@@ -915,6 +915,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/publishing-preferences": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read owner publishing preferences
+         * @description Returns the Workspace's persistent publishing timezone, reusable
+         *     signature templates, and owner notification choices. An untouched
+         *     Workspace returns a null timezone, no templates, and both notification
+         *     events disabled. `email_available` reports whether the installation can
+         *     actually deliver mail; clients must not offer a channel when it is
+         *     false.
+         */
+        get: operations["getPublishingPreferences"];
+        /**
+         * Replace owner publishing preferences
+         * @description Atomically replaces the complete timezone, signature template list, and
+         *     notification choices. A template list carries the full desired order,
+         *     so create, edit, reorder, delete, and default selection are one
+         *     replacement. Changing the display timezone never rewrites a stored
+         *     Schedule instant. Requires the workspace admin role.
+         */
+        put: operations["updatePublishingPreferences"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/platforms/capabilities": {
         parameters: {
             query?: never;
@@ -2572,11 +2614,12 @@ export interface components {
         };
         /**
          * @description Saved per-Channel settings for one Platform account on this Post.
-         *     attachment_ids selects and orders this Channel's attachment subset:
-         *     null inherits the Post's ordered attachments, [] publishes text only,
-         *     and a list overrides both membership and order. Targets may exist
-         *     before any Distribution; readiness is enforced only when the target
-         *     is scheduled.
+         *     signature is the resolved default signature snapshot this target will
+         *     append; null means no signature. attachment_ids selects and orders this
+         *     Channel's attachment subset: null inherits the Post's ordered
+         *     attachments, [] publishes text only, and a list overrides both
+         *     membership and order. Targets may exist before any Distribution;
+         *     readiness is enforced only when the target is scheduled.
          */
         PostTarget: {
             /** Format: uuid */
@@ -2585,6 +2628,7 @@ export interface components {
             description_override: string | null;
             hashtags: string[];
             provider_options: components["schemas"]["PostProviderOptions"] | null;
+            signature: string | null;
             attachment_ids: string[] | null;
         };
         /**
@@ -2721,9 +2765,12 @@ export interface components {
         };
         /**
          * @description Per-Channel settings to persist for one Platform account.
-         *     attachment_ids: null or omitted inherits the Post's ordered
-         *     attachments, [] publishes text only, and a list overrides membership
-         *     and order for this target. Each account appears at most once.
+         *     signature is the resolved signature snapshot the composer previewed for
+         *     this target; the server stores it verbatim and later template edits do
+         *     not change it. attachment_ids: null or omitted inherits the Post's
+         *     ordered attachments, [] publishes text only, and a list overrides
+         *     membership and order for this target. Each account appears at most
+         *     once.
          */
         PostTargetInput: {
             /** Format: uuid */
@@ -2732,6 +2779,7 @@ export interface components {
             description_override?: string | null;
             hashtags?: string[];
             provider_options?: components["schemas"]["PostProviderOptions"] | null;
+            signature?: string | null;
             attachment_ids?: string[] | null;
         };
         /**
@@ -2893,18 +2941,21 @@ export interface components {
         };
         /**
          * @description Immutable resolved composition one Provider publish attempt froze at
-         *     claim time. title and text are the caption the Channel was asked to
-         *     publish after applying its overrides; media is the exact ordered set
-         *     of media identities delivered, each carrying only descriptive facts —
-         *     never storage keys or signed capabilities. An attachment whose
-         *     rendition was not ready at claim keeps its position with null media
-         *     facts instead of silently dropping out of the published order.
+         *     claim time. title, text, and signature are the caption the Channel was
+         *     asked to publish after applying its overrides; media is the exact
+         *     ordered set of media identities delivered, each carrying only
+         *     descriptive facts — never storage keys or signed capabilities. An
+         *     attachment whose rendition was not ready at claim keeps its position
+         *     with null media facts instead of silently dropping out of the
+         *     published order.
          */
         DistributionPublication: {
             /** @description Frozen caption title; empty when the attempt had none. */
             title: string;
             /** @description Frozen caption body; empty for media-only publications. */
             text: string;
+            /** @description Frozen signature appended to the caption, or null. */
+            signature: string | null;
             hashtags: string[];
             /** @description Frozen per-Provider settings the attempt was claimed with. */
             provider_options: components["schemas"]["ProviderPublishOptions"] | null;
@@ -2929,6 +2980,11 @@ export interface components {
             is_ai_generated: boolean;
             /** @constant */
             music_usage_confirmed: true;
+            /**
+             * @description Only applies to photo posts. When true TikTok adds recommended
+             *     music the creator can later change in the app.
+             */
+            auto_add_music?: boolean;
         };
         /** @enum {string} */
         YouTubePrivacyStatus: "public" | "unlisted" | "private";
@@ -2954,6 +3010,7 @@ export interface components {
             is_ai_generated: boolean;
             /** @constant */
             music_usage_confirmed: true;
+            auto_add_music?: boolean;
         };
         /**
          * @description Saved audience and visibility choices. An omitted made_for_kids is an
@@ -2964,6 +3021,69 @@ export interface components {
             made_for_kids?: boolean;
             privacy_status?: components["schemas"]["YouTubePrivacyStatus"];
         };
+        /** @enum {string} */
+        InstagramPostType: "feed" | "reel" | "story";
+        /**
+         * @description Saved Instagram publication choices. A single image defaults to feed
+         *     and a single video defaults to reel; multiple attachments publish as
+         *     one feed carousel. story is supported for a single image or video.
+         *     trial_reel is valid only for a reel and asks Instagram to test the
+         *     reel with non-followers first; trial_graduation applies only with
+         *     trial_reel.
+         */
+        InstagramPostOptions: {
+            post_type?: components["schemas"]["InstagramPostType"];
+            trial_reel?: boolean;
+            /** @enum {string} */
+            trial_graduation?: "manual" | "performance";
+        };
+        InstagramPublishOptions: {
+            post_type?: components["schemas"]["InstagramPostType"];
+            trial_reel?: boolean;
+            /** @enum {string} */
+            trial_graduation?: "manual" | "performance";
+        };
+        /**
+         * @description One reusable signature. body may use {brand_profile}, {platform}, and
+         *     {channel}; the composer resolves them against the actual target before
+         *     saving the Post snapshot.
+         */
+        SignatureTemplate: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            body: string;
+            is_default: boolean;
+            position: number;
+        };
+        NotificationPreferences: {
+            events: {
+                publication_failed: boolean;
+                channel_disconnected: boolean;
+            };
+            channels: {
+                email: boolean;
+            };
+        };
+        /**
+         * @description Persistent owner preferences for the shared Workspace. timezone null
+         *     means the browser's timezone remains in effect. email_available is
+         *     false when the installation has no working mail sender, and clients
+         *     must not offer to enable that channel.
+         */
+        PublishingPreferences: {
+            timezone: string | null;
+            signature_templates: components["schemas"]["SignatureTemplate"][];
+            notifications: components["schemas"]["NotificationPreferences"];
+            email_available: boolean;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PublishingPreferencesUpdate: {
+            timezone: string | null;
+            signature_templates: components["schemas"]["SignatureTemplate"][];
+            notifications: components["schemas"]["NotificationPreferences"];
+        };
         /**
          * @description Provider choices saved on a Post, including incomplete drafts.
          *     Scheduling validates completeness before creating publication options.
@@ -2971,10 +3091,12 @@ export interface components {
         PostProviderOptions: {
             tiktok?: components["schemas"]["TikTokPostOptions"];
             youtube?: components["schemas"]["YouTubePostOptions"];
+            instagram?: components["schemas"]["InstagramPostOptions"];
         };
         ProviderPublishOptions: {
             tiktok?: components["schemas"]["TikTokPublishOptions"];
             youtube?: components["schemas"]["YouTubePublishOptions"];
+            instagram?: components["schemas"]["InstagramPublishOptions"];
         };
         UpdateDistributionRequest: {
             /** Format: date-time */
@@ -4794,6 +4916,75 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             429: components["responses"]["RateLimited"];
+        };
+    };
+    getPublishingPreferences: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current publishing preferences. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishingPreferences"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    updatePublishingPreferences: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublishingPreferencesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Preferences replaced. */
+            200: {
+                headers: {
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishingPreferences"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
         };
     };
     listPlatformCapabilities: {

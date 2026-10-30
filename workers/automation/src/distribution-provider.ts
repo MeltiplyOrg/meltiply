@@ -67,6 +67,7 @@ export interface DistributionPublishTarget {
   postId: string;
   providerAccountId?: string;
   providerOptions?: ProviderPublishOptions;
+  signature?: string | null;
   storedAccessToken: string;
   storedRefreshToken?: string | null;
   textContent: string | null;
@@ -207,6 +208,7 @@ function frozenCaption(target: DistributionPublishTarget): string {
     defaultText: target.textContent,
     descriptionOverride: null,
     hashtags: target.hashtags,
+    signature: target.signature ?? null,
     title: target.title,
     titleOverride: null,
   });

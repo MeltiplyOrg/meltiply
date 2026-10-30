@@ -2,7 +2,7 @@ import { objectStorageBindings } from "@meltiply/storage";
 import type { AccessClaims, JwtIdentity } from "@meltiply/auth";
 
 import type { ResolvedActor } from "./actor-resolution";
-import { mailSenderConfiguration } from "./mail";
+import { mailSenderConfiguration } from "@meltiply/domain/mail-content";
 
 import type { OAuthStateCoordinatorStub } from "@meltiply/contracts";
 

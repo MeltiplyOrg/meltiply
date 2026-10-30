@@ -428,6 +428,76 @@ describe("createTikTokAdapter", () => {
     ]);
   });
 
+  it("adds recommended music only when a photo target asks for it", async () => {
+    const photoUrl = `${mediaUrlPrefix}org/asset/photo.jpg?signature=safe`;
+    const providerCalls = sequence(
+      () => creator({ duet_disabled: true, stitch_disabled: true }),
+      () => success({ publish_id: "p_pub_url~v2.789" }),
+    );
+    const result = await adapter(providerCalls.fetcher).publish!(
+      context,
+      credentials,
+      publishInput({
+        caption: "Photo launch",
+        media: [
+          {
+            contentType: "image/jpeg",
+            fileSize: 1024,
+            metadata: { height: 1080, width: 1080 },
+            mode: "remote_ingest",
+            url: photoUrl,
+          },
+        ],
+        providerOptions: {
+          tiktok: {
+            allowComment: true,
+            allowDuet: false,
+            allowStitch: false,
+            autoAddMusic: true,
+            brandContent: false,
+            brandOrganic: true,
+            isAiGenerated: false,
+            musicUsageConfirmed: true,
+            privacyLevel: "SELF_ONLY",
+          },
+        },
+      }),
+    );
+    expect(result).toEqual({
+      outcome: "confirmed_success",
+      providerOperationId: "publish:p_pub_url~v2.789",
+    });
+    const body = JSON.parse(String(providerCalls.calls[1]!.init.body)) as {
+      post_info: { auto_add_music?: boolean };
+    };
+    expect(body.post_info.auto_add_music).toBe(true);
+  });
+
+  it("rejects automatic music on a video target instead of dropping the choice", async () => {
+    const providerCalls = sequence(() => creator());
+    await expect(
+      adapter(providerCalls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: {
+            tiktok: {
+              allowComment: true,
+              allowDuet: true,
+              allowStitch: true,
+              autoAddMusic: true,
+              brandContent: false,
+              brandOrganic: false,
+              isAiGenerated: false,
+              musicUsageConfirmed: true,
+              privacyLevel: "PUBLIC_TO_EVERYONE",
+            },
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ failure: { code: "tiktok_auto_music_video_unsupported" } });
+  });
+
   it("submits one JPEG through the photo Direct Post surface", async () => {
     const photoUrl = `${mediaUrlPrefix}org/asset/photo.jpg?signature=safe`;
     const providerCalls = sequence(

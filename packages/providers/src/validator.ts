@@ -1,5 +1,6 @@
 import type { PlatformCapability, ValidationIssue } from "@meltiply/contracts";
 
+import { resolveInstagramOptions } from "./instagram-options";
 import type { PublishInput } from "./types";
 
 export type { ValidationIssue } from "@meltiply/contracts";
@@ -22,22 +23,25 @@ export interface CaptionSource {
   defaultText: string | null;
   descriptionOverride: string | null;
   hashtags: readonly string[];
+  signature?: string | null;
   title: string;
   titleOverride: string | null;
 }
 
 /**
  * Composes the normalized caption sent to a provider from Post title/body, the
- * target's overrides, and hashtags.
- * Deduplicates title and body when identical and appends space-separated hashtags.
- * Pure function reused across pre-flight validation and publishing to guarantee character count parity.
- * @param source - Post title/default text, optional target overrides, and hashtags.
+ * target's overrides, the resolved signature snapshot, and hashtags.
+ * Deduplicates title and body when identical, appends the signature as its own
+ * paragraph, and appends space-separated hashtags. Pure function reused across
+ * pre-flight validation and publishing to guarantee character count parity.
+ * @param source - Post title/default text, optional target overrides, signature, and hashtags.
  * @returns The formatted multi-line caption string, empty when nothing is set.
  */
 export function composeCaption(source: CaptionSource): string {
   const title = (source.titleOverride ?? source.title).trim();
   const body = (source.descriptionOverride ?? source.defaultText ?? "").trim();
-  const content = [title, body]
+  const signature = (source.signature ?? "").trim();
+  const content = [title, body, signature]
     .filter((value, index, values) => value && values.indexOf(value) === index)
     .join("\n\n");
   const tags = source.hashtags.map((tag) => `#${tag}`).join(" ");
@@ -273,6 +277,31 @@ export function validatePublishInput(
       field: "providerOptions.tiktok",
       message: `${capability.platform} does not accept TikTok publish options`,
     });
+  }
+
+  if (capability.platform !== "instagram" && input.providerOptions?.instagram) {
+    issues.push({
+      constraint: "unsupported_provider_options",
+      field: "providerOptions.instagram",
+      message: `${capability.platform} does not accept Instagram publish options`,
+    });
+  }
+
+  if (capability.platform === "instagram") {
+    const options = input.providerOptions?.instagram;
+    if (options) {
+      const kinds = input.media.map((media) =>
+        mediaKind(media.contentType.split(";", 1)[0]!.trim().toLowerCase()),
+      );
+      if (!resolveInstagramOptions(options, kinds)) {
+        issues.push({
+          constraint: "instagram_post_options_invalid",
+          field: "providerOptions.instagram",
+          message:
+            "The selected Instagram post type or trial Reel does not apply to this attachment set",
+        });
+      }
+    }
   }
 
   return issues;

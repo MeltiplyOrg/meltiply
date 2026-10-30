@@ -129,11 +129,27 @@ export interface TikTokPublishOptions {
   allowComment: boolean;
   allowDuet: boolean;
   allowStitch: boolean;
+  autoAddMusic?: boolean;
   brandContent: boolean;
   brandOrganic: boolean;
   isAiGenerated: boolean;
   musicUsageConfirmed: true;
   privacyLevel: TikTokPrivacyLevel;
+}
+
+export type InstagramPostType = "feed" | "reel" | "story";
+
+export type InstagramTrialGraduation = "manual" | "performance";
+
+/**
+ * Creator-selected Instagram publication shape. `postType` defaults to `feed`
+ * for images and `reel` for videos; `trialReel` is valid only for a single
+ * video Reel and asks Instagram to test it with non-followers first.
+ */
+export interface InstagramPublishOptions {
+  postType?: InstagramPostType;
+  trialGraduation?: InstagramTrialGraduation;
+  trialReel?: boolean;
 }
 
 export type YouTubePrivacyStatus = "public" | "unlisted" | "private";
@@ -149,6 +165,7 @@ export interface YouTubePublishOptions {
 }
 
 export interface ProviderPublishOptions {
+  instagram?: InstagramPublishOptions;
   tiktok?: TikTokPublishOptions;
   youtube?: YouTubePublishOptions;
 }

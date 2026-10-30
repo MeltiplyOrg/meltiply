@@ -723,6 +723,26 @@ describe("API Worker foundation", () => {
     expect(normal.headers.get("Vary")).toBe("Origin");
   });
 
+  it("permits cross-origin publishing preference replacements", async () => {
+    const app = createApiApp();
+    const origin = stagingEnv.APP_URL;
+    const response = await app.fetch(
+      new Request("http://example.test/api/v1/publishing-preferences", {
+        method: "OPTIONS",
+        headers: {
+          Origin: origin,
+          "Access-Control-Request-Method": "PUT",
+          "Access-Control-Request-Headers": "Content-Type, Idempotency-Key",
+        },
+      }),
+      stagingEnv,
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe(origin);
+    expect(response.headers.get("Access-Control-Allow-Methods")?.split(/,\s*/)).toContain("PUT");
+  });
+
   it("serves credentials-aware CORS preflights for the Better Auth surface", async () => {
     const app = createApiApp({
       betterAuth: fakeBetterAuth as never,

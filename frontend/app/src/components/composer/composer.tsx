@@ -69,12 +69,20 @@ import {
   usePlatformCapabilities,
   usePlatforms,
   usePost,
+  usePublishingPreferences,
   useSchedulePost,
   useUpdatePost,
   useQueues,
 } from "@/lib/queries";
 import { createAssetUpload, type AssetUploadStatus, type AssetUploadTask } from "@/lib/upload";
 import { RollingCount } from "@meltiply/ui/rolling-count";
+import {
+  captionWithSignature,
+  defaultSignatureTemplate,
+  instantToWallClock,
+  resolveSignature,
+  wallClockToInstant,
+} from "@/lib/publishing-preferences";
 import { platformDisplayName } from "@/lib/platforms";
 import { resolvePublicationStatus } from "@/lib/publication-status";
 import { Trans, useI18n } from "@/lib/i18n";
@@ -91,6 +99,12 @@ interface ChannelOverride {
   content: string;
   hasOverride: boolean;
   settings: Record<string, unknown>;
+  /**
+   * Saved signature snapshot. Present (including explicit null) on a hydrated
+   * target so a later template edit cannot rewrite existing content; absent on
+   * a newly selected target, where the current default template resolves.
+   */
+  signature?: string | null;
 }
 
 /** Publishing intents the composer submits; the pinned bar acts on the chosen one. */
@@ -236,6 +250,7 @@ const composerRecoverySchema = Schema.Struct({
       content: Schema.String,
       hasOverride: Schema.Boolean,
       settings: Schema.Record(Schema.String, Schema.Unknown),
+      signature: Schema.optional(Schema.NullOr(Schema.String)),
     }),
   ),
   removedAssetIds: Schema.Array(Schema.String),
@@ -286,32 +301,6 @@ const activeUploadStatuses: ReadonlySet<AssetUploadStatus> = new Set([
  */
 function isUploadCancellation(error: unknown): boolean {
   return error instanceof Error && error.name === "UploadCancelledError";
-}
-
-/**
- * Formats a Date or ISO string into the composer's local minute-precision value
- * ('YYYY-MM-DDTHH:mm'). Calendar seeds default midnight to 10:00 local;
- * restoring an existing schedule must opt out to preserve its chosen instant.
- *
- * @param dateOrStr - Date object or ISO timestamp.
- * @param defaultMidnightToDaytime - Apply the calendar-click suggestion; defaults to true.
- * @returns Local datetime string, or an empty string when the input is unparseable.
- */
-function formatInitialScheduleDate(
-  dateOrStr: Date | string,
-  defaultMidnightToDaytime = true,
-): string {
-  const date = typeof dateOrStr === "string" ? new Date(dateOrStr) : new Date(dateOrStr.getTime());
-  if (Number.isNaN(date.getTime())) return "";
-  if (defaultMidnightToDaytime && date.getHours() === 0 && date.getMinutes() === 0) {
-    date.setHours(10, 0, 0, 0);
-  }
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
 /**
@@ -451,6 +440,7 @@ function overridesFromPost(
       hasOverride:
         target.description_override !== null && target.description_override !== post.default_text,
       settings: descriptor?.readTarget?.(target) ?? {},
+      signature: target.signature,
     };
   }
   return overrides;
@@ -660,12 +650,16 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   );
   const [selectedQueueId, setSelectedQueueId] = useState("");
   const [scheduleDate, setScheduleDate] = useState<string>(() => {
-    const seeded = initialDate ? formatInitialScheduleDate(initialDate) : "";
+    const seeded = initialDate
+      ? instantToWallClock(initialDate, Intl.DateTimeFormat().resolvedOptions().timeZone)
+      : "";
     if (seeded) return seeded;
     const fallback = new Date(Date.now() + 1000 * 60 * 60 * 2);
     fallback.setMinutes(fallback.getMinutes() - fallback.getTimezoneOffset());
     return fallback.toISOString().slice(0, 16);
   });
+  const scheduleTouchedRef = useRef(false);
+  const scheduleTimeZoneRef = useRef(Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
@@ -786,6 +780,12 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   // its cache entry (no second request) purely for its settledness, so
   // hydration cannot race the Channel list it depends on.
   const platformsQuery = usePlatforms(scope, { brandProfileId: null });
+  const preferencesQuery = usePublishingPreferences(scope);
+  const publishingTimeZone =
+    preferencesQuery.data?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const defaultSignature = defaultSignatureTemplate(
+    preferencesQuery.data?.signature_templates ?? [],
+  );
   const platformByAccountId = useMemo<Record<string, string | undefined>>(() => {
     const byAccount: Record<string, string | undefined> = {};
     for (const channel of integrations) byAccount[channel.id] = channel.providerIdentifier;
@@ -822,11 +822,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   }, []);
 
   // Seed the schedule slot from a calendar click unless an existing Post is open.
-  const [prevInitialDate, setPrevInitialDate] = useState(initialDate);
-  if (initialDate !== prevInitialDate) {
-    setPrevInitialDate(initialDate);
-    if (initialDate && !initialPostId) setScheduleDate(formatInitialScheduleDate(initialDate));
-  }
+  useEffect(() => {
+    if (!initialDate || initialPostId || scheduleTouchedRef.current) return;
+    scheduleTimeZoneRef.current = publishingTimeZone;
+    setScheduleDate(instantToWallClock(initialDate, publishingTimeZone));
+  }, [initialDate, initialPostId, publishingTimeZone]);
 
   /**
    * Returns every composer row to its empty state for a new Post. Runs when the
@@ -1011,7 +1011,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       setAttachmentOverrides(attachmentOverridesFromPost(post));
       setSelectedChannelIds([...channelIds]);
       if (scheduledAt) {
-        setScheduleDate(formatInitialScheduleDate(scheduledAt, false));
+        scheduleTimeZoneRef.current = publishingTimeZone;
+        setScheduleDate(instantToWallClock(scheduledAt, publishingTimeZone, false));
         setPublishMode("schedule");
       }
       if (post.queue_membership) {
@@ -1030,6 +1031,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     platformsQuery.isPending,
     postId,
     postQuery.data,
+    publishingTimeZone,
     scope.isSignedIn,
     ownerProfileId,
     setSelectedChannelIds,
@@ -1350,6 +1352,54 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   );
 
   /**
+   * Converts the visible wall-clock schedule into the selected publishing
+   * timezone. Validation runs the same conversion before submission, so a
+   * malformed value never reaches the API.
+   *
+   * @returns ISO instant, or null when the value is invalid.
+   */
+  const scheduleInstant = useCallback(
+    () => wallClockToInstant(scheduleDate, publishingTimeZone),
+    [publishingTimeZone, scheduleDate],
+  );
+
+  // The initial field value is browser-local until preferences settle. When the
+  // saved timezone arrives, reinterpret that same wall clock through the
+  // previous zone so the intended instant is preserved; a value the creator has
+  // already edited is never rewritten.
+  useEffect(() => {
+    const previous = scheduleTimeZoneRef.current;
+    if (previous === publishingTimeZone) return;
+    scheduleTimeZoneRef.current = publishingTimeZone;
+    if (scheduleTouchedRef.current) return;
+    const instant = wallClockToInstant(scheduleDate, previous);
+    if (instant) setScheduleDate(instantToWallClock(instant, publishingTimeZone, false));
+  }, [publishingTimeZone, scheduleDate]);
+
+  /**
+   * Resolves the signature snapshot for one Channel. A hydrated target keeps the
+   * signature stored with it, including an explicit null, so later template
+   * edits never rewrite an existing Post. A newly selected Channel resolves the
+   * current default template against its Brand Profile, Platform, and Channel.
+   *
+   * @param channel - Target Channel.
+   * @returns Resolved signature text, or null when no template applies.
+   */
+  const signatureFor = useCallback(
+    (channel: ChannelIntegration): string | null => {
+      const saved = channelOverrides[channel.id];
+      if (saved && Object.hasOwn(saved, "signature")) return saved.signature ?? null;
+      if (!defaultSignature) return null;
+      return resolveSignature(defaultSignature.body, {
+        brandProfileName: profileNames.get(channel.brandProfileId) ?? "",
+        channelName: channel.name,
+        platform: channel.providerIdentifier,
+      });
+    },
+    [channelOverrides, defaultSignature, profileNames],
+  );
+
+  /**
    * Resolves which attachments a Channel publishes: its own ordered selection
    * when set, otherwise the Post's ordered attachments (inherit).
    *
@@ -1395,6 +1445,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         // string even when blank, because a blank caption is a real choice that
         // `null` would silently turn back into the shared text on the next save.
         target.description_override = override?.hasOverride ? override.content : null;
+        target.signature = signatureFor(channel);
         const attachmentIds = attachmentOverrides[channel.id];
         if (attachmentIds) target.attachment_ids = [...attachmentIds];
         return target;
@@ -1405,6 +1456,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       attachmentsForChannel,
       channelOverrides,
       selectedChannels,
+      signatureFor,
       tiktokRequirements,
     ],
   );
@@ -1906,7 +1958,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           }),
         );
       }
-      if (type === "schedule" && Number.isNaN(new Date(scheduleDate).getTime())) {
+      if (type === "schedule" && wallClockToInstant(scheduleDate, publishingTimeZone) === null) {
         errors.push(t("Please provide a valid schedule date and time."));
       }
       if (
@@ -1931,6 +1983,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         const content = resolvedContentFor(channel.id);
         const capability = capabilityByPlatform.get(platform);
         const channelAttachments = attachmentsForChannel(channel.id);
+        const channelSignature = signatureFor(channel);
+        const finalCaption = captionWithSignature(content, channelSignature);
 
         if (!content.trim() && channelAttachments.length === 0) {
           errors.push(t("{name}: post text is empty for this channel.", { name }));
@@ -1939,7 +1993,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         if (
           maxCaption !== null &&
           maxCaption !== undefined &&
-          captionLength(content) > maxCaption
+          captionLength(finalCaption) > maxCaption
         ) {
           errors.push(
             t("{name}: text exceeds the {limit}-character limit for this platform.", {
@@ -2033,7 +2087,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       capabilitiesQuery.isPending,
       providerValidationErrors,
       resolvedContentFor,
+      publishingTimeZone,
       scheduleDate,
+      signatureFor,
       hasSelectedQueue,
       ownerProfileId,
       selectedProfileIds,
@@ -2157,7 +2213,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                 : [],
             ),
             mode: type,
-            scheduledAt: type === "schedule" ? new Date(scheduleDate).toISOString() : null,
+            scheduledAt: type === "schedule" ? scheduleInstant() : null,
             workspaceId: scope.workspaceId,
             copies: profileCopiesRef.current,
             signal: controller.signal,
@@ -2232,7 +2288,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             ...(type === "queue"
               ? { queue_id: selectedQueueId }
               : {
-                  scheduled_at: type === "schedule" ? new Date(scheduleDate).toISOString() : null,
+                  scheduled_at: type === "schedule" ? scheduleInstant() : null,
                 }),
             targets: buildTargets("publication"),
           },
@@ -2287,7 +2343,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       persistPost,
       refreshWorkspace,
       resetComposer,
-      scheduleDate,
+      scheduleInstant,
       schedulePost,
       selectedQueueId,
       ownerProfileId,
@@ -2829,6 +2885,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             const includesAttachments = inheritsAttachments || channelAttachments.length > 0;
             const channelCaptionLimit = captionLimitFor(channel);
             const channelContent = resolvedContentFor(channel.id);
+            const channelSignature = signatureFor(channel);
+            const channelCaption = captionWithSignature(channelContent, channelSignature);
 
             return (
               <section
@@ -2879,10 +2937,20 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                         }
                       >
                         {t("{count}/{limit} characters", {
-                          count: captionLength(channelContent),
+                          count: captionLength(channelCaption),
                           limit: channelCaptionLimit ?? "—",
                         })}
                       </span>
+                      {channelSignature && (
+                        <div className="rounded-control border border-line bg-field px-3 py-2">
+                          <p className="text-(length:--font-size-micro) font-medium text-ink-3">
+                            {t("Signature preview")}
+                          </p>
+                          <p className="mt-1 whitespace-pre-wrap text-xs text-ink-2">
+                            {channelSignature}
+                          </p>
+                        </div>
+                      )}
                     </div>
                     {override.hasOverride && (
                       <Button
@@ -3024,7 +3092,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             {publishMode === "schedule" && (
               <ScheduleDateTime
                 value={scheduleDate}
+                timeZone={publishingTimeZone}
                 onChange={(value) => {
+                  scheduleTouchedRef.current = true;
                   setScheduleDate(value);
                   markDirty();
                 }}

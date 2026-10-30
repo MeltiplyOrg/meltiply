@@ -369,6 +369,7 @@ function publishOptions(input: PublishInput): TikTokPublishOptions {
       value.brandOrganic,
       value.isAiGenerated,
     ].some((choice) => typeof choice !== "boolean") ||
+    (value.autoAddMusic !== undefined && typeof value.autoAddMusic !== "boolean") ||
     (value.brandContent && value.privacyLevel === "SELF_ONLY")
   ) {
     throw new ProviderAdapterError(
@@ -871,6 +872,14 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       }
       const [first] = media;
       const choices = publishOptions(input);
+      if (isVideo && choices.autoAddMusic === true) {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({
+            code: "tiktok_auto_music_video_unsupported",
+            status: 400,
+          }),
+        );
+      }
       const requirements = await getRequirements(context, credentials);
       if (
         !requirements.privacyLevels.includes(choices.privacyLevel) ||
@@ -981,7 +990,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         body = {
           media_type: "PHOTO",
           post_info: {
-            auto_add_music: false,
+            auto_add_music: choices.autoAddMusic === true,
             brand_content_toggle: choices.brandContent,
             brand_organic_toggle: choices.brandOrganic,
             description: caption,

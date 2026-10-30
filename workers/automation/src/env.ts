@@ -25,6 +25,11 @@ export interface AutomationEnv {
   DB_SYSTEM?: Hyperdrive;
   ENVIRONMENT: string;
   LOG_SAMPLE_RATE?: string;
+  MAIL?: SendEmail;
+  MAIL_FROM_ADDRESS?: string;
+  MAIL_FROM_NAME?: string;
+  /** Queue carrying durable owner notification deliveries. */
+  NOTIFICATIONS_QUEUE?: Queue<unknown>;
   FACEBOOK_CLIENT_ID?: string;
   FACEBOOK_CLIENT_SECRET?: string;
   FACEBOOK_LIVE_ACCEPTED?: string;

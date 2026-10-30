@@ -3,6 +3,8 @@ import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
 import type { DatabaseError, DomainError } from "@meltiply/domain";
 import type {
+  InstagramPostType,
+  InstagramTrialGraduation,
   TikTokPrivacyLevel,
   TikTokPublishOptions,
   YouTubePublishOptions,
@@ -34,6 +36,11 @@ interface PostFilters {
  * validates these choices and converts them to strict ProviderPublishOptions.
  */
 export interface PostProviderOptions {
+  instagram?: {
+    postType?: InstagramPostType;
+    trialGraduation?: InstagramTrialGraduation;
+    trialReel?: boolean;
+  };
   tiktok?: Omit<TikTokPublishOptions, "privacyLevel"> & {
     privacyLevel?: TikTokPrivacyLevel;
     discloseCommercialContent?: boolean;
@@ -54,6 +61,11 @@ interface PostTargetInput {
   hashtags?: string[];
   platformAccountId: string;
   providerOptions?: PostProviderOptions;
+  /**
+   * Resolved signature snapshot for this target. The server stores it
+   * verbatim; later template edits never rewrite an existing Post.
+   */
+  signature?: string | null;
   titleOverride?: string | null;
 }
 

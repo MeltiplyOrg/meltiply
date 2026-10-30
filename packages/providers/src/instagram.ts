@@ -31,6 +31,7 @@ import {
 } from "./meta-common";
 import type { MetaContainerOperation } from "./meta-common";
 import type {
+  InstagramPostType,
   OAuthConnection,
   ProviderAdapter,
   ProviderCredentials,
@@ -40,6 +41,7 @@ import type {
   ProviderTokenSet,
   PublishInput,
 } from "./types";
+import { resolveInstagramOptions, type ResolvedInstagramOptions } from "./instagram-options";
 
 const apiOrigin = "https://graph.instagram.com";
 const exchangeOrigin = "https://api.instagram.com";
@@ -79,8 +81,9 @@ const capability: PlatformCapability = {
   multi_asset_types: ["image", "video"],
   notes: [
     "Professional Business or Creator accounts use Instagram Login.",
-    "Single images and Reels use public HTTPS remote-ingest URLs.",
-    "Up to 10 images and Reels combine as one carousel post.",
+    "Single images, videos, Reels, and Stories use public HTTPS remote-ingest URLs.",
+    "Up to 10 images and videos combine as one feed carousel post.",
+    "Trial Reels are shared to non-followers first and support manual or performance graduation.",
     "Images are limited to 8 MiB; Reels are limited to 1 GiB and 15 minutes.",
     "Live-account acceptance remains required before runtime enablement.",
   ],
@@ -255,22 +258,80 @@ function carouselParentParameters(children: readonly string[], text: string): UR
 }
 
 /**
- * Builds container-creation parameters for a single-attachment post, keeping
- * the historical image_url or REELS shape so accepted behavior and its
- * reconciliation lifecycle are unchanged.
+ * Resolves Instagram's publication shape against the actual attachment set,
+ * failing closed when the stored choices cannot apply to this media set. The
+ * rule lives in `instagram-options` so the pre-flight validator and this
+ * adapter cannot disagree.
+ *
+ * @param input - Composed caption plus the Post's ordered attachments.
+ * @param attachments - Validated attachments in creator order.
+ * @returns The validated post type and trial settings.
+ * @throws ProviderAdapterError when the choices cannot apply to this media set.
+ */
+function instagramOptions(
+  input: PublishInput,
+  attachments: readonly InstagramAttachment[],
+): ResolvedInstagramOptions {
+  const resolved = resolveInstagramOptions(
+    input.providerOptions?.instagram,
+    attachments.map((attachment) => attachment.kind),
+  );
+  if (!resolved) {
+    throw new ProviderAdapterError(
+      classifyProviderFailure({
+        code: "instagram_post_options_invalid",
+        status: 400,
+      }),
+    );
+  }
+  return resolved;
+}
+
+/**
+ * Builds container-creation parameters for a single-attachment post. Images
+ * use a feed image or Story container; videos use VIDEO, REELS, or STORIES.
+ * share_to_feed remains true for a standard Reel, and trial Reels carry the
+ * documented graduation strategy.
  * @param item - The single validated attachment being published.
  * @param text - Trimmed caption for the published post.
+ * @param options - Validated post type and trial settings.
  * @returns Parameters for the container creation request.
  */
-function singleParameters(item: InstagramAttachment, text: string): URLSearchParams {
+function singleParameters(
+  item: InstagramAttachment,
+  text: string,
+  options: {
+    postType: InstagramPostType;
+    trialGraduation: "manual" | "performance";
+    trialReel: boolean;
+  },
+): URLSearchParams {
   const parameters = new URLSearchParams();
   if (text) parameters.set("caption", text);
   if (item.kind === "image") {
     parameters.set("image_url", item.url);
-  } else {
-    parameters.set("media_type", "REELS");
-    parameters.set("share_to_feed", "true");
-    parameters.set("video_url", item.url);
+    if (options.postType === "story") parameters.set("media_type", "STORIES");
+    return parameters;
+  }
+  parameters.set("video_url", item.url);
+  if (options.postType === "story") {
+    parameters.set("media_type", "STORIES");
+    return parameters;
+  }
+  if (options.postType === "feed") {
+    parameters.set("media_type", "VIDEO");
+    return parameters;
+  }
+  parameters.set("media_type", "REELS");
+  parameters.set("share_to_feed", "true");
+  if (options.trialReel) {
+    parameters.set(
+      "trial_params",
+      JSON.stringify({
+        graduation_strategy:
+          options.trialGraduation === "performance" ? "SS_PERFORMANCE" : "MANUAL",
+      }),
+    );
   }
   return parameters;
 }
@@ -809,10 +870,15 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
           outcome: "confirmed_success",
           providerOperationId: containerOperationId(
             "created",
-            await createContainer(singleParameters(only!, text)),
+            await createContainer(
+              singleParameters(only!, text, instagramOptions(input, attachments)),
+            ),
           ),
         };
       }
+      // Carousels are always feed posts; instagramOptions rejects a story or
+      // trial Reel choice here instead of silently publishing a different shape.
+      instagramOptions(input, attachments);
       // Children are created one at a time in creator order so a rejected
       // attachment stops the flow before later children exist, and the returned
       // ids stay aligned with the published carousel order.

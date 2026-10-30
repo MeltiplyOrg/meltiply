@@ -25,6 +25,7 @@
     "lint": "bun run --cwd ../.. --no-install vp lint frontend/app frontend/shared --deny-warnings",
     "test": "vp test run",
     "test:e2e": "playwright test",
+    "test:performance": "MELTIPLY_E2E_PERFORMANCE=1 playwright test e2e/performance.spec.ts --project performance",
     "type-check": "tsc",
     "format": "bun run --cwd ../.. --no-install vp fmt frontend/app frontend/shared",
     "format-check": "bun run --cwd ../.. --no-install vp fmt frontend/app frontend/shared --check",

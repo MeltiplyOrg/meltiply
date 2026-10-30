@@ -63,7 +63,7 @@ function queueNames() {
 }
 
 function iacOutput(overrides = {}) {
-  const queues = queueNames();
+  const queues = { ...queueNames(), notifications: "meltiply-notifications-staging" };
   const resources = {
     app_hostname: "staging.meltiply.com",
     app_custom_domains_attached: false,
@@ -384,14 +384,19 @@ test("rendered files are deterministic and private", async (context) => {
     path.resolve(path.dirname(first.paths.api), apiConfig.$schema),
     path.join(repoRoot, "node_modules/wrangler/config-schema.json"),
   );
-  // The source wrangler.jsonc carries a placeholder MAIL entry; rendering must replace it
-  // in place, leaving exactly one binding restricted to the configured sender.
-  assert.deepEqual(apiConfig.send_email, [
-    {
-      name: "MAIL",
-      allowed_sender_addresses: ["auth@staging.meltiply.com"],
-    },
-  ]);
+  // Both mail-sending Workers must deploy with one sender-restricted binding
+  // and the matching identity, rather than inheriting template placeholders.
+  for (const worker of ["api", "automation"]) {
+    const config = JSON.parse(await readFile(first.paths[worker], "utf8"));
+    assert.equal(config.vars.MAIL_FROM_ADDRESS, "auth@staging.meltiply.com");
+    assert.equal(config.vars.MAIL_FROM_NAME, "Meltiply");
+    assert.deepEqual(config.send_email, [
+      {
+        name: "MAIL",
+        allowed_sender_addresses: ["auth@staging.meltiply.com"],
+      },
+    ]);
+  }
 });
 
 test("connected preflight requires matching Cloudflare and TLS database credentials", async () => {

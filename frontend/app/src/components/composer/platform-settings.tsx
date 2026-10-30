@@ -30,6 +30,7 @@ type Translate = (message: string, values?: TranslationValues) => string;
  * base settings interface.
  */
 interface TikTokComposerSettings extends TikTokSettings {
+  auto_add_music?: boolean;
   brand_content?: boolean;
   brand_organic?: boolean;
   is_ai_generated?: boolean;
@@ -48,6 +49,8 @@ interface ProviderEditorProps<S> {
   settings: Partial<S>;
   /** Merges one key into the raw settings map and reports the change upward. */
   update: (key: string, value: unknown) => void;
+  /** Applies related choices atomically against the same settings snapshot. */
+  updateMany: (patch: Record<string, unknown>) => void;
   /** Live TikTok publishing requirements when the descriptor opted in; otherwise null. */
   requirements: TikTokPublishingRequirements | null;
   /** Actual attachment kinds for this Channel, not the Post's full media set. */
@@ -145,6 +148,7 @@ function defineProviderDescriptor<S>(spec: ProviderSpec<S>): ProviderDescriptor 
       channelName={props.channelName}
       settings={read(props.settings)}
       update={props.update}
+      updateMany={props.updateMany}
       requirements={props.requirements}
       t={props.t}
       mediaKinds={props.mediaKinds}
@@ -407,6 +411,21 @@ function TikTokEditor({
             </label>
           ))}
       </div>
+      {photo && (
+        <label
+          htmlFor={`${fieldId}-auto-music`}
+          className="flex min-h-12 items-center justify-between gap-3"
+        >
+          <span className="text-xs font-medium text-ink">
+            {t("Automatically add recommended music")}
+          </span>
+          <Switch
+            id={`${fieldId}-auto-music`}
+            checked={tt.auto_add_music ?? false}
+            onCheckedChange={(checked) => update("auto_add_music", checked)}
+          />
+        </label>
+      )}
       <label
         htmlFor={`${fieldId}-disclose`}
         className="flex min-h-12 items-center justify-between gap-3"
@@ -485,6 +504,112 @@ function TikTokEditor({
 }
 
 /**
+ * Composer-only Instagram choices persisted in `provider_options.instagram`.
+ * `post_type` is deliberately unanswered until the creator selects a shape so
+ * the adapter's documented image/feed and video/Reel defaults remain in force.
+ */
+interface InstagramComposerSettings {
+  post_type?: "feed" | "reel" | "story";
+  trial_graduation?: "manual" | "performance";
+  trial_reel?: boolean;
+}
+
+/**
+ * Instagram publication shape controls. Feed accepts one or a carousel; Reel
+ * and Story require exactly one attachment, and a trial Reel must be a Reel.
+ * The controls are limited by the actual attachment kinds so an impossible
+ * choice is never offered.
+ */
+function InstagramEditor({
+  channelName,
+  settings: instagram,
+  update,
+  updateMany,
+  mediaKinds,
+  t,
+}: ProviderEditorProps<InstagramComposerSettings>): React.ReactElement {
+  const fieldId = useId();
+  const single = mediaKinds.length === 1;
+  const hasVideo = mediaKinds.includes("video");
+  const postType = instagram.post_type ?? "";
+  return (
+    <ProviderPanel channelName={channelName} t={t}>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={`${fieldId}-post-type`} className="text-xs font-medium text-ink-3">
+          {t("Post type")}
+        </label>
+        <Select
+          value={postType}
+          onValueChange={(value) =>
+            updateMany({
+              post_type: value,
+              ...(value !== "reel" ? { trial_reel: false } : {}),
+            })
+          }
+        >
+          <SelectTrigger id={`${fieldId}-post-type`}>
+            <SelectValue placeholder={t("Choose the Instagram post type")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="feed">{t("Feed")}</SelectItem>
+            <SelectItem value="reel" disabled={!single || !hasVideo}>
+              {t("Reel")}
+            </SelectItem>
+            <SelectItem value="story" disabled={!single}>
+              {t("Story")}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-ink-3">
+          {single
+            ? t("Reels require one video; Stories require one image or video.")
+            : t("Multiple attachments publish as one feed carousel.")}
+        </p>
+      </div>
+      {postType === "reel" && (
+        <div className="flex flex-col gap-2 rounded-control border border-line p-3">
+          <label
+            htmlFor={`${fieldId}-trial`}
+            className="flex min-h-12 items-center justify-between gap-3"
+          >
+            <span className="text-xs font-medium text-ink">{t("Trial Reel")}</span>
+            <Switch
+              id={`${fieldId}-trial`}
+              checked={instagram.trial_reel ?? false}
+              onCheckedChange={(checked) => update("trial_reel", checked)}
+            />
+          </label>
+          <p className="text-xs text-ink-3">
+            {t("Trial Reels are shown to non-followers first; you can graduate them later.")}
+          </p>
+          {instagram.trial_reel && (
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor={`${fieldId}-graduation`} className="text-xs font-medium text-ink-3">
+                {t("Graduation")}
+              </label>
+              <Select
+                value={instagram.trial_graduation ?? "manual"}
+                onValueChange={(value) => update("trial_graduation", value)}
+              >
+                <SelectTrigger id={`${fieldId}-graduation`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="manual">{t("Graduate manually")}</SelectItem>
+                  <SelectItem value="performance">
+                    {t("Graduate automatically when it performs well")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
+      )}
+    </ProviderPanel>
+  );
+}
+
+/**
  * Facebook Page Reels have implicit Public scope. Expose that sole audience
  * choice and the sharing consequence without inventing unsupported privacy
  * settings or storing a redundant target option.
@@ -511,6 +636,11 @@ function FacebookEditor({
       </div>
       <p className="text-xs text-ink-2">
         {t("This Reel will be shared publicly on your Facebook Page.")}
+      </p>
+      <p className="text-xs text-ink-3">
+        {t(
+          "This Facebook connection publishes Reels only. Text backgrounds and text-only Page posts are not supported.",
+        )}
       </p>
     </ProviderPanel>
   );
@@ -630,6 +760,7 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
             !photo &&
             (!publishing || requirements?.stitch_allowed === true) &&
             (tt.stitch ?? false),
+          ...(photo ? { auto_add_music: tt.auto_add_music ?? false } : {}),
           brand_content: disclose && (tt.brand_content ?? false),
           brand_organic: disclose && (tt.brand_organic ?? false),
           disclose_commercial_content: disclose,
@@ -650,6 +781,7 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
         comment: options.allow_comment,
         duet: options.allow_duet,
         stitch: options.allow_stitch,
+        auto_add_music: options.auto_add_music,
         brand_content: options.brand_content,
         brand_organic: options.brand_organic,
         is_ai_generated: options.is_ai_generated,
@@ -682,6 +814,48 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
             }),
           );
         }
+      }
+      return errors;
+    },
+  }),
+  defineProviderDescriptor<InstagramComposerSettings>({
+    providers: ["instagram"],
+    read: (settings) => settings as Partial<InstagramComposerSettings>,
+    Editor: InstagramEditor,
+    applyTarget: (target, instagram) => {
+      target.provider_options = {
+        instagram: {
+          ...(instagram.post_type ? { post_type: instagram.post_type } : {}),
+          ...(instagram.trial_reel ? { trial_reel: true } : {}),
+          ...(instagram.trial_reel && instagram.trial_graduation
+            ? { trial_graduation: instagram.trial_graduation }
+            : {}),
+        },
+      };
+    },
+    readTarget: (target) => {
+      const options = target.provider_options?.instagram;
+      if (!options) return {};
+      return {
+        post_type: options.post_type,
+        trial_reel: options.trial_reel,
+        trial_graduation: options.trial_graduation,
+      };
+    },
+    validate: ({ channelName, settings: instagram, mediaKinds, t }) => {
+      const errors: string[] = [];
+      const single = mediaKinds.length === 1;
+      const hasVideo = mediaKinds.includes("video");
+      if (instagram.post_type === "reel" && (!single || !hasVideo)) {
+        errors.push(t("{name}: Instagram Reels require exactly one video.", { name: channelName }));
+      }
+      if (instagram.post_type === "story" && !single) {
+        errors.push(
+          t("{name}: Instagram Stories require exactly one image or video.", { name: channelName }),
+        );
+      }
+      if (instagram.post_type !== "reel" && instagram.trial_reel) {
+        errors.push(t("{name}: a trial Reel must use the Reel post type.", { name: channelName }));
       }
       return errors;
     },
@@ -800,6 +974,11 @@ export function PlatformSettings({
     });
   };
 
+  /** Commits coupled Provider choices together so one cannot overwrite another. */
+  const updateMany = (patch: Record<string, unknown>) => {
+    onChange({ ...settings, ...patch });
+  };
+
   const Editor = descriptor.Editor;
   return (
     <>
@@ -807,6 +986,7 @@ export function PlatformSettings({
         channelName={channelName}
         settings={settings}
         update={update}
+        updateMany={updateMany}
         requirements={requirements}
         mediaKinds={mediaKinds}
         t={t}

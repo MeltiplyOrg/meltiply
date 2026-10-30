@@ -22,6 +22,11 @@ locals {
       max_retries           = 3
       visibility_timeout_ms = 120000
     }
+    "notifications" = {
+      batch_size      = 10
+      max_concurrency = 2
+      max_retries     = 5
+    }
     "publish-facebook" = {
       batch_size            = 5
       max_concurrency       = 1

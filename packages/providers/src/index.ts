@@ -32,6 +32,7 @@ export * from "./failures";
 export * from "./facebook";
 export * from "./http";
 export * from "./instagram";
+export * from "./instagram-options";
 export * from "./rate-limit";
 export * from "./threads";
 export * from "./tiktok";

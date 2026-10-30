@@ -33,6 +33,8 @@ import type {
   PostListResponse,
   PostQueryParams,
   PublishingRequirements,
+  PublishingPreferences,
+  PublishingPreferencesUpdate,
   SchedulePostInput,
   PublishingQueue,
   QueueListResponse,
@@ -87,6 +89,8 @@ import {
   getDistributionAnalytics,
   getPlatformPublishingRequirements,
   getPost,
+  getPublishingPreferences,
+  updatePublishingPreferences,
   getUploadSession,
   listBrandProfiles,
   listPlatformCapabilities,
@@ -275,6 +279,13 @@ export interface ApiClientServiceShape {
     id: string,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<PublishingRequirements>;
+  readonly getPublishingPreferences: (
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<PublishingPreferences>;
+  readonly updatePublishingPreferences: (
+    input: PublishingPreferencesUpdate,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<PublishingPreferences>;
   readonly disconnectPlatform: (id: string, options?: ApiRequestOptions) => ApiClientEffect<void>;
   readonly getDistribution: (
     id: string,
@@ -450,6 +461,8 @@ export function createApiClientServiceTest(
     getInstallation: unstubbed("getInstallation"),
     getInvitationPreview: unstubbed("getInvitationPreview"),
     getPlatformPublishingRequirements: unstubbed("getPlatformPublishingRequirements"),
+    getPublishingPreferences: unstubbed("getPublishingPreferences"),
+    updatePublishingPreferences: unstubbed("updatePublishingPreferences"),
     getPost: unstubbed("getPost"),
     getUploadSession: unstubbed("getUploadSession"),
     listBrandProfiles: unstubbed("listBrandProfiles"),
@@ -549,6 +562,10 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
     getInvitationPreview: (token, options) => getInvitationPreview(token, options),
     getPlatformPublishingRequirements: (id, options) =>
       inWorkspace((workspaceId) => getPlatformPublishingRequirements(workspaceId, id, options)),
+    getPublishingPreferences: (options) =>
+      inWorkspace((workspaceId) => getPublishingPreferences(workspaceId, options)),
+    updatePublishingPreferences: (input, options) =>
+      inWorkspace((workspaceId) => updatePublishingPreferences(workspaceId, input, options)),
     getPost: (id, options) => inWorkspace((workspaceId) => getPost(workspaceId, id, options)),
     getUploadSession: (sessionId, options) =>
       inWorkspace((workspaceId) => getUploadSession(workspaceId, sessionId, options)),

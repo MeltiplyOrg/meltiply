@@ -36,6 +36,7 @@ export type WorkspaceCapability =
   | "member:invite"
   | "member:manage"
   | "member:read"
+  | "preferences:manage"
   | "workspace:rename";
 
 const ADMIN_CAPABILITIES: readonly WorkspaceCapability[] = [
@@ -52,6 +53,7 @@ const ADMIN_CAPABILITIES: readonly WorkspaceCapability[] = [
   "member:invite",
   "member:manage",
   "member:read",
+  "preferences:manage",
   "workspace:rename",
 ];
 

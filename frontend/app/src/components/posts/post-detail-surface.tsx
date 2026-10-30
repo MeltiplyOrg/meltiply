@@ -25,6 +25,8 @@ import { useLatchedValue } from "@meltiply/ui/use-latched-value";
 import { useSessionScope } from "@/hooks/use-session-scope";
 import { useRetryDistribution, useUpdateScheduledDistribution } from "@/lib/queries";
 import { useI18n } from "@/lib/i18n";
+import { usePublishingTimeZone } from "@/context/publishing-timezone.context";
+import { instantToWallClock, wallClockToInstant } from "@/lib/publishing-preferences";
 import { Skeleton } from "@meltiply/ui/skeleton";
 import { platformDisplayName } from "@/lib/platforms";
 import { isCancellablePublicationStatus } from "@/lib/publication-status";
@@ -47,7 +49,7 @@ const PostAnalyticsSection = lazy(() =>
  * (e.g. 'Sep 14, 2026, 02:30 PM'). Returns null for missing/invalid input so
  * callers can omit the row entirely.
  */
-function formatPostDate(value: string | null | undefined): string | null {
+function formatPostDate(value: string | null | undefined, timeZone: string): string | null {
   if (!value) return null;
   const date = new Date(value);
   if (isNaN(date.getTime())) return null;
@@ -58,18 +60,20 @@ function formatPostDate(value: string | null | undefined): string | null {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
+    timeZone,
   });
 }
 
 /**
- * Converts an ISO timestamp into the local `YYYY-MM-DDTHH:mm` shape required by
- * `datetime-local` inputs, pre-filling the reschedule picker with the current slot.
+ * Converts an ISO timestamp into the wall-clock `YYYY-MM-DDTHH:mm` shape required
+ * by `datetime-local` inputs in the owner's publishing timezone.
  */
-function toLocalInputValue(value: string | null | undefined): string {
-  const date = value ? new Date(value) : new Date(Date.now() + 60 * 60 * 1000);
-  if (isNaN(date.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+function toLocalInputValue(value: string | null | undefined, timeZone: string): string {
+  // A stored schedule keeps its exact wall clock, including local midnight;
+  // only a fresh slot gets the composer's 10:00 calendar suggestion.
+  return value
+    ? instantToWallClock(value, timeZone, false)
+    : instantToWallClock(new Date(Date.now() + 60 * 60 * 1000), timeZone);
 }
 
 /**
@@ -102,6 +106,7 @@ function ChannelOutcomeRow({
   onRequestDelete: (distributionIds: string[]) => void;
 }) {
   const { t } = useI18n();
+  const timeZone = usePublishingTimeZone();
   const scope = useSessionScope();
   const retry = useRetryDistribution(scope);
   const reschedule = useUpdateScheduledDistribution(scope);
@@ -113,8 +118,8 @@ function ChannelOutcomeRow({
   const channelName =
     item.integration?.name ?? (distribution ? platformDisplayName(distribution.platform) : null);
   const provider = item.integration?.providerIdentifier ?? distribution?.platform ?? "";
-  const scheduledLabel = formatPostDate(distribution?.scheduled_at);
-  const publishedLabel = formatPostDate(distribution?.published_at);
+  const scheduledLabel = formatPostDate(distribution?.scheduled_at, timeZone);
+  const publishedLabel = formatPostDate(distribution?.published_at, timeZone);
   const cancellable = distribution ? isCancellablePublicationStatus(status) : false;
   const attachmentSelection = item.target?.attachment_ids ?? null;
   // Only a pending target narrows against the current Post; a claimed
@@ -134,16 +139,16 @@ function ChannelOutcomeRow({
    */
   const applyReschedule = () => {
     if (!distribution || !rescheduleValue) return;
-    const next = new Date(rescheduleValue);
-    if (isNaN(next.getTime())) return;
+    const next = wallClockToInstant(rescheduleValue, timeZone);
+    if (!next) return;
     reschedule
-      .mutateAsync({ id: distribution.id, input: { scheduled_at: next.toISOString() } })
+      .mutateAsync({ id: distribution.id, input: { scheduled_at: next } })
       .then(() => {
         setRescheduleOpen(false);
         toast(t("Post rescheduled"), {
           description: t("{channel} scheduled for {date}", {
             channel: channelName ?? platformDisplayName(provider),
-            date: formatPostDate(next.toISOString()) ?? next.toLocaleString("en-US"),
+            date: formatPostDate(next, timeZone) ?? next,
           }),
           variant: "success",
         });
@@ -296,7 +301,7 @@ function ChannelOutcomeRow({
                   queueOwned ? t("Remove this Post from its Queue before rescheduling.") : undefined
                 }
                 onClick={() => {
-                  setRescheduleValue(toLocalInputValue(distribution.scheduled_at));
+                  setRescheduleValue(toLocalInputValue(distribution.scheduled_at, timeZone));
                   setRescheduleOpen((open) => !open);
                 }}
                 className="h-7 text-xs rounded-control gap-1"
@@ -417,14 +422,15 @@ export function usePostDetailSurface({
   extraActions,
 }: PostDetailSurfaceProps): PostDrawerSurface | null {
   const { t } = useI18n();
+  const timeZone = usePublishingTimeZone();
   const post = useLatchedValue(livePost);
 
   const surface = useMemo(() => {
     if (!post) return null;
 
     const caption = resolveRowCaption(post);
-    const dateLabel = formatPostDate(post.date);
-    const assignedLabel = formatPostDate(post.post?.queue_membership?.assigned_at);
+    const dateLabel = formatPostDate(post.date, timeZone);
+    const assignedLabel = formatPostDate(post.post?.queue_membership?.assigned_at, timeZone);
     const attachments = post.post?.attachments ?? [];
     const isDraft = post.post?.status === "draft";
     const cancellableIds = resolveCancellableDistributionIds(post);
@@ -637,7 +643,18 @@ export function usePostDetailSurface({
         </>
       ),
     };
-  }, [post, livePost, canMutate, canDelete, onClose, onEdit, onRequestDelete, extraActions, t]);
+  }, [
+    post,
+    livePost,
+    canMutate,
+    canDelete,
+    onClose,
+    onEdit,
+    onRequestDelete,
+    extraActions,
+    t,
+    timeZone,
+  ]);
 
   return surface;
 }

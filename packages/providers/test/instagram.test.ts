@@ -309,6 +309,75 @@ describe("createInstagramAdapter", () => {
     });
   });
 
+  it("publishes a feed video, a Story, and a trial Reel with explicit shapes", async () => {
+    const video = {
+      contentType: "video/mp4",
+      fileSize: 50 * 1024 * 1024,
+      mode: "remote_ingest" as const,
+      url: "https://assets.example/video.mp4",
+    };
+    const feed = sequence(() => json({ id: "feed-container" }));
+    await adapter(feed.fetcher).publish!(
+      context,
+      credentials,
+      publishInput({
+        media: [video],
+        providerOptions: { instagram: { postType: "feed" } },
+      }),
+    );
+    expect(Object.fromEntries(feed.calls[0]!.url.searchParams)).toMatchObject({
+      media_type: "VIDEO",
+      video_url: "https://assets.example/video.mp4",
+    });
+
+    const story = sequence(() => json({ id: "story-container" }));
+    await adapter(story.fetcher).publish!(
+      context,
+      credentials,
+      publishInput({
+        media: [video],
+        providerOptions: { instagram: { postType: "story" } },
+      }),
+    );
+    expect(Object.fromEntries(story.calls[0]!.url.searchParams)).toMatchObject({
+      media_type: "STORIES",
+      video_url: "https://assets.example/video.mp4",
+    });
+
+    const trial = sequence(() => json({ id: "trial-container" }));
+    await adapter(trial.fetcher).publish!(
+      context,
+      credentials,
+      publishInput({
+        media: [video],
+        providerOptions: {
+          instagram: {
+            postType: "reel",
+            trialGraduation: "performance",
+            trialReel: true,
+          },
+        },
+      }),
+    );
+    expect(trial.calls[0]!.url.searchParams.get("trial_params")).toBe(
+      JSON.stringify({ graduation_strategy: "SS_PERFORMANCE" }),
+    );
+  });
+
+  it("rejects a trial Reel that is not a single video Reel", async () => {
+    const providerCalls = sequence();
+    await expect(
+      adapter(providerCalls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: { instagram: { postType: "feed", trialReel: true } },
+        }),
+      ),
+    ).rejects.toMatchObject({ failure: { code: "instagram_post_options_invalid" } });
+    expect(providerCalls.calls).toHaveLength(0);
+  });
+
   // Observe the actual mixed-carousel protocol: unpublished VIDEO children,
   // one parent caption, and ordered child ids rather than standalone Reels.
   it("creates one child container per attachment and binds them in creator order", async () => {

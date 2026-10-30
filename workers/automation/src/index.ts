@@ -351,6 +351,9 @@ function queueEvent(body: unknown): string {
     if (body.topic === "comment.reply.requested") {
       return "reply_job";
     }
+    if (body.topic === "notification.delivery.requested") {
+      return "notification_job";
+    }
     return "asset_job";
   }
   return "unsupported_queue_message";
@@ -597,6 +600,15 @@ function dispatchQueueMessage(
   }
   if (isOutboxMessage(body) && body.topic === "comment.reply.requested") {
     return input.enqueueReplyWorkflow(env, body);
+  }
+  if (isOutboxMessage(body) && body.topic === "notification.delivery.requested") {
+    return Effect.flatMap(
+      Effect.tryPromise({
+        catch: (cause) => classifyJobError(cause),
+        try: () => import("./notifications"),
+      }),
+      (module) => module.processNotificationMessage(env, body),
+    );
   }
   if (isOutboxMessage(body)) {
     return Effect.flatMap(

@@ -96,6 +96,7 @@ interface DistributionRow extends Record<string, unknown> {
   reconciliation_attempt_count: number;
   refresh_token: string | null;
   scheduled_at: Date | string | null;
+  signature_text: string | null;
   status: string;
   attempt_count: number;
   title_override: string | null;
@@ -373,6 +374,7 @@ interface PublicationSnapshot {
   content: {
     hashtags: string[];
     provider_options?: ProviderPublishOptions;
+    signature?: string | null;
     text: string;
     title: string;
   };
@@ -410,6 +412,7 @@ function publicationSnapshot(
     content: {
       title: row.title_override ?? row.post_title,
       text: row.description_override ?? row.post_default_text,
+      signature: row.signature_text ?? null,
       hashtags: row.hashtags ?? [],
       ...(row.provider_options ? { provider_options: row.provider_options } : {}),
     },
@@ -569,6 +572,7 @@ function prepare(
                 distribution.platform_post_id,
                 distribution.title_override,
                 distribution.description_override,
+                distribution.signature_text,
                 distribution.hashtags, distribution.provider_options,
                 post.title AS post_title, post.default_text AS post_default_text,
                 composition.media,
@@ -2012,6 +2016,7 @@ export function processDistributionMessage(
           postId: row.post_id,
           providerAccountId: row.platform_user_id ?? undefined,
           providerOptions: snapshot.content.provider_options,
+          signature: snapshot.content.signature ?? null,
           storedAccessToken: row.access_token ?? "",
           storedRefreshToken: row.refresh_token,
           textContent: snapshot.content.text,

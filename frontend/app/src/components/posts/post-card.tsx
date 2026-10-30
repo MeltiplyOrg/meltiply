@@ -14,7 +14,8 @@ import { Input } from "@meltiply/ui/input";
 import { Card, CardFooter } from "@meltiply/ui/card";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { useI18n } from "@/lib/i18n";
-import { abbreviateRecordId } from "@/lib/format";
+import { usePublishingTimeZone } from "@/context/publishing-timezone.context";
+import { abbreviateRecordId, postDateFormatters } from "@/lib/format";
 import {
   formatAnalyticsCompact,
   formatAnalyticsInteger,
@@ -30,9 +31,7 @@ import {
 } from "./posts-helpers";
 import type { PostRow } from "./types";
 
-/** Card meta date, formatted with one shared formatter instead of one per card per render. */
-const CARD_DATE_FORMAT = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
-
+/** Card metric icons, rendered in the stored-analytics footer. */
 const CARD_METRICS = [
   { key: "views", icon: Eye },
   { key: "likes", icon: Heart },
@@ -68,6 +67,8 @@ export const PostCard = React.memo(function PostCard({
   ...actions
 }: PostCardProps) {
   const { t, language } = useI18n();
+  const timeZone = usePublishingTimeZone();
+  const dateFormat = postDateFormatters(timeZone).day;
   const providers = resolveRowProviders(post);
   const preview = resolveRowPreviewAttachment(post);
   const image = preview?.asset.thumbnail_url ?? preview?.asset.download_url;
@@ -129,7 +130,7 @@ export const PostCard = React.memo(function PostCard({
         </span>
         <span className="inline-flex shrink-0 items-center gap-1">
           <CalendarDays className="size-3" />
-          <time dateTime={post.date}>{CARD_DATE_FORMAT.format(new Date(post.date))}</time>
+          <time dateTime={post.date}>{dateFormat.format(new Date(post.date))}</time>
         </span>
         {attachments > 0 && (
           <span className="inline-flex shrink-0 items-center gap-1">

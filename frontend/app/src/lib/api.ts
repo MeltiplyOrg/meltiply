@@ -34,6 +34,8 @@ import type {
   PostListResponse,
   PostQueryParams,
   PublishingRequirements,
+  PublishingPreferences,
+  PublishingPreferencesUpdate,
   SchedulePostInput,
   PublishingQueue,
   QueueListResponse,
@@ -452,6 +454,54 @@ export function listQueues(
       client().GET("/queues", {
         headers: workspaceHeaders(workspaceId),
         params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Reads the Workspace's persistent timezone, signature templates, and owner
+ * notification choices. An untouched Workspace returns null timezone, no
+ * templates, both events disabled, and `email_available` reflecting the real
+ * mail capability.
+ *
+ * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
+ * @param options Request options with optional abort signal.
+ * @returns Effect resolving to the current publishing preferences.
+ */
+export function getPublishingPreferences(workspaceId: string | null, options?: ApiRequestOptions) {
+  return unwrap<PublishingPreferences>(
+    (signal) =>
+      client().GET("/publishing-preferences", {
+        headers: workspaceHeaders(workspaceId),
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Replaces the complete publishing-preference document. Template create, edit,
+ * reorder, delete, and default selection all travel as one list so the server
+ * can enforce one default and contiguous positions atomically.
+ *
+ * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
+ * @param input Complete replacement document.
+ * @param options Request options with optional idempotency key.
+ * @returns Effect resolving to the stored preferences.
+ */
+export function updatePublishingPreferences(
+  workspaceId: string | null,
+  input: PublishingPreferencesUpdate,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<PublishingPreferences>(
+    (signal) =>
+      client().PUT("/publishing-preferences", {
+        body: input,
+        headers: workspaceHeaders(workspaceId),
+        params: { header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) } },
         signal,
       }),
     options?.signal,

@@ -9,6 +9,8 @@ const stagingBaseUrl = process.env.STAGING_E2E_BASE_URL?.trim();
 const stagingStorageState = process.env.STAGING_E2E_STORAGE_STATE?.trim();
 const localApiOrigin = process.env.MELTIPLY_E2E_API_BASE_URL?.trim() || "http://127.0.0.1:8787";
 const reuseExistingServers = process.env.MELTIPLY_E2E_REUSE_SERVERS === "1";
+const publicPreview = process.env.MELTIPLY_E2E_START_PUBLIC === "1";
+const publicOrigin = "http://127.0.0.1:4321";
 // Opt-in acceptance mode boots the controlled-Provider acceptance Workers instead of
 // the production local entries. Controlled journeys (publication and channel-scoped
 // composer scenarios) need the controlled Provider on the far side of the Provider
@@ -38,6 +40,17 @@ const controlledComposerPatterns = [
   /identifies media-required channels before submitting text-only posts/,
 ];
 
+const performanceProjects =
+  process.env.MELTIPLY_E2E_PERFORMANCE === "1"
+    ? [
+        {
+          name: "performance",
+          testMatch: "**/performance.spec.ts",
+          use: { ...devices["Desktop Chrome"] },
+        },
+      ]
+    : [];
+
 const localProjects = [
   {
     name: "chromium",
@@ -47,10 +60,12 @@ const localProjects = [
       "**/publishing-queues.spec.ts",
       "**/workspace-design.spec.ts",
       "**/analytics.spec.ts",
+      "**/performance.spec.ts",
     ],
     grepInvert: controlledComposerPatterns,
     use: { ...devices["Desktop Chrome"] },
   },
+  ...performanceProjects,
 ];
 const acceptanceProjects = [
   {
@@ -159,5 +174,16 @@ export default defineConfig({
           timeout: 120_000,
           url: `${frontendOrigin}/`,
         },
+        ...(publicPreview
+          ? [
+              {
+                command: `bun run --cwd frontend/public build && bun run --cwd frontend/public --no-install preview -- --host 127.0.0.1 --port 4321 --strictPort`,
+                cwd: repositoryRoot,
+                reuseExistingServer: reuseExistingServers,
+                timeout: 180_000,
+                url: `${publicOrigin}/`,
+              },
+            ]
+          : []),
       ],
 });

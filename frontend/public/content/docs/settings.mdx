@@ -1,6 +1,6 @@
 ---
 title: Settings
-description: Use Appearance, Language, Account, and Security in the current workspace Settings page.
+description: Use Appearance, Language, Publishing, Account, and Security in the current workspace Settings page.
 section: Workspace
 order: 11
 ---
@@ -20,6 +20,18 @@ There is one implemented animation path, with no separate motion mode or switch.
 ## Language
 
 Choose **English** or **Español**. The interface changes immediately; remembering the selection across visits requires functional consent. Public guides are separate content rather than a promise that every article is translated.
+
+## Publishing
+
+Workspace Admins can choose the timezone every new schedule interprets and every schedule date displays in. Leave **Use this device's timezone** on to follow the current browser, or choose a supported IANA timezone such as `America/New_York`. Changing this preference never moves an existing Schedule: assigned instants stay exactly as stored. Providers receive only the stored instant; the timezone is a Meltiply entry and display choice, not a Platform publishing constraint.
+
+Signatures are reusable text appended to new Posts. Add up to ten templates, name each one, and choose exactly one default. A template may use `{brand_profile}`, `{platform}`, and `{channel}`; the composer resolves them against the actual destination and shows the result before saving. A saved or published Post keeps the signature it stored, so later template edits do not rewrite it. Signature text counts toward each Platform's caption limit.
+
+Notification choices cover failed publications and connected Channels that need reconnecting. Both events are off until you enable them. **Email** is offered only when this installation has working mail delivery; it sends to the Installation Owner's current address. Enabled alerts run through the durable queue with bounded retries, and recorded delivery evidence stops a replay from sending the same event again.
+
+Concurrent deliveries of the same alert wait for the active sending attempt
+without consuming another attempt. Post titles and Provider failure reasons are
+shown as bounded, single-line excerpts.
 
 ## Account
 
@@ -49,7 +61,7 @@ Select a profile through Posts/Channels filters or top-bar jump search. **All Br
 
 ## What Settings does not include
 
-The current route does not provide billing, team invitations, notification configuration, API-key management, or self-service identity editing. Reference-design examples do not create those product capabilities.
+The current route does not provide billing, API-key management, or self-service identity editing. Membership invitations, roles, installation lifecycle, and Audit live in **Administration**; owner notification choices live in **Publishing** and cover only publication-failure and disconnected-Channel alerts. Reference-design examples do not create those product capabilities.
 
 ## Related guides
 

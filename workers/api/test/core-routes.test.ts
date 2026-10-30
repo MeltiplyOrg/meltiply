@@ -2223,6 +2223,54 @@ describe("core API routes", () => {
     });
   });
 
+  it.each([
+    { ENVIRONMENT: "staging", origin: "http://localhost:3000", status: 503 },
+    { ENVIRONMENT: "production", origin: "http://localhost:3000", status: 503 },
+    { ENVIRONMENT: "staging", origin: "https://app.example.test", status: 307 },
+    { ENVIRONMENT: "production", origin: "https://app.example.test", status: 307 },
+    { ENVIRONMENT: "local", origin: "http://localhost:3000", status: 307 },
+    { ENVIRONMENT: "test", origin: "http://localhost:3000", status: 307 },
+  ] as const)(
+    "enforces OAuth callback security in $ENVIRONMENT at $origin",
+    async ({ ENVIRONMENT, origin, status }) => {
+      const { authorizationUrl, registry } = oauthRegistry();
+      const create = vi.fn(async () => undefined);
+      const app = authenticatedApp(
+        service({ platformCapabilities: () => registry.capabilities() }),
+        {
+          brandProfileService: brandProfileService(),
+          providerRegistry: registry,
+        },
+      );
+      const response = await app.request(
+        "/api/v1/platforms/threads/connect",
+        { headers: bearerHeaders },
+        {
+          ...env,
+          ENVIRONMENT,
+          APP_URL: origin,
+          OAUTH_STATE: {
+            getByName: () => ({ create }),
+          } as unknown as DurableObjectNamespace<OAuthStateStub>,
+        },
+      );
+      expect(response.status).toBe(status);
+      if (status === 307) {
+        const location = new URL(response.headers.get("Location")!);
+        expect(location.searchParams.get("redirect_uri")).toBe(
+          `${origin}/api/v1/platforms/threads/callback`,
+        );
+      } else {
+        expect(response.headers.get("Location")).toBeNull();
+        expect(create).not.toHaveBeenCalled();
+        expect(authorizationUrl).not.toHaveBeenCalled();
+        await expect(response.json()).resolves.toMatchObject({
+          error: { code: "service_unavailable" },
+        });
+      }
+    },
+  );
+
   it("starts accepted OAuth with PKCE and user/org-bound consume-once state", async () => {
     const { authorizationUrl, registry } = oauthRegistry();
     const create = vi.fn(

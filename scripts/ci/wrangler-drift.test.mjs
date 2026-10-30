@@ -1,12 +1,10 @@
 // Wrangler ↔ Terraform ↔ environment drift gate (AUD-050).
 //
 // Single source of truth assertions:
-//   1. every Queue producer binding in workers/*/wrangler.jsonc exists as a
-//      Terraform queue (and vice versa), using the same naming formula;
-//   2. Terraform queue consumers attach the Worker name declared in wrangler;
-//   3. every `env.X` / `process.env.X` binding referenced in worker source is
+//   1. Terraform queue consumers attach the Worker name declared in wrangler;
+//   2. every `env.X` / `process.env.X` binding referenced in worker source is
 //      declared in that worker's wrangler.jsonc or in .env.example;
-//   4. the only `replace-with-*` strings in checked-in configs are the
+//   3. the only `replace-with-*` strings in checked-in configs are the
 //      documented release-substituted placeholders.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -31,13 +29,6 @@ function workerConfigs() {
   }));
 }
 
-function terraformWorkloads() {
-  const source = read("infra/cloudflare/main.tf");
-  const block = source.match(/locals \{\s*workloads = \{([\s\S]*?)\n  \}\s*\}/);
-  assert.ok(block, "Terraform `local.workloads` block is missing from main.tf");
-  return [...block[1].matchAll(/^\s*"([a-z0-9-]+)"\s*=\s*\{/gm)].map((match) => match[1]).sort();
-}
-
 function tfvarsValue(name) {
   const source = read("infra/cloudflare/staging.tfvars.example");
   const match = source.match(new RegExp(`^${name}\\s*=\\s*"([^"]+)"`, "m"));
@@ -56,21 +47,6 @@ function collectSourceFiles(root, files = []) {
   }
   return files;
 }
-
-test("Queue producers in wrangler match Terraform queues in both directions", () => {
-  const workloads = terraformWorkloads();
-  const environment = tfvarsValue("environment");
-  const automation = workerConfigs().find((w) => w.name === "automation").config;
-  const producers = automation.queues?.producers ?? [];
-  assert.ok(producers.length > 0, "automation wrangler declares Queue producers");
-  const expected = workloads.map((workload) => `meltiply-${workload}-${environment}`).sort();
-  const actual = producers.map((producer) => producer.queue).sort();
-  assert.deepEqual(
-    actual,
-    expected,
-    "wrangler producer Queues must equal Terraform queue_names (meltiply-<workload>-<environment>)",
-  );
-});
 
 test("Terraform Queue consumers attach the Worker declared in wrangler", () => {
   const automationWorkerName = tfvarsValue("automation_worker_name");

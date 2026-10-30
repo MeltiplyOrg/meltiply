@@ -14,6 +14,7 @@ import {
   validateIacOutputs,
 } from "./release-lib.mjs";
 import { validateWorkerVersionId } from "./release-worker.mjs";
+import { assertFrontendReleaseEvidence } from "./release-frontend.mjs";
 
 const manifestName = "release-manifest.json";
 const maximumFileBytes = 512 * 1024;
@@ -43,6 +44,8 @@ const privateAllowlist = new Set([
   "release-input.json",
   "release-manifest.json",
   "reviewed-sha",
+  "reviewed-context.json",
+  "approval-session.json",
 ]);
 
 // IaC phase proven by each transition's post-apply outputs.
@@ -80,6 +83,8 @@ const evidenceByMode = Object.freeze({
     "worker-automation-secrets.json",
     "worker-state-candidate.json",
     "worker-state-deployment.json",
+    "worker-frontend-candidate.json",
+    "worker-frontend-deployment.json",
   ]),
   bootstrap: Object.freeze([
     "foundation-plan-summary.json",
@@ -106,12 +111,8 @@ const evidenceByMode = Object.freeze({
   ]),
 });
 
-// Holds and the transition plan digest each must bind.
-const holds = Object.freeze([
-  Object.freeze({ name: "staging-foundation-approval" }),
-  Object.freeze({ name: "staging-traffic-approval" }),
-  Object.freeze({ name: "staging-queue-resume-approval" }),
-]);
+// Each review binds one transition digest in the selected installation.
+const approvalScopes = Object.freeze(["foundation", "traffic", "queue-resume"]);
 
 /**
  * Asserts a value is a non-null, non-array object.
@@ -266,10 +267,11 @@ async function readPlanDigest(outDir, phase) {
  * transition it claims to review.
  *
  * @param {object} summary - Parsed plan summary
- * @param {string} phase - Expected transition phase name
+ * @param {string} phase - Expected release transition phase
+ * @param {object} spec - Release input whose environment the summary must match
  * @throws {TypeError} If fields, phase, or transition invariants mismatch
  */
-function validatePlanSummary(summary, phase) {
+function validatePlanSummary(summary, phase, spec) {
   plainObject(summary, `${phase} plan summary`);
   if (summary.schemaVersion !== 1 || summary.phase !== phase) {
     throw new TypeError(`${phase} plan summary does not match the phase`);
@@ -280,12 +282,12 @@ function validatePlanSummary(summary, phase) {
   const transition = plainObject(summary.transition, `${phase} plan summary transition`);
   const expected = iacPhaseStates[transitionStates[phase]];
   const actual = [
-    transition.attach_app_custom_domains,
-    transition.attach_queue_consumers,
-    transition.queue_delivery_paused,
+    transition.attachAppCustomDomains,
+    transition.attachQueueConsumers,
+    transition.queueDeliveryPaused,
   ];
   if (
-    transition.environment !== "staging" ||
+    transition.environment !== spec.environment ||
     actual.some((value) => typeof value !== "boolean") ||
     actual.some((value, index) => value !== expected[index])
   ) {
@@ -354,11 +356,11 @@ function validateSmokeHealth(evidence, url, name, versionPinned, spec) {
     throw new TypeError(`${name} health probes the wrong URL`);
   }
   if (
-    health.environment !== "staging" ||
+    health.environment !== spec.environment ||
     health.status !== "ok" ||
     !gitShaPattern.test(health.version)
   ) {
-    throw new TypeError(`${name} health is not the staging contract`);
+    throw new TypeError(`${name} health is not the ${spec.environment} contract`);
   }
   if (versionPinned && health.version !== spec.git_sha) {
     throw new TypeError(`${name} health version does not match the release`);
@@ -408,7 +410,7 @@ function evidenceContext({
  * @throws {TypeError} If the document fails any evidence contract
  */
 function validateEvidenceDocument({ content, context, name, spec }) {
-  const foundation = context.approvalByName.get("staging-foundation-approval");
+  const foundation = context.approvalByName.get(`${spec.environment}-foundation-approval`);
   const evidence = assertReleaseBound(content, name, spec);
 
   if (name === "migration-evidence.json") {
@@ -526,6 +528,7 @@ function validateEvidenceDocument({ content, context, name, spec }) {
       api: context.secretsVersionId,
       automation: context.candidate.automation_secrets,
       state: context.candidate.state,
+      frontend: context.candidate.frontend,
     };
     if (evidence.version_id !== deployedIds[worker]) {
       throw new TypeError(`${name} activated the wrong Worker version`);
@@ -558,7 +561,7 @@ function validateEvidenceDocument({ content, context, name, spec }) {
       throw new TypeError(`${name} does not prove the staged rollout`);
     }
     assertPlanDigest(evidence, context.domainDigest, name);
-    const trafficApproval = context.approvalByName.get("staging-traffic-approval");
+    const trafficApproval = context.approvalByName.get(`${spec.environment}-traffic-approval`);
     assertApprovalEmbedded(evidence, trafficApproval, name, spec);
     return;
   }
@@ -619,7 +622,9 @@ function validateEvidenceDocument({ content, context, name, spec }) {
     }
     if (activating) {
       assertPlanDigest(evidence, context.unpauseDigest, name);
-      const resumeApproval = context.approvalByName.get("staging-queue-resume-approval");
+      const resumeApproval = context.approvalByName.get(
+        `${spec.environment}-queue-resume-approval`,
+      );
       assertApprovalEmbedded(evidence, resumeApproval, name, spec);
     } else {
       assertPlanDigest(evidence, context.initialDigest, name);
@@ -723,12 +728,12 @@ export async function buildReleaseManifest({
   // Every hold must bind its own reviewed plan; a later hold can never reuse
   // an earlier digest or label.
   const approvals = await loadApprovalMetadata({
-    expectedNames: new Set(holds.map((hold) => hold.name)),
+    expectedNames: new Set(approvalScopes.map((scope) => `${spec.environment}-${scope}-approval`)),
     paths: approvalPaths,
     planDigests: new Map([
-      ["staging-foundation-approval", initialDigest],
-      ["staging-traffic-approval", domainDigest],
-      ["staging-queue-resume-approval", unpauseDigest],
+      [`${spec.environment}-foundation-approval`, initialDigest],
+      [`${spec.environment}-traffic-approval`, domainDigest],
+      [`${spec.environment}-queue-resume-approval`, unpauseDigest],
     ]),
     spec,
   });
@@ -810,7 +815,10 @@ export async function buildReleaseManifest({
           approval.approval_job.name !==
           name
             .slice(9, -5)
-            .replace(/^(foundation|traffic|queue-resume)$/, (part) => `staging-${part}-approval`)
+            .replace(
+              /^(foundation|traffic|queue-resume)$/,
+              (part) => `${spec.environment}-${part}-approval`,
+            )
         ) {
           throw new TypeError(`${name} holds an unexpected approval job`);
         }
@@ -819,7 +827,7 @@ export async function buildReleaseManifest({
           throw new TypeError(`${name} diverges from the approved metadata`);
         }
       } else if (name.endsWith("-plan-summary.json")) {
-        validatePlanSummary(parsed, name.slice(0, -"-plan-summary.json".length));
+        validatePlanSummary(parsed, name.slice(0, -"-plan-summary.json".length), spec);
       } else if (name.startsWith("iac-outputs-")) {
         validatePhaseOutputs(parsed, name.slice(12, -5), spec);
       } else if (name === "worker-api-candidate.json") {
@@ -860,6 +868,7 @@ export async function buildReleaseManifest({
       automation: documents.get("worker-automation-candidate.json")?.version_id,
       automation_secrets: documents.get("worker-automation-secrets.json")?.version_id,
       state: documents.get("worker-state-candidate.json")?.version_id,
+      frontend: documents.get("worker-frontend-candidate.json")?.version_id,
     },
     domainDigest,
     expectedTraffic,
@@ -878,6 +887,7 @@ export async function buildReleaseManifest({
     }
     validateEvidenceDocument({ content: parsed, context, name, spec });
   }
+  await assertFrontendReleaseEvidence({ iac, outDir, spec });
 
   // The final post-apply outputs must equal the unpause outputs byte-for-byte,
   // must equal the outputs supplied for validation, and must prove the fully
@@ -897,7 +907,7 @@ export async function buildReleaseManifest({
   // The on-disk document is the raw OpenTofu output; the loaded `iac` input is
   // its normalized form. Revalidating the file and comparing normalized forms
   // proves the supplied outputs and the persisted outputs describe the same
-  // staging state without a brittle byte-level identity requirement.
+  // installation state without a brittle byte-level identity requirement.
   const finalIac = validateIacOutputs(parsedFinal, spec);
   if (
     JSON.stringify(releaseInternals.stableValue(finalIac)) !==
@@ -932,7 +942,7 @@ export async function buildReleaseManifest({
 
   const manifest = {
     deployment_mode: mode,
-    environment: "staging",
+    environment: spec.environment,
     evidence: files.sort((left, right) => left.file.localeCompare(right.file)),
     git_sha: spec.git_sha,
     openapi: contract,

@@ -57,7 +57,7 @@ checks live S3 operations, runs `bun run cloudflare:check`, then exercises
 application uploads, native media processing, private delivery, and retention
 against R2 and MinIO. They run on GitHub-hosted machines without deployment
 secrets. A passing automatic `ci-gate` does not imply that a manual lane ran.
-Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
+Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#release-and-rollback).
 
 `publishing-flow` runs focused composer/creator-freshness and all five Provider regressions, changed-scope React
 review, the full application gate, documentation links, and browser publication,
@@ -131,6 +131,19 @@ in both palettes. Its owner, profiles, and Channels are real fixture state; pend
 selection metadata is controlled. Screenshots and traces are retained as artifacts.
 This does not certify live provider consent, app review, account permissions, or
 real social publication; see the [provider contract research](research/provider-channel-connections.md).
+
+`managed-release` runs `bun run cloudflare:check`, `bun run iac:check`,
+`bun run test:staging`, and `bun run docs:links` on the hosted runner. It also
+executes the actual offline release preflight for staging and production without
+account credentials, renders and production-builds both reviewed frontend bundles,
+checks their environment/SHA/name/API target and absence of the Vite dev client,
+and packages each with Wrangler dry-run. A fresh isolated PostgreSQL service
+exercises the shared role gate, complete migrations, and installed RLS objects.
+The infrastructure/release suites cover the transition wrapper with a fake provider
+and environment-specific confirmation/digest evidence. This lane validates the
+[managed runbook's implementation](../infra/cloudflare/README.md#release-and-rollback);
+it neither creates live Cloudflare/Neon resources nor certifies Email Sending
+delivery, external Provider consent/app review, or a live deployment.
 
 `frontend-full` provisions local signing/storage configuration before browser
 journeys. It runs production-entry browser scenarios, then the cross-profile

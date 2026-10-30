@@ -228,156 +228,161 @@ test("stdin secret bundles require exact worker-specific names without recording
   assert.throws(() => validateSecretBundle(source, spec, "state"), /only for API and Automation/);
 });
 
-test("Automation update uploads code, creates a stdin secret version, and activates it", async (context) => {
-  const outDir = await mkdtemp(path.join(tmpdir(), "release-worker-"));
-  context.after(() => rm(outDir, { force: true, recursive: true }));
-  await mkdir(path.join(outDir, "wrangler"));
-  await writeFile(
-    path.join(outDir, "wrangler/automation.json"),
-    JSON.stringify({ name: "meltiply-automation", main: "worker.ts" }),
-  );
+for (const environment of ["staging", "production"]) {
+  test(`${environment} Automation update uploads code, creates a stdin secret version, and activates it`, async (context) => {
+    const workerName =
+      environment === "staging" ? "meltiply-automation" : "meltiply-automation-production";
+    const outDir = await mkdtemp(path.join(tmpdir(), "release-worker-"));
+    context.after(() => rm(outDir, { force: true, recursive: true }));
+    await mkdir(path.join(outDir, "wrangler"));
+    await writeFile(
+      path.join(outDir, "wrangler/automation.json"),
+      JSON.stringify({ name: workerName, main: "worker.ts" }),
+    );
 
-  const gitSha = "a".repeat(40);
-  const spec = {
-    runtime: {},
-    deployment_mode: "update",
-    git_sha: gitSha,
-    provider_acceptance: {
-      facebook: false,
-      instagram: false,
-      threads: false,
-      tiktok: false,
-      youtube: false,
-    },
-    release_id: `staging-${gitSha.slice(0, 12)}`,
-  };
-  const codeTag = `${spec.release_id}-automation-code`;
-  const secretTag = `${spec.release_id}-automation-secrets`;
-  let versions = [{ id: version, tag: "previous" }];
-  let activeVersion = version;
-  // Simulate Wrangler state transitions after Bun's local-binary command prefix.
-  async function runCommand(_command, args, options = {}) {
-    const wrangler = args.slice(3);
-    if (wrangler[0] === "versions" && wrangler[1] === "list") {
-      return {
-        code: 0,
-        stderr: "",
-        stdout: JSON.stringify(
-          versions.map((entry) => ({
-            id: entry.id,
-            annotations: { "workers/tag": entry.tag },
-          })),
-        ),
-      };
-    }
-    if (wrangler[0] === "deployments" && wrangler[1] === "status") {
-      return {
-        code: 0,
-        stderr: "",
-        stdout: JSON.stringify({
-          versions: [{ percentage: 100, version_id: activeVersion }],
-        }),
-      };
-    }
-    if (wrangler[0] === "versions" && wrangler[1] === "upload") {
-      assert.ok(wrangler.includes("--strict"));
-      versions.unshift({ id: otherVersion, tag: codeTag });
-      await writeFile(
-        options.env.WRANGLER_OUTPUT_FILE_PATH,
-        `${JSON.stringify({
-          type: "version-upload",
-          worker_name: "meltiply-automation",
-          version_id: otherVersion,
-          preview_url: "https://candidate.example.workers.dev",
-        })}\n`,
-      );
-      return { code: 0, stderr: "", stdout: "" };
-    }
-    if (wrangler[0] === "versions" && wrangler[1] === "view") {
-      const id = wrangler[2];
-      const found = versions.find((entry) => entry.id === id);
-      return {
-        code: 0,
-        stderr: "",
-        stdout: JSON.stringify({
-          id,
-          annotations: { "workers/tag": found?.tag },
-          resources: {
-            bindings: [{ name: "VERSION", text: gitSha, type: "plain_text" }],
-          },
-        }),
-      };
-    }
-    if (wrangler.join(" ").startsWith("versions secret bulk")) {
-      assert.equal(typeof options.stdin, "string");
-      assert.doesNotMatch(options.stdin, /BETTER_AUTH_SECRET/);
-      versions.unshift({ id: secretVersion, tag: secretTag });
-      return {
-        code: 0,
-        stderr: "",
-        stdout: `Success! Created version ${secretVersion} with 3 secrets.\n`,
-      };
-    }
-    if (wrangler[0] === "versions" && wrangler[1] === "deploy") {
-      activeVersion = secretVersion;
-      await writeFile(
-        options.env.WRANGLER_OUTPUT_FILE_PATH,
-        `${JSON.stringify({ type: "version-deploy", worker_name: "meltiply-automation" })}\n`,
-      );
-      return { code: 0, stderr: "", stdout: "" };
-    }
-    throw new Error(`unexpected Wrangler command: ${wrangler.join(" ")}`);
-  }
-
-  const common = {
-    R2_ACCESS_KEY_ID: "access-key",
-    R2_SECRET_ACCESS_KEY: "secret-key",
-    TOKEN_ENCRYPTION_KEY: "encryption-key",
-  };
-  const approvals = [{ approval_job: { approved_by: "operator" } }];
-  const planDigest = "b".repeat(64);
-  await deployWorkerStep({
-    approvals,
-    environment: {},
-    outDir,
-    phase: "automation-update",
-    planDigest,
-    runCommand,
-    spec,
-    step: "upload",
-  });
-  await injectWorkerSecrets({
-    approvals,
-    environment: {},
-    outDir,
-    planDigest,
-    runCommand,
-    secretSource: JSON.stringify({
-      api: {
-        ...common,
-        BETTER_AUTH_SECRET: "better-auth-secret",
-        AUTH_SETUP_SECRET: "bootstrap-placeholder-not-a-real-secret",
+    const gitSha = "a".repeat(40);
+    const spec = {
+      runtime: {},
+      deployment_mode: "update",
+      environment,
+      git_sha: gitSha,
+      provider_acceptance: {
+        facebook: false,
+        instagram: false,
+        threads: false,
+        tiktok: false,
+        youtube: false,
       },
-      automation: common,
-    }),
-    spec,
-    worker: "automation",
-  });
-  const deployed = await deployWorkerStep({
-    approvals,
-    environment: {},
-    outDir,
-    phase: "automation-update",
-    planDigest,
-    runCommand,
-    spec,
-    step: "activate",
-  });
+      release_id: `${environment}-${gitSha.slice(0, 12)}`,
+    };
+    const codeTag = `${spec.release_id}-automation-code`;
+    const secretTag = `${spec.release_id}-automation-secrets`;
+    let versions = [{ id: version, tag: "previous" }];
+    let activeVersion = version;
+    // Simulate Wrangler state transitions after Bun's local-binary command prefix.
+    async function runCommand(_command, args, options = {}) {
+      const wrangler = args.slice(3);
+      if (wrangler[0] === "versions" && wrangler[1] === "list") {
+        return {
+          code: 0,
+          stderr: "",
+          stdout: JSON.stringify(
+            versions.map((entry) => ({
+              id: entry.id,
+              annotations: { "workers/tag": entry.tag },
+            })),
+          ),
+        };
+      }
+      if (wrangler[0] === "deployments" && wrangler[1] === "status") {
+        return {
+          code: 0,
+          stderr: "",
+          stdout: JSON.stringify({
+            versions: [{ percentage: 100, version_id: activeVersion }],
+          }),
+        };
+      }
+      if (wrangler[0] === "versions" && wrangler[1] === "upload") {
+        assert.ok(wrangler.includes("--strict"));
+        versions.unshift({ id: otherVersion, tag: codeTag });
+        await writeFile(
+          options.env.WRANGLER_OUTPUT_FILE_PATH,
+          `${JSON.stringify({
+            type: "version-upload",
+            worker_name: workerName,
+            version_id: otherVersion,
+            preview_url: "https://candidate.example.workers.dev",
+          })}\n`,
+        );
+        return { code: 0, stderr: "", stdout: "" };
+      }
+      if (wrangler[0] === "versions" && wrangler[1] === "view") {
+        const id = wrangler[2];
+        const found = versions.find((entry) => entry.id === id);
+        return {
+          code: 0,
+          stderr: "",
+          stdout: JSON.stringify({
+            id,
+            annotations: { "workers/tag": found?.tag },
+            resources: {
+              bindings: [{ name: "VERSION", text: gitSha, type: "plain_text" }],
+            },
+          }),
+        };
+      }
+      if (wrangler.join(" ").startsWith("versions secret bulk")) {
+        assert.equal(typeof options.stdin, "string");
+        assert.doesNotMatch(options.stdin, /BETTER_AUTH_SECRET/);
+        versions.unshift({ id: secretVersion, tag: secretTag });
+        return {
+          code: 0,
+          stderr: "",
+          stdout: `Success! Created version ${secretVersion} with 3 secrets.\n`,
+        };
+      }
+      if (wrangler[0] === "versions" && wrangler[1] === "deploy") {
+        activeVersion = secretVersion;
+        await writeFile(
+          options.env.WRANGLER_OUTPUT_FILE_PATH,
+          `${JSON.stringify({ type: "version-deploy", worker_name: workerName })}\n`,
+        );
+        return { code: 0, stderr: "", stdout: "" };
+      }
+      throw new Error(`unexpected Wrangler command: ${wrangler.join(" ")}`);
+    }
 
-  assert.equal(deployed.version_id, secretVersion);
-  assert.equal(
-    JSON.parse(await readFile(path.join(outDir, "worker-automation-secrets.json"), "utf8"))
-      .secret_names.length,
-    3,
-  );
-});
+    const common = {
+      R2_ACCESS_KEY_ID: "access-key",
+      R2_SECRET_ACCESS_KEY: "secret-key",
+      TOKEN_ENCRYPTION_KEY: "encryption-key",
+    };
+    const approvals = [{ approval_job: { approved_by: "operator" } }];
+    const planDigest = "b".repeat(64);
+    await deployWorkerStep({
+      approvals,
+      environment: {},
+      outDir,
+      phase: "automation-update",
+      planDigest,
+      runCommand,
+      spec,
+      step: "upload",
+    });
+    await injectWorkerSecrets({
+      approvals,
+      environment: {},
+      outDir,
+      planDigest,
+      runCommand,
+      secretSource: JSON.stringify({
+        api: {
+          ...common,
+          BETTER_AUTH_SECRET: "better-auth-secret",
+          AUTH_SETUP_SECRET: "bootstrap-placeholder-not-a-real-secret",
+        },
+        automation: common,
+      }),
+      spec,
+      worker: "automation",
+    });
+    const deployed = await deployWorkerStep({
+      approvals,
+      environment: {},
+      outDir,
+      phase: "automation-update",
+      planDigest,
+      runCommand,
+      spec,
+      step: "activate",
+    });
+
+    assert.equal(deployed.version_id, secretVersion);
+    assert.equal(
+      JSON.parse(await readFile(path.join(outDir, "worker-automation-secrets.json"), "utf8"))
+        .secret_names.length,
+      3,
+    );
+  });
+}

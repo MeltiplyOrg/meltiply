@@ -18,6 +18,7 @@ const canonicalCrons = ["* * * * *", "0 0 * * *"];
 function spec(deploymentMode = "update") {
   return {
     deployment_mode: deploymentMode,
+    environment: "staging",
     git_sha: gitSha,
     release_id: "staging-20260722-a1b2c3d4",
     runtime: { r2_account_id: "c".repeat(32) },
@@ -198,6 +199,39 @@ test("update Cron pause deploys an empty set and records only its digest", async
   assert.equal(result.schedule_set_digest, scheduleSetDigest([]));
   assert.equal(JSON.stringify(result).includes(canonicalCrons[0]), false);
   await assert.rejects(readFile(path.join(outDir, "wrangler/automation-paused.json")), /ENOENT/);
+});
+
+/** Cron provider calls use the rendered production identity, never the legacy staging service. */
+test("production Cron pause addresses its reviewed Worker name", async (context) => {
+  const outDir = await releaseDirectory(context);
+  await writeFile(
+    path.join(outDir, "wrangler/automation.json"),
+    JSON.stringify({
+      name: "fork-automation-production",
+      triggers: { crons: canonicalCrons },
+    }),
+  );
+  const production = {
+    ...spec(),
+    environment: "production",
+    release_id: `production-${gitSha.slice(0, 12)}`,
+  };
+  const evidence = await transitionAutomationCron({
+    approvals: [],
+    environment: { CLOUDFLARE_API_TOKEN: "token-with-at-least-20-characters" },
+    fetchImpl: async (url) => {
+      assert.ok(url.pathname.endsWith("/workers/scripts/fork-automation-production/schedules"));
+      return response([]);
+    },
+    outDir,
+    phase: "cron-pause",
+    planDigest,
+    pollAttempts: 1,
+    pollIntervalMs: 0,
+    runCommand: async () => ({ code: 0, stderr: "", stdout: "" }),
+    spec: production,
+  });
+  assert.equal(evidence.release_id, production.release_id);
 });
 
 // Activation evidence must reflect the canonical remote schedule, not subprocess argument spelling.

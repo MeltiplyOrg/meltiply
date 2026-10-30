@@ -506,7 +506,7 @@ function oauthStateStub(env: ApiWorkerEnv, routingKey: string): OAuthStateStub {
 /**
  * Constructs the canonical public OAuth callback URL for a given social platform provider.
  *
- * Enforces HTTPS scheme unless running in local development mode against localhost.
+ * Enforces HTTPS except for local/test callbacks against localhost.
  *
  * @param env - Worker environment bindings containing `APP_URL`.
  * @param provider - Social platform identifier (e.g. `'tiktok'`, `'youtube'`).
@@ -520,7 +520,10 @@ function oauthCallbackUrl(env: ApiWorkerEnv, provider: Platform): string {
   const target = new URL(oauthCallbackPath(provider), env.APP_URL);
   if (
     target.protocol !== "https:" &&
-    !(env.ENVIRONMENT !== "staging" && target.hostname === "localhost")
+    !(
+      (env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test") &&
+      target.hostname === "localhost"
+    )
   ) {
     throw new CoreApiError(503, "service_unavailable", "The public API URL is not secure.");
   }
@@ -1484,7 +1487,7 @@ export function registerCoreRoutes(
         const routingKey = yield* fromPromise(() => oauthStateRoutingKey(organizationId));
         const state = `${routingKey}.${randomBase64Url(32)}`;
         const verifier = randomBase64Url(32);
-        const redirectUri = oauthCallbackUrl(c.env, selected);
+        const redirectUri = yield* fromPromise(() => oauthCallbackUrl(c.env, selected));
         yield* fromPromise(() =>
           oauthStateStub(c.env, routingKey).create(state, {
             expires_at: Date.now() + 10 * 60 * 1_000,

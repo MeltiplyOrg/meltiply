@@ -22,6 +22,33 @@ const environment = {
     "postgres://meltiply_system:system-secret@db.example.test/meltiply?sslmode=verify-full",
 };
 
+/** Models both protected PostgreSQL sessions; overrides only the selected catalog view. */
+function roleClientFactory({ connection, missing, bypass, identity, superuser = false } = {}) {
+  return async (url) => {
+    const role = new URL(url).username;
+    const affected = !connection || connection === role;
+    return {
+      connect: async () => {},
+      end: async () => {},
+      query: async () => ({
+        rows: [
+          { rolname: "meltiply_system", rolbypassrls: true, rolsuper: false },
+          { rolname: "meltiply_rls", rolbypassrls: false, rolsuper: false },
+        ]
+          .filter((row) => !affected || row.rolname !== missing)
+          .map((row) => ({
+            ...row,
+            ...(affected && row.rolname === "meltiply_rls"
+              ? { rolbypassrls: bypass ?? false, rolsuper: superuser }
+              : {}),
+            current_user: affected ? (identity ?? role) : role,
+            session_user: affected ? (identity ?? role) : role,
+          })),
+      }),
+    };
+  };
+}
+
 function apiResponse(result, options = {}) {
   return new Response(
     JSON.stringify({
@@ -81,10 +108,13 @@ test("bootstrap creates missing configurations without exposing credentials", as
     apiResponse({ id: ids.system }),
   ]);
 
-  assert.deepEqual(await bootstrapHyperdrive({ environment, fetchImpl }), {
-    authenticated_hyperdrive_config_id: ids.authenticated,
-    system_hyperdrive_config_id: ids.system,
-  });
+  assert.deepEqual(
+    await bootstrapHyperdrive({ clientFactory: roleClientFactory(), environment, fetchImpl }),
+    {
+      authenticated_hyperdrive_config_id: ids.authenticated,
+      system_hyperdrive_config_id: ids.system,
+    },
+  );
   assert.deepEqual(
     calls.map(({ init }) => init.method),
     ["GET", "POST", "GET", "POST"],
@@ -124,10 +154,13 @@ test("bootstrap discovers named configurations and rotates them with PUT", async
     apiResponse({ id: ids.system }),
   ]);
 
-  assert.deepEqual(await bootstrapHyperdrive({ environment, fetchImpl }), {
-    authenticated_hyperdrive_config_id: ids.authenticated,
-    system_hyperdrive_config_id: ids.system,
-  });
+  assert.deepEqual(
+    await bootstrapHyperdrive({ clientFactory: roleClientFactory(), environment, fetchImpl }),
+    {
+      authenticated_hyperdrive_config_id: ids.authenticated,
+      system_hyperdrive_config_id: ids.system,
+    },
+  );
   assert.deepEqual(
     calls.map(({ init }) => init.method),
     ["GET", "PUT", "GET", "PUT"],
@@ -145,7 +178,7 @@ test("bootstrap follows bounded lookup pagination before updating", async () => 
     apiResponse({ id: ids.system }),
   ]);
 
-  await bootstrapHyperdrive({ environment, fetchImpl });
+  await bootstrapHyperdrive({ clientFactory: roleClientFactory(), environment, fetchImpl });
   assert.match(calls[0].url, /page=1/);
   assert.match(calls[1].url, /page=2/);
   assert.equal(calls[2].init.method, "PUT");
@@ -159,10 +192,13 @@ test("bootstrap accepts an empty zero-page lookup result", async () => {
     apiResponse({ id: ids.system }),
   ]);
 
-  assert.deepEqual(await bootstrapHyperdrive({ environment, fetchImpl }), {
-    authenticated_hyperdrive_config_id: ids.authenticated,
-    system_hyperdrive_config_id: ids.system,
-  });
+  assert.deepEqual(
+    await bootstrapHyperdrive({ clientFactory: roleClientFactory(), environment, fetchImpl }),
+    {
+      authenticated_hyperdrive_config_id: ids.authenticated,
+      system_hyperdrive_config_id: ids.system,
+    },
+  );
 });
 
 test("partial failure retains only the completed non-secret ID", async () => {
@@ -176,15 +212,18 @@ test("partial failure retains only the completed non-secret ID", async () => {
     }),
   ]);
 
-  await assert.rejects(bootstrapHyperdrive({ environment, fetchImpl }), (error) => {
-    assert.ok(error instanceof HyperdriveBootstrapError);
-    assert.deepEqual(error.partialResult, {
-      authenticated_hyperdrive_config_id: ids.authenticated,
-    });
-    assert.doesNotMatch(error.message, /system-secret/);
-    assert.match(error.message, /codes: 1001/);
-    return true;
-  });
+  await assert.rejects(
+    bootstrapHyperdrive({ clientFactory: roleClientFactory(), environment, fetchImpl }),
+    (error) => {
+      assert.ok(error instanceof HyperdriveBootstrapError);
+      assert.deepEqual(error.partialResult, {
+        authenticated_hyperdrive_config_id: ids.authenticated,
+      });
+      assert.doesNotMatch(error.message, /system-secret/);
+      assert.match(error.message, /codes: 1001/);
+      return true;
+    },
+  );
 });
 
 test("bootstrap rejects ambiguous names, IDs, and database roles before writes", async () => {
@@ -196,6 +235,7 @@ test("bootstrap rejects ambiguous names, IDs, and database roles before writes",
   ]);
   await assert.rejects(
     bootstrapHyperdrive({
+      clientFactory: roleClientFactory(),
       environment,
       fetchImpl: duplicateLookup.fetchImpl,
     }),
@@ -228,4 +268,28 @@ test("bootstrap rejects ambiguous names, IDs, and database roles before writes",
     }),
     /IDs must differ/,
   );
+});
+
+test("bootstrap rejects unsafe roles through either protected login before any provider mutation", async () => {
+  for (const fixture of [
+    { missing: "meltiply_rls" },
+    { connection: "meltiply_rls", missing: "meltiply_system" },
+    { connection: "meltiply_rls", bypass: true },
+    { connection: "meltiply_rls", superuser: true },
+    { connection: "meltiply_rls", identity: "neondb_owner" },
+  ]) {
+    let providerCalls = 0;
+    await assert.rejects(
+      bootstrapHyperdrive({
+        clientFactory: roleClientFactory(fixture),
+        environment,
+        fetchImpl: async () => {
+          providerCalls += 1;
+          throw new Error("must not provision");
+        },
+      }),
+      /meltiply_(?:rls|system)/,
+    );
+    assert.equal(providerCalls, 0);
+  }
 });

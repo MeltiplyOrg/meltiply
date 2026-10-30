@@ -95,8 +95,17 @@ function iacOutput(resourceOverrides = {}) {
     assets_bucket_name: bucketName,
     authenticated_hyperdrive_id: "1".repeat(32),
     dead_letter_queue_ids: {},
-    dead_letter_queue_names: {},
+    dead_letter_queue_names: Object.fromEntries(
+      Object.entries(queues).map(([workload, name]) => [workload, `${name}-dlq`]),
+    ),
     environment: "staging",
+    frontend_worker_name: "meltiply-frontend-staging",
+    worker_names: {
+      api: "meltiply-api",
+      automation: "meltiply-automation",
+      state: "meltiply-state",
+      frontend: "meltiply-frontend-staging",
+    },
     operator_access_aud: null,
     operator_hostname: null,
     queue_consumers_attached: true,
@@ -536,6 +545,18 @@ describe("R2 acceptance arguments", () => {
     assert.equal(options.bucketName, bucketName);
     assert.equal(options.multipartBytes, 25 * 1024 * 1024 + 1);
     assert.equal(options.releaseId, `staging-${gitSha.slice(0, 12)}`);
+  });
+
+  it("cannot use staging acceptance credentials against a production release", () => {
+    const inputs = releaseInputs();
+    assert.throws(
+      () =>
+        prepareR2AcceptanceOptions(parsedArguments(), {
+          ...inputs,
+          spec: { ...inputs.spec, environment: "production" },
+        }),
+      /requires a staging release input/,
+    );
   });
 
   it("requires exact confirmation and bounded multipart inputs", () => {

@@ -75,12 +75,16 @@ period's publishing budget.
 
 ## Deployment targets
 
-Keep the [managed Cloudflare deployment](infra/cloudflare/README.md), or run the
-production-built application and Workers on your own host with
-[one Docker Compose file](docs/self-hosting.md). The self-hosted stack includes
-PostgreSQL, persistent workerd bindings, durable queues, SMTP delivery, native
-media processing, and optional TLS. Its GitHub Actions workflow builds and verifies
-three GHCR release images; it does not require remote Cloudflare Workers.
+Deploy a complete [managed Cloudflare staging or production installation](infra/cloudflare/README.md#release-and-rollback)
+with the shared operator-run release flow, or run the production-built application
+and Workers on your own host with [one Docker Compose file](docs/self-hosting.md).
+The managed flow deploys State, Automation, API, and frontend with environment-bound
+evidence; it requires your own Cloudflare/Neon accounts and Email Sending domain.
+The self-hosted stack includes PostgreSQL, persistent workerd bindings, durable
+queues, SMTP delivery, native media processing, and optional TLS. Its GitHub Actions
+workflow builds and verifies three GHCR release images; it does not require remote
+Cloudflare Workers. Both targets can be installed before Provider app review;
+connections and publishing remain unavailable while their acceptance flags are false.
 
 [`compose.dev.yml`](compose.dev.yml) provides only the development database and
 optional observability services used by `make dev`; it is not the self-hosted

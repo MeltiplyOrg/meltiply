@@ -1,8 +1,12 @@
 # Cloudflare infrastructure
 
-This OpenTofu root manages staging account/zone resources only. Preview plans are
-rejected: a preview stack needs isolated identifiers and state, not reused staging
-resources. Worker code and version deployment remain Wrangler-owned.
+This OpenTofu root manages either `staging` or `production` account/zone resources.
+They are separate installations, with separate protected inputs and state, except
+that one installation's state owns security entrypoints shared by their DNS zone. No
+other environment or preview stack is supported. Worker code and version
+deployment remain Wrangler-owned; use the release CLI rather than deploying
+checked-in placeholder configs directly. This runbook describes operator actions,
+not evidence that a live Cloudflare or Neon deployment has been performed.
 
 ## Ownership
 
@@ -12,7 +16,7 @@ resources. Worker code and version deployment remain Wrangler-owned.
 | Wrangler            | Worker source/versions, compatibility/CPU settings, bindings, handler declarations, and Durable Object migrations                                |
 | Protected bootstrap | Two distinct Hyperdrive configurations, validated by OpenTofu with query caching disabled                                                        |
 
-Staging Queue consumers are OpenTofu-owned; the Automation Wrangler config
+Managed Queue consumers are OpenTofu-owned; the Automation Wrangler config
 intentionally omits them. Local Wrangler declares consumers because workerd has
 no Cloudflare control plane. See [main.tf](main.tf), [variables.tf](variables.tf),
 and [outputs.tf](outputs.tf) for the resource graph and release controls.
@@ -34,18 +38,21 @@ validation, mocked plans, policy, and cost inputs. Tool/provider versions belong
 in the [installer](../../scripts/infra/install-opentofu.sh) and
 [lockfile](.terraform.lock.hcl), not a second version inventory here.
 
-For an authenticated staging plan:
+For an authenticated plan, select the installation explicitly:
 
 ```bash
 .bin/tofu -chdir=infra/cloudflare init \
   -reconfigure \
-  -backend-config=/protected/backend.hcl
-MELTIPLY_IAC_TFVARS=/protected/staging.tfvars bun run iac:check
+  -backend-config=/protected/meltiply/production/backend.hcl
+MELTIPLY_IAC_TFVARS=/protected/meltiply/production/foundation.tfvars bun run iac:check
 ```
 
-Use [backend.hcl.example](backend.hcl.example) and
-[staging.tfvars.example](staging.tfvars.example) as templates. Supply backend
-credentials through `TF_HTTP_USERNAME`/`TF_HTTP_PASSWORD`. The state service must
+Use [backend.hcl.example](backend.hcl.example) and either
+[staging.tfvars.example](staging.tfvars.example) or
+[production.tfvars.example](production.tfvars.example) as templates. For staging,
+use `/protected/meltiply/staging/` instead, with its own state addresses, not a
+second filename pointing at production state.
+Supply credentials through `TF_HTTP_USERNAME`/`TF_HTTP_PASSWORD`. The state service must
 provide TLS, encryption at rest, access control, backups, and locking. Keep
 populated backend files, state, plans, and plan JSON out of version control.
 Apply only an approved plan with real resource IDs, a protected backend,
@@ -58,6 +65,12 @@ keys stay outside HCL and state. `bun run hyperdrive:bootstrap` creates or rotat
 the two configurations through the API; only their non-secret IDs enter OpenTofu
 and Worker bindings. Ambiguous names fail closed; a partial failure returns the
 completed ID for recovery. See [the bootstrap implementation](../../scripts/infra/hyperdrive-bootstrap.mjs).
+
+Before bootstrap or online preflight, provision the database roles described in
+[database provisioning](#database-provisioning). Bootstrap, online preflight, and
+migrations verify both role definitions through both protected login connections.
+Offline preflight reports `database_roles.status=skipped` with reason `offline`;
+it proves neither database readiness nor account/product access.
 
 Use separate account-scoped identities for Hyperdrive bootstrap, infrastructure
 planning/apply, Worker deployment, and protected secret injection. Grant only
@@ -107,106 +120,579 @@ PUT for direct browser uploads, restricted to the configured application origins
 
 ## Release and rollback
 
-Release transitions are explicit: create the paused foundation, deploy State and
-triggerless Automation, attach consumers while paused, deploy API, then attach
-its domain. Verify version/live smoke before a fresh approved plan enables Queue
-delivery and the exact canonical Cron schedule. Updates pause Queues and remove
-and verify empty Automation schedules before rollout.
+The canonical flow below applies to both supported managed environments. A
+first deployment uses `deployment_mode: "bootstrap"`; an existing installation
+uses `update` and the [update differences](#updating-an-existing-installation).
+Queue delivery stays paused through domain attachment and live smoke. Cron
+activation is separately verified after the approved Queue resume. Worker rollback
+changes routing/code, not PostgreSQL, R2, Queue, Workflow, or Durable Object state.
+Pause producers and consumers and use forward storage fixes.
 
-Use the [release scripts](../../scripts/release/) for orchestration and evidence.
-`release:smoke` checks candidate/live identity and rollout traffic;
-`release:manifest` validates the evidence set and writes a redacted manifest.
-Record plan digests, resource outputs, Worker versions, migration checksums,
-schedule-set evidence, and OpenAPI provenance.
+### Account and workstation prerequisites
 
-### Operator-run deployment
+Arrange these before planning; scripts cannot provision account eligibility or
+complete third-party review:
 
-No CI service or CI account is required to deploy. Use a trusted workstation
-with the pinned Node/Bun/OpenTofu tools, Cloudflare deployment credentials, and
-protected backend/tfvars files. Populate
-[`release-input.example.json`](../../scripts/release/release-input.example.json)
-for your own account, domains, database, and exact checked-out commit. Keep the
-checkout clean and use a new ignored release directory for each release.
+- A Cloudflare account on **Workers Paid**, with Queues, R2, Hyperdrive, Workflows,
+  Durable Objects, and Containers available. The Automation deployment builds its
+  media processor container; have a working Docker engine and registry/deployment
+  permissions as well as the repository's pinned Node/Bun/OpenTofu tools.
+- A Cloudflare-managed DNS zone for the HTTPS application hostname and, if
+  enabled, a distinct operator hostname and configured Cloudflare Access team.
+  Reserve names before attaching custom domains; do not point the app hostname
+  directly at the API Worker.
+- A fresh Neon PostgreSQL branch/database per installation, its direct TLS compute
+  endpoint, an administrator able to provision the required role attributes,
+  and a Neon API key permitted to create/read branch snapshots. Confirm snapshot
+  retention and budget support the required 7–30-day restore-point lifetime.
+- An R2 S3 API access key pair scoped to the selected environment's asset bucket
+  (or the [explicit S3 alternative](#object-storage-selection)). Arrange credentials
+  for the bucket planned by IaC and finish bucket scoping after foundation apply.
+  These are not the Cloudflare control-plane API token.
+- **Cloudflare Email Sending** onboarding, an authorized sending domain with its
+  required DNS records verified, and a sender matching `runtime.mail_from_address`.
+  The rendered API `MAIL` binding restricts `allowed_sender_addresses` to that
+  address. See [Email Sending setup](https://developers.cloudflare.com/email-service/)
+  for current account eligibility and domain onboarding. There is no SMTP/API-key
+  fallback for managed Workers. Email verification is mandatory for staging and
+  production; verify actual inbox delivery before inviting members.
+- For each enabled Platform: your own Provider app, client credentials, HTTPS
+  OAuth callback and any webhook/media URL registration, necessary account roles,
+  scopes, consent, app review and production access. See the
+  [Provider connection research](../../docs/research/provider-channel-connections.md).
+  Facebook/Instagram/Threads, TikTok, and YouTube permissions and reviews remain
+  external obligations; a successful deployment never grants them.
 
-Use one `app_url` in the release input and the matching `app_url` in protected
-tfvars. The release renders `APP_URL` for API and automation Workers; IaC derives
-the public hostname and R2 CORS origin from that URL. Extra `allowed_origins` are
-optional, not a second required copy of the app origin. The app custom domain
-belongs to `meltiply-frontend-staging`, whose `API` Service Binding forwards
-`/api/*` to `meltiply-api`; the operator hostname remains on the API Worker.
-Deploy both Workers before the domain-attachment phase. Do not attach the app
-hostname to the API Worker directly: that would remove dashboard asset routing.
+All `provider_acceptance` flags may remain `false` for installation verification
+before app review. The capability/readiness responses then report Platform
+connections and publishing unavailable; the Channels surface follows that
+readiness. This is a working installation with disabled external capabilities,
+not live Provider acceptance. Set a flag true only after separately recording
+the relevant real-account acceptance and providing its required non-secret client
+ID in `runtime` and client secret in both Worker secret bundles. Engagement flags
+are separate from publishing acceptance. Do not set flags merely to make a
+capability appear available.
 
-Plans and review receipts are local operator records, not authenticated approvals
-or signatures. Filesystem permissions and deployment credentials are the trust
-boundary. Never download or apply plans produced by untrusted contributor code.
+Use separate least-privilege identities for infrastructure, Hyperdrive bootstrap,
+Worker deployment, secret injection, and monitoring. Load credentials from your
+protected environment; do not paste them into shell history or evidence. Required
+operator variables are:
 
-For the initial paused foundation:
+| Variable                                                              | Purpose                                                                                                     |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`                       | Selected account and step-specific control-plane permissions; account ID must match `runtime.r2_account_id` |
+| `TF_HTTP_USERNAME`, `TF_HTTP_PASSWORD`                                | Selected installation's protected locking state service                                                     |
+| `MELTIPLY_SYSTEM_DATABASE_URL`                                        | TLS Neon URL logging in directly as `meltiply_system`                                                       |
+| `MELTIPLY_AUTHENTICATED_DATABASE_URL`                                 | Same endpoint/database, logging in directly as `meltiply_rls`                                               |
+| `NEON_API_KEY`, `MELTIPLY_NEON_PROJECT_ID`, `MELTIPLY_NEON_BRANCH_ID` | Snapshot creation; IDs must match the release input                                                         |
 
-```bash
-export MELTIPLY_RELEASE_INPUT=/protected/release.json
-export MELTIPLY_RELEASE_SHA="$(git rev-parse HEAD)"
-export MELTIPLY_RELEASE_DIR="$PWD/.release/initial-deployment"
-export MELTIPLY_TF_BACKEND_CONFIG=/protected/backend.hcl
+Online preflight validates credentials' presence/account selection and queries
+the database roles; it is not a blanket API permission or Email Sending delivery
+test. Restore points, deployments, and smoke provide their own later evidence.
 
-bun run release:preflight:offline
-./scripts/infra/staging-transition.sh plan foundation /protected/foundation.tfvars
-.bin/tofu -chdir=infra/cloudflare show "$MELTIPLY_RELEASE_DIR/foundation.tfplan"
-# Review the actual plan and policy summary before confirming their exact bytes.
-digest="$(cat "$MELTIPLY_RELEASE_DIR/foundation-plan.sha256")"
-bun run release:approve foundation "$MELTIPLY_RELEASE_INPUT" \
-  "$MELTIPLY_RELEASE_DIR/foundation.tfplan" "$USER" \
-  "approve $MELTIPLY_RELEASE_SHA $digest"
-MELTIPLY_RELEASE_CONFIRM="apply foundation $MELTIPLY_RELEASE_SHA $digest" \
-  ./scripts/infra/staging-transition.sh apply foundation
-export MELTIPLY_RELEASE_IAC_OUTPUTS="$MELTIPLY_RELEASE_DIR/iac-outputs.json"
-bun run release:render
+### Database provisioning
+
+Provision roles **before any migration**, on the selected empty database:
+
+1. In the [Neon Console](https://console.neon.tech), select the exact project and
+   branch, then **Postgres database → Roles → Add role**. Create a new
+   `meltiply_system` and save its generated password privately. Neon control-plane
+   role creation sets `BYPASSRLS` on the role itself; it is not just inherited
+   membership. Do not first create this role through SQL and expect a later
+   password reset to promote its attributes.
+2. Connect as the branch's administrator to the selected database with the SQL
+   Editor or a protected `psql` session. Create the **restricted** role through SQL
+   and grant the migration login database/schema creation rights:
+
+```sql
+CREATE ROLE meltiply_rls LOGIN PASSWORD '<unique-authenticated-password>'
+  NOSUPERUSER NOBYPASSRLS;
+GRANT CONNECT ON DATABASE "<selected-database>" TO meltiply_system, meltiply_rls;
+GRANT CREATE ON DATABASE "<selected-database>" TO meltiply_system;
+GRANT USAGE, CREATE ON SCHEMA public TO meltiply_system;
 ```
 
-The apply checks the checkout, saved-plan digest, and explicit phase/commit/digest
-confirmation before invoking OpenTofu, then removes the sensitive raw plan and
-plan JSON. Create the review receipt **before** applying. Never reuse a release
-directory for a different commit or release ID.
+`CREATE` on the database allows the migration-owned `auth` schema to be created;
+the migration runner connects as `meltiply_system` and owns the objects it creates.
+Existing migrations install the tenant grants/policies for `meltiply_rls`; do not
+grant it administrative membership or bypass rights. Substitute the database
+identifier and unique password privately, never in the repository or a recorded
+terminal. Inspect the resulting role attributes:
 
-Continue in this order, following each command's `--help` for phase/step arguments:
+```sql
+SELECT rolname, rolcanlogin, rolbypassrls, rolsuper
+FROM pg_catalog.pg_roles
+WHERE rolname IN ('meltiply_system', 'meltiply_rls');
+```
 
-| Order | Transition                                                                                                                                 |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1     | `release:restore-point`, then `release:migrate --phase bootstrap` for a new deployment or `--phase expand` for a compatible update.        |
-| 2     | Deploy State, inject protected secrets, then deploy Automation without triggers.                                                           |
-| 3     | Plan/review/apply `paused-consumers`; refresh rendered configs from its outputs.                                                           |
-| 4     | Deploy API and inject its secrets; verify candidate identity with `release:smoke`.                                                         |
-| 5     | Plan/review `domain`, create its `release:approve traffic` receipt before applying, then verify live identity.                             |
-| 6     | For updates, use the traffic receipt with `release:deploy --phase api-rollout` at 5%, 25%, 50%, and 100%, smoking each stage.              |
-| 7     | Plan/review `unpause`, create `release:approve queue-resume`, apply it, then enable the exact canonical Cron schedule with `release:cron`. |
-| 8     | Finish live smoke and `release:manifest`; do not run destructive schema contraction during rollout.                                        |
+Require `meltiply_system` to have `rolcanlogin=true`, `rolbypassrls=true`, and
+`meltiply_rls` to have `rolcanlogin=true`, `rolbypassrls=false`, `rolsuper=false`.
+Never create `meltiply_rls` through the Console/API/CLI: those interfaces give
+administrator privileges. If a role already exists with incorrect attributes,
+stop and correct its provisioning before continuing. In particular, do not
+assume an ordinary Neon SQL administrator can issue `CREATE ROLE ... BYPASSRLS`
+or `ALTER ROLE ... BYPASSRLS`.
 
-Every release CLI command that applies or deploys a change requires `--apply`,
-the exact `--confirm "release staging <git-sha>"`, `--plan-digest`, and the
-appropriate `--approval-metadata "$MELTIPLY_RELEASE_DIR/approval-<scope>.json"`.
-These requirements do not apply to the foundation apply performed by
-`staging-transition.sh`. The scopes are `foundation`, `traffic`, and
-`queue-resume`; each receipt binds one reviewed plan to the same release session.
-Never bypass missing restore-point, migration, identity, traffic, Queue, or Cron
-evidence.
+For clarity, these are the equivalent SQL role declarations **for an administrator
+with permission to set these attributes**, not commands to run instead of the
+Neon control-plane step above:
 
-An update first plans/reviews/applies `pause`, verifies Queue delivery is paused,
-and removes/verifies Automation schedules before changing Worker versions.
-Retain the previous versions and restore-point evidence until acceptance is complete.
+```sql
+CREATE ROLE meltiply_system LOGIN PASSWORD '<unique-system-password>'
+  NOSUPERUSER BYPASSRLS;
+CREATE ROLE meltiply_rls LOGIN PASSWORD '<unique-authenticated-password>'
+  NOSUPERUSER NOBYPASSRLS;
+```
 
-The R2 acceptance probe (`staging:r2:check` / `staging:r2:run`) requires a
-dedicated staging user and workspace, configured through
-`MELTIPLY_STAGING_ACCEPTANCE_USER_ID`, `MELTIPLY_STAGING_ACCEPTANCE_ORG_ID`, and
-`MELTIPLY_STAGING_BEARER_TOKEN`. It verifies those identities before mutation;
-no subscription or payment configuration is needed. Keep sufficient upload and
-storage headroom for the probe. The API enforces community quotas, and admission
-failures produce failed evidence and run resource cleanup. The probe verifies
-object lifecycle cleanup, not a billing usage endpoint.
+The managed distinction is documented in
+[Neon's role interfaces](https://neon.com/docs/manage/roles) and
+[RLS connection guide](https://neon.com/docs/guides/rls-query-execution);
+its [role creation implementation](https://github.com/neondatabase/neon/blob/main/compute_tools/src/spec_apply.rs)
+explicitly sets `BYPASSRLS` for new ordinary control-plane roles. The release
+requires that actual attribute, not a renamed owner or an assumed `SET ROLE`
+session. Both protected URLs must use their named role as `current_user` and
+`session_user`, target the same database/endpoint, and include `sslmode=require`,
+`verify-ca`, or `verify-full`. Run online preflight below to verify both logins;
+these provisioning instructions are not a claim of live Neon verification.
+
+Bootstrap, online preflight, and migration share the same role assertion. Missing
+or wrong roles stop migrations **before** advisory locking, transactions, or
+ledger writes. After migration, the runner requires the `auth` schema,
+`auth.jwt()` claims accessor, and enabled tenant RLS policies for `meltiply_rls`.
+
+If an earlier run already recorded the baseline while RLS setup was skipped,
+creating roles and rerunning cannot repair that ledger. **Recreate the affected
+Neon branch from a clean, unmigrated source**, then provision roles and start a new
+release session. Preserve any required data first; do not delete a non-disposable
+installation's branch without an approved recovery/data-migration procedure.
+Do not edit existing migration files or remove ledger rows to force replay.
+
+### Select and protect one installation
+
+No CI account is required for deployment. On a trusted workstation, use a clean
+checkout of the exact commit and a new ignored `.release` directory. Populate a
+protected copy of
+[`release-input.example.json`](../../scripts/release/release-input.example.json)
+and the environment's tfvars template. In a Bash session from the repository root:
+
+```bash
+umask 077
+export MELTIPLY_ENVIRONMENT=production # Use staging for the staging installation.
+protected="/protected/meltiply/$MELTIPLY_ENVIRONMENT"
+export MELTIPLY_RELEASE_SHA="$(git rev-parse HEAD)"
+export MELTIPLY_RELEASE_INPUT="$protected/release.json"
+export MELTIPLY_TF_BACKEND_CONFIG="$protected/backend.hcl"
+export MELTIPLY_RELEASE_DIR="$PWD/.release/$MELTIPLY_ENVIRONMENT-${MELTIPLY_RELEASE_SHA:0:12}"
+export MELTIPLY_RELEASE_IAC_OUTPUTS="$MELTIPLY_RELEASE_DIR/iac-outputs.json"
+```
+
+`protected` and the arrays below are local Bash conveniences, not additional CLI
+settings. Set the input's `environment` to the selection, `deployment_mode` to
+`bootstrap`, `git_sha` to the full SHA, and `release_id` to
+`<environment>-<first-12-SHA-characters>`. Set your actual Neon IDs, a future
+7–30-day `restore_point_expires_at`, sender, account ID, and HTTPS `app_url`.
+`api_workers_dev_url` is the selected API Worker's account workers.dev origin
+(including `-production` for the production API), used for version-preview smoke;
+the stable workers.dev route remains disabled.
+
+Use one matching `app_url` in release input and every phase's tfvars. IaC derives
+the app hostname and R2 CORS origin; optional `allowed_origins` are additive.
+Keep **each environment's own** backend configuration, release JSON, phase tfvars,
+database/Hyperdrive IDs, credentials, and release directories. In particular,
+all three backend `address`, `lock_address`, and `unlock_address` values must
+address that installation's state, with TLS, locking, backups, access controls,
+and encryption at rest. Merely renaming a backend file does not isolate state.
+Never initialize production against staging state or use state migration to switch
+environments. The wrapper reconfigures the explicit backend every time and binds
+its bytes/path and the protected input to the session before contacting OpenTofu.
+
+Create complete protected tfvars files with identical installation settings and
+only these reviewed activation differences:
+
+| File under `$protected`       | `attach_queue_consumers` | `attach_app_custom_domains` | `queue_delivery_paused` |
+| ----------------------------- | ------------------------ | --------------------------- | ----------------------- |
+| `foundation.tfvars`           | `false`                  | `false`                     | `true`                  |
+| `paused-consumers.tfvars`     | `true`                   | `false`                     | `true`                  |
+| `domain.tfvars`               | `true`                   | `true`                      | `true`                  |
+| `unpause.tfvars`              | `true`                   | `true`                      | `false`                 |
+| `pause.tfvars` (updates only) | `true`                   | `true`                      | `true`                  |
+
+Review the names that `release_resources` will output:
+
+| Service/resource     | Existing staging name                                             | Production name                                                         |
+| -------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| API                  | `meltiply-api`                                                    | `meltiply-api-production`                                               |
+| Automation           | `meltiply-automation`                                             | `meltiply-automation-production`                                        |
+| State                | `meltiply-state`                                                  | `meltiply-state-production`                                             |
+| Frontend             | `meltiply-frontend-staging`                                       | `meltiply-frontend-production`                                          |
+| Asset bucket         | `meltiply-assets-staging`                                         | `meltiply-assets-production`                                            |
+| Workload Queue / DLQ | `meltiply-<workload>-staging` / `meltiply-<workload>-staging-dlq` | `meltiply-<workload>-production` / `meltiply-<workload>-production-dlq` |
+
+Staging's existing unsuffixed backend services remain unchanged; do not rename
+them during an update. Production's services, container and Durable Object
+namespaces are isolated from staging. The frontend name is reviewed via
+`frontend_worker_name`; its `API` service binding targets `worker_names.api`
+from the same outputs. The app hostname serves frontend assets and forwards
+`/api/*` to that API; an enabled operator hostname attaches to the API.
+
+### Choose and verify the zone-security owner
+
+Cloudflare permits [at most one entrypoint ruleset per phase per zone](https://developers.cloudflare.com/ruleset-engine/about/rulesets/#entry-point-ruleset).
+Environment suffixes do not isolate these resources. Exactly **one protected
+backend per zone** must own `http_ratelimit` and, when enabled,
+`http_request_firewall_managed`. Do not import the same entrypoint into two states,
+create a second entrypoint, or disable an existing owner to make production apply.
+
+`manage_zone_security` defaults to staging ownership and production non-ownership.
+`protected_app_hostnames` maps supported environments to their app hostnames.
+An owner with no explicit map protects its own hostname; a non-owner must supply
+an explicit map containing its exact app hostname or planning fails. This map is
+a declaration, **not proof that another state has applied protection**. Verify
+the owner as described below before the non-owner's foundation or domain phase.
+The owner applies the API-path rate limit and any configured approved managed WAF
+to every hostname in the map, while each installation still owns only its own
+custom domains. Managed WAF remains optional and plan-dependent, not a substitute
+for the mandatory rate limit.
+
+- **First staging, empty zone:** keep `manage_zone_security = true`; use the
+  staging-only map from the example. Confirm neither phase already has an owner.
+- **Existing staging plus production in the same zone:** retain the staging
+  backend as owner. Set this map in **every** protected phase file for both
+  installations, substituting their actual same-zone hostnames:
+
+  ```hcl
+  protected_app_hostnames = {
+    staging    = "staging.example.com"
+    production = "app.example.com"
+  }
+  ```
+
+  Keep `manage_zone_security = true` in staging and `false` in production.
+  Preserve the existing owner's approved `managed_waf_ruleset_id` and rate limit.
+  Apply the staging owner's coverage extension **before production foundation**.
+
+- **First production, no staging or other zone owner:** explicitly set
+  `manage_zone_security = true` and a production-only map. If staging is added
+  later in the same zone, first extend the production owner's map, then configure
+  staging with `manage_zone_security = false` and the identical full map.
+- **Different zones:** select one owner independently in each zone. Inspect
+  existing Cloudflare phase entrypoints and protected state inventories first;
+  unrelated existing zone security must be reconciled into the sole owner rather
+  than overwritten. Ownership transfer between backends is not a release step.
+
+For an already-running owner, extending coverage is a **separate reviewed
+infrastructure maintenance operation**, not a `pause`, `domain`, `unpause`, or
+`paused-consumers` transition. Their narrow plan scopes are unchanged and reject
+security-resource mutations. Preserve all current attachment/delivery flags and
+resource values in the owner's active tfvars; do not replay bootstrap foundation.
+For example, on a trusted checkout with the owner's credentials and protected
+backend (replace `unpause.tfvars` with its actual current active configuration):
+
+```bash
+owner=/protected/meltiply/staging
+.bin/tofu -chdir=infra/cloudflare init -input=false -lockfile=readonly \
+  -reconfigure -backend-config="$owner/backend.hcl"
+.bin/tofu -chdir=infra/cloudflare plan -input=false \
+  -var-file="$owner/unpause.tfvars" -out="$owner/zone-security.tfplan"
+.bin/tofu -chdir=infra/cloudflare show "$owner/zone-security.tfplan"
+.bin/tofu -chdir=infra/cloudflare show -json "$owner/zone-security.tfplan" \
+  > "$owner/zone-security-plan.json"
+node scripts/infra/policy-check.mjs "$owner/zone-security-plan.json"
+# Stop for independent operator review before applying the exact saved plan.
+.bin/tofu -chdir=infra/cloudflare apply -input=false "$owner/zone-security.tfplan"
+.bin/tofu -chdir=infra/cloudflare output -json zone_security \
+  > "$owner/zone-security-applied.json"
+```
+
+The approved plan must extend protection in place with no deletes/replacements
+and no domain, Queue, consumer, storage, or other unrelated changes. The included
+`moved` block relocates the existing staging rate-limit state address from
+`module.edge.cloudflare_ruleset.rate_limit` to
+`module.edge.cloudflare_ruleset.rate_limit[0]` without changing its Cloudflare ID.
+An existing managed WAF remains at
+`module.edge.cloudflare_ruleset.managed_waf[0]`. Do not run `state mv`, migrate
+backends, remove the old resources, or accept a recreate to enact this change.
+
+Retain the reviewed plan and applied owner output as protected release evidence.
+Verify `zone_id`, `manages_rulesets = true`, both exact app hostnames in
+`protected_app_hostnames`, and `entrypoints.http_ratelimit` with an ID and an
+expression covering **both** API hosts. When managed WAF is configured, verify
+`entrypoints.http_request_firewall_managed` likewise covers both hosts. Confirm
+those IDs against the zone's live phase entrypoints in Cloudflare, and inspect
+both backends' state inventories to prove only the designated owner holds them.
+The non-owner's reviewed `zone_security` output must declare the same map and
+zone, `manages_rulesets = false`, and empty `entrypoints`. Its plan must create
+neither ruleset. Stop if coverage, IDs, or single-state ownership cannot be
+verified; **do not attach or release an unprotected production hostname**.
+Use the non-owner's own backend for the subsequent release commands; the
+transition wrapper reconfigures it explicitly.
+
+### Bootstrap Hyperdrive and paused foundation
+
+With the selected account's Hyperdrive bootstrap credentials and both database
+URLs loaded:
+
+```bash
+bun run release:preflight:offline
+bun run release:preflight
+bun run hyperdrive:bootstrap
+```
+
+Save the returned **distinct** authenticated/system Hyperdrive IDs to every
+protected phase tfvars file before planning. Query caching is disabled. On
+rotation/recovery, supply `MELTIPLY_AUTHENTICATED_HYPERDRIVE_ID` and
+`MELTIPLY_SYSTEM_HYPERDRIVE_ID` for the existing selected configurations; ambiguous
+names fail closed and partial failure reports the completed ID. Do not change the
+release input or backend after the first plan binds the session.
+
+Plan, inspect both the raw plan and policy summary, and attest to the exact bytes:
+
+```bash
+./scripts/infra/release-transition.sh plan foundation "$protected/foundation.tfvars"
+.bin/tofu -chdir=infra/cloudflare show "$MELTIPLY_RELEASE_DIR/foundation.tfplan"
+cat "$MELTIPLY_RELEASE_DIR/foundation-plan-summary.json"
+foundation_digest="$(cat "$MELTIPLY_RELEASE_DIR/foundation-plan.sha256")"
+bun run release:approve foundation "$MELTIPLY_RELEASE_INPUT" \
+  "$MELTIPLY_RELEASE_DIR/foundation.tfplan" "$USER" \
+  "approve $MELTIPLY_ENVIRONMENT $MELTIPLY_RELEASE_SHA $foundation_digest"
+MELTIPLY_RELEASE_CONFIRM="apply $MELTIPLY_ENVIRONMENT foundation $MELTIPLY_RELEASE_SHA $foundation_digest" \
+  ./scripts/infra/release-transition.sh apply foundation
+bun run release:render
+
+foundation_flags=(--apply --confirm "release $MELTIPLY_ENVIRONMENT $MELTIPLY_RELEASE_SHA" \
+  --plan-digest "$foundation_digest" \
+  --approval-metadata "$MELTIPLY_RELEASE_DIR/approval-foundation.json")
+```
+
+Use the appropriate step-specific token for each operation. Review receipts are
+local intent records, not authenticated signatures; protected filesystem access
+and deployment credentials are the trust boundary. Create receipts **before**
+apply deletes sensitive raw plan/JSON. The wrapper checks checkout, phase,
+environment, commit, input/backend context and plan digest, then saves phase-specific
+and current `iac-outputs.json`. Never apply untrusted contributor-produced plans,
+reuse a directory for another release, or hand-edit outputs/evidence.
+
+### Restore point, migrations, State and Automation
+
+```bash
+bun run release:restore-point "${foundation_flags[@]}"
+bun run release:migrate --phase bootstrap "${foundation_flags[@]}"
+bun run release:cron --phase cron-pause "${foundation_flags[@]}"
+bun run release:deploy --phase state-bootstrap --step initialize "${foundation_flags[@]}"
+bun run release:deploy --phase automation-bootstrap --step initialize "${foundation_flags[@]}"
+```
+
+The restore point is a real Neon branch snapshot checked against the reviewed
+project/branch and endpoint, not a declaration that backups exist. Preserve its
+evidence and expiry. Migration evidence records checksums and installed RLS.
+Bootstrap `cron-pause` verifies an empty schedule set (a not-yet-created Automation
+Worker is allowed); Automation initializes without triggers. State initializes
+directly at 100% and needs no release secrets.
+
+Prepare `$protected/secrets.json`, or pipe the same JSON from your secret manager.
+The CLI accepts non-interactive stdin only, at most 64 KiB, and requires **both**
+top-level `api` and `automation` objects with exactly the required keys. For
+default R2 storage and all acceptance flags false the shape is:
+
+```json
+{
+  "api": {
+    "AUTH_SETUP_SECRET": "<random-bootstrap-secret-at-least-32-characters>",
+    "BETTER_AUTH_SECRET": "<random-session-secret-at-least-32-characters>",
+    "R2_ACCESS_KEY_ID": "<selected-bucket-access-key>",
+    "R2_SECRET_ACCESS_KEY": "<selected-bucket-secret-key>",
+    "TOKEN_ENCRYPTION_KEY": "<base64-encoded-32-byte-key>"
+  },
+  "automation": {
+    "R2_ACCESS_KEY_ID": "<same-selected-bucket-access-key>",
+    "R2_SECRET_ACCESS_KEY": "<same-selected-bucket-secret-key>",
+    "TOKEN_ENCRYPTION_KEY": "<same-base64-encoded-32-byte-key>"
+  }
+}
+```
+
+Replace every placeholder privately. For S3, replace the two R2 keys in **both**
+objects with `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`. Enabled Provider flags
+require their matching client secret in both objects as defined by the
+[release secret contract](../../scripts/release/release-lib.mjs); extra keys fail.
+No database URL or mail API key belongs in this bundle. Keep the bundle outside
+the release directory and version control. Give only the secret injection
+identity the secret-writing capability, then return to deployment credentials:
+
+```bash
+bun run release:secrets --phase automation "${foundation_flags[@]}" < "$protected/secrets.json"
+bun run release:deploy --phase automation-bootstrap --step activate "${foundation_flags[@]}"
+```
+
+Initialization records a code candidate; secret injection creates a separate
+secret-bearing version. **Activation must follow injection**, not the reverse.
+Automation remains triggerless and Queue delivery paused.
+
+### Attach paused consumers; deploy API and frontend
+
+```bash
+./scripts/infra/release-transition.sh plan paused-consumers "$protected/paused-consumers.tfvars"
+.bin/tofu -chdir=infra/cloudflare show "$MELTIPLY_RELEASE_DIR/paused-consumers.tfplan"
+cat "$MELTIPLY_RELEASE_DIR/paused-consumers-plan-summary.json"
+consumers_digest="$(cat "$MELTIPLY_RELEASE_DIR/paused-consumers-plan.sha256")"
+MELTIPLY_RELEASE_CONFIRM="apply $MELTIPLY_ENVIRONMENT paused-consumers $MELTIPLY_RELEASE_SHA $consumers_digest" \
+  ./scripts/infra/release-transition.sh apply paused-consumers
+bun run release:render
+
+bun run release:deploy --phase api-bootstrap --step initialize "${foundation_flags[@]}"
+bun run release:secrets --phase api "${foundation_flags[@]}" < "$protected/secrets.json"
+bun run release:deploy --phase api-bootstrap --step activate "${foundation_flags[@]}"
+bun run release:deploy --phase frontend-bootstrap --step initialize "${foundation_flags[@]}"
+bun run release:smoke --phase version
+```
+
+`paused-consumers` permits only consumer attachment, still with delivery paused;
+it does not have a separate approval scope. Keep using the foundation receipt
+and digest for Worker/migration/secret operations.
+
+Frontend initialization builds `build:staging` or `build:production` through the
+CLI's reviewed Vite/Wrangler config and deploys the production bundle, not a dev
+server. It records `worker-frontend-candidate.json` and
+`worker-frontend-deployment.json`, including the reviewed name, source/built config
+digests and 100% version traffic. Frontend needs neither secret injection nor a
+separate bootstrap activate step. Repeating the step recovers this release's
+tagged version instead of blindly redeploying.
+
+Preserve private `wrangler/frontend.json` and `wrangler/frontend-built.json`.
+The generated deployment config points at `frontend/app/dist` outside the evidence
+directory; keep that build intact for deployment/recovery. Do not regenerate
+configs with different inputs mid-release. Version smoke checks the API's
+secret-bearing candidate, release SHA and selected environment before domains
+are attached; it is not a frontend browser journey or external Provider test.
+
+### Domain attachment and live smoke
+
+```bash
+./scripts/infra/release-transition.sh plan domain "$protected/domain.tfvars"
+.bin/tofu -chdir=infra/cloudflare show "$MELTIPLY_RELEASE_DIR/domain.tfplan"
+cat "$MELTIPLY_RELEASE_DIR/domain-plan-summary.json"
+domain_digest="$(cat "$MELTIPLY_RELEASE_DIR/domain-plan.sha256")"
+bun run release:approve traffic "$MELTIPLY_RELEASE_INPUT" \
+  "$MELTIPLY_RELEASE_DIR/domain.tfplan" "$USER" \
+  "approve $MELTIPLY_ENVIRONMENT $MELTIPLY_RELEASE_SHA $domain_digest"
+MELTIPLY_RELEASE_CONFIRM="apply $MELTIPLY_ENVIRONMENT domain $MELTIPLY_RELEASE_SHA $domain_digest" \
+  ./scripts/infra/release-transition.sh apply domain
+bun run release:smoke --phase live
+```
+
+Both domain **plan and apply** reject missing/mismatched frontend evidence before
+backend initialization: same SHA/release ID, reviewed Worker and API binding,
+source/built config digests and candidate deployed at 100%. The domain transition
+changes only custom domains; Queue delivery remains paused and Cron remains
+empty. Live smoke verifies the app's `/api/v1/health`, release identity/environment,
+and actual API version traffic. Inspect the app in a browser and verify email
+delivery with your controlled owner account; smoke does not exercise those flows.
+
+### Queue resume, Cron activation, and manifest
+
+Only after live smoke and operator acceptance, review the narrow Queue resume:
+
+```bash
+./scripts/infra/release-transition.sh plan unpause "$protected/unpause.tfvars"
+.bin/tofu -chdir=infra/cloudflare show "$MELTIPLY_RELEASE_DIR/unpause.tfplan"
+cat "$MELTIPLY_RELEASE_DIR/unpause-plan-summary.json"
+unpause_digest="$(cat "$MELTIPLY_RELEASE_DIR/unpause-plan.sha256")"
+bun run release:approve queue-resume "$MELTIPLY_RELEASE_INPUT" \
+  "$MELTIPLY_RELEASE_DIR/unpause.tfplan" "$USER" \
+  "approve $MELTIPLY_ENVIRONMENT $MELTIPLY_RELEASE_SHA $unpause_digest"
+MELTIPLY_RELEASE_CONFIRM="apply $MELTIPLY_ENVIRONMENT unpause $MELTIPLY_RELEASE_SHA $unpause_digest" \
+  ./scripts/infra/release-transition.sh apply unpause
+bun run release:cron --phase cron-activate --apply \
+  --confirm "release $MELTIPLY_ENVIRONMENT $MELTIPLY_RELEASE_SHA" \
+  --plan-digest "$unpause_digest" \
+  --approval-metadata "$MELTIPLY_RELEASE_DIR/approval-queue-resume.json"
+bun run release:manifest \
+  --approval-metadata "$MELTIPLY_RELEASE_DIR/approval-foundation.json" \
+  --approval-metadata "$MELTIPLY_RELEASE_DIR/approval-traffic.json" \
+  --approval-metadata "$MELTIPLY_RELEASE_DIR/approval-queue-resume.json"
+```
+
+The actual gate order is intentional: `unpause` changes only delivery flags on
+all eleven workload Queues; `cron-activate` then requires those active IaC outputs,
+Automation deployment evidence and the **previous successful paused live smoke**.
+It deploys and polls the exact canonical hourly/daily schedule set. Do not
+activate Cron early, bypass its evidence, or describe Queue resume as atomic with
+Cron activation. If Cron fails, the release is incomplete even though Queues may
+already deliver; pause delivery with a newly reviewed `pause` plan while recovering.
+`release:smoke --phase live` requires paused outputs, so do not rerun it against
+the now-active state; retain the successful pre-unpause smoke.
+
+`release-manifest.json` is the terminal redacted sign-off record, not a new deploy.
+It validates matching environment/release identity, all three review receipts and
+digests, phase plan summaries and post-apply outputs, restore/migration evidence,
+all four Workers, API/Automation secret versions, version/live smoke, empty/active
+Cron sets and OpenAPI provenance. Final outputs must equal the unpause snapshot
+and prove the active selected installation. Retain the private session securely;
+publish only the validated redacted manifest/evidence allowlist, never raw plans,
+plan JSON, credentials, secret bundles, source config scratch or build assets.
+Do not borrow evidence from the other environment.
+
+First-run owner setup at `/sign-in` uses the protected `AUTH_SETUP_SECRET`;
+registration closes after the owner exists. Keep that value server-only and
+follow [owner and authentication policies](../../docs/self-hosting.md#authentication-invitations-and-owner-recovery).
+Record deployment-specific backup/restore drills and measured costs separately;
+a snapshot or a complete manifest establishes neither full recovery nor a bill.
+
+### Updating an existing installation
+
+Use a new clean checkout/session, the same installation's backend, and
+`deployment_mode: "update"`. Preserve the existing staging names. The transition
+phase names and semantics stay `pause`, `domain`, and `unpause`; do not replay
+foundation or `paused-consumers` against an attached stack:
+
+1. Plan/review/apply `pause` with `$protected/pause.tfvars` exactly as foundation
+   above, but create the `foundation` approval against `pause.tfplan` and use
+   `pause-plan.sha256` for `foundation_flags`. Render the paused outputs.
+   Run `release:cron --phase cron-pause "${foundation_flags[@]}"` to remove and
+   verify all Automation schedules **before** any Worker upload.
+2. Create `release:restore-point "${foundation_flags[@]}"`; run
+   `release:migrate --phase expand "${foundation_flags[@]}"`. No destructive schema
+   contraction is allowed during rollout.
+3. Use `release:deploy --phase state-update --step upload` then `--step activate`;
+   for `automation-update`, use `--step upload`, inject `release:secrets --phase
+   automation`, then `--step activate`. Pass `foundation_flags` to every mutation.
+4. Use `release:deploy --phase api-update --step upload`, then `release:secrets
+   --phase api`, both with `foundation_flags`; API activation is the staged rollout,
+   not an `api-update --step activate` command. Use `frontend-update --step upload`
+   then `--step activate` with `foundation_flags` (no frontend secrets).
+5. Run version smoke; plan/review `domain` and create its `traffic` receipt as
+   above even when domain attachments are unchanged. Apply the reviewed domain
+   plan. Frontend evidence is mandatory for updates too.
+6. Run each API stage in order, stopping on any failed smoke:
+
+   ```bash
+   for percentage in 5 25 50 100; do
+     bun run release:deploy --phase api-rollout --percentage "$percentage" --apply \
+       --confirm "release $MELTIPLY_ENVIRONMENT $MELTIPLY_RELEASE_SHA" \
+       --plan-digest "$domain_digest" \
+       --approval-metadata "$MELTIPLY_RELEASE_DIR/approval-traffic.json" || break
+     bun run release:smoke --phase live --percentage "$percentage" || break
+   done
+   ```
+
+   Review all four successful outcomes before proceeding; breaking the loop is
+   **not** acceptance. Both Queue delivery and Cron remain paused throughout.
+
+7. Follow the same approved `unpause`, `cron-activate`, and manifest commands.
+   Keep previous versions, snapshot and rollback evidence until acceptance.
+
+### Async acceptance
+
+The R2 acceptance probe (`staging:r2:check` / `staging:r2:run`) remains a dedicated
+**staging-only probe**, not the production release path. It requires a controlled
+user and Workspace through `MELTIPLY_STAGING_ACCEPTANCE_USER_ID`,
+`MELTIPLY_STAGING_ACCEPTANCE_ORG_ID`, and `MELTIPLY_STAGING_BEARER_TOKEN`; it checks
+those identities before mutation. Keep sufficient upload/storage headroom. It
+verifies object lifecycle cleanup, not a billing endpoint or live Provider review.
 
 API smoke is not async acceptance. There is no synthetic canary Queue: approved
 real staging messages and durable outcomes are still required for async acceptance.
-Worker rollback changes routing/code, not PostgreSQL, R2, Queue, Workflow, or
-Durable Object state. Pause producers and consumers; use forward storage fixes.
+An installation with false Provider flags cannot supply live publishing acceptance.
 
 ## Queue operations and costs
 

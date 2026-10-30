@@ -3,12 +3,15 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { isMailSenderAddress, isMailSenderName } from "../../packages/domain/src/mail-content.mjs";
+import { assertDatabaseRoles } from "../lib/database-roles.mjs";
 import { parseJsonc } from "../lib/jsonc.mjs";
+import { releaseEnvironments } from "../lib/release-environments.mjs";
 
 const workerConfigs = {
   api: "workers/api/wrangler.jsonc",
   automation: "workers/automation/wrangler.jsonc",
   state: "workers/state/wrangler.jsonc",
+  frontend: "frontend/app/wrangler.jsonc",
 };
 
 const queueBindings = {
@@ -281,11 +284,10 @@ export function containsCredentialMaterial(serialized) {
 }
 
 /**
- * Validates a non-secret staging release specification document against structural and security invariants.
- * Enforces schema version 1, staging environment, valid deployment mode ('bootstrap' or 'update'),
- * 40-character Git SHA, derived release ID ('staging-<12-char-sha>'), origin-only HTTPS URLs,
- * the shared sender address/name policy with a
- * dotted sender domain required for staging, a staging DNS suffix, Neon scope,
+ * Validates a non-secret release specification against structural and security invariants.
+ * Enforces schema version 1, an allowed deployed environment, deployment mode ('bootstrap' or 'update'),
+ * 40-character Git SHA, derived release ID ('<environment>-<12-char-sha>'), origin-only HTTPS URLs,
+ * the shared sender address/name policy with a dotted sender domain, Neon scope,
  * and ISO 8601 restore point expiry. Rejects secrets, private keys, and connection strings.
  * Object storage defaults to R2; S3 selection requires a bucket and HTTPS origin,
  * with region us-east-1 and path-style addressing by default. Credentials stay
@@ -303,16 +305,16 @@ export function validateReleaseSpec(input) {
   }
   assertExactKeys(spec, exactSpecKeys, "release input");
   if (spec.schema_version !== 1) throw new TypeError("schema_version must be 1");
-  if (spec.environment !== "staging") {
-    throw new TypeError("the release tooling is staging-only");
+  if (!releaseEnvironments.includes(spec.environment)) {
+    throw new TypeError(`environment must be one of ${releaseEnvironments.join(", ")}`);
   }
   if (!new Set(["bootstrap", "update"]).has(spec.deployment_mode)) {
     throw new TypeError("deployment_mode must be bootstrap or update");
   }
   const gitSha = requiredString(spec.git_sha, "git_sha", /^[0-9a-f]{40}$/);
-  const releaseId = requiredString(spec.release_id, "release_id", /^staging-[0-9a-f]{12}$/);
-  if (releaseId !== `staging-${gitSha.slice(0, 12)}`) {
-    throw new TypeError("release_id must contain the first 12 characters of git_sha");
+  const releaseId = requiredString(spec.release_id, "release_id");
+  if (releaseId !== `${spec.environment}-${gitSha.slice(0, 12)}`) {
+    throw new TypeError("release_id must match environment and the first 12 characters of git_sha");
   }
 
   const apiBaseUrl = httpsUrl(spec.app_url, "app_url", {
@@ -323,9 +325,6 @@ export function validateReleaseSpec(input) {
   });
   if (!new URL(apiWorkersDevUrl).hostname.endsWith(".workers.dev")) {
     throw new TypeError("api_workers_dev_url must use a workers.dev hostname");
-  }
-  if (!new URL(apiWorkersDevUrl).hostname.startsWith("meltiply-api.")) {
-    throw new TypeError("api_workers_dev_url must name the meltiply-api Worker");
   }
   if (apiWorkersDevUrl === apiBaseUrl) {
     throw new TypeError("api_workers_dev_url must differ from app_url");
@@ -444,7 +443,7 @@ export function validateReleaseSpec(input) {
     api_workers_dev_url: apiWorkersDevUrl,
     automation_guard: { consumers_paused: true, cron_safe: true },
     deployment_mode: spec.deployment_mode,
-    environment: "staging",
+    environment: spec.environment,
     allowed_origins: frontendOrigins,
     git_sha: gitSha,
     neon_branch_id: neonBranchId,
@@ -461,7 +460,7 @@ export function validateReleaseSpec(input) {
 
 /**
  * Validates post-apply OpenTofu IaC outputs against release specification invariants.
- * Ensures consistent resource names, valid Hyperdrive identifiers, staging-scoped R2 asset buckets,
+ * Ensures consistent resource names, valid Hyperdrive identifiers, environment-scoped R2 asset buckets,
  * and complete queue binding definitions across all supported workloads.
  *
  * @param {unknown} input - Raw OpenTofu JSON outputs object
@@ -476,8 +475,8 @@ export function validateIacOutputs(input, spec) {
     "release_resources",
   );
   const bindings = assertPlainObject(outputValue(outputs, "worker_bindings"), "worker_bindings");
-  if (resources.environment !== "staging") {
-    throw new TypeError("IaC release resources must be staging");
+  if (resources.environment !== spec.environment) {
+    throw new TypeError("IaC release resources environment must match the release input");
   }
   const hostname = requiredString(
     resources.app_hostname,
@@ -488,8 +487,37 @@ export function validateIacOutputs(input, spec) {
     throw new TypeError("app_url must match the IaC API hostname");
   }
   const bucket = requiredString(bindings.ASSETS, "worker_bindings.ASSETS");
-  if (bucket !== resources.assets_bucket_name || !bucket.endsWith("-staging")) {
-    throw new TypeError("the IaC asset bucket is inconsistent or not staging-scoped");
+  if (bucket !== resources.assets_bucket_name || !bucket.endsWith(`-${spec.environment}`)) {
+    throw new TypeError(`the IaC asset bucket is inconsistent or not ${spec.environment}-scoped`);
+  }
+  const frontendWorkerName = requiredString(
+    resources.frontend_worker_name,
+    "release_resources.frontend_worker_name",
+    /^[a-z0-9][a-z0-9-]*$/,
+  );
+  if (!frontendWorkerName.endsWith(`-${spec.environment}`)) {
+    throw new TypeError("the IaC frontend Worker name must carry the release environment suffix");
+  }
+  const workerNames = assertPlainObject(resources.worker_names, "release_resources.worker_names");
+  assertExactKeys(workerNames, new Set(["api", "automation", "state", "frontend"]), "worker_names");
+  for (const worker of ["api", "automation", "state", "frontend"]) {
+    const name = requiredString(
+      workerNames[worker],
+      `worker_names.${worker}`,
+      /^[a-z0-9][a-z0-9-]*$/,
+    );
+    if (spec.environment !== "staging" && !name.endsWith(`-${spec.environment}`)) {
+      throw new TypeError(`worker_names.${worker} must carry the release environment suffix`);
+    }
+  }
+  if (
+    new Set(Object.values(workerNames)).size !== 4 ||
+    workerNames.frontend !== frontendWorkerName
+  ) {
+    throw new TypeError("IaC Worker names must be distinct and consistent");
+  }
+  if (!new URL(spec.api_workers_dev_url).hostname.startsWith(`${workerNames.api}.`)) {
+    throw new TypeError("api_workers_dev_url must name the IaC API Worker");
   }
   const authenticatedId = requiredString(
     bindings.DB_AUTHENTICATED,
@@ -512,12 +540,24 @@ export function validateIacOutputs(input, spec) {
   const queues = assertPlainObject(bindings.queues, "worker_bindings.queues");
   assertExactKeys(queues, new Set(Object.keys(queueBindings)), "worker_bindings.queues");
   for (const workload of Object.keys(queueBindings)) {
-    if (queues[workload] !== `meltiply-${workload}-staging`) {
-      throw new TypeError(`queue ${workload} is not the expected staging queue`);
+    if (queues[workload] !== `meltiply-${workload}-${spec.environment}`) {
+      throw new TypeError(`queue ${workload} is not the expected ${spec.environment} queue`);
     }
   }
   if (JSON.stringify(stableValue(queues)) !== JSON.stringify(stableValue(resources.queue_names))) {
     throw new TypeError("queue names differ between IaC outputs");
+  }
+  const deadLetters = assertPlainObject(
+    resources.dead_letter_queue_names,
+    "dead_letter_queue_names",
+  );
+  assertExactKeys(deadLetters, new Set(Object.keys(queueBindings)), "dead_letter_queue_names");
+  for (const workload of Object.keys(queueBindings)) {
+    if (deadLetters[workload] !== `meltiply-${workload}-${spec.environment}-dlq`) {
+      throw new TypeError(
+        `dead-letter queue ${workload} is not the expected ${spec.environment} queue`,
+      );
+    }
   }
 
   const accessAud = bindings.ACCESS_POLICY_AUD ?? null;
@@ -542,6 +582,8 @@ export function validateIacOutputs(input, spec) {
     app_hostname: hostname,
     assets_bucket: bucket,
     authenticated_hyperdrive_id: authenticatedId,
+    frontend_worker_name: frontendWorkerName,
+    worker_names: stableValue(workerNames),
     operator_hostname: operatorHostname,
     queues: stableValue(queues),
     release_resources: stableValue(resources),
@@ -591,8 +633,8 @@ function replaceBinding(entries, identifier, replacement, key = "binding") {
 }
 
 /**
- * Renders concrete Cloudflare Wrangler configuration trees for the api, automation, and state Workers.
- * Injects staging environment variables, Hyperdrive bindings, the selected object storage settings, queue producers,
+ * Renders concrete Cloudflare Wrangler configuration trees for all four release Workers.
+ * Injects selected environment variables, Hyperdrive bindings, the selected object storage settings, queue producers,
  * allowed CORS origins, the sender-restricted send_email MAIL binding, Zero Trust Access bindings,
  * and per-version preview URLs on the API Worker (the stable workers.dev route stays disabled).
  * S3 deployments omit the unused ASSETS binding; omitted provider selection preserves R2.
@@ -600,14 +642,58 @@ function replaceBinding(entries, identifier, replacement, key = "binding") {
  * @param {Record<string, object>} sourceConfigs - Base source Wrangler configurations loaded from disk
  * @param {object} spec - Validated release specification
  * @param {object} iac - Validated post-apply IaC outputs
- * @returns {{ api: object, automation: object, state: object }} Complete rendered Wrangler configurations
+ * @returns {{ api: object, automation: object, state: object, frontend: object }} Complete rendered Wrangler configurations
  */
 export function renderWranglerConfigs(sourceConfigs, spec, iac) {
   const state = structuredClone(sourceConfigs.state);
   const automation = structuredClone(sourceConfigs.automation);
   const api = structuredClone(sourceConfigs.api);
+  const frontend = structuredClone(sourceConfigs.frontend);
+  const frontendEnvironment = frontend.env?.[spec.environment] ?? {};
+  delete frontend.env;
+  Object.assign(frontend, frontendEnvironment, {
+    name: iac.frontend_worker_name,
+    vars: { ENVIRONMENT: spec.environment, VERSION: spec.git_sha },
+    services: (frontendEnvironment.services ?? frontend.services ?? []).map((binding) =>
+      binding.binding === "API" ? { ...binding, service: iac.worker_names.api } : binding,
+    ),
+  });
+  // Vite selects Cloudflare environments at build time, before flattening.
+  // Retain only the reviewed environment; never inherit local API_ORIGIN.
+  frontend.env = {
+    [spec.environment]: {
+      name: frontend.name,
+      services: frontend.services,
+      vars: frontend.vars,
+      workers_dev: frontend.workers_dev,
+    },
+  };
+  api.name = iac.worker_names.api;
+  automation.name = iac.worker_names.automation;
+  state.name = iac.worker_names.state;
+  state.vars = { ...state.vars, ENVIRONMENT: spec.environment, VERSION: spec.git_sha };
+  api.services = (api.services ?? []).map((binding) =>
+    binding.binding === "AUTOMATION"
+      ? { ...binding, service: iac.worker_names.automation }
+      : binding,
+  );
+  if (api.durable_objects?.bindings) {
+    api.durable_objects.bindings = api.durable_objects.bindings.map((binding) =>
+      binding.name === "OAUTH_STATE"
+        ? { ...binding, script_name: iac.worker_names.state }
+        : binding,
+    );
+  }
+  if (spec.environment !== "staging") {
+    for (const container of automation.containers ?? []) {
+      container.name = `${container.name}-${spec.environment}`;
+    }
+  }
+  for (const workflow of automation.workflows ?? []) {
+    if (workflow.binding === "REPLY_WORKFLOW") workflow.name = `meltiply-reply-${spec.environment}`;
+  }
   const commonVars = {
-    ENVIRONMENT: "staging",
+    ENVIRONMENT: spec.environment,
     APP_URL: spec.app_url,
     ...(spec.runtime.object_storage_provider === "s3"
       ? {
@@ -685,10 +771,11 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
     api: stableValue(api),
     automation: stableValue(automation),
     state: stableValue(state),
+    frontend: stableValue(frontend),
   };
 }
 /**
- * Loads and validates both the staging release input and OpenTofu post-apply IaC output files.
+ * Loads and validates both the release input and OpenTofu post-apply IaC output files.
  *
  * @param {object} params - File path parameters
  * @param {string} params.iacOutputsPath - Path to OpenTofu post-apply JSON outputs
@@ -731,7 +818,7 @@ export async function loadReleaseSpec(inputPath) {
 }
 
 /**
- * Loads and parses JSONC Wrangler configurations for state, automation, and api Workers.
+ * Loads and parses source Wrangler configurations for all four release Workers.
  *
  * @param {string} repoRoot - Repository root directory path
  * @returns {Promise<Record<string, object>>} Parsed source Wrangler configurations
@@ -760,7 +847,7 @@ function rewriteConfigRelativePath(configDir, sourceDir, value) {
 }
 
 /**
- * Rewrites schema, main script, and container image/build-context relative paths
+ * Rewrites schema, script, asset directory, and container relative paths
  * and generates a composite SHA-256 config digest.
  *
  * Wrangler resolves those paths against the directory holding the config file,
@@ -781,13 +868,20 @@ export async function writeRenderedConfigs({ outDir, repoRoot, spec, iac }) {
   const configDir = path.join(outDir, "wrangler");
   await mkdir(configDir, { mode: 0o700, recursive: true });
   const paths = {};
-  for (const worker of ["state", "automation", "api"]) {
+  for (const worker of ["state", "automation", "api", "frontend"]) {
     const sourceDir = path.dirname(path.join(repoRoot, workerConfigs[worker]));
     for (const field of ["$schema", "main"]) {
       configs[worker][field] = rewriteConfigRelativePath(
         configDir,
         sourceDir,
         configs[worker][field],
+      );
+    }
+    if (configs[worker].assets?.directory) {
+      configs[worker].assets.directory = rewriteConfigRelativePath(
+        configDir,
+        sourceDir,
+        configs[worker].assets.directory,
       );
     }
     for (const container of configs[worker].containers ?? []) {
@@ -803,7 +897,9 @@ export async function writeRenderedConfigs({ outDir, repoRoot, spec, iac }) {
     paths[worker] = outputPath;
   }
   const digest = createHash("sha256")
-    .update(["state", "automation", "api"].map((worker) => json(configs[worker])).join("\0"))
+    .update(
+      ["state", "automation", "api", "frontend"].map((worker) => json(configs[worker])).join("\0"),
+    )
     .digest("hex");
   return { config_digest: digest, paths };
 }
@@ -896,7 +992,7 @@ export function validateDatabaseEnvironment(environment) {
  * send_email binding, so no delivery credential is required.
  *
  * @param {object} spec - Release specification object
- * @returns {{ api: Array<string>, automation: Array<string>, state: Array<string> }} Required secret names by worker
+ * @returns {{ api: Array<string>, automation: Array<string>, state: Array<string>, frontend: Array<string> }} Required secret names by worker
  */
 function requiredRemoteSecrets(spec) {
   const storage =
@@ -912,16 +1008,17 @@ function requiredRemoteSecrets(spec) {
       automation.push(fields.secret);
     }
   }
-  return { api: api.sort(), automation: automation.sort(), state: [] };
+  return { api: api.sort(), automation: automation.sort(), state: [], frontend: [] };
 }
 
 /**
  * Runs release preflight checks: verifies git HEAD commit matches release spec git_sha,
  * asserts a clean tracked working tree and pinned Wrangler CLI version via Bun without downloading tools,
- * and validates Cloudflare account ID, API tokens, and Neon database connection strings.
+ * and validates Cloudflare credentials plus both database login identities and role attributes.
  * The CI/release toolchain stays pinned together so reviewed evidence cannot drift.
  *
  * @param {object} params - Preflight parameters
+ * @param {Function} [params.clientFactory] - Injectable PostgreSQL client factory
  * @param {Record<string, string | undefined>} params.environment - Environment variable lookup
  * @param {boolean} params.offline - Flag indicating offline mode (skips remote account/token checks)
  * @param {string} params.repoRoot - Repository root directory path
@@ -930,7 +1027,14 @@ function requiredRemoteSecrets(spec) {
  * @returns {Promise<object>} Preflight status summary object
  * @throws {Error} If commit mismatch, dirty checkout, wrong Wrangler version, or credentials fail validation
  */
-export async function preflightRelease({ environment, offline, repoRoot, runCommand, spec }) {
+export async function preflightRelease({
+  clientFactory,
+  environment,
+  offline,
+  repoRoot,
+  runCommand,
+  spec,
+}) {
   const [head, status, wranglerVersion] = await Promise.all([
     runCommand("git", ["rev-parse", "HEAD"], { cwd: repoRoot }),
     runCommand("git", ["status", "--porcelain", "--untracked-files=no"], {
@@ -948,6 +1052,7 @@ export async function preflightRelease({ environment, offline, repoRoot, runComm
     throw new Error("release requires Wrangler 4.148.0");
   }
   const requiredSecrets = requiredRemoteSecrets(spec);
+  let databaseRoles = { reason: "offline", status: "skipped" };
   if (!offline) {
     const accountId = environment.CLOUDFLARE_ACCOUNT_ID?.trim();
     if (!accountId || accountId !== spec.runtime.r2_account_id) {
@@ -957,10 +1062,12 @@ export async function preflightRelease({ environment, offline, repoRoot, runComm
       throw new Error("CLOUDFLARE_API_TOKEN is required");
     }
     validateDatabaseEnvironment(environment);
+    databaseRoles = await assertDatabaseRoles({ clientFactory, environment });
   }
 
   return {
-    environment: "staging",
+    database_roles: databaseRoles,
+    environment: spec.environment,
     deployment_mode: spec.deployment_mode,
     git_sha: spec.git_sha,
     offline,

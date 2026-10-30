@@ -9,13 +9,13 @@ variable "zone_id" {
 }
 
 variable "environment" {
-  description = "Staging deployment environment owned by this stack."
+  description = "Deployment environment; each installation requires isolated protected state and inputs."
   type        = string
   default     = "staging"
 
   validation {
-    condition     = var.environment == "staging"
-    error_message = "This Cloudflare stack is staging-only; preview requires isolated resource identifiers and a separate stack."
+    condition     = contains(jsondecode(file("${path.module}/../../scripts/lib/release-environments.json")), var.environment)
+    error_message = "The Cloudflare environment must be in the shared release environment allow-list."
   }
 }
 
@@ -33,19 +33,49 @@ variable "app_url" {
 variable "api_worker_name" {
   description = "API Worker service name owned by Wrangler deployment."
   type        = string
-  default     = "meltiply-api"
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.api_worker_name == null || var.environment == "staging" ? true : endswith(var.api_worker_name, "-${var.environment}")
+    error_message = "The production API Worker name must carry the selected environment suffix."
+  }
 }
 
 variable "frontend_worker_name" {
   description = "Frontend Worker serving the app origin and proxying /api/* through its API binding."
   type        = string
-  default     = "meltiply-frontend-staging"
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.frontend_worker_name == null ? true : endswith(var.frontend_worker_name, "-${var.environment}")
+    error_message = "The frontend Worker name must carry the selected environment suffix."
+  }
 }
 
 variable "automation_worker_name" {
   description = "Automation Worker service name owned by Wrangler deployment."
   type        = string
-  default     = "meltiply-automation"
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.automation_worker_name == null || var.environment == "staging" ? true : endswith(var.automation_worker_name, "-${var.environment}")
+    error_message = "The production Automation Worker name must carry the selected environment suffix."
+  }
+}
+
+variable "state_worker_name" {
+  description = "State Worker service name owned by Wrangler deployment."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.state_worker_name == null || var.environment == "staging" ? true : endswith(var.state_worker_name, "-${var.environment}")
+    error_message = "The production State Worker name must carry the selected environment suffix."
+  }
 }
 
 variable "attach_app_custom_domains" {
@@ -69,7 +99,13 @@ variable "queue_delivery_paused" {
 variable "assets_bucket_name" {
   description = "Private asset bucket name."
   type        = string
-  default     = "meltiply-assets-staging"
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.assets_bucket_name == null ? true : endswith(var.assets_bucket_name, "-${var.environment}")
+    error_message = "The private asset bucket name must carry the selected environment suffix."
+  }
 }
 
 variable "allowed_origins" {
@@ -86,6 +122,37 @@ variable "authenticated_hyperdrive_config_id" {
 variable "system_hyperdrive_config_id" {
   description = "ID created by protected Hyperdrive secret bootstrap for the system role."
   type        = string
+}
+
+variable "manage_zone_security" {
+  description = "Own the zone's rate-limit and optional managed-WAF entrypoints in this state only. Null preserves staging ownership and makes production a non-owner."
+  type        = bool
+  default     = null
+  nullable    = true
+}
+
+variable "protected_app_hostnames" {
+  description = "Environment-to-app-hostname coverage of the single zone owner. Non-owners must explicitly declare coverage matching the applied owner's configuration."
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition = alltrue([
+      for environment, hostname in var.protected_app_hostnames :
+      contains(jsondecode(file("${path.module}/../../scripts/lib/release-environments.json")), environment) &&
+      can(regex("^[a-z0-9][a-z0-9.-]*[a-z0-9]$", hostname))
+    ])
+    error_message = "Protected app hostnames must map supported environments to bare lowercase DNS hostnames."
+  }
+
+  validation {
+    condition = (
+      length(var.protected_app_hostnames) == 0
+      ? coalesce(var.manage_zone_security, var.environment == "staging")
+      : lookup(var.protected_app_hostnames, var.environment, "") == trimprefix(var.app_url, "https://")
+    )
+    error_message = "Zone security coverage must include this environment's exact app_url hostname; non-owners must explicitly declare the applied owner's coverage."
+  }
 }
 
 variable "managed_waf_ruleset_id" {

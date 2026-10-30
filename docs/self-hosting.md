@@ -1,9 +1,12 @@
 # Production self-hosting
 
-Meltiply supports two deployment targets: [managed Cloudflare](../infra/cloudflare/README.md)
-and a single-host [Docker Compose deployment](../compose.selfhost.yml). Neither
-replaces the development stack (`make dev`). Both targets build the same API,
-automation handlers, state coordinator, reply workflow, and application frontend.
+Meltiply supports two deployment targets: [managed Cloudflare staging/production](../infra/cloudflare/README.md#release-and-rollback)
+and a single-host [Docker Compose deployment](../compose.selfhost.yml). Both run
+production-built API, automation handlers, state coordinator, reply workflow,
+and application frontend; neither replaces the development stack (`make dev`).
+Managed Workers use their own protected release/backend and Cloudflare services.
+This guide instead describes Compose's separate `ENVIRONMENT=selfhost` runtime,
+local binding persistence, and SMTP; it does not deploy a managed staging stack.
 
 Wrangler bundles production Workers with `deploy --dry-run --minify`; Vite builds
 the production app. The public marketing/documentation site is not built or
@@ -23,7 +26,7 @@ host, not the Cloudflare managed service or an availability guarantee.
 | Workflows               | Persistent local binding running the canonical reply workflow                                                     |
 | Queues                  | SQLite WAL broker; commit-before-ack, delayed delivery, visibility leases, retries and dead-letter queues         |
 | Cron                    | Durable hourly/daily schedule ledger invoking canonical scheduled handlers; missed slots coalesce after downtime  |
-| Email                   | Real SMTP transport; signup still requires email verification                                                     |
+| Email                   | Optional real SMTP transport; verification follows the mail configuration described below                         |
 | Operator authentication | Private administrator-issued HMAC tokens, at most 15 minutes, instead of Cloudflare Access                        |
 | Media processing        | Existing FFmpeg/libvips processor in a private container; no Docker socket                                        |
 | TLS                     | Optional Caddy profile in the same Compose file                                                                   |
@@ -31,9 +34,12 @@ host, not the Cloudflare managed service or an availability guarantee.
 This is a **single-host** deployment, not a replacement for Cloudflare's global
 network, managed durability, autoscaling, Access, or service SLAs. Run one runtime
 replica per data volume; do not share its SQLite files across hosts. Back up both
-the PostgreSQL and runtime state. Social Providers and billing remain external
-services and require your own credentials, public callback URLs, and approvals.
-No Cloudflare account or remote Workers are needed by this deployment.
+the PostgreSQL and runtime state. Social Providers remain external services and
+require your own credentials, public callback URLs, and approvals. Both targets
+may start with all Provider acceptance flags false; connections and publishing
+then remain unavailable until the relevant live acceptance is established.
+No Cloudflare account, Email Sending domain, or remote Workers are required by
+this Compose target.
 
 The API uses bounded, disposable Worker-local memory for read optimization, with
 the same implementation on managed Workers and self-hosted workerd. Publishing
@@ -186,8 +192,8 @@ S3_FORCE_PATH_STYLE=true     # optional; set false for virtual-hosted addressing
 ```
 
 `S3_ENDPOINT` must be an origin with no path, and must use HTTPS: the
-supervisor runs as `ENVIRONMENT=staging`, which never permits signing a
-plain-HTTP origin. `S3_FORCE_PATH_STYLE` defaults to `true`, which is what
+supervisor runs as `ENVIRONMENT=selfhost`, whose storage policy also rejects
+plain-HTTP signing origins. `S3_FORCE_PATH_STYLE` defaults to `true`, which is what
 MinIO, Ceph, and other self-hosted services expect; AWS endpoints want `false`.
 The origin must be reachable from the runtime container and from any machine or
 service that fetches signed URLs.
@@ -264,11 +270,12 @@ reused password solely because it appeared in a breach. PostgreSQL-backed limits
 bound credential attempts and verification/reset delivery across API instances;
 client-supplied `X-Forwarded-For` cannot select a different budget.
 
-Deployed sign-in requires verified email and configured mail delivery. Use
-**Resend verification** on the sign-in form if needed, or **Forgot password?**
-for a single-use, expiring reset link. Recovery responses do not disclose whether
-an address is registered. Mailpit proves SMTP submission and link handling in CI,
-not delivery to an external inbox.
+Managed staging/production sign-in always requires verified email and Cloudflare
+Email Sending. Compose self-hosting instead follows its optional SMTP/verification
+settings above. With mail configured, use **Resend verification** on the sign-in
+form if needed, or **Forgot password?** for a single-use, expiring reset link.
+Recovery responses do not disclose whether an address is registered. Mailpit
+proves SMTP submission and link handling in CI, not delivery to an external inbox.
 
 Open **Settings → Security** on desktop or mobile to see password and authenticator
 controls directly. Enrollment provides a manual setup key and backup

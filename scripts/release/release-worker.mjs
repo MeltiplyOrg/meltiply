@@ -3,14 +3,9 @@ import path from "node:path";
 
 import { readJsonFile, sha256, writeEvidence } from "./release-guard.mjs";
 import { releaseInternals } from "./release-lib.mjs";
+import { buildFrontend } from "./release-frontend.mjs";
 
 const versionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-const workers = {
-  api: "meltiply-api",
-  automation: "meltiply-automation",
-  state: "meltiply-state",
-};
 
 const deployPhases = new Map([
   [
@@ -40,6 +35,11 @@ const deployPhases = new Map([
   ],
   ["state-bootstrap", { mode: "bootstrap", steps: new Set(["initialize"]), worker: "state" }],
   ["state-update", { mode: "update", steps: new Set(["activate", "upload"]), worker: "state" }],
+  ["frontend-bootstrap", { mode: "bootstrap", steps: new Set(["initialize"]), worker: "frontend" }],
+  [
+    "frontend-update",
+    { mode: "update", steps: new Set(["activate", "upload"]), worker: "frontend" },
+  ],
 ]);
 
 /**
@@ -103,7 +103,7 @@ function exactObject(value, keys, name) {
  * @param {string} phase - Registered deploy phase name (e.g., "api-update", "state-bootstrap")
  * @param {string} step - Deployment step ("initialize", "upload", "activate")
  * @param {object} spec - Release specification defining deployment_mode
- * @returns {{ mode: "bootstrap"|"update", step: string, worker: "api"|"automation"|"state" }} Resolved phase execution intent
+ * @returns {{ mode: "bootstrap"|"update", step: string, worker: "api"|"automation"|"state"|"frontend" }} Resolved phase execution intent
  * @throws {TypeError} If phase is unrecognized, mode mismatches, or step is disallowed for the phase
  */
 export function resolveDeployPhase(phase, step, spec) {
@@ -474,7 +474,7 @@ export async function getWorkerTraffic({ configPath, environment, runCommand }) 
  * Parses and verifies details of a specific Worker version from Cloudflare control plane.
  *
  * Enforces that the retrieved version ID and release tag match expected values.
- * For API and Automation workers, asserts that the plaintext VERSION binding
+ * For API, Automation, and frontend, asserts that the plaintext VERSION binding
  * matches the exact Git commit SHA of the release.
  *
  * @param {string} source - JSON output from wrangler versions view <id> --json
@@ -494,7 +494,7 @@ export function parseVersionDetails(source, expected) {
   if (details?.annotations?.["workers/tag"] !== expected.tag) {
     throw new TypeError(`Wrangler ${expected.worker} version tag does not match the release`);
   }
-  if (new Set(["api", "automation"]).has(expected.worker)) {
+  if (new Set(["api", "automation", "frontend"]).has(expected.worker)) {
     if (!Array.isArray(details?.resources?.bindings)) {
       throw new TypeError(`Wrangler ${expected.worker} version bindings are invalid`);
     }
@@ -667,6 +667,8 @@ async function writeBootstrapConfig(configPath, worker) {
  * @param {string} options.planDigest - SHA-256 digest of verified release plan
  * @param {Function} options.runCommand - Subprocess runner
  * @param {object} options.spec - Verified release specification
+ * @param {string} options.repoRoot - Checkout root for the frontend production build
+ * @param {object} options.iac - Reviewed infrastructure identity for frontend deployment
  * @param {string} options.step - Target step ("initialize", "upload", "activate")
  * @returns {Promise<object>} Generated and validated step evidence record
  * @throws {TypeError|Error} If phase/step is invalid, existing version conflicts occur, or traffic assertion fails
@@ -674,19 +676,70 @@ async function writeBootstrapConfig(configPath, worker) {
 export async function deployWorkerStep({
   approvals,
   environment,
+  iac,
   outDir,
   phase,
   planDigest,
   runCommand,
+  repoRoot,
   spec,
   step,
 }) {
   const intent = resolveDeployPhase(phase, step, spec);
-  const workerName = workers[intent.worker];
+  // The reviewed rendered config, not a fixed staging service, owns deployment identity.
   const configPath = workerConfigPath(outDir, intent.worker);
   const configSource = await readFile(configPath, "utf8");
+  const config = parseJson(configSource, "rendered Worker config");
+  const workerName = config.name;
+  if (
+    typeof workerName !== "string" ||
+    !/^[a-z0-9][a-z0-9-]*$/.test(workerName) ||
+    (spec.environment === "production" && !workerName.endsWith(`-${spec.environment}`))
+  ) {
+    throw new TypeError("rendered Worker config has the wrong installation name");
+  }
+  if (
+    intent.worker === "frontend" &&
+    (workerName !== iac.frontend_worker_name ||
+      config.vars?.VERSION !== spec.git_sha ||
+      config.vars?.ENVIRONMENT !== spec.environment ||
+      config.vars?.API_ORIGIN !== undefined ||
+      config.services?.find((binding) => binding.binding === "API")?.service !==
+        iac.worker_names.api)
+  ) {
+    throw new TypeError(
+      "frontend config does not match the reviewed IaC Worker/environment/API target",
+    );
+  }
   const configDigest = sha256(configSource);
   const tag = releaseTag(spec, intent.worker, "code");
+  let frontendCandidate;
+  if (intent.worker === "frontend") {
+    try {
+      frontendCandidate = await readJsonFile(
+        candidatePath(outDir, "frontend"),
+        "frontend candidate",
+      );
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    if (
+      frontendCandidate &&
+      (frontendCandidate.config_digest !== configDigest ||
+        frontendCandidate.git_sha !== spec.git_sha ||
+        frontendCandidate.release_id !== spec.release_id ||
+        frontendCandidate.worker_name !== workerName)
+    ) {
+      throw new TypeError("frontend candidate does not match this release/config");
+    }
+    if (
+      frontendCandidate &&
+      sha256(await readFile(path.join(outDir, "wrangler/frontend-built.json"), "utf8")) !==
+        frontendCandidate.build_config_digest
+    ) {
+      throw new TypeError("frontend built config does not match the candidate");
+    }
+  }
 
   if (step === "initialize" || step === "upload") {
     let versions;
@@ -716,6 +769,28 @@ export async function deployWorkerStep({
       }
       previousVersionId = current[0].version_id;
     }
+    if (recovered && frontendCandidate) previousVersionId = frontendCandidate.previous_version_id;
+
+    let frontendBuild;
+    if (intent.worker === "frontend") {
+      if (frontendCandidate) {
+        const builtPath = path.join(outDir, "wrangler/frontend-built.json");
+        // The candidate's exact built config was verified before any provider call.
+        frontendBuild = {
+          configPath: builtPath,
+          build_config_digest: frontendCandidate.build_config_digest,
+        };
+      } else {
+        frontendBuild = await buildFrontend({
+          configPath,
+          environment,
+          outDir,
+          repoRoot,
+          runCommand,
+          spec,
+        });
+      }
+    }
 
     let uploaded;
     if (recovered) {
@@ -731,7 +806,7 @@ export async function deployWorkerStep({
           ? [
               command,
               "--config",
-              await writeBootstrapConfig(configPath, intent.worker),
+              await writeBootstrapConfig(frontendBuild?.configPath ?? configPath, intent.worker),
               "--strict",
               "--tag",
               tag,
@@ -742,7 +817,7 @@ export async function deployWorkerStep({
               command,
               "upload",
               "--config",
-              configPath,
+              frontendBuild?.configPath ?? configPath,
               "--strict",
               "--preview-alias",
               spec.release_id,
@@ -777,11 +852,14 @@ export async function deployWorkerStep({
     const evidence = {
       approvals,
       config_digest: configDigest,
+      ...(frontendBuild
+        ? { build_config_digest: frontendBuild.build_config_digest, worker_name: workerName }
+        : {}),
       deployment_mode: intent.mode,
       git_sha: spec.git_sha,
       plan_digest: planDigest,
-      preview_alias_url: uploaded.preview_alias_url,
-      preview_url: uploaded.preview_url,
+      preview_alias_url: intent.worker === "frontend" ? null : uploaded.preview_alias_url,
+      preview_url: intent.worker === "frontend" ? null : uploaded.preview_url,
       previous_version_id: previousVersionId,
       release_id: spec.release_id,
       schema_version: 1,
@@ -791,36 +869,49 @@ export async function deployWorkerStep({
     };
     await writeEvidence(outDir, `worker-${intent.worker}-candidate.json`, evidence);
 
-    if (intent.mode === "bootstrap" && intent.worker === "state") {
+    if (
+      intent.mode === "bootstrap" &&
+      (intent.worker === "state" || intent.worker === "frontend")
+    ) {
       const traffic = await getWorkerTraffic({
         configPath,
         environment,
         runCommand,
       });
       assertWorkerTraffic(traffic, [{ percentage: 100, version_id: uploaded.version_id }]);
-      await writeEvidence(outDir, "worker-state-deployment.json", {
+      await writeEvidence(outDir, `worker-${intent.worker}-deployment.json`, {
         approvals,
+        ...(frontendBuild
+          ? {
+              build_config_digest: frontendBuild.build_config_digest,
+              config_digest: configDigest,
+              worker_name: workerName,
+            }
+          : {}),
         git_sha: spec.git_sha,
         plan_digest: planDigest,
         release_id: spec.release_id,
         schema_version: 1,
         traffic,
         version_id: uploaded.version_id,
-        worker: "state",
+        worker: intent.worker,
       });
     }
     return evidence;
   }
 
   const source =
-    intent.worker === "state"
+    intent.worker === "state" || intent.worker === "frontend"
       ? await readJsonFile(candidatePath(outDir, intent.worker), "Worker candidate evidence")
       : await readJsonFile(secretPath(outDir, intent.worker), "Worker secret evidence");
   const selectedVersionId = validateWorkerVersionId(source.version_id);
+  if (intent.worker === "frontend" && !frontendCandidate) {
+    throw new TypeError("frontend deploy step requires candidate evidence");
+  }
   const expectedTag = releaseTag(
     spec,
     intent.worker,
-    intent.worker === "state" ? "code" : "secrets",
+    intent.worker === "state" || intent.worker === "frontend" ? "code" : "secrets",
   );
   await verifyWorkerVersion({
     configPath,
@@ -831,22 +922,28 @@ export async function deployWorkerStep({
     tag: expectedTag,
     worker: intent.worker,
   });
-  await runWrangler({
-    args: [
-      "versions",
-      "deploy",
-      `${selectedVersionId}@100%`,
-      "--config",
-      configPath,
-      "--message",
-      `${spec.release_id} ${intent.worker} activation`,
-      "--yes",
-    ],
-    environment,
-    outDir,
-    outputName: `wrangler-${intent.worker}-activate.jsonl`,
-    runCommand,
-  });
+  const alreadyActive =
+    intent.worker === "frontend" &&
+    JSON.stringify(await getWorkerTraffic({ configPath, environment, runCommand })) ===
+      JSON.stringify([{ percentage: 100, version_id: selectedVersionId }]);
+  if (!alreadyActive) {
+    await runWrangler({
+      args: [
+        "versions",
+        "deploy",
+        `${selectedVersionId}@100%`,
+        "--config",
+        configPath,
+        "--message",
+        `${spec.release_id} ${intent.worker} activation`,
+        "--yes",
+      ],
+      environment,
+      outDir,
+      outputName: `wrangler-${intent.worker}-activate.jsonl`,
+      runCommand,
+    });
+  }
   const traffic = await getWorkerTraffic({
     configPath,
     environment,
@@ -855,6 +952,13 @@ export async function deployWorkerStep({
   assertWorkerTraffic(traffic, [{ percentage: 100, version_id: selectedVersionId }]);
   const evidence = {
     approvals,
+    ...(intent.worker === "frontend"
+      ? {
+          build_config_digest: source.build_config_digest,
+          config_digest: configDigest,
+          worker_name: workerName,
+        }
+      : {}),
     git_sha: spec.git_sha,
     plan_digest: planDigest,
     release_id: spec.release_id,

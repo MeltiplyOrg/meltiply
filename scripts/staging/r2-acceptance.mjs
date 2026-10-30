@@ -163,7 +163,7 @@ export function parseR2AcceptanceArguments(args) {
 /**
  * Binds parsed CLI arguments to verified release inputs and IaC target configuration.
  *
- * Enforces active IaC state, validates exact confirmation phrase on --apply,
+ * Enforces staging-only credentials and active IaC state, validates exact confirmation phrase on --apply,
  * and compiles cryptographic SHA-256 hashes of release inputs and IaC outputs.
  *
  * @param {object} parsed - Parsed CLI options from parseR2AcceptanceArguments
@@ -173,6 +173,9 @@ export function parseR2AcceptanceArguments(args) {
  * @throws {Error} If IaC state is not active or confirmation phrase mismatches
  */
 export function prepareR2AcceptanceOptions(parsed, { iac, spec }, repoRoot = REPO_ROOT) {
+  if (spec.environment !== "staging") {
+    throw new Error("staging R2 acceptance requires a staging release input");
+  }
   assertIacState(iac, "active", spec);
   const expectedConfirmation = `r2 staging ${spec.git_sha}`;
   if (parsed.apply && parsed.confirm !== expectedConfirmation) {

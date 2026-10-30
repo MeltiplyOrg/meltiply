@@ -31,7 +31,7 @@ function option(name) {
   return value;
 }
 
-/** Selects a PR merge base or the previous reachable release for default-branch and release-tag pushes. */
+/** Selects the diff base and, for PRs, the latest release reachable from the target branch. */
 function ciBase() {
   const event = process.env.GITHUB_EVENT_PATH
     ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"))
@@ -40,27 +40,31 @@ function ciBase() {
     if (!event?.pull_request?.base?.sha || !event?.pull_request?.head?.sha) {
       throw new Error("pull_request event is missing base/head commits");
     }
-    return git("merge-base", event.pull_request.base.sha, event.pull_request.head.sha);
+    return {
+      base: git("merge-base", event.pull_request.base.sha, event.pull_request.head.sha),
+      releaseBase: latestContractTag(event.pull_request.base.sha),
+    };
   }
   if (
     process.env.GITHUB_EVENT_NAME === "push" &&
     process.env.GITHUB_REF === `refs/heads/${event?.repository?.default_branch}`
   ) {
-    return latestContractTag();
+    return { base: latestContractTag() };
   }
   if (
     process.env.GITHUB_EVENT_NAME === "push" &&
     process.env.GITHUB_REF?.startsWith("refs/tags/contract-v")
   ) {
-    return latestContractTag("HEAD", process.env.GITHUB_REF.slice("refs/tags/".length));
+    return { base: latestContractTag("HEAD", process.env.GITHUB_REF.slice("refs/tags/".length)) };
   }
-  return undefined;
+  return {};
 }
 
-/** Compares contracts; only fresh complete changelog bullets bound to the exact change may waive breaks. */
+/** Compares contracts; a fresh breaking bullet must cover both the PR diff and cumulative release span. */
 function main() {
   const ci = process.argv.includes("--ci");
-  const base = option("--base") ?? (ci ? ciBase() : undefined);
+  const explicitBase = option("--base");
+  const { base, releaseBase } = explicitBase ? { base: explicitBase } : ci ? ciBase() : {};
   if (!base) {
     if (ci) {
       report(
@@ -116,6 +120,12 @@ function main() {
     if (result.status !== 1 || !result.stdout.trim())
       throw new Error(`oasdiff failed (${result.status})`);
     const token = breakingReviewToken(before, after);
+    const tokens = [token];
+    if (releaseBase) {
+      const released = YAML.parse(git("show", `${releaseBase}:packages/contracts/openapi.yaml`));
+      const cumulativeToken = breakingReviewToken(released, after);
+      if (cumulativeToken !== token) tokens.push(cumulativeToken);
+    }
     const changelog = readFileSync(
       resolve(option("--changelog") ?? "packages/contracts/CHANGELOG.md"),
       "utf8",
@@ -138,17 +148,17 @@ function main() {
       .some(
         (bullet) =>
           bullet.startsWith("- **Breaking:** ") &&
-          bullet.includes(`[${token}]`) &&
-          bullet.replace(`[${token}]`, "").length > 40,
+          tokens.every((required) => bullet.includes(`[${required}]`)) &&
+          tokens.reduce((description, required) => description.replace(`[${required}]`, ""), bullet).length > 40,
       );
     if (acknowledged && !previous.includes(token)) {
       report(
-        `Contract compatibility: intentional breaking change reviewed in CHANGELOG.md [${token}].`,
+        `Contract compatibility: intentional breaking change reviewed in CHANGELOG.md ${tokens.map((required) => `[${required}]`).join(" ")}.`,
       );
       return 0;
     }
     report(
-      `Unreviewed breaking change. Add a NEW Unreleased entry describing affected operations/fields, migration and deprecation policy:\n- **Breaking:** [${token}] <change and client migration>`,
+      `Unreviewed breaking change. Add one NEW Unreleased entry describing affected operations/fields, migration and deprecation policy, with every token in the same bullet:\n- **Breaking:** ${tokens.map((required) => `[${required}]`).join(" ")} <change and client migration>`,
     );
     return 1;
   } finally {

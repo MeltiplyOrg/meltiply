@@ -83,7 +83,11 @@ try {
 
   writeFileSync(changelog, `## Unreleased\n\n- **Breaking:** [${token}] [${token}]\n`);
   const repeatedTokens = run();
-  assert.equal(repeatedTokens.status, 1, "repeated review tokens cannot substitute for a change description");
+  assert.equal(
+    repeatedTokens.status,
+    1,
+    "repeated review tokens cannot substitute for a change description",
+  );
 
   const reviewedChangelog = `## Unreleased\n\n- **Breaking:** [${token}] GET /probe (getProbe) removes response status; regenerate clients.\n`;
   writeFileSync(changelog, reviewedChangelog);

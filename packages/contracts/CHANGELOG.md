@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Exclude every occurrence of required review tokens from the breaking-change
+  description length check; repeated tokens cannot replace migration prose.
+
 ## 1.0.0 - 2026-10-30
 
 - Require breaking PR review to acknowledge both merge-base and cumulative

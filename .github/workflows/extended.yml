@@ -14,6 +14,7 @@ on:
           - cloudflare-extended
           - cloudflare-full
           - device-authorization
+          - versioned-contract
           - object-storage
           - publishing-queues
           - publishing-flow
@@ -133,7 +134,7 @@ jobs:
           bun build scripts/selfhost/queue-capacity-check.ts --target=node --external miniflare --external pg --external effect --external zod --outfile=scripts/selfhost/.queue-capacity-check.mjs
           QUEUE_CAPACITY_BUNDLE=artifacts/queue-capacity-worker/queue-capacity.js node scripts/selfhost/.queue-capacity-check.mjs
       - name: Prepare full gate database
-        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke' || inputs.lane == 'versioned-contract'
         run: bun run setup --skip-dependencies --skip-image-pull
       - name: Exercise every provider connection through real state and persistence
 
@@ -147,8 +148,15 @@ jobs:
             --outfile=scripts/selfhost/.oauth-connection-check.mjs
           node scripts/selfhost/.oauth-connection-check.mjs
       - name: Validate complete application contract
-        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'versioned-contract'
         run: bun run cloudflare:check
+      - name: Exercise versioned release artifacts and public health
+        if: inputs.lane == 'versioned-contract'
+        run: |
+          bun run release:test
+          bun run contract:release:artifacts
+          node packages/contracts/scripts/contract-smoke.mjs
+          bun run docs:links
       - name: Observe cold, warm, concurrent, and lifecycle cache behavior in workerd
         if: inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         env:

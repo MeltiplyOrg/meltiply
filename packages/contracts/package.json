@@ -28,7 +28,7 @@
     "./test-support": "./test-support/validation.ts"
   },
   "scripts": {
-    "generate": "openapi-typescript --redocly ../../redocly.yaml",
+    "generate": "node scripts/contract-version.mjs && openapi-typescript --redocly ../../redocly.yaml",
     "readiness:check": "node scripts/endpoint-readiness.mjs --check",
     "readiness:generate": "node scripts/endpoint-readiness.mjs --write",
     "test": "vp test run --dir test",

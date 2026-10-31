@@ -1923,6 +1923,8 @@ export interface components {
             /** @constant */
             status: "ok";
             version: string;
+            /** @description Semantic version of the API contract implemented by this installation. */
+            contract_version: string;
             environment: string;
         };
         ReadinessComponent: {
@@ -3487,6 +3489,7 @@ export interface operations {
                      * @example {
                      *       "status": "ok",
                      *       "version": "01JZRELEASE",
+                     *       "contract_version": "1.0.0",
                      *       "environment": "staging"
                      *     }
                      */

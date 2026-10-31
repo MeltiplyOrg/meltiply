@@ -37,6 +37,14 @@ branches and pull requests compare against their base merge point, retaining
 earlier unmerged changes. Renames and deletions count. Manual runs and unavailable
 ancestry conservatively select every lane.
 
+The Cloudflare lane's existing `bun run contract:check` compares API contracts
+against the PR merge base, or the previous reachable `contract-v*` release on a
+default-branch push. Missing initial-release baselines are explicitly reported.
+Its job summary includes compatibility impact and operation/field diagnostics.
+An intentional break needs a fresh changelog review token bound to the exact
+base/target contract pair, not an unrelated historical breaking entry. See the
+[contract upgrade and release procedure](../packages/contracts/README.md).
+
 The jobs use Node 24.18.0 and Bun 1.4.2. The database is a disposable local Docker
 PostgreSQL instance with fixture-only credentials; cleanup runs after failures.
 Tokens have read-only repository access, checkouts retain no credentials, and no
@@ -58,6 +66,17 @@ application uploads, native media processing, private delivery, and retention
 against R2 and MinIO. They run on GitHub-hosted machines without deployment
 secrets. A passing automatic `ci-gate` does not imply that a manual lane ran.
 Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
+
+`versioned-contract` runs `bun run cloudflare:check`, then produces and verifies
+the public release artifacts and requests unauthenticated health from the actual
+production API entry in isolated local workerd. The separate
+[contract release workflow](../.github/workflows/contract-release.yml) runs the
+authoritative contract gate, automatic version preparation, artifact corruption/
+version/inventory rejection scenarios and that HTTP smoke on contract pushes.
+Branch runs upload preview artifacts and a source-preparation patch; they cannot
+publish a release. Protected `contract-v*` tags must belong to the default branch's
+history. Only their publishing job receives release write permission. No tag
+protection means publication fails closed; no deployment is performed.
 
 `publishing-flow` runs focused composer/creator-freshness and all five Provider regressions, changed-scope React
 review, the full application gate, documentation links, and browser publication,

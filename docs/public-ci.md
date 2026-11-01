@@ -56,6 +56,21 @@ service cache for each cold observation. Error assertions distinguish policy
 rejection from unrelated authentication failures or server errors. Tests of a
 signed capability's expiry never allow it to outlive the persisted write hold.
 
+The November 2026 test-correctness review exercised the corrected code at
+`8654499` on hosted runners:
+
+| Verification                                                             | Hosted run                                                                      | Outcome                                                          |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Automatic CI, including PostgreSQL and both image architectures          | [41303548942](https://github.com/MeltiplyOrg/meltiply/actions/runs/41303548942) | Passed                                                           |
+| `cloudflare-full`: `bun run cloudflare:check` and provider/browser smoke | [41304074534](https://github.com/MeltiplyOrg/meltiply/actions/runs/41304074534) | Passed                                                           |
+| `frontend-ui`: both frontend checks and browser journeys                 | [41304762488](https://github.com/MeltiplyOrg/meltiply/actions/runs/41304762488) | 710 unit tests and 10 browser tests passed; React Doctor 100/100 |
+| `cloudflare-extended`: release, staging-adapter, and Terraform checks    | [41305370071](https://github.com/MeltiplyOrg/meltiply/actions/runs/41305370071) | Passed                                                           |
+| `performance-media`: native codec and restart smoke                      | [41305486899](https://github.com/MeltiplyOrg/meltiply/actions/runs/41305486899) | 212 assertions and restart replay passed                         |
+
+The changed live-staging browser locator was reviewed against the shared toolbar,
+but was not exercised against a deployed origin: that manual suite requires
+`STAGING_E2E_BASE_URL` and authenticated `STAGING_E2E_STORAGE_STATE`.
+
 The [extended workflow](../.github/workflows/extended.yml) exposes manually
 selected lanes: `frontend-full` for full browser/Lighthouse journeys,
 `frontend-ui` for focused UI verification, `cloudflare-full` for

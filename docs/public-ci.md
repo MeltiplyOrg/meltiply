@@ -14,8 +14,11 @@ Automatic checks run in separate jobs:
 - `frontend-fast`: app formatting, types, bindings, lint, coverage, production
   build, and public-site checks.
 - `cloudflare-fast`: spelling, contracts, Worker bindings, package/Worker types,
-  tests and builds, strict lint, dead code, formatting, drift/routing regressions,
-  local-tooling and release regressions, supply-chain/SBOM policy, costs, and PostgreSQL integration tests.
+  tests and builds, strict lint, dead code, formatting, and PostgreSQL integration
+  tests.
+- `cloudflare-tooling`: all Node tooling suites (including drift/routing checks),
+  shell lifecycle and release regressions, supply-chain/SBOM policy, and costs;
+  runs alongside `cloudflare-fast` under the same routing rule.
 - `selfhost-images`: when production image inputs change, build the three images
   for both amd64 and ARM64 in six parallel native-runner jobs, then smoke the exact
   artifacts on each architecture, including crash recovery and HTTPS. Nothing is
@@ -39,6 +42,9 @@ ancestry conservatively select every lane.
 
 The jobs use Node 24.18.0 and Bun 1.4.2. The database is a disposable local Docker
 PostgreSQL instance with fixture-only credentials; cleanup runs after failures.
+The development-launcher regression replaces sleeps only in its failed-DNS
+fixture, so it exercises all retries without waiting for real DNS propagation.
+Production retry timing and process-lifecycle waits remain unchanged.
 Tokens have read-only repository access, checkouts retain no credentials, and no
 deployment secrets are supplied. Do not execute contributor code through
 `pull_request_target` or persistent self-hosted runners.
@@ -264,6 +270,8 @@ Bun's download store, keyed by runner OS/architecture, Bun version, lockfile,
 workspace configuration, and dependency patches. A compatible download-cache
 fallback avoids re-downloading unchanged packages; installation always uses
 `--frozen-lockfile`. Installed `node_modules` is not cached.
+Frontend-only installation passes `selfhost: "false"` to skip the separate
+self-hosted runtime's npm installation; other callers retain it by default.
 
 Docker layer caches are isolated by component and architecture. The runtime
 Dockerfile installs workspace dependencies from manifests, lockfiles, and patches
@@ -280,6 +288,9 @@ the cache at the first commit. Only type-check/build tasks use task caching;
 tests, integration tests, secret scans, and repository checks execute every time.
 No PostgreSQL state or credentials are cached. GitHub scopes PR caches separately
 from the default branch; cache size and retention remain subject to GitHub limits.
+Worker tests retain per-file isolation and coverage instrumentation. Do not enable
+Vitest's filesystem module cache with the pinned Cloudflare test plugin: a hosted
+trial failed because the Worker runtime tried to read host-only cache paths.
 
 ## Quality tools
 

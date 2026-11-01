@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { TokenCipher } from "../src";
@@ -29,7 +30,11 @@ describe("TokenCipher", () => {
     // GCM tag), prefixed `meltiply:v1:` with no key ID. Reusing this module's
     // own writer would only prove it can read what it writes, not that the
     // legacy layout is understood.
-    const legacy = "meltiply:v1:AAECAwQFBgcICQoLsR5POQIi_L25H3ztNd9m0J7XZrh0mfnxOFIhTQ";
+    const payload = Buffer.from(
+      "000102030405060708090a0bb11e4f390222fcbdb91f7ced35df66d09ed766b87499f9f13852214d",
+      "hex",
+    );
+    const legacy = `meltiply:v1:${payload.toString("base64url")}`;
     const reader = new TokenCipher({
       currentKeyId: "current",
       keys: [

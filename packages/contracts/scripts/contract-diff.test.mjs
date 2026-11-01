@@ -263,6 +263,73 @@ try {
   writeFileSync(eventPath, JSON.stringify({ repository: { default_branch: "master" } }));
   const cumulativePush = ci("push", "refs/heads/master");
   assert.equal(cumulativePush.status, 0, `${cumulativePush.stdout}${cumulativePush.stderr}`);
+
+  // An additive PR after an acknowledged but unreleased break must also cover the release span.
+  fixtureGit("checkout", "--detach", "--force", common);
+  writeFileSync(source, document({}));
+  writeFileSync(notes, "## Unreleased\n");
+  const acknowledgedRemoval = reviewToken(common);
+  writeFileSync(
+    notes,
+    `## Unreleased\n\n- **Breaking:** [${acknowledgedRemoval}] Remove probe; regenerate clients immediately.\n`,
+  );
+  const unreleasedBreak = commit();
+  writeFileSync(join(repository, "unrelated.txt"), "No contract change\n");
+  const unchangedHead = commit();
+  writeFileSync(
+    eventPath,
+    JSON.stringify({
+      pull_request: { base: { sha: unreleasedBreak }, head: { sha: unchangedHead } },
+    }),
+  );
+  const unchangedInherited = ci("pull_request");
+  assert.equal(
+    unchangedInherited.status,
+    0,
+    "an unchanged contract retains the exact cumulative token from its merge base",
+  );
+  writeFileSync(source, document({ "/extra": extra }));
+  const additiveHead = commit();
+  writeFileSync(
+    eventPath,
+    JSON.stringify({
+      pull_request: { base: { sha: unreleasedBreak }, head: { sha: additiveHead } },
+    }),
+  );
+  const additiveAfterBreak = ci("pull_request");
+  const additiveDiagnostic = `${additiveAfterBreak.stdout}${additiveAfterBreak.stderr}`;
+  assert.equal(
+    additiveAfterBreak.status,
+    1,
+    "an additive PR must acknowledge the cumulative release span",
+  );
+  assert.match(
+    additiveDiagnostic,
+    /cumulative changes since contract-v1\.0\.0 are breaking even though the PR diff against .* is additive/,
+  );
+  const cumulativeToken = additiveDiagnostic.match(/contract-change:[a-f0-9]{64}/)?.[0];
+  assert.ok(cumulativeToken);
+  assert.notEqual(cumulativeToken, acknowledgedRemoval);
+  writeFileSync(
+    notes,
+    `## Unreleased\n\n- **Breaking:** [${acknowledgedRemoval}] Remove probe; regenerate clients immediately.\n- **Breaking:** [${cumulativeToken}] The cumulative PR span removes probe; regenerate clients immediately.\n`,
+  );
+  const cumulativeAcknowledged = commit();
+  writeFileSync(
+    eventPath,
+    JSON.stringify({
+      pull_request: { base: { sha: unreleasedBreak }, head: { sha: cumulativeAcknowledged } },
+    }),
+  );
+  const additiveReviewed = ci("pull_request");
+  assert.equal(additiveReviewed.status, 0, `${additiveReviewed.stdout}${additiveReviewed.stderr}`);
+  writeFileSync(eventPath, JSON.stringify({ repository: { default_branch: "master" } }));
+  const cumulativeAdditivePush = ci("push", "refs/heads/master");
+  assert.equal(
+    cumulativeAdditivePush.status,
+    0,
+    `${cumulativeAdditivePush.stdout}${cumulativeAdditivePush.stderr}`,
+  );
   fixtureGit("tag", "-d", "contract-v1.0.0");
   const initial = ci("push", "refs/heads/master");
   assert.equal(initial.status, 0, initial.stderr);
@@ -270,7 +337,7 @@ try {
   writeFileSync(eventPath, "{}");
   assert.equal(ci("pull_request").status, 2, "missing PR ancestry must fail closed, not skip");
   console.log(
-    "Compatibility CLI: additive pass; named field/operation removal rejected; exact fresh review passes; stale/mismatched review and malformed contract rejected.",
+    "Compatibility CLI: additive pass; named field/operation removal rejected; exact fresh review passes; additive PR after an unreleased acknowledged break requires the cumulative token; stale/mismatched review and malformed contract rejected.",
   );
 } finally {
   rmSync(directory, { force: true, recursive: true });

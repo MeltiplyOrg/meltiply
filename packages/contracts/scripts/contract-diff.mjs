@@ -60,7 +60,42 @@ function ciBase() {
   return {};
 }
 
-/** Compares contracts; a fresh breaking bullet must cover both the PR diff and cumulative release span. */
+/**
+ * Runs oasdiff from a baseline file and reports accepted breaking findings.
+ * Returns true for breaking findings; false when compatible. Tool/parser failures throw because
+ * they cannot be waived by a changelog token.
+ */
+function breaking(baseFile, current) {
+  const binary = process.env.OASDIFF_BIN;
+  const args = ["breaking", "--fail-on", "ERR", "--format", "text", baseFile, current];
+  const result = spawnSync(
+    binary ?? "go",
+    binary ? args : ["run", "github.com/oasdiff/oasdiff@v1.17.0", ...args],
+    {
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+    },
+  );
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (process.env.GITHUB_STEP_SUMMARY && (result.stdout || result.stderr)) {
+    appendFileSync(
+      process.env.GITHUB_STEP_SUMMARY,
+      `\n\`\`\`text\n${`${result.stdout}${result.stderr}`.slice(0, 64_000)}\n\`\`\`\n`,
+    );
+  }
+  if (result.error) throw result.error;
+  if (result.status === 0) return false;
+  // oasdiff exits 1 for breaking ERR findings; parser/tool errors cannot be waived.
+  if (result.status !== 1 || !result.stdout.trim())
+    throw new Error(`oasdiff failed (${result.status})`);
+  return true;
+}
+
+/**
+ * Compares contracts. A breaking PR diff and any breaking cumulative release span each require an
+ * exact token in one fresh breaking bullet; identical spans share one token.
+ */
 function main() {
   const ci = process.argv.includes("--ci");
   const explicitBase = option("--base");
@@ -85,47 +120,56 @@ function main() {
   const after = YAML.parse(readFileSync(current, "utf8"));
   if (!before?.paths || !after?.paths || !before?.info || !after?.info)
     throw new Error("Both contracts must be OpenAPI documents");
-  if (contractDigest(before) === contractDigest(after)) {
+  const releasedText = releaseBase
+    ? git("show", `${releaseBase}:packages/contracts/openapi.yaml`)
+    : undefined;
+  const released = releasedText ? YAML.parse(releasedText) : undefined;
+  if (releasedText && (!released?.paths || !released?.info))
+    throw new Error(`Released contract ${releaseBase} must be an OpenAPI document`);
+  const beforeDigest = contractDigest(before);
+  const afterDigest = contractDigest(after);
+  const releasedDigest = released ? contractDigest(released) : undefined;
+  const baseUnchanged = beforeDigest === afterDigest;
+  const cumulativeUnchanged = releasedDigest === undefined || releasedDigest === afterDigest;
+  if (baseUnchanged && cumulativeUnchanged) {
     report(`Contract compatibility: unchanged against ${base}.`);
     return 0;
   }
+  // A release already equal to the merge base has the same semantic diff; avoid a duplicate run.
+  const cumulativeDistinct = releasedDigest !== undefined && releasedDigest !== beforeDigest;
   const directory = mkdtempSync(join(tmpdir(), "meltiply-contract-diff-"));
   try {
     const baseFile = join(directory, "base.yaml");
     writeFileSync(baseFile, baseText);
-    const binary = process.env.OASDIFF_BIN;
-    const args = ["breaking", "--fail-on", "ERR", "--format", "text", baseFile, current];
-    const result = spawnSync(
-      binary ?? "go",
-      binary ? args : ["run", "github.com/oasdiff/oasdiff@v1.17.0", ...args],
-      {
-        encoding: "utf8",
-        maxBuffer: 8 * 1024 * 1024,
-      },
-    );
-    if (result.stdout) process.stdout.write(result.stdout);
-    if (result.stderr) process.stderr.write(result.stderr);
-    if (process.env.GITHUB_STEP_SUMMARY && (result.stdout || result.stderr)) {
-      appendFileSync(
-        process.env.GITHUB_STEP_SUMMARY,
-        `\n\`\`\`text\n${`${result.stdout}${result.stderr}`.slice(0, 64_000)}\n\`\`\`\n`,
-      );
+    const baseBreaking = !baseUnchanged && breaking(baseFile, current);
+    let cumulativeBreaking = false;
+    if (released && !cumulativeUnchanged) {
+      if (cumulativeDistinct) {
+        const releasedFile = join(directory, "released.yaml");
+        writeFileSync(releasedFile, releasedText);
+        cumulativeBreaking = breaking(releasedFile, current);
+      } else {
+        cumulativeBreaking = baseBreaking;
+      }
     }
-    if (result.error) throw result.error;
-    if (result.status === 0) {
-      report(`Contract compatibility: no breaking changes against ${base}.`);
+    if (!baseBreaking && !cumulativeBreaking) {
+      report(
+        baseUnchanged
+          ? `Contract compatibility: unchanged against ${base}.`
+          : `Contract compatibility: no breaking changes against ${base}.`,
+      );
+      if (cumulativeDistinct && !cumulativeUnchanged)
+        report(`Contract compatibility: no breaking changes since ${releaseBase}.`);
       return 0;
     }
-    // oasdiff exits 1 for breaking ERR findings; parser/tool errors cannot be waived.
-    if (result.status !== 1 || !result.stdout.trim())
-      throw new Error(`oasdiff failed (${result.status})`);
-    const token = breakingReviewToken(before, after);
-    const tokens = [token];
-    if (releaseBase) {
-      const released = YAML.parse(git("show", `${releaseBase}:packages/contracts/openapi.yaml`));
-      const cumulativeToken = breakingReviewToken(released, after);
-      if (cumulativeToken !== token) tokens.push(cumulativeToken);
+    if (cumulativeBreaking && !baseBreaking) {
+      report(
+        `Contract compatibility: cumulative changes since ${releaseBase} are breaking even though the PR diff against ${base} is ${baseUnchanged ? "unchanged" : "additive"}.`,
+      );
     }
+    const baseToken = baseBreaking ? breakingReviewToken(before, after) : undefined;
+    const cumulativeToken = cumulativeBreaking ? breakingReviewToken(released, after) : undefined;
+    const tokens = [...new Set([baseToken, cumulativeToken].filter(Boolean))];
     const changelog = readFileSync(
       resolve(option("--changelog") ?? "packages/contracts/CHANGELOG.md"),
       "utf8",
@@ -154,7 +198,9 @@ function main() {
             bullet,
           ).length > 40,
       );
-    if (acknowledged && !previous.includes(token)) {
+    // The PR-diff token must be new. An unchanged PR may inherit the exact cumulative token
+    // already present at its merge base; a different target always produces a different token.
+    if (acknowledged && (!baseToken || !previous.includes(baseToken))) {
       report(
         `Contract compatibility: intentional breaking change reviewed in CHANGELOG.md ${tokens.map((required) => `[${required}]`).join(" ")}.`,
       );

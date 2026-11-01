@@ -78,10 +78,14 @@ edit. The prepared release's versioned changelog section is also eligible, so
 version preparation does not discard the review. Reviewers must still judge the
 migration and window; the token proves scope and freshness, not human approval.
 
-For a breaking PR, when the target branch has a reachable contract release, the
-same bullet must contain both the PR merge-base token and the cumulative
-release-tag-to-head token printed by CI. Separate bullets cannot combine their
-acknowledgements. Without a prior release only the merge-base token applies.
+When the target branch has a reachable contract release, CI also compares that
+release with the PR head. If the cumulative release span is breaking, the PR must
+carry its release-to-head token even when the PR's own merge-base diff is additive;
+this keeps an unreleased break acknowledged for every target until publication.
+Changing the contract produces a new cumulative token, while an unchanged contract
+retains the exact existing one. If the PR diff is breaking too, one bullet must
+contain both the merge-base and cumulative tokens; separate bullets cannot combine
+their acknowledgements. Without a prior release only the merge-base token applies.
 Default-branch validation still compares against the latest release tag.
 
 For a removal, first publish its deprecation and announce the earliest removal

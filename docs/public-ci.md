@@ -42,8 +42,11 @@ ancestry conservatively select every lane.
 
 The Cloudflare lane's existing `bun run contract:check` compares API contracts
 against the PR merge base, or the previous reachable `contract-v*` release on a
-default-branch push. Missing initial-release baselines are explicitly reported.
-Its job summary includes compatibility impact and operation/field diagnostics.
+default-branch push. PRs with a reachable release also compare that release with
+the PR head, so an additive PR cannot pass while an unreleased break remains
+acknowledged only for an earlier target. Missing initial-release baselines are
+explicitly reported. Its job summary includes compatibility impact and
+operation/field diagnostics.
 An intentional break needs a fresh changelog review token bound to the exact
 base/target contract pair, not an unrelated historical breaking entry. See the
 [contract upgrade and release procedure](../packages/contracts/README.md).

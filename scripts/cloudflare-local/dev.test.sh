@@ -608,13 +608,22 @@ export MELTIPLY_CLOUDFLARED_BIN="$fixture/bin/cloudflared"
 # The connector reports success for everything, exactly as it does when a record
 # lands in the wrong Cloudflare account. Only the DNS check can catch that.
 export FIXTURE_DNS_OK=0
+# Only the DNS-failure run replaces sleeping: exercise the full retry budget
+# without waiting for real DNS propagation or changing production retry timing.
+mkdir -p "$fixture/dns-bin"
+cat >"$fixture/dns-bin/sleep" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'dns-retry-delay %s\n' "$*" >>"${COMMAND_LOG:?}"
+EOF
+chmod +x "$fixture/dns-bin/sleep"
 reset_run_state
 : >"$COMMAND_LOG"
 log_file="$fixture/dev-dns-missing.log"
 set +e
 (
   cd "$fixture"
-  PATH="$LAUNCHER_PATH" \
+  PATH="$fixture/dns-bin:$LAUNCHER_PATH" \
     BUN="$fixture/bin/bun" \
     WRANGLER_DEV_PORT=9911 \
     FRONTEND_DEV_PORT=9912 \
@@ -629,6 +638,8 @@ set -e
 expect_contains "$log_file" "does not" dns-not-resolving
 expect_contains "$log_file" "cloudflared tunnel login" dns-remedy
 expect_contains "$log_file" "propagate" dns-propagation-hint
+retry_delays="$(grep -c '^dns-retry-delay ' "$COMMAND_LOG")"
+[[ "$retry_delays" == "15" ]] || fail "expected 15 DNS retry delays, got $retry_delays"
 # A dead public URL is worse than no tunnel: nothing may boot.
 [[ ! -e "$fixture/frontend.started" ]] || fail "services booted with an unresolvable tunnel"
 [[ ! -d "$fixture/.wrangler/logs/named-tunnel.log" ]] ||

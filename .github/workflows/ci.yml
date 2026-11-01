@@ -67,6 +67,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
+        with:
+          selfhost: "false"
       - name: Format, type, bindings, lint, coverage, and production builds
         run: |
           bun run --cwd frontend/app format-check
@@ -109,6 +111,13 @@ jobs:
           key: vite-v1-${{ runner.os }}-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock', 'bunfig.toml', 'package.json', 'patches/**') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             vite-v1-${{ runner.os }}-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock', 'bunfig.toml', 'package.json', 'patches/**') }}-
+      - name: Restore Worker test transforms
+        uses: actions/cache@v5
+        with:
+          path: node_modules/.vitest-cache
+          key: vitest-v1-${{ runner.os }}-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock', 'bunfig.toml', 'package.json', 'patches/**', '**/vitest*.ts', '**/wrangler*.jsonc', 'vite.config.ts', 'scripts/lib/vitest-offline-collector.ts') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vitest-v1-${{ runner.os }}-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock', 'bunfig.toml', 'package.json', 'patches/**', '**/vitest*.ts', '**/wrangler*.jsonc', 'vite.config.ts', 'scripts/lib/vitest-offline-collector.ts') }}-
       - name: Type-check, test, and build packages and Workers
         run: |
           bunx vp run --cache --filter './packages/*' --filter './workers/*' --concurrency-limit 1 type-check
@@ -129,21 +138,6 @@ jobs:
           bunx --no-install vp fmt .github/workflows/ci.yml .github/workflows/selfhost.yml .github/workflows/selfhost-ci.yml .github/actions/install-workspace/action.yml scripts/selfhost compose.selfhost.yml docs/public-ci.md --check
           git diff --exit-code -- packages/contracts
           bun run test:ci-routing
-      - name: Local tooling, release, and supply-chain contracts
-        run: |
-          bun run test:local-setup
-          bun run test:available-port
-          bun run test:wrangler-env
-          bun run test:teardown
-          bun run test:dev
-          bun run test:quick-tunnel
-          bun run test:tunnel-hostname
-          bun run test:doctor
-          bun run test:k6-runner
-          bun run release:test
-          bun run test:supply-chain
-          bun run security:supply-chain
-          bun run cost:check
       - name: PostgreSQL integration tests
         env:
           MELTIPLY_DATABASE_TEST_URL: postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable
@@ -153,13 +147,40 @@ jobs:
         if: always()
         run: ./scripts/cloudflare-local/database.sh stop
 
+  cloudflare-tooling:
+    needs: changes
+    if: needs.changes.outputs.cloudflare == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-workspace
+      - name: Development launcher lifecycle
+        run: bun run test:dev
+      - name: Local tooling, release, and supply-chain contracts
+        run: |
+          bun run test:local-setup
+          bun run test:available-port
+          bun run test:wrangler-env
+          bun run test:teardown
+          bun run test:quick-tunnel
+          bun run test:tunnel-hostname
+          bun run test:doctor
+          bun run test:k6-runner
+          bun run release:test
+          bun run test:supply-chain
+          bun run security:supply-chain
+          bun run cost:check
+
   selfhost-images:
     needs: changes
     if: needs.changes.outputs.selfhost == 'true'
     uses: ./.github/workflows/selfhost-ci.yml
 
   ci-gate:
-    needs: [changes, baseline, frontend-fast, cloudflare-fast, selfhost-images]
+    needs: [changes, baseline, frontend-fast, cloudflare-fast, cloudflare-tooling, selfhost-images]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -172,6 +193,7 @@ jobs:
           FRONTEND: ${{ needs.frontend-fast.result }}
           CLOUDFLARE_SELECTED: ${{ needs.changes.outputs.cloudflare }}
           CLOUDFLARE: ${{ needs.cloudflare-fast.result }}
+          CLOUDFLARE_TOOLING: ${{ needs.cloudflare-tooling.result }}
           SELFHOST_SELECTED: ${{ needs.changes.outputs.selfhost }}
           SELFHOST_IMAGES: ${{ needs.selfhost-images.result }}
         run: |
@@ -189,6 +211,8 @@ jobs:
           fi
           if [ "$CLOUDFLARE_SELECTED" = true ]; then
             test "$CLOUDFLARE" = success
+            test "$CLOUDFLARE_TOOLING" = success
           else
             test "$CLOUDFLARE" = skipped
+            test "$CLOUDFLARE_TOOLING" = skipped
           fi

@@ -186,7 +186,10 @@ describe("provider media resolver", () => {
         transferMode: "remote_ingest",
       }),
     ).rejects.toThrow("object key is invalid");
-    expect(head).not.toHaveBeenCalled();
+    // The promoted request above read metadata once; the rejected staging key
+    // must not add a second read.
+    expect(head).toHaveBeenCalledTimes(1);
+    expect(head).toHaveBeenCalledWith("org-1/asset-1/rendition.webp");
   });
 
   /**

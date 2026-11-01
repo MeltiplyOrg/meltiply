@@ -349,9 +349,7 @@ function facebookOptionsField(value: unknown): NonNullable<PostProviderOptions["
   return {
     ...(postType !== undefined ? { postType: postType as FacebookPostType } : {}),
     ...(link !== undefined ? { link } : {}),
-    ...(facebook.is_ai_generated !== undefined
-      ? { isAiGenerated: facebook.is_ai_generated as boolean }
-      : {}),
+    ...(facebook.is_ai_generated !== undefined ? { isAiGenerated: facebook.is_ai_generated } : {}),
   };
 }
 
@@ -714,7 +712,7 @@ function youtubeOptionsField(value: unknown): NonNullable<PostProviderOptions["y
     instants.some(
       (key) =>
         youtube[key] !== undefined &&
-        (typeof youtube[key] !== "string" || Number.isNaN(Date.parse(youtube[key] as string))),
+        (typeof youtube[key] !== "string" || Number.isNaN(Date.parse(youtube[key]))),
     )
   ) {
     throw new CoreApiError(400, "validation_error", "provider_options.youtube is invalid.");

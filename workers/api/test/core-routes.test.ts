@@ -394,8 +394,17 @@ describe("core API routes", () => {
       body: { brand_profile_id: brandProfileId, default_text: 42 },
     },
     {
+      // A malformed field (file_size must be a positive safe integer) so the
+      // case fails on the typed boundary rather than on a merely absent field.
       path: "/api/v1/asset-upload-sessions",
-      body: { asset_type: "image", brand_profile_id: brandProfileId },
+      body: {
+        asset_type: "image",
+        brand_profile_id: brandProfileId,
+        content_type: "image/png",
+        file_size: "1024",
+        filename: "launch.png",
+        title: "Launch image",
+      },
     },
   ])("keeps malformed $path fields on the typed 400 boundary", async ({ path, body }) => {
     const app = authenticatedApp(service(), {
@@ -539,9 +548,12 @@ describe("core API routes", () => {
   it("creates a text-only Post draft with no Channel selection", async () => {
     const app = authenticatedApp(service(), {
       postService: postService({
+        // A first create is a fresh outcome. Replay is proven by the service's
+        // own idempotency ledger in the integration suites; asserting a header
+        // whose value this double supplies would prove nothing about replay.
         createPost: () =>
           Effect.succeed({
-            replayed: true,
+            replayed: false,
             value: { ...post, attachments: [], targets: [] },
           }),
       }),
@@ -565,7 +577,7 @@ describe("core API routes", () => {
     );
 
     expect(response.status).toBe(201);
-    expect(response.headers.get("Idempotency-Replayed")).toBe("true");
+    expect(response.headers.get("Idempotency-Replayed")).toBeNull();
     await expect(response.json()).resolves.toEqual({
       ...post,
       attachments: [],
@@ -652,8 +664,9 @@ describe("core API routes", () => {
   });
 
   // Explicit TikTok publishing choices are saved on a Post target before any
-  // scheduling, so an accepted payload must survive as durable target
-  // settings while a contradictory combination is refused at the boundary.
+  // scheduling. The boundary rule under test is the mandatory music-usage
+  // confirmation: it is the one field the negative case below leaves false, so
+  // a refusal there is attributable to that rule and not to an unrelated field.
   it("saves explicit TikTok publishing choices on a Post target", async () => {
     const saved: components["schemas"]["Post"] = {
       ...post,
@@ -1908,7 +1921,7 @@ describe("core API routes", () => {
     });
   });
 
-  it("requires idempotency and exposes replay for accepted replies", async () => {
+  it("requires an Idempotency-Key and accepts one reply", async () => {
     const comment = {
       author_avatar: null,
       author_name: "Viewer",
@@ -1926,9 +1939,12 @@ describe("core API routes", () => {
       synced_at: "2026-01-01T00:00:00.000Z",
       updated_at: "2026-01-01T00:00:00.000Z",
     };
+    // A fresh accepted reply, not a replay: the replayed flag is owned by the
+    // service's idempotency ledger, so a value supplied by this double would
+    // assert nothing about replay behavior.
     const replyToComment = vi.fn(() =>
       Effect.succeed({
-        replayed: true,
+        replayed: false,
         value: comment,
       }),
     );
@@ -1965,7 +1981,7 @@ describe("core API routes", () => {
       env,
     );
     expect(accepted.status).toBe(202);
-    expect(accepted.headers.get("Idempotency-Replayed")).toBe("true");
+    expect(accepted.headers.get("Idempotency-Replayed")).toBeNull();
     expect(replyToComment).toHaveBeenCalledWith(
       env,
       session,
@@ -2142,10 +2158,14 @@ describe("core API routes", () => {
       path: "/api/v1/asset-upload-sessions",
     },
     {
+      // asset_type is present so the earlier asset_type guard cannot satisfy
+      // this case; the missing brand_profile_id is the only remaining refusal.
       body: {
+        asset_type: "image",
         content_type: "image/png",
         file_size: 1024,
         filename: "launch.png",
+        title: "Launch image",
       },
       method: "POST",
       path: "/api/v1/asset-upload-sessions",
@@ -2270,9 +2290,21 @@ describe("core API routes", () => {
       redirect_path: "/channels",
       user_id: actor.userId,
     });
+    // The challenge must be the S256 digest of the verifier handed to the
+    // Provider, not just any 43-character string: recomputing it here rejects a
+    // mutant that mints an unrelated challenge, which would break the token
+    // exchange while two independent wildcards would still have passed.
+    const verifierDigest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(record.pkce_verifier as string),
+    );
+    const expectedChallenge = btoa(String.fromCharCode(...new Uint8Array(verifierDigest)))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
     expect(record.expires_at).toBeGreaterThan(Date.now());
     expect(authorizationUrl).toHaveBeenCalledWith({
-      codeChallenge: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+      codeChallenge: expectedChallenge,
       redirectUri: "http://localhost:3000/api/v1/platforms/threads/callback",
       state,
     });
@@ -2941,7 +2973,11 @@ describe("OAuth Page selection flow", () => {
 
   it("GET /api/v1/oauth-selections/:selectionId returns 404 for wrong, foreign, or expired tickets", async () => {
     const routingKey = await oauthStateRoutingKey(actor.workspace.id);
-    const foreignKey = "foreignroutingkey";
+    // A canonical 22-character routing key from another workspace: it must
+    // satisfy OAUTH_ROUTING_KEY_PATTERN so the foreign-key guard is the only
+    // thing that can reject it. A short fixture would fail the pattern and be
+    // refused later by the missing-selection guard instead.
+    const foreignKey = "foreign-routing-key-01";
     const getSelection = vi.fn(async () => null);
     const oauthEnv: ApiWorkerEnv = {
       ...env,
@@ -3039,7 +3075,11 @@ describe("OAuth Page selection flow", () => {
     );
   });
 
-  it("POST /api/v1/oauth-selections/:selectionId/confirm replays 204 on identical idempotency key and account without re-saving", async () => {
+  // Replay is decided by the OAuth-state Durable Object, and it reports it by
+  // claiming without returning a connection. This route's own responsibility is
+  // the mapping: a replay claim must answer 204, mark the header, and never
+  // re-save. The DO's ledger itself is exercised in the automation suites.
+  it("maps a replayed selection claim to 204 without re-saving the connection", async () => {
     const routingKey = await oauthStateRoutingKey(actor.workspace.id);
     const selectionId = `${routingKey}.validnonce1234567890`;
     const claimSelection = vi.fn(async () => ({
@@ -3501,7 +3541,12 @@ describe("provider media delivery route", () => {
     const unsigned = `/api/v1/provider-media/${mediaKey}?expires=${future}`;
     for (const url of [tampered, expired, unsigned]) {
       const response = await app.request(url, {}, providerMediaEnv(get));
+      // Pinning the machine code keeps this insensitive to an unrelated 403
+      // (auth middleware, origin policy) standing in for signature rejection.
       expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "media_url_invalid" },
+      });
     }
     expect(get).not.toHaveBeenCalled();
   });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { afterEach, test } from "node:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,14 +39,40 @@ function fixture({ en, es, glossary }) {
 }
 
 /**
- * Runs the wrapper against a fixture locale root in a child process.
+ * Runs the wrapper against a fixture locale root in a child process, inside a
+ * throwaway checkout holding copies of the wrapper and its helpers. The wrapper
+ * resolves both `--locks` and its default locale root from its own file
+ * location, so a copy is what keeps the run independent of the repository's
+ * committed `.shipi18n/locks.json`; the fixture supplies its own locks there.
  *
  * @param {string} root Fixture locale tree.
  * @returns {import("node:child_process").SpawnSyncReturns<string>}
  */
 function runCheck(root) {
-  return spawnSync(process.execPath, [checkScript, root], {
-    cwd: repositoryRoot,
+  const checkout = mkdtempSync(join(tmpdir(), "meltiply-i18n-checkout-"));
+  temporaryRoots.push(checkout);
+  const scripts = join(checkout, "scripts", "i18n");
+  mkdirSync(scripts, { recursive: true });
+  for (const name of ["check.mjs", "glossary.mjs", "shipi18n.mjs"]) {
+    copyFileSync(fileURLToPath(new URL(name, import.meta.url)), join(scripts, name));
+  }
+  // `shipi18n.mjs` resolves the CLI through Node's module paths from the copy.
+  symlinkSync(join(repositoryRoot, "node_modules"), join(checkout, "node_modules"), "dir");
+  mkdirSync(join(checkout, ".shipi18n"), { recursive: true });
+  writeFileSync(
+    join(checkout, ".shipi18n", "locks.json"),
+    JSON.stringify({
+      version: 1,
+      locked: {
+        // Deliberately disagrees with the fixture translation: locks may only
+        // warn, so a clean tree must still pass and repository lock state can
+        // never decide this test's outcome.
+        "es::ui::Hello": { sourceHash: "0".repeat(16), translationHash: "1".repeat(16) },
+      },
+    }),
+  );
+  return spawnSync(process.execPath, [join(scripts, "check.mjs"), root], {
+    cwd: checkout,
     encoding: "utf8",
   });
 }

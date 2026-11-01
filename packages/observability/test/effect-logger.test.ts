@@ -1,7 +1,23 @@
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { Effect } from "effect";
 
 import { effectLoggerLayer, type LogContext } from "../src";
+
+// Every case logs with `environment: "test"`, which makes the sink attempt a
+// local Loki push. Stub the transport so the suite never performs real
+// network I/O, and restore centrally so a failing assertion cannot leave
+// `console.*`/`fetch` mocked for the cases after it.
+beforeEach(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(null, { status: 204 })),
+  );
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("Effect Observability Logger Integration", () => {
   it("routes Effect.log calls to Meltiply structured log with context and redaction", async () => {
@@ -44,15 +60,22 @@ describe("Effect Observability Logger Integration", () => {
     };
 
     const program = Effect.gen(function* () {
-      yield* Effect.logError("auth_failure");
+      yield* Effect.logError("auth_failure").pipe(
+        Effect.annotateLogs({ access_token: "provider-access-secret" }),
+      );
     }).pipe(Effect.provide(effectLoggerLayer(context)));
 
     await Effect.runPromise(program);
 
     expect(consoleSpy).toHaveBeenCalledTimes(1);
-    const logged = JSON.parse(String(consoleSpy.mock.calls[0]?.[0]));
+    const line = String(consoleSpy.mock.calls[0]?.[0]);
+    const logged = JSON.parse(line);
     expect(logged.level).toBe("error");
     expect(logged.context.event).toBe("auth_failure");
+    // The claim in this case's name is redaction, so the annotation carrying a
+    // credential must reach the line masked rather than verbatim.
+    expect(logged.context.access_token).toBe("[REDACTED]");
+    expect(line).not.toContain("provider-access-secret");
 
     consoleSpy.mockRestore();
   });
@@ -102,7 +125,11 @@ describe("Effect Observability Logger Integration", () => {
       version: "1.0.0",
     };
 
-    const error = new Error("Connection timeout");
+    const error = Object.assign(new Error("Connection timeout"), {
+      // The case name promises the code is bridged; without a code on the
+      // thrown value the `error_code` branch is never reached.
+      code: "database_timeout",
+    });
     error.name = "DatabaseTimeoutError";
 
     const program = Effect.gen(function* () {
@@ -115,6 +142,8 @@ describe("Effect Observability Logger Integration", () => {
     const logged = JSON.parse(String(consoleSpy.mock.calls[0]?.[0]));
     expect(logged.level).toBe("error");
     expect(logged.context.event).toBe("database_failed");
+    expect(logged.context.error_code).toBe("database_timeout");
+    expect(logged.context.outcome).toBe("failure");
     expect(logged.error.name).toBe("DatabaseTimeoutError");
     expect(logged.error.message).toBe("Connection timeout");
     expect(logged.error.stack).toContain("DatabaseTimeoutError: Connection timeout");

@@ -14,7 +14,8 @@ const refreshedJwt = "session-jwt-2";
 function sessionResponse(jwt: string): Response {
   return new Response(
     JSON.stringify({
-      session: { expiresAt: new Date().toISOString(), id: "session-1", userId: "user-1" },
+      // A valid session: an already-expired one would exercise the refresh path instead.
+      session: { expiresAt: "2099-07-18T16:00:00.000Z", id: "session-1", userId: "user-1" },
       user: { email: "user@example.com", id: "user-1" },
     }),
     {

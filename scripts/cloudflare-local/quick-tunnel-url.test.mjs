@@ -53,12 +53,16 @@ function runScript(args) {
  * waiting on a log that is still being written.
  *
  * @param {string[]} args Arguments passed to the script.
+ * @param {string[]} nodeArgs Optional Node preload flags, before the CLI entry.
  * @returns {Promise<{stdout: string}>} Resolves with the captured origin.
  */
-function execFileAsync(args) {
+function execFileAsync(args, nodeArgs = []) {
   return new Promise((resolve, reject) => {
-    execFile(process.execPath, [scriptPath, ...args], { encoding: "utf8" }, (error, stdout) =>
-      error ? reject(error) : resolve({ stdout }),
+    execFile(
+      process.execPath,
+      [...nodeArgs, scriptPath, ...args],
+      { encoding: "utf8" },
+      (error, stdout) => (error ? reject(error) : resolve({ stdout })),
     );
   });
 }
@@ -101,13 +105,32 @@ describe("quick-tunnel-url", () => {
     const directory = scratchDirectory();
     const log = join(directory, "cloudflared.log");
     writeFileSync(log, "INF Requesting new quick Tunnel on trycloudflare.com...\n");
-    // The connector only prints the hostname seconds after start, so the
-    // helper must poll rather than read once and give up.
-    setTimeout(() => {
-      writeFileSync(log, "INF | https://delayed-tunnel-host.trycloudflare.com |\n", { flag: "a" });
-    }, 750);
+    // Publish only after the helper's first real read has returned URL-free
+    // contents. A startup timer could fire before a slow child even reads once,
+    // allowing a broken read-once implementation to pass.
+    const preload = join(directory, "publish-after-read.mjs");
+    writeFileSync(
+      preload,
+      `import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+const read = fs.readFileSync;
+let published = false;
+fs.readFileSync = function(path, ...args) {
+  const contents = read.call(this, path, ...args);
+  if (path === ${JSON.stringify(log)} && !published) {
+    published = true;
+    fs.appendFileSync(path, "INF | https://delayed-tunnel-host.trycloudflare.com |\\n");
+  }
+  return contents;
+};
+syncBuiltinESMExports();
+`,
+    );
 
-    const { stdout } = await execFileAsync(["--log", log, "--timeout", "10"]);
+    const { stdout } = await execFileAsync(
+      ["--log", log, "--timeout", "10"],
+      ["--import", preload],
+    );
 
     assert.equal(stdout, "https://delayed-tunnel-host.trycloudflare.com\n");
   });

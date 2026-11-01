@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Effect } from "effect";
+import { Effect, Cause } from "effect";
 import { DatabaseError, InvalidRequestError } from "@meltiply/domain";
 
 import {
@@ -27,7 +27,9 @@ class FakeClient implements TransactionClient {
     if (text === "COMMIT" && this.failCommit) throw new Error("commit failed");
     if (this.failQuery && text !== "BEGIN" && text !== "COMMIT" && text !== "ROLLBACK")
       throw new Error("query failed");
-    return { rows: [] as Row[] } as never;
+    // Mirrors node-postgres' QueryResult so callers can read any field the real
+    // driver returns instead of only `rows`.
+    return { command: "SELECT", fields: [], oid: 0, rowCount: 0, rows: [] as Row[] };
   }
 
   release(destroy = false) {
@@ -95,13 +97,19 @@ describe("Effect database transactions and DatabaseService", () => {
 
   it("withTransactionEffect rolls back and preserves error on failure", async () => {
     const client = new FakeClient();
+    const operationError = new Error("operation error");
     const failureExit = await Effect.runPromiseExit(
       withTransactionEffect({ connect: async () => client }, (tx) =>
-        tx.query("SELECT 1").pipe(Effect.flatMap(() => Effect.fail(new Error("operation error")))),
+        tx.query("SELECT 1").pipe(Effect.flatMap(() => Effect.fail(operationError))),
       ),
     );
 
     expect(failureExit._tag).toBe("Failure");
+    // "Preserves error" is the claim, so the caller must still observe the
+    // original failure rather than a rollback or transaction error.
+    if (failureExit._tag === "Failure") {
+      expect(Cause.squash(failureExit.cause)).toBe(operationError);
+    }
     expect(client.calls).toEqual([
       { text: "BEGIN", values: undefined },
       { text: "SELECT 1", values: undefined },

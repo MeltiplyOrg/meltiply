@@ -1178,15 +1178,18 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
     });
   });
 
-  it("holds frozen media while a stalled attempt awaits reconciliation", async () => {
+  it("no-ops a publish delivery whose attempt the row records as in flight", async () => {
     const publish = vi.fn(async () => ({
       outcome: "confirmed_success" as const,
       providerPostId: "must-not-publish",
     }));
     const eventId = eventIds[2]!;
 
-    // An in-flight publish that was lost mid-attempt must not be republished,
-    // and its media must stay held while reconciliation owns the outcome.
+    // A publish trigger on a row that already records an attempt in flight is
+    // a no-op: the provider side effect is unknown, so the delivery must never
+    // reach the adapter. The intent, its frozen media, and its lease below are
+    // the durable evidence of that lost attempt, and the recovery test that
+    // follows reads them.
     await expect(
       Effect.runPromise(
         processDistributionMessage(env, publishMessage(eventId, leaseRecoveryDistributionId), {
@@ -1293,25 +1296,9 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
         ],
       ),
     );
-
-    const held = await mediaHolds(leaseRecoveryDistributionId);
-    expect(held).toEqual([
-      {
-        asset_id: secondAssetId,
-        media_hold_until: expect.any(Date),
-        object_key: secondRenditionKey,
-        operation: "publish",
-        position: 0,
-      },
-    ]);
-    expect(held[0]!.media_hold_until!.getTime()).toBeGreaterThan(Date.now());
   });
 
-  it("recovers a stalled attempt through reconciliation without republishing", async () => {
-    const publish = vi.fn(async () => ({
-      outcome: "confirmed_success" as const,
-      providerPostId: "must-not-publish",
-    }));
+  it("recovers a stalled attempt through a reconciliation trigger, never a second publish", async () => {
     const eventId = eventIds[2]!;
 
     await runSystemTransaction(env, (client) =>
@@ -1331,6 +1318,8 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       ),
     );
 
+    // The scan is workspace-global, so its total may include other fixtures;
+    // the per-row evidence below is what proves this stalled row was claimed.
     await expect(Effect.runPromise(enqueueDueDistributions(env))).resolves.toBeGreaterThanOrEqual(
       1,
     );
@@ -1353,10 +1342,35 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       );
       return result.rows[0];
     });
+    // Exactly one reconcile trigger was armed: a duplicate-arming regression
+    // would leave two live events and still satisfy the scan's total.
+    const reconcileEvents = await runSystemTransaction(env, (client) =>
+      client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM outbox_events
+          WHERE aggregate_id = $1 AND topic = 'distribution.reconcile.requested'`,
+        [leaseRecoveryDistributionId],
+      ),
+    );
+    expect(reconcileEvents.rows[0]?.count).toBe("1");
+    // Recovery must not release the attempt's retrieval hold: the bytes may
+    // still be in flight at the Provider, so the hold stays until it lapses.
+    const held = await mediaHolds(leaseRecoveryDistributionId);
+    expect(held.map((row) => row.object_key)).toEqual([secondRenditionKey]);
+    expect(held[0]!.media_hold_until!.getTime()).toBeGreaterThan(Date.now());
+    // The stalled row is armed for reconciliation and carries none of the
+    // evidence a republish would need: no second publish command exists for it.
     expect(recovered?.status).toBe("needs_reconciliation");
     expect(recovered?.failure_code).toBe("provider_outcome_ambiguous");
     expect(recovered?.topic).toBe("distribution.reconcile.requested");
-    expect(publish).not.toHaveBeenCalled();
+    const publishCommands = await runSystemTransaction(env, (client) =>
+      client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM outbox_events
+          WHERE aggregate_id = $1 AND topic = 'distribution.publish.requested'
+            AND state IN ('pending', 'leased')`,
+        [leaseRecoveryDistributionId],
+      ),
+    );
+    expect(publishCommands.rows[0]?.count).toBe("0");
   });
 
   it("freezes the approved JPEG when the smaller ready WEBP is undeliverable", async () => {

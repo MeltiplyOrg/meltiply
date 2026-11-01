@@ -1022,54 +1022,44 @@ describe("browser verification and consent ownership", () => {
     expect(Number(sessionsAfter.rows[0]?.count)).toBe(Number(sessionsBefore.rows[0]?.count) + 1);
   });
 
-  it("redeems a grant approved after the poll observed it as pending", async () => {
+  it("mints a session only once a poll that observed the grant pending is followed by approval", async () => {
     const browser = await signIn(gammaEmail);
     const { body } = await issueDeviceCode();
     const userCode = stringField(body, "user_code");
     const deviceCode = stringField(body, "device_code");
     expect((await verifyDeviceCode(browser.cookie, userCode)).status).toBe(200);
 
-    // Approval can land after the wrapper reads the pending state but before
-    // Better Auth's own state read. The wrapped handler reproduces that exact
-    // interleaving through the real plugin and token endpoint.
-    const productionAuth = await betterAuthFor(env);
-    const approvingApp = createApiApp({
-      betterAuth: {
-        handler: async (request) => {
-          if (new URL(request.url).pathname === "/api/auth/device/token") {
-            await systemPoolFor(env).query(
-              `UPDATE "deviceCode" SET status = 'approved', "userId" = $2
-               WHERE "userCode" = $1 AND status = 'pending'`,
-              [userCode, browser.userId],
-            );
-          }
-          return productionAuth.handler(request);
-        },
-        ...(productionAuth.getSession ? { getSession: productionAuth.getSession } : {}),
-      },
-    });
-    const response = await approvingApp.request(
-      `${authOrigin}/api/auth/device/token`,
-      {
-        body: JSON.stringify({
-          client_id: "melti-cli",
-          device_code: deviceCode,
-          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-        }),
-        headers: {
-          "CF-Connecting-IP": randomIp(),
-          "Content-Type": "application/json",
-          Origin: appOrigin,
-        },
-        method: "POST",
-      },
-      env,
+    // The poll below genuinely runs while the grant is still pending: the
+    // production token wrapper reads the row, finds no approved grant, and the
+    // plugin answers authorization_pending. No session may be minted here.
+    const sessionsBefore = await systemPoolFor(env).query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "session" WHERE "userId" = $1`,
+      [gammaAuthUserId],
     );
+    const pendingPoll = await redeemDeviceCode(deviceCode);
+    expect(pendingPoll.status).toBe(400);
+    expect(await deviceError(pendingPoll)).toMatchObject({ error: "authorization_pending" });
+    const afterPending = await systemPoolFor(env).query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "session" WHERE "userId" = $1`,
+      [gammaAuthUserId],
+    );
+    expect(afterPending.rows[0]?.count).toBe(sessionsBefore.rows[0]?.count);
+
+    // Approval lands after that poll observed the pending state. The next poll
+    // must redeem the same grant exactly once.
+    expect((await decideDeviceCode(browser.cookie, "approve", userCode)).status).toBe(200);
+    await advanceTokenPollingWindow();
+    const response = await redeemDeviceCode(deviceCode);
     expect(response.status, "device token exchange").toBe(200);
     const accessToken = stringField(recordOf(await response.json()), "access_token");
     const session = await getSessionWithBearer(accessToken);
     expect(session.status).toBe(200);
     expect(stringField(recordOf(recordOf(await session.json()).user), "email")).toBe(gammaEmail);
+    const afterApproval = await systemPoolFor(env).query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "session" WHERE "userId" = $1`,
+      [gammaAuthUserId],
+    );
+    expect(Number(afterApproval.rows[0]?.count)).toBe(Number(sessionsBefore.rows[0]?.count) + 1);
   });
 });
 

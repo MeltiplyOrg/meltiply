@@ -503,26 +503,10 @@ describe("createThreadsAdapter", () => {
     });
   });
 
-  it("rejects publication when child container discriminator is omitted or wrong", async () => {
-    const strictResponder = strictThreadsContainer("item-1");
-
-    // Rejects child item container when media_type discriminator is omitted
-    const omittedUrl = new URL(
-      "https://graph.threads.com/me/threads?is_carousel_item=true&image_url=https://assets.example/one.jpg",
-    );
-    const omittedResponse = await strictResponder(omittedUrl, {
-      method: "POST",
-    });
-    expect(omittedResponse.status).toBe(400);
-
-    // Rejects child item container when media_type discriminator is wrong/mismatched
-    const wrongUrl = new URL(
-      "https://graph.threads.com/me/threads?is_carousel_item=true&media_type=VIDEO&image_url=https://assets.example/one.jpg",
-    );
-    const wrongResponse = await strictResponder(wrongUrl, { method: "POST" });
-    expect(wrongResponse.status).toBe(400);
-
-    // Remote provider rejection surfaces as a ProviderAdapterError and halts on the first failed child
+  // A rejected item container must stop the carousel where it failed: the
+  // provider error surfaces unchanged and no later item or parent container is
+  // created, so a partially created carousel never looks publishable.
+  it("surfaces a provider rejection and halts carousel creation on the first failed item", async () => {
     const providerCalls = sequence(() =>
       json(
         {
@@ -897,6 +881,7 @@ describe("createThreadsAdapter", () => {
   it("refreshes a Threads long-lived access token", async () => {
     const providerCalls = sequence((url) => {
       expect(url.origin).toBe("https://graph.threads.com");
+      expect(url.searchParams.get("grant_type")).toBe("th_refresh_token");
       expect(url.searchParams.get("access_token")).toBe("current-long-token");
       return json({
         access_token: "refreshed-long-token",

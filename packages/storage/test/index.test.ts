@@ -12,6 +12,37 @@ import {
   type R2BucketLike,
 } from "../src";
 
+/**
+ * Resolves an Effect to the `_tag` of its typed failure, or `"success"`.
+ *
+ * Asserting only `Exit._tag === "Failure"` accepts any tagged error, so a
+ * signer/store that regressed to a different error class would still pass.
+ * Comparing the tag keeps each claimed error-mapping contract checkable.
+ *
+ * @param effect - Any Effect whose failure carries a `_tag` discriminant.
+ * @returns Effect resolving to the failure tag, or `"success"` on success.
+ */
+function errorTag<A, E extends { readonly _tag: string }>(
+  effect: Effect.Effect<A, E>,
+): Effect.Effect<string> {
+  return Effect.match(effect, {
+    onFailure: (error) => error._tag,
+    onSuccess: () => "success",
+  });
+}
+
+/**
+ * Runs {@link errorTag} outside an Effect generator.
+ *
+ * @param effect - Any Effect whose failure carries a `_tag` discriminant.
+ * @returns The failure tag, or `"success"` when the Effect succeeded.
+ */
+async function failureTag<A, E extends { readonly _tag: string }>(
+  effect: Effect.Effect<A, E>,
+): Promise<string> {
+  return Effect.runPromise(errorTag(effect));
+}
+
 describe("storage keys", () => {
   it("separates upload-writable staging keys from publishable ready keys", () => {
     // A ready key keeps `<org>/<asset>/<name>` so ownership is verifiable from
@@ -26,14 +57,17 @@ describe("storage keys", () => {
     );
   });
 
-  it.each(["../escape", "nested/name", "", "."])("rejects unsafe segment %j", (segment) => {
-    expect(() => readyObjectKey("org-alpha", "asset-one", segment)).toThrow(
-      "non-empty path segment",
-    );
-    expect(() => stagingObjectKey("org-alpha", "asset-one", "session-one", segment)).toThrow(
-      "non-empty path segment",
-    );
-  });
+  it.each(["..", "../escape", "nested/name", "", ".", "tab\tname"])(
+    "rejects unsafe segment %j",
+    (segment) => {
+      expect(() => readyObjectKey("org-alpha", "asset-one", segment)).toThrow(
+        "non-empty path segment",
+      );
+      expect(() => stagingObjectKey("org-alpha", "asset-one", "session-one", segment)).toThrow(
+        "non-empty path segment",
+      );
+    },
+  );
 });
 
 describe("R2SigV4Signer key derivation", () => {
@@ -60,7 +94,9 @@ describe("R2SigV4Signer key derivation", () => {
       );
       const signed = await Promise.all(requests);
 
-      expect(signed).toHaveLength(63);
+      // Each request signs a distinct part key and number, so 63 distinct
+      // signatures prove the cached key is reused without collapsing inputs.
+      expect(new Set(signed).size).toBe(63);
       expect(importKey).toHaveBeenCalledTimes(5);
 
       current = new Date("2026-01-02T00:00:00Z");
@@ -85,7 +121,16 @@ describe("R2ObjectStore", () => {
       delete: vi.fn(),
       get: vi.fn(),
       head: vi.fn().mockResolvedValue({
-        checksums: { sha256: new Uint8Array([0xab, 0xcd]) },
+        // R2 reports `checksums.sha256` as an ArrayBuffer, and this one is a
+        // real 32-byte digest rather than a two-byte stand-in. The leading 0x06
+        // byte is what catches a hex conversion that drops zero padding.
+        checksums: {
+          sha256: new Uint8Array([
+            0x06, 0xc0, 0xae, 0x52, 0x7e, 0xb2, 0x21, 0x31, 0x1d, 0x94, 0x2e, 0xca, 0x38, 0xef,
+            0x58, 0x42, 0x22, 0xcb, 0xe8, 0xdb, 0x8b, 0x51, 0xda, 0x7f, 0xa7, 0xe6, 0x5e, 0xd8,
+            0x4c, 0x76, 0xc5, 0x68,
+          ]).buffer,
+        },
         etag: "etag-one",
         httpMetadata: { contentType: "video/mp4" },
         key: "org/asset/clip.mp4",
@@ -102,7 +147,7 @@ describe("R2ObjectStore", () => {
       customMetadata: null,
       etag: "etag-one",
       key: "org/asset/clip.mp4",
-      sha256: "abcd",
+      sha256: "06c0ae527eb221311d942eca38ef584222cbe8db8b51da7fa7e65ed84c76c568",
       size: 42,
       uploadedAt: uploaded,
       version: "version-one",
@@ -162,11 +207,18 @@ describe("R2ObjectStore", () => {
     expect(put).toHaveBeenCalledWith(
       "org/asset/original",
       body,
-      expect.objectContaining({ onlyIf: { etagDoesNotMatch: "*" } }),
+      expect.objectContaining({
+        httpMetadata: { contentType: "image/png" },
+        onlyIf: { etagDoesNotMatch: "*" },
+      }),
     );
   });
 
-  it("refuses to promote a staging object a reused grant rewrote", async () => {
+  it("refuses to promote a staging object that no longer exists", async () => {
+    // R2 answers an `etagMatches` failure with the object metadata and no body,
+    // not with null (see the next case); null means the key itself is gone, so
+    // the only thing left to assert is that the read was pinned and no write
+    // followed it.
     const get = vi.fn().mockResolvedValue(null);
     const put = vi.fn();
     const store = new R2ObjectStore({
@@ -184,6 +236,9 @@ describe("R2ObjectStore", () => {
         ifSourceEtagMatches: "etag-expected",
       }),
     ).resolves.toBeNull();
+    expect(get).toHaveBeenCalledWith("staging/org/asset/session/clip.mp4", {
+      onlyIf: { etagMatches: "etag-expected" },
+    });
     expect(put).not.toHaveBeenCalled();
   });
 
@@ -215,12 +270,15 @@ describe("R2ObjectStore", () => {
   });
 
   it("adopts an existing destination instead of duplicating a replayed copy", async () => {
+    // R2 answers a failed `etagDoesNotMatch: "*"` write with null, which is how
+    // a replay learns the earlier attempt already wrote the destination.
+    const body = {} as unknown as ReadableStream;
     const put = vi.fn().mockResolvedValue(null);
     const store = new R2ObjectStore({
       createMultipartUpload: vi.fn(),
       delete: vi.fn(),
       get: vi.fn().mockResolvedValue({
-        body: {} as unknown as ReadableStream,
+        body,
         etag: "etag-staged",
         key: "staging/org/asset/session/clip.mp4",
         size: 42,
@@ -236,6 +294,11 @@ describe("R2ObjectStore", () => {
         ifDestinationAbsent: true,
       }),
     ).resolves.toBeNull();
+    // The write really was attempted with the create-only guard; a copy that
+    // skipped the write would return null for the wrong reason.
+    expect(put).toHaveBeenCalledWith("org/asset/original", body, {
+      onlyIf: { etagDoesNotMatch: "*" },
+    });
   });
 
   it("resumes opaque native multipart uploads", async () => {
@@ -261,7 +324,7 @@ describe("R2ObjectStore", () => {
     expect(resumed.uploadId).toBe("native-upload-id");
   });
 
-  it("reads only a bounded object prefix", async () => {
+  it("reads only a bounded object prefix, admitting exactly 1 MiB", async () => {
     const get = vi.fn().mockResolvedValue({
       arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
       etag: "etag-one",
@@ -285,7 +348,20 @@ describe("R2ObjectStore", () => {
       range: { length: 256, offset: 0 },
     });
     await expect(store.readPrefix("org/asset/image.png", 0)).rejects.toThrow("maximumBytes");
+    // 1 MiB is the inclusive ceiling: the exact limit succeeds and one byte
+    // more is refused, so the bound is neither exclusive nor unbounded.
+    await expect(store.readPrefix("org/asset/image.png", 1024 * 1024)).resolves.toEqual(
+      new Uint8Array([1, 2, 3]),
+    );
+    expect(get).toHaveBeenLastCalledWith("org/asset/image.png", {
+      range: { length: 1024 * 1024, offset: 0 },
+    });
+    await expect(store.readPrefix("org/asset/image.png", 1024 * 1024 + 1)).rejects.toThrow(
+      "maximumBytes",
+    );
     await expect(store.readRange("org/asset/image.png", -1, 256)).rejects.toThrow("offset");
+    // Only the two accepted reads reached the bucket.
+    expect(get).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -662,6 +738,34 @@ describe("R2SigV4Signer", () => {
         uploadId: "upload",
       }),
     ).rejects.toThrow("partNumber");
+    // 10,000 is the inclusive last part; the bound must not reject it.
+    const lastPart = new URL(
+      await signer.signMultipartPart({
+        contentLength: 1,
+        contentType: "video/mp4",
+        expiresInSeconds: 900,
+        key: "org/asset/clip.mp4",
+        partNumber: 10_000,
+        uploadId: "upload",
+      }),
+    );
+    expect(lastPart.searchParams.get("partNumber")).toBe("10000");
+    // Expiry is an inclusive 1..604800 range: both ends sign, and one step
+    // outside each end is refused.
+    const oneSecond = new URL(
+      await signer.signDownload({ expiresInSeconds: 1, key: "org/asset/clip.mp4" }),
+    );
+    expect(oneSecond.searchParams.get("X-Amz-Expires")).toBe("1");
+    const sevenDays = new URL(
+      await signer.signDownload({ expiresInSeconds: 604_800, key: "org/asset/clip.mp4" }),
+    );
+    expect(sevenDays.searchParams.get("X-Amz-Expires")).toBe("604800");
+    await expect(
+      signer.signDownload({ expiresInSeconds: 604_801, key: "org/asset/clip.mp4" }),
+    ).rejects.toThrow("expiresInSeconds");
+    await expect(
+      signer.signDownload({ expiresInSeconds: 1.5, key: "org/asset/clip.mp4" }),
+    ).rejects.toThrow("expiresInSeconds");
   });
 
   it("binds downloads to an attachment disposition and safe content type", async () => {
@@ -808,7 +912,13 @@ describe("R2SigV4Signer", () => {
         ),
       ),
     );
-    expect(result.url).toContain("X-Amz-Signature=");
+    // Signing is independent of the store, so this is a real presigned grant
+    // for the requested key rather than a placeholder.
+    const signedUrl = new URL(result.url);
+    expect(signedUrl.origin).toBe("https://account-id.r2.cloudflarestorage.com");
+    expect(signedUrl.pathname).toBe("/assets/org/asset/photo.png");
+    expect(signedUrl.searchParams.get("X-Amz-Signature")).toMatch(/^[a-f0-9]{64}$/);
+    expect(signedUrl.searchParams.get("X-Amz-Expires")).toBe("60");
     expect(result.missing).toBe("Object storage is not configured.");
   });
 
@@ -847,7 +957,9 @@ describe("R2SigV4Signer", () => {
       head: (key) =>
         Effect.succeed({
           contentType: "text/plain",
-          etag: "mock-etag",
+          // Distinct from the default double's `mock-etag`, otherwise the
+          // assertion below would pass whether or not the override was used.
+          etag: "override-etag",
           key,
           size: 10,
           uploadedAt: new Date("2026-01-01"),
@@ -860,7 +972,12 @@ describe("R2SigV4Signer", () => {
     }).pipe(Effect.provide(testLayer));
 
     const testResult = await Effect.runPromise(testProgram);
-    expect(testResult?.etag).toBe("mock-etag");
+    expect(testResult).toMatchObject({
+      contentType: "text/plain",
+      etag: "override-etag",
+      key: "test-key",
+      size: 10,
+    });
   });
 
   it("exercises R2ObjectStore and EffectMultipartUpload full lifecycle", async () => {
@@ -927,6 +1044,10 @@ describe("R2SigV4Signer", () => {
     expect(res.prefix).toEqual(new Uint8Array([1, 2, 3, 4]));
     expect(res.range).toEqual(new Uint8Array([1, 2, 3, 4]));
     expect(res.completed.etag).toBe("complete-etag");
+    // The uploaded part reaches `complete` unchanged, and both handles were
+    // aborted, so the wrapped Effects really drove the native controller.
+    expect(mockComplete).toHaveBeenCalledWith([{ etag: "part-1-etag", partNumber: 1 }]);
+    expect(mockAbort).toHaveBeenCalledTimes(2);
   });
 
   it("exercises R2SigV4Signer multipart and download effect methods", async () => {
@@ -938,26 +1059,34 @@ describe("R2SigV4Signer", () => {
       secretAccessKey: "secret-key",
     });
 
-    const partUrl = await Effect.runPromise(
-      localSigner.signMultipartPartEffect({
-        contentLength: 512,
-        contentType: "video/mp4",
-        expiresInSeconds: 900,
-        key: "org/asset/clip.mp4",
-        partNumber: 1,
-        uploadId: "upload-1",
-      }),
+    const partUrl = new URL(
+      await Effect.runPromise(
+        localSigner.signMultipartPartEffect({
+          contentLength: 512,
+          contentType: "video/mp4",
+          expiresInSeconds: 900,
+          key: "org/asset/clip.mp4",
+          partNumber: 1,
+          uploadId: "upload-1",
+        }),
+      ),
     );
-    expect(partUrl).toContain("partNumber=1");
+    expect(partUrl.searchParams.get("partNumber")).toBe("1");
+    expect(partUrl.searchParams.get("uploadId")).toBe("upload-1");
 
-    const downloadUrl = await Effect.runPromise(
-      localSigner.signDownloadEffect({
-        downloadFilename: "my_video.mp4",
-        expiresInSeconds: 900,
-        key: "org/asset/clip.mp4",
-      }),
+    const downloadUrl = new URL(
+      await Effect.runPromise(
+        localSigner.signDownloadEffect({
+          downloadFilename: "my_video.mp4",
+          expiresInSeconds: 900,
+          key: "org/asset/clip.mp4",
+        }),
+      ),
     );
-    expect(downloadUrl).toContain("response-content-disposition");
+    expect(downloadUrl.searchParams.get("response-content-disposition")).toBe(
+      'attachment; filename="my_video.mp4"',
+    );
+    expect(downloadUrl.searchParams.get("response-content-type")).toBe("application/octet-stream");
   });
 
   it("exercises StorageService live with full signer options and test defaults", async () => {
@@ -1064,7 +1193,16 @@ describe("R2SigV4Signer", () => {
 
     const liveRes = await Effect.runPromise(liveProgram);
     expect(liveRes.meta.etag).toBe("live-etag");
-    expect(liveRes.uploadUrl).toContain("https://");
+    // The live layer signs with the supplied R2 credentials, so the grant is a
+    // bucket-scoped presigned URL rather than any URL at all.
+    const liveUploadUrl = new URL(liveRes.uploadUrl);
+    expect(liveUploadUrl.origin).toBe("https://account-id.r2.cloudflarestorage.com");
+    expect(liveUploadUrl.pathname).toBe("/meltiply-test/test.mp4");
+    expect(liveUploadUrl.searchParams.get("X-Amz-Signature")).toMatch(/^[a-f0-9]{64}$/);
+    expect(new URL(liveRes.partUrl).searchParams.get("uploadId")).toBe("upl-1");
+    expect(new URL(liveRes.downloadUrl).searchParams.has("response-content-disposition")).toBe(
+      false,
+    );
 
     // Test default implementation doubles in createStorageServiceTest
     const defaultTestLayer = createStorageServiceTest();
@@ -1110,7 +1248,24 @@ describe("R2SigV4Signer", () => {
 
     const testRes = await Effect.runPromise(testProgram);
     expect(testRes.meta.etag).toBe("mock-etag");
-    expect(testRes.upUrl).toContain("mock-storage.local");
+    // Each call is served by the corresponding fake, which means the requested
+    // arguments really travelled through the service rather than a shared
+    // stub: the granted URLs carry the requested key and part identifiers.
+    const upUrl = new URL(testRes.upUrl);
+    expect(upUrl.pathname.endsWith("/dummy")).toBe(true);
+    const partUrl = new URL(testRes.partUrl);
+    expect(partUrl.searchParams.get("partNumber")).toBe("1");
+    expect(partUrl.searchParams.get("uploadId")).toBe("u1");
+    const downUrl = new URL(testRes.downUrl);
+    expect(downUrl.pathname.endsWith("/dummy")).toBe(true);
+    expect(testRes.head?.etag).toBe("mock-etag");
+    // readPrefix and readRange are distinct operations even though the default
+    // doubles return the same in-memory payload.
+    expect(testRes.prefix).toEqual(new Uint8Array([0x00, 0x01]));
+    expect(testRes.range).toEqual(new Uint8Array([0x00, 0x01]));
+    // `complete` on the created session reports the create-double's metadata,
+    // not the resumed one, so the two handles are not aliased.
+    expect(testRes.c.etag).toBe("mock-etag-complete");
 
     // Live layer without signer fails closed on signing
     const noSignerLayer = createStorageServiceLive({
@@ -1129,8 +1284,9 @@ describe("R2SigV4Signer", () => {
       return yield* storage.signDownload({ expiresInSeconds: 60, key: "test" });
     }).pipe(Effect.provide(noSignerLayer));
 
-    const exit = await Effect.runPromiseExit(noSignerProgram);
-    expect(exit._tag).toBe("Failure");
+    // The signer is absent, so signing fails closed with the shared
+    // infrastructure error rather than a signing-specific one.
+    expect(await failureTag(noSignerProgram)).toBe("StorageUnavailableError");
 
     // Live layer with plain ObjectUrlSigner (Promise-based)
     const customSignerLayer = createStorageServiceLive({
@@ -1202,8 +1358,9 @@ describe("R2SigV4Signer", () => {
       });
     }).pipe(Effect.provide(invalidSignerLayer));
 
-    const invalidSignerExit = await Effect.runPromiseExit(invalidSignerProgram);
-    expect(invalidSignerExit._tag).toBe("Failure");
+    // Empty R2 credentials make createStorageServiceLive drop the signer, so
+    // the service reports signing as not configured instead of signing.
+    expect(await failureTag(invalidSignerProgram)).toBe("StorageUnavailableError");
 
     // Invalid parameters in signMultipartPartEffect and signDownloadEffect
     const localSigner = new R2SigV4Signer({
@@ -1213,25 +1370,29 @@ describe("R2SigV4Signer", () => {
       secretAccessKey: "secret-key",
     });
 
-    const partErrExit = await Effect.runPromiseExit(
-      localSigner.signMultipartPartEffect({
-        contentLength: 10,
-        contentType: "text/plain",
-        expiresInSeconds: 60,
-        key: "org/asset/file.txt",
-        partNumber: 0,
-        uploadId: "u1",
-      }),
-    );
-    expect(partErrExit._tag).toBe("Failure");
+    // signMultipartPartEffect / signDownloadEffect / signUploadEffect only map
+    // to InvalidRequestError, so the tag is the whole contract.
+    expect(
+      await failureTag(
+        localSigner.signMultipartPartEffect({
+          contentLength: 10,
+          contentType: "text/plain",
+          expiresInSeconds: 60,
+          key: "org/asset/file.txt",
+          partNumber: 0,
+          uploadId: "u1",
+        }),
+      ),
+    ).toBe("InvalidRequestError");
 
-    const downErrExit = await Effect.runPromiseExit(
-      localSigner.signDownloadEffect({
-        expiresInSeconds: 0,
-        key: "org/asset/file.txt",
-      }),
-    );
-    expect(downErrExit._tag).toBe("Failure");
+    expect(
+      await failureTag(
+        localSigner.signDownloadEffect({
+          expiresInSeconds: 0,
+          key: "org/asset/file.txt",
+        }),
+      ),
+    ).toBe("InvalidRequestError");
 
     // Custom signer failure maps to StorageUnavailableError
     const failingSignerLayer = createStorageServiceLive({
@@ -1250,52 +1411,58 @@ describe("R2SigV4Signer", () => {
       },
     });
 
-    const failingDownExit = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const storage = yield* StorageService;
-        return yield* storage.signDownload({ expiresInSeconds: 60, key: "k" });
-      }).pipe(Effect.provide(failingSignerLayer)),
-    );
-    expect(failingDownExit._tag).toBe("Failure");
+    // A plain Error rejection is infrastructure, not invalid input; every
+    // signing entry point must classify it that way.
+    expect(
+      await failureTag(
+        Effect.gen(function* () {
+          const storage = yield* StorageService;
+          return yield* storage.signDownload({ expiresInSeconds: 60, key: "k" });
+        }).pipe(Effect.provide(failingSignerLayer)),
+      ),
+    ).toBe("StorageUnavailableError");
 
-    const failingPartExit = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const storage = yield* StorageService;
-        return yield* storage.signMultipartPart({
-          contentLength: 10,
-          contentType: "text/plain",
-          expiresInSeconds: 60,
-          key: "k",
-          partNumber: 1,
-          uploadId: "u",
-        });
-      }).pipe(Effect.provide(failingSignerLayer)),
-    );
-    expect(failingPartExit._tag).toBe("Failure");
+    expect(
+      await failureTag(
+        Effect.gen(function* () {
+          const storage = yield* StorageService;
+          return yield* storage.signMultipartPart({
+            contentLength: 10,
+            contentType: "text/plain",
+            expiresInSeconds: 60,
+            key: "k",
+            partNumber: 1,
+            uploadId: "u",
+          });
+        }).pipe(Effect.provide(failingSignerLayer)),
+      ),
+    ).toBe("StorageUnavailableError");
 
-    const failingUpExit = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const storage = yield* StorageService;
-        return yield* storage.signUpload({
-          contentLength: 10,
-          contentType: "text/plain",
-          expiresInSeconds: 60,
-          key: "k",
-        });
-      }).pipe(Effect.provide(failingSignerLayer)),
-    );
-    expect(failingUpExit._tag).toBe("Failure");
+    expect(
+      await failureTag(
+        Effect.gen(function* () {
+          const storage = yield* StorageService;
+          return yield* storage.signUpload({
+            contentLength: 10,
+            contentType: "text/plain",
+            expiresInSeconds: 60,
+            key: "k",
+          });
+        }).pipe(Effect.provide(failingSignerLayer)),
+      ),
+    ).toBe("StorageUnavailableError");
 
     // Invalid request in signUploadEffect
-    const upErrExit = await Effect.runPromiseExit(
-      localSigner.signUploadEffect({
-        contentLength: 10,
-        contentType: "text/plain",
-        expiresInSeconds: 0,
-        key: "invalid.txt",
-      }),
-    );
-    expect(upErrExit._tag).toBe("Failure");
+    expect(
+      await failureTag(
+        localSigner.signUploadEffect({
+          contentLength: 10,
+          contentType: "text/plain",
+          expiresInSeconds: 0,
+          key: "invalid.txt",
+        }),
+      ),
+    ).toBe("InvalidRequestError");
 
     // Multipart upload errors in EffectMultipartUpload
     const failingMultipartLayer = createStorageServiceLive({
@@ -1320,18 +1487,22 @@ describe("R2SigV4Signer", () => {
     const mpFailProgram = Effect.gen(function* () {
       const storage = yield* StorageService;
       const mp = yield* storage.createMultipartUpload("test.txt", "text/plain");
+      // A bare `Failure` would accept any tagged error, so each operation's
+      // taxonomy is pinned: wrapMultipartUpload fixes abort/complete to
+      // infrastructure, while uploadPart keeps the caller-error distinction.
+      const abortTag = yield* errorTag(mp.abort());
+      expect(abortTag).toBe("StorageUnavailableError");
 
-      const abortExit = yield* Effect.exit(mp.abort());
-      expect(abortExit._tag).toBe("Failure");
+      const completeTag = yield* errorTag(mp.complete([]));
+      expect(completeTag).toBe("StorageUnavailableError");
 
-      const compExit = yield* Effect.exit(mp.complete([]));
-      expect(compExit._tag).toBe("Failure");
+      // TypeError from the provider is a caller error; anything else is
+      // infrastructure. The mock rejects once with each, in this order.
+      const callerErrorTag = yield* errorTag(mp.uploadPart(1, new Uint8Array([1])));
+      expect(callerErrorTag).toBe("InvalidRequestError");
 
-      const typeErrExit = yield* Effect.exit(mp.uploadPart(1, new Uint8Array([1])));
-      expect(typeErrExit._tag).toBe("Failure");
-
-      const standardErrExit = yield* Effect.exit(mp.uploadPart(1, new Uint8Array([1])));
-      expect(standardErrExit._tag).toBe("Failure");
+      const storageErrorTag = yield* errorTag(mp.uploadPart(1, new Uint8Array([1])));
+      expect(storageErrorTag).toBe("StorageUnavailableError");
     }).pipe(Effect.provide(failingMultipartLayer));
 
     await Effect.runPromise(mpFailProgram);

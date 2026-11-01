@@ -23,14 +23,13 @@ describe("TokenCipher", () => {
   });
 
   it("reads the Go-compatible version-one nonce/ciphertext layout", async () => {
-    const writer = new TokenCipher({
-      currentKeyId: "old",
-      keys: [{ id: "old", material: oldKey }],
-      randomBytes: () => fixedNonce,
-    });
-    const versionTwo = await writer.encrypt("legacy-token");
-    const payload = versionTwo.split(":").at(-1)!;
-    const legacy = `meltiply:v1:${payload}`;
+    // Independent oracle: this literal was produced outside this module by
+    // AES-256-GCM under `oldKey` with nonce 0x00..0x0b, laying out the payload
+    // exactly as version 1 did — base64url(12-byte nonce ‖ ciphertext ‖ 16-byte
+    // GCM tag), prefixed `meltiply:v1:` with no key ID. Reusing this module's
+    // own writer would only prove it can read what it writes, not that the
+    // legacy layout is understood.
+    const legacy = "meltiply:v1:AAECAwQFBgcICQoLsR5POQIi_L25H3ztNd9m0J7XZrh0mfnxOFIhTQ";
     const reader = new TokenCipher({
       currentKeyId: "current",
       keys: [
@@ -40,6 +39,16 @@ describe("TokenCipher", () => {
     });
 
     await expect(reader.decrypt(legacy)).resolves.toBe("legacy-token");
+
+    // Version 1 carries no key ID, so a ring without the writer's key must fail
+    // rather than return ciphertext as if it were plaintext.
+    const unrelated = new TokenCipher({
+      currentKeyId: "current",
+      keys: [{ id: "current", material: currentKey }],
+    });
+    await expect(unrelated.decrypt(legacy)).rejects.toThrow(
+      "legacy token ciphertext cannot be decrypted",
+    );
   });
 
   it("keeps plaintext legacy rows readable during migration", async () => {

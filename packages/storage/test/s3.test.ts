@@ -68,7 +68,10 @@ describe("S3ObjectStore metadata", () => {
   it("normalizes origin headers into ObjectMetadata", async () => {
     const { requests, store } = fakeOrigin(() =>
       headResponse({
-        "x-amz-checksum-sha256": "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+        // A real 32-byte SHA-256 digest in the base64 form S3 sends. It carries
+        // `+`, `/`, and `=` and starts with 0x06, so both the base64 decoding
+        // and the zero-padded hex conversion are exercised.
+        "x-amz-checksum-sha256": "BsCuUn6yITEdlC7KOO9YQiLL6NuLUdp/p+Ze2Ex2xWg=",
         "x-amz-version-id": "version-one",
       }),
     );
@@ -80,7 +83,7 @@ describe("S3ObjectStore metadata", () => {
       // unquoted and as the hex digest its R2 adapter reports.
       etag: "abc123",
       key: "org/asset/image.png",
-      sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      sha256: "06c0ae527eb221311d942eca38ef584222cbe8db8b51da7fa7e65ed84c76c568",
       size: 42,
       uploadedAt: new Date("Sat, 18 Jul 2026 12:00:00 GMT"),
       version: "version-one",
@@ -139,11 +142,23 @@ describe("S3ObjectStore reads", () => {
     expect(requests[1]?.headers.get("range")).toBe("bytes=8-10");
   });
 
-  it("rejects out-of-range reads before touching the origin", async () => {
-    const { requests, store } = fakeOrigin(() => new Response(null));
+  it("admits exactly 1 MiB and rejects out-of-range reads before touching the origin", async () => {
+    // A satisfied byte range is answered with 206, so the accepted ceiling read
+    // is modeled with the same status a real origin sends.
+    const { requests, store } = fakeOrigin(() => new Response(new Uint8Array(), { status: 206 }));
     await expect(store.readPrefix("org/asset/image.png", 0)).rejects.toThrow("maximumBytes");
+    // 1 MiB is the inclusive ceiling: the exact limit is issued, one byte more
+    // is refused, so the bound is neither exclusive nor unbounded.
+    await expect(store.readPrefix("org/asset/image.png", 1024 * 1024)).resolves.toEqual(
+      new Uint8Array(),
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.headers.get("range")).toBe("bytes=0-1048575");
+    await expect(store.readPrefix("org/asset/image.png", 1024 * 1024 + 1)).rejects.toThrow(
+      "maximumBytes",
+    );
     await expect(store.readRange("org/asset/image.png", -1, 4)).rejects.toThrow("offset");
-    expect(requests).toHaveLength(0);
+    expect(requests).toHaveLength(1);
   });
 });
 
@@ -170,7 +185,12 @@ describe("S3ObjectStore copy", () => {
     const { requests, store } = fakeOrigin((_request, index) => {
       if (index === 0) return new Response(null, { status: 404 });
       if (index === 1) {
-        return new Response("<CopyObjectResult><ETag>ready-etag</ETag></CopyObjectResult>");
+        // Real S3/MinIO copy responses are namespaced documents with a quoted
+        // ETag and a LastModified element.
+        return new Response(
+          '<?xml version="1.0" encoding="UTF-8"?><CopyObjectResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ETag>"ready-etag"</ETag><LastModified>2026-07-18T12:00:00.000Z</LastModified></CopyObjectResult>',
+          { headers: { "content-type": "application/xml" } },
+        );
       }
       return headResponse({ etag: '"ready-etag"' });
     });
@@ -194,6 +214,9 @@ describe("S3ObjectStore copy", () => {
     expect(copy?.headers.get("x-amz-copy-source-if-match")).toBe('"staged-etag"');
     expect(copy?.headers.get("if-none-match")).toBe("*");
     expect(copy?.headers.get("content-type")).toBe("image/png");
+    // Without REPLACE the origin keeps the staging object's metadata, so the
+    // promoted key would be served back with the staging content type.
+    expect(copy?.headers.get("x-amz-metadata-directive")).toBe("REPLACE");
   });
 
   it("adopts an existing destination instead of rewriting it", async () => {
@@ -220,6 +243,21 @@ describe("S3ObjectStore copy", () => {
     ).resolves.toBeNull();
     expect(requests.some((request) => request.method === "PUT")).toBe(true);
   });
+
+  it("surfaces a copy origin failure instead of reporting no promotion", async () => {
+    // Only the precondition statuses mean "did not apply"; a 500 is an origin
+    // fault, and collapsing it into null would silently drop the asset.
+    const { store } = fakeOrigin((_request, index) =>
+      index === 0 ? new Response(null, { status: 404 }) : new Response("boom", { status: 500 }),
+    );
+
+    await expect(
+      store.copyObject("staging/org/asset/session/image.png", "org/asset/original", {
+        ifDestinationAbsent: true,
+        ifSourceEtagMatches: "staged-etag",
+      }),
+    ).rejects.toThrow("object copy failed with status 500");
+  });
 });
 
 describe("S3ObjectStore multipart uploads", () => {
@@ -242,14 +280,15 @@ describe("S3ObjectStore multipart uploads", () => {
     const { requests, store } = fakeOrigin((_request, index) => {
       if (index === 0) {
         return new Response(
-          "<InitiateMultipartUploadResult><Bucket>meltiply-assets</Bucket><Key>org/asset/clip.mp4</Key><UploadId>upload-9</UploadId></InitiateMultipartUploadResult>",
+          '<?xml version="1.0" encoding="UTF-8"?><InitiateMultipartUploadResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Bucket>meltiply-assets</Bucket><Key>org/asset/clip.mp4</Key><UploadId>upload-9</UploadId></InitiateMultipartUploadResult>',
           { headers: { "content-type": "application/xml" } },
         );
       }
       if (index === 2) {
-        return new Response("<CompleteMultipartUploadResult/>", {
-          headers: { "content-type": "application/xml" },
-        });
+        return new Response(
+          '<?xml version="1.0" encoding="UTF-8"?><CompleteMultipartUploadResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Location>https://objects.example.com/meltiply-assets/org/asset/clip.mp4</Location><Bucket>meltiply-assets</Bucket><Key>org/asset/clip.mp4</Key><ETag>"complete-etag"</ETag></CompleteMultipartUploadResult>',
+          { headers: { "content-type": "application/xml" } },
+        );
       }
       return index === 3
         ? headResponse({
@@ -278,10 +317,13 @@ describe("S3ObjectStore multipart uploads", () => {
     expect(requests[0]?.url.searchParams.get("uploads")).toBe("");
     expect(requests[1]?.url.searchParams.get("partNumber")).toBe("1");
     expect(requests[1]?.url.searchParams.get("uploadId")).toBe("upload-9");
+    // The completion document carries the part number and the ETag normalized
+    // to the unquoted form Meltiply stores, not the quoted wire ETag.
     expect(requests[2]?.body).toBe(
       "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>part-one-etag</ETag></Part></CompleteMultipartUpload>",
     );
     expect(requests[4]?.method).toBe("DELETE");
+    expect(requests[4]?.url.searchParams.get("uploadId")).toBe("upload-9");
   });
 
   it("fails when the origin returns no upload id", async () => {

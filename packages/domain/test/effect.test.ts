@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 
 import {
   ActiveOrganizationRequiredError,
@@ -147,44 +147,35 @@ describe("Effect v4 Domain Tagged Errors", () => {
 
 describe("RequestContext Scope & Isolation", () => {
   it("proves request context does not leak between concurrent requests", async () => {
-    const taskA = Effect.gen(function* () {
-      const ctx = yield* RequestContext;
-      // Simulate asynchronous execution time
-      yield* Effect.sleep("10 millis");
-      const ctxAfter = yield* RequestContext;
-      expect(ctxAfter.requestId).toBe("req-A");
-      expect(ctxAfter.traceId).toBe("trace-A");
-      return ctx.requestId;
-    }).pipe(
-      Effect.provideService(RequestContext, {
-        requestId: "req-A",
-        traceId: "trace-A",
-        tenantId: "org-A",
-      }),
-    );
+    // Requests in one Worker isolate share a single Effect runtime, so the
+    // interleaving must happen inside one runtime: two independent
+    // `runPromise` calls never share mutable state and could not expose a
+    // process-wide context store. Each fiber reads the service before and
+    // after a suspension point so a global-store implementation would show the
+    // sibling's identifiers on the second read.
+    const request = (requestId: string, delay: string) =>
+      Effect.gen(function* () {
+        const ctx = yield* RequestContext;
+        yield* Effect.sleep(delay);
+        const ctxAfter = yield* RequestContext;
+        expect(ctxAfter.requestId).toBe(requestId);
+        expect(ctxAfter.traceId).toBe(`trace-${requestId}`);
+        return ctx.requestId;
+      }).pipe(
+        Effect.provideService(RequestContext, {
+          requestId,
+          traceId: `trace-${requestId}`,
+          tenantId: `org-${requestId}`,
+        }),
+      );
 
-    const taskB = Effect.gen(function* () {
-      const ctx = yield* RequestContext;
-      yield* Effect.sleep("5 millis");
-      const ctxAfter = yield* RequestContext;
-      expect(ctxAfter.requestId).toBe("req-B");
-      expect(ctxAfter.traceId).toBe("trace-B");
-      return ctx.requestId;
-    }).pipe(
-      Effect.provideService(RequestContext, {
-        requestId: "req-B",
-        traceId: "trace-B",
-        tenantId: "org-B",
-      }),
-    );
+    const program = Effect.gen(function* () {
+      const fiberA = yield* Effect.forkChild(request("req-A", "10 millis"));
+      const fiberB = yield* Effect.forkChild(request("req-B", "5 millis"));
+      return [yield* Fiber.join(fiberA), yield* Fiber.join(fiberB)];
+    });
 
-    const [fiberA, fiberB] = await Promise.all([
-      Effect.runPromise(taskA),
-      Effect.runPromise(taskB),
-    ]);
-
-    expect(fiberA).toBe("req-A");
-    expect(fiberB).toBe("req-B");
+    expect(await Effect.runPromise(program)).toEqual(["req-A", "req-B"]);
   });
 
   it("makeRequestContext populates immutable request context data", () => {
@@ -198,5 +189,8 @@ describe("RequestContext Scope & Isolation", () => {
     expect(data.traceId).toBe("trace-456");
     expect(data.tenantId).toBe("org-789");
     expect(data.session).toEqual({ role: "admin" });
+    // An absent session must normalize to null so callers can test presence
+    // rather than cope with both undefined and null.
+    expect(makeRequestContext({ requestId: "req-1", traceId: "trace-1" }).session).toBeNull();
   });
 });

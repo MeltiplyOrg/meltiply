@@ -61,6 +61,22 @@ test("placement experiment measures paired complete actions and retains routing 
         ["analytics.page", "candidate", 2],
       ],
     );
+    // Percentiles and byte counts are the report's actual measurements. The
+    // fixture body is 27 bytes, so the byte totals are exact even though the
+    // latency samples themselves depend on the host.
+    const fixtureBytes = 27;
+    assert.deepEqual(
+      report.summaries.map((row) => row.response_bytes),
+      [fixtureBytes * 2, fixtureBytes * 2, fixtureBytes * 2 * 2, fixtureBytes * 2 * 2],
+    );
+    for (const row of report.summaries) {
+      for (const key of ["p50_ms", "p95_ms", "p99_ms"]) {
+        assert.equal(typeof row[key], "number", `${row.workflow}/${row.revision} ${key}`);
+        assert.ok(Number.isFinite(row[key]), `${row.workflow}/${row.revision} ${key} is finite`);
+        assert.ok(row[key] > 0, `${row.workflow}/${row.revision} ${key} measured a duration`);
+      }
+      assert.ok(row.p50_ms <= row.p95_ms && row.p95_ms <= row.p99_ms);
+    }
     assert.deepEqual(
       report.observations
         .filter((entry) => entry.workflow === "analytics.page")

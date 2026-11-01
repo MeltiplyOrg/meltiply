@@ -270,7 +270,11 @@ const cases: ConformanceCase[] = [
   {
     method: "GET",
     operationId: "completePlatformOAuth",
-    path: "/api/v1/platforms/threads/callback?code=provider-code&state=state-with-enough-length",
+    // The state must carry a canonical 22-character routing key: a shorter or
+    // differently shaped value is rejected as `state_invalid` before the
+    // Durable Object is consulted, which would leave the documented
+    // `select_account` redirect unexercised while the case still "passed".
+    path: "/api/v1/platforms/threads/callback?code=provider-code&state=ABCDEFGHIJKLMNOPQRSTUV.statenonce1234567890",
   },
   {
     method: "DELETE",
@@ -1005,9 +1009,14 @@ describe("API Worker OpenAPI conformance", () => {
   for (const testCase of cases) {
     it(`${testCase.method} ${testCase.path} implements ${testCase.operationId}`, async () => {
       const example = catalog.operations[testCase.operationId]!;
+      // A valid caller-supplied correlation id the app must echo back: asserting
+      // only that the header is non-empty would pass for any generated value,
+      // including one that ignored the request.
+      const requestId = `conformance-${testCase.operationId}`;
       const headers: Record<string, string> = {
         Authorization: bearerAuthorization,
         "Idempotency-Key": `worker-conformance-${testCase.operationId}`,
+        "X-Request-ID": requestId,
       };
       let requestBody: string | undefined;
       if (example.request !== undefined) {
@@ -1021,7 +1030,7 @@ describe("API Worker OpenAPI conformance", () => {
         env,
       );
       expect(response.status, testCase.operationId).toBe(example.success.status);
-      expect(response.headers.get("X-Request-ID"), testCase.operationId).toBeTruthy();
+      expect(response.headers.get("X-Request-ID"), testCase.operationId).toBe(requestId);
 
       const responseBody = response.headers.get("content-type")?.includes("application/json")
         ? await response.json()
@@ -1040,7 +1049,37 @@ describe("API Worker OpenAPI conformance", () => {
         const actual = response.headers.get(headerName);
         expect(actual, `${testCase.operationId} ${headerName}`).toBeTruthy();
         if (headerName.toLowerCase() === "location") {
-          expect(() => new URL(actual!)).not.toThrow();
+          // The redirect target is application behavior, not a library echo, so
+          // require the contract's origin and path rather than any well-formed
+          // URL (which is what an open redirect would also satisfy). The
+          // callback's path carries the selection ticket, so it is compared
+          // with the ticket segment collapsed to its stable prefix.
+          const expected = example.success.headers![headerName]!;
+          const actualUrl = new URL(actual!);
+          const expectedUrl = new URL(expected);
+          expect(actualUrl.origin, `${testCase.operationId} Location origin`).toBe(
+            expectedUrl.origin,
+          );
+          if (testCase.operationId === "completePlatformOAuth") {
+            expect(actualUrl.pathname, `${testCase.operationId} Location path`).toBe(
+              "/channels/connect",
+            );
+            const expectedParams = new URLSearchParams(expectedUrl.search);
+            expectedParams.delete("selection_id");
+            const actualParams = new URLSearchParams(actualUrl.search);
+            const actualTicket = actualParams.get("selection_id");
+            // The ticket is freshly minted per request, so assert its shape and
+            // that it is not empty instead of pinning the example value.
+            expect(actualTicket).toMatch(/^[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}$/);
+            actualParams.delete("selection_id");
+            expect(actualParams.toString(), `${testCase.operationId} Location query`).toBe(
+              expectedParams.toString(),
+            );
+          } else {
+            expect(actualUrl.pathname, `${testCase.operationId} Location path`).toBe(
+              expectedUrl.pathname,
+            );
+          }
         }
       }
     });

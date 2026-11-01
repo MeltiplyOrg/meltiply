@@ -103,20 +103,40 @@ describe("Effect provider safety", () => {
   });
 
   it("dispatches writes once despite random keys, 5xx, timeout, or malformed responses", async () => {
-    const responses: Array<() => Promise<Response>> = [
-      async () => Response.json({}, { status: 503 }),
-      async () => {
-        throw new DOMException("remote may have committed", "TimeoutError");
-      },
-      async () =>
-        new Response("not-json", {
-          headers: { "Content-Type": "application/json" },
-        }),
-      async () => {
-        throw new Error("network lost after commit");
-      },
+    // Each cause has exactly one correct class: a defined 5xx is a transient
+    // server fault, while a timeout, a malformed body, or a transport error
+    // after dispatch leaves the remote write unconfirmed and must be
+    // `ambiguous` — never a retry-eligible class, which would let a blind
+    // retry duplicate the post.
+    const cases: Array<[string, () => Promise<Response>, string, boolean]> = [
+      ["5xx", () => Response.json({}, { status: 503 }), "transient", true],
+      [
+        "timeout",
+        () => {
+          throw new DOMException("remote may have committed", "TimeoutError");
+        },
+        "ambiguous",
+        false,
+      ],
+      [
+        "malformed body",
+        () =>
+          new Response("not-json", {
+            headers: { "Content-Type": "application/json" },
+          }),
+        "ambiguous",
+        false,
+      ],
+      [
+        "transport error",
+        () => {
+          throw new Error("network lost after commit");
+        },
+        "ambiguous",
+        false,
+      ],
     ];
-    for (const response of responses) {
+    for (const [label, response, expectedClass, expectedRetryable] of cases) {
       const fetcher = vi.fn<typeof fetch>(response);
       const http = client(fetcher);
       const raw = adapter({
@@ -130,8 +150,9 @@ describe("Effect provider safety", () => {
         },
       });
       const error = await failure(publishEffect(raw, context, credentials, input));
-      expect(fetcher).toHaveBeenCalledTimes(1);
-      expect(["transient", "ambiguous"]).toContain(error.failure.classification);
+      expect(fetcher, label).toHaveBeenCalledTimes(1);
+      expect(error.failure.classification, label).toBe(expectedClass);
+      expect(error.failure.retryable, label).toBe(expectedRetryable);
     }
   });
 

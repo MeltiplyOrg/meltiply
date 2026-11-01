@@ -10,26 +10,24 @@ const base = join(directory, "base.json");
 const compatible = join(directory, "compatible.json");
 const breaking = join(directory, "breaking.json");
 
-const operation = {
-  get: {
-    operationId: "getProbe",
-    responses: {
-      200: {
-        content: {
-          "application/json": {
-            schema: {
-              additionalProperties: false,
-              properties: { status: { type: "string" } },
-              required: ["status"],
-              type: "object",
-            },
-          },
+const jsonResponse = {
+  200: {
+    content: {
+      "application/json": {
+        schema: {
+          additionalProperties: false,
+          properties: { status: { type: "string" } },
+          required: ["status"],
+          type: "object",
         },
-        description: "Probe response",
       },
     },
+    description: "Probe response",
   },
 };
+const operation = (operationId) => ({
+  get: { operationId, responses: jsonResponse },
+});
 const document = (paths) => ({
   info: { title: "Compatibility probe", version: "1.0.0" },
   openapi: "3.1.0",
@@ -46,24 +44,50 @@ function run(current) {
   });
 }
 
+/**
+ * Fails when the diff could not execute the comparison at all. The wrapper
+ * prints this prefix when `go`/`oasdiff` is missing, which also exits non-zero
+ * and would otherwise satisfy the breaking-change assertion for the wrong
+ * reason.
+ */
+function assertDiffRan(result, label) {
+  const output = `${result.stdout}${result.stderr}`;
+  if (result.error || /unable to run /u.test(output)) {
+    throw new Error(
+      `${label}: contract diff could not run oasdiff:\n${output}${result.error ?? ""}`,
+    );
+  }
+  return output;
+}
+
 try {
-  write(base, document({ "/probe": operation }));
-  write(compatible, document({ "/probe": operation }));
+  write(base, document({ "/probe": operation("getProbe") }));
+  // A genuinely additive change: one new endpoint. Comparing a byte-identical
+  // copy would only prove that the wrapper propagates a zero exit status.
+  write(
+    compatible,
+    document({
+      "/probe": operation("getProbe"),
+      "/probe-extra": operation("getProbeExtra"),
+    }),
+  );
   write(breaking, document({}));
 
   const compatibleResult = run(compatible);
+  const compatibleOutput = assertDiffRan(compatibleResult, "compatible");
   if (compatibleResult.status !== 0) {
-    throw new Error(
-      `compatible contract was rejected:\n${compatibleResult.stdout}${compatibleResult.stderr}`,
-    );
+    throw new Error(`compatible contract was rejected:\n${compatibleOutput}`);
   }
 
   const breakingResult = run(breaking);
+  assertDiffRan(breakingResult, "breaking");
   if (breakingResult.status === 0) {
-    throw new Error("removed operation was not reported as a breaking change");
+    throw new Error(
+      `removed operation was not reported as a breaking change:\n${breakingResult.stdout}${breakingResult.stderr}`,
+    );
   }
 
-  console.log("contract diff accepts compatibility and rejects a removed operation");
+  console.log("contract diff accepts an additive change and rejects a removed operation");
 } finally {
   rmSync(directory, { force: true, recursive: true });
 }

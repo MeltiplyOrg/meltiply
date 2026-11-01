@@ -102,7 +102,11 @@ describe("Access-protected operator reconciliation route", () => {
     expect(resolveDistribution).not.toHaveBeenCalled();
   });
 
-  it("verifies Access identity and invokes one strict idempotent resolution", async () => {
+  // The route's own contract: verify the Access identity, forward the parsed
+  // resolution once, and map the reconciliation outcome (including the replay
+  // header). Replay deduplication is owned by the reconciliation service's
+  // idempotency ledger, so it is not asserted through a value this double sets.
+  it("verifies Access identity, forwards one strict resolution, and maps a replay outcome", async () => {
     const resolveDistribution = vi.fn(() =>
       Effect.succeed({
         auditId: "94000000-0000-4000-8000-000000000001",

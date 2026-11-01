@@ -692,22 +692,40 @@ describe("ProviderRegistry", () => {
         transferModes: ["remote_ingest"],
       }),
     ).toThrow("requires a retry policy");
-    expect(() =>
-      registry.register("threads", {
-        capability,
-        lookupPublication: async () => ({ state: "not_found" }),
-        publish: async () => ({
-          outcome: "confirmed_success",
-          providerPostId: "post-1",
-        }),
-        retryPolicy: {
-          baseDelaySeconds: 0,
-          maxAttempts: 11,
-          maxDelaySeconds: 100_000,
-        },
-        transferModes: ["remote_ingest"],
-      }),
-    ).toThrow("outside safe bounds");
+    // Each bound is violated alone, so a guard that checks only one of the three
+    // cannot hide behind the others. Inclusive legal values are asserted below.
+    const acceptedRetryPolicy = {
+      baseDelaySeconds: 15,
+      maxAttempts: 5,
+      maxDelaySeconds: 300,
+    };
+    const invalidRetryPolicies = [
+      ["baseDelaySeconds below 1", { ...acceptedRetryPolicy, baseDelaySeconds: 0 }],
+      ["baseDelaySeconds above 3600", { ...acceptedRetryPolicy, baseDelaySeconds: 3_601 }],
+      ["maxAttempts above 10", { ...acceptedRetryPolicy, maxAttempts: 11 }],
+      ["maxAttempts below 1", { ...acceptedRetryPolicy, maxAttempts: 0 }],
+      ["maxDelaySeconds above 86400", { ...acceptedRetryPolicy, maxDelaySeconds: 86_401 }],
+      [
+        "maxDelaySeconds below baseDelaySeconds",
+        { baseDelaySeconds: 300, maxAttempts: 5, maxDelaySeconds: 299 },
+      ],
+    ] as const;
+    for (const [label, retryPolicy] of invalidRetryPolicies) {
+      expect(
+        () =>
+          registry.register("threads", {
+            capability,
+            lookupPublication: async () => ({ state: "not_found" }),
+            publish: async () => ({
+              outcome: "confirmed_success",
+              providerPostId: "post-1",
+            }),
+            retryPolicy,
+            transferModes: ["remote_ingest"],
+          }),
+        label,
+      ).toThrow("outside safe bounds");
+    }
     expect(() =>
       registry.register("threads", {
         capability,
@@ -773,6 +791,49 @@ describe("ProviderRegistry", () => {
         transferModes: ["remote_ingest"],
       }),
     ).toThrow("already registered");
+  });
+
+  it("accepts retry policies at the inclusive bounds", () => {
+    // `register` allows maxAttempts 1-10, baseDelaySeconds 1-3600, and
+    // maxDelaySeconds up to 86400 (providers/src/index.ts). Rejecting exactly
+    // these values would be an off-by-one that only a boundary control catches.
+    const registerWith = (retryPolicy: {
+      baseDelaySeconds: number;
+      maxAttempts: number;
+      maxDelaySeconds: number;
+    }) => {
+      const registry = new ProviderRegistry();
+      registry.register("threads", {
+        capability: {
+          accepted_mime_types: ["image/jpeg"],
+          analytics: false,
+          asset_types: ["image"],
+          comments: false,
+          connect_available: false,
+          max_caption_length: 500,
+          max_file_size: 1_000_000,
+          max_hashtags: 5,
+          max_media_count: 10,
+          max_video_duration_sec: null,
+          min_media_count: 0,
+          multi_asset_types: ["image"],
+          notes: [],
+          platform: "threads",
+          publish: true,
+          reply: false,
+        },
+        lookupPublication: async () => ({ state: "not_found" }),
+        publish: async () => ({ outcome: "confirmed_success", providerPostId: "post-1" }),
+        retryPolicy,
+        transferModes: ["remote_ingest"],
+      });
+      return registry.get("threads");
+    };
+
+    expect(registerWith({ baseDelaySeconds: 1, maxAttempts: 1, maxDelaySeconds: 1 })).toBeDefined();
+    expect(
+      registerWith({ baseDelaySeconds: 3_600, maxAttempts: 10, maxDelaySeconds: 86_400 }),
+    ).toBeDefined();
   });
 });
 

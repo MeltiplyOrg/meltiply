@@ -43,6 +43,19 @@ Tokens have read-only repository access, checkouts retain no credentials, and no
 deployment secrets are supplied. Do not execute contributor code through
 `pull_request_target` or persistent self-hosted runners.
 
+Both automatic backend CI and `cloudflare:check` run `bun run test:tooling`.
+It discovers the Node test files in CI helpers, local tooling, translations,
+infrastructure, releases, staging adapters, benchmarks, and self-hosted jobs.
+Shell regressions and PostgreSQL suites remain separate commands; none of these
+fixture-based tests require deployment credentials.
+
+Regression fixtures must isolate the rule named by the test. In particular,
+storage-boundary tests clear independent upload-count limits when modeling a
+monthly rollover, and performance tests of database aggregation use a fresh
+service cache for each cold observation. Error assertions distinguish policy
+rejection from unrelated authentication failures or server errors. Tests of a
+signed capability's expiry never allow it to outlive the persisted write hold.
+
 The [extended workflow](../.github/workflows/extended.yml) exposes manually
 selected lanes: `frontend-full` for full browser/Lighthouse journeys,
 `frontend-ui` for focused UI verification, `cloudflare-full` for

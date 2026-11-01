@@ -29,11 +29,22 @@ exit 0
 EOF
 chmod +x "$fixture/bin/docker"
 
+# Prometheus becomes ready only after the runner starts it through the shared
+# Compose boundary, so the orchestration branch is exercised instead of being
+# short-circuited by an always-ready stub.
 cat >"$fixture/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'curl %s\n' "$*" >>"$COMMAND_LOG"
-# API health and prometheus ready succeed.
+for argument in "$@"; do
+  case "$argument" in
+    *9090/-/ready*)
+      grep -Fq 'up -d prometheus' "$COMMAND_LOG"
+      exit
+      ;;
+  esac
+done
+# API health succeeds.
 exit 0
 EOF
 chmod +x "$fixture/bin/curl"
@@ -60,6 +71,8 @@ export PATH="$fixture/bin:$PATH"
   ./scripts/cloudflare-local/k6-run.sh --ci --vus 2 --duration 5s
 )
 
+# The runner must bring Prometheus up through Compose before remote-writing.
+grep -Fq 'up -d prometheus' "$COMMAND_LOG"
 grep -Fq 'docker run' "$COMMAND_LOG"
 grep -Fq 'experimental-prometheus-rw' "$COMMAND_LOG"
 grep -Fq 'grafana/k6:' "$COMMAND_LOG"
@@ -74,6 +87,10 @@ grep -Fq 'K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM=false' "$COMMAND_LOG"
   ./scripts/cloudflare-local/k6-run.sh --skip-prometheus --base-url http://127.0.0.1:9999
 )
 grep -Fq 'docker run' "$COMMAND_LOG"
+if grep -Fq 'up -d prometheus' "$COMMAND_LOG"; then
+  echo "expected prometheus startup to be skipped" >&2
+  exit 1
+fi
 if grep -Fq 'experimental-prometheus-rw' "$COMMAND_LOG"; then
   echo "expected prometheus output to be skipped" >&2
   exit 1

@@ -58,7 +58,27 @@ test("projects shared allowances, scaled usage, and provider rounding", async ()
   assert.equal(projection.scenarios[0].known_monthly_usd, 17.935);
   assert.equal(projection.scenarios[1].known_monthly_usd, 84.475);
   assert.equal(projection.scenarios[0].components["r2.storage"], 0.015);
-  assert.ok(projection.scenarios[2].known_monthly_usd > projection.scenarios[1].known_monthly_usd);
+  // The 10x scenario is a computed projection, not merely "larger": pin its
+  // total and its variable components so a capped multiplier or dropped base
+  // cost fails.
+  assert.equal(projection.scenarios[2].known_monthly_usd, 317.365);
+  assert.deepEqual(
+    {
+      "cloudflare.workers_paid_plan":
+        projection.scenarios[2].components["cloudflare.workers_paid_plan"],
+      "neon.compute": projection.scenarios[2].components["neon.compute"],
+      "queues.operations": projection.scenarios[2].components["queues.operations"],
+      "r2.storage": projection.scenarios[2].components["r2.storage"],
+      "workers.requests": projection.scenarios[2].components["workers.requests"],
+    },
+    {
+      "cloudflare.workers_paid_plan": 5,
+      "neon.compute": 106,
+      "queues.operations": 7.6,
+      "r2.storage": 1.365,
+      "workers.requests": 30,
+    },
+  );
   assert.doesNotThrow(() => assertCompleteProjection(projection));
 });
 
@@ -138,6 +158,16 @@ test("Neon configuration must be measured or explicitly unmeasured, never inferr
   const measured = measuredNeonConfig();
   assert.doesNotThrow(() => validateNeonEndpointConfig(measured));
   assert.doesNotThrow(() => assertMeasuredNeonConfig(measured));
+
+  // Negations: an unmeasured configuration must fail closed, or the check is a
+  // no-op that any caller can ignore.
+  const unmeasured = measuredNeonConfig();
+  unmeasured.unmeasured = ["endpoint.suspend_timeout_seconds"];
+  unmeasured.endpoint.suspend_timeout_seconds = null;
+  assert.throws(
+    () => assertMeasuredNeonConfig(unmeasured),
+    /Neon compute configuration is unmeasured \(endpoint\.suspend_timeout_seconds\)/,
+  );
 
   const scaleToZeroFloor = measuredNeonConfig();
   scaleToZeroFloor.endpoint.min_cu = 0;

@@ -25,8 +25,9 @@ import { readFile, readdir } from "node:fs/promises";
 import process from "node:process";
 
 const intervalMs = Math.max(50, Number(process.env.MEASURE_INTERVAL_MS ?? 250) || 250);
-// run.sh injects the harness mode so the summary itself records whether the
-// cgroup envelope was enforced; anything else cannot claim hard verification.
+// run.sh injects the harness mode as a label only. Whether the cgroup envelope
+// was actually enforced is decided in envelopeVerdict() from the observed
+// limits, so a strict run on an unenforcing host cannot claim verification.
 const mode = process.env.PROCESSOR_SMOKE_MODE ?? "strict";
 const stopFile = process.env.PROCESSOR_SMOKE_STOP_FILE;
 
@@ -95,6 +96,77 @@ function observedCgroupLimits() {
     cgroup_type: readLimit("/sys/fs/cgroup/cgroup.type"),
     cpu_max: readLimit("/sys/fs/cgroup/cpu.max"),
     memory_max: readLimit("/sys/fs/cgroup/memory.max"),
+  };
+}
+
+/** Bytes in one GiB, so the declared envelope and memory.max share a unit. */
+const GIB = 1024 * 1024 * 1024;
+/** Cores the strict mode asks Docker for; a finite cpu.max must not exceed it. */
+const DECLARED_CPU_CORES = 2;
+/** Memory the strict mode asks Docker for, in bytes. */
+const DECLARED_MEMORY_BYTES = 8 * GIB;
+
+/**
+ * Parses `cpu.max` into its quota in cores, or null when the file is absent or
+ * reports `max` (no quota). A quota is what makes the CPU bound real: without
+ * it a run may consume the whole host regardless of the mode requested.
+ */
+function cpuQuotaCores(cpuMax) {
+  const [quota, period] = (cpuMax ?? "").split(/\s+/);
+  const quotaValue = Number(quota);
+  const periodValue = Number(period);
+  if (!Number.isFinite(quotaValue) || !Number.isFinite(periodValue) || periodValue <= 0) {
+    return null;
+  }
+  return quotaValue / periodValue;
+}
+
+/**
+ * Parses `memory.max` into bytes, or null when the file is absent or `max`.
+ */
+function memoryLimitBytes(memoryMax) {
+  const value = Number(memoryMax);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/**
+ * Decides whether this run actually proved the standard-3 envelope, from the
+ * daemon's own limit files plus the measurement this sampler collected.
+ *
+ * A strict-mode invocation on a host without a cgroup v2 domain, or without a
+ * finite cpu.max/memory.max, enforced nothing — reporting proof from the mode
+ * string alone would be a fabricated result. Likewise enforcement without
+ * staying inside the limits is not proof either, so the measurement has to
+ * satisfy them too. Every missing input yields null (unknown) and any null keeps
+ * `hard_envelope_verified` false rather than optimistically true.
+ *
+ * @param limits - Contents of cgroup.type, cpu.max, and memory.max.
+ * @param measurement - Sampled CPU seconds, wall window, and peak RSS.
+ * @returns Enforcement and containment verdicts, plus their conjunction.
+ */
+function envelopeVerdict(limits, measurement) {
+  const quotaCores = cpuQuotaCores(limits.cpu_max);
+  const memoryBytes = memoryLimitBytes(limits.memory_max);
+  const enforced =
+    limits.cgroup_type === "domain" &&
+    quotaCores !== null &&
+    quotaCores <= DECLARED_CPU_CORES + 0.001 &&
+    memoryBytes !== null &&
+    memoryBytes <= DECLARED_MEMORY_BYTES;
+  const wallSeconds = measurement.wall_time_ms / 1_000;
+  // A quota without a measured window or CPU total has no denominator, so
+  // containment stays unknown instead of defaulting to a green result.
+  const cpuWithinEnvelope =
+    quotaCores === null || measurement.cpu_seconds === null || wallSeconds <= 0
+      ? null
+      : measurement.cpu_seconds <= quotaCores * wallSeconds + 1;
+  const memoryWithinEnvelope =
+    memoryBytes === null ? null : measurement.peak_rss_bytes <= memoryBytes;
+  return {
+    cgroup_envelope_enforced: enforced,
+    cpu_within_envelope: cpuWithinEnvelope,
+    memory_within_envelope: memoryWithinEnvelope,
+    hard_envelope_verified: enforced && cpuWithinEnvelope === true && memoryWithinEnvelope === true,
   };
 }
 
@@ -188,22 +260,35 @@ async function finish(reason) {
   // One last sample so the tail of the last job is not lost between the
   // previous tick and the stop signal.
   await sample().catch(() => {});
+  const limits = observedCgroupLimits();
+  const measurements = {
+    // Without any sample there is no measurement, so CPU and wall are reported
+    // as unknown rather than as zero seconds of work.
+    cpu_seconds:
+      lastCpuJiffies === null || firstCpuJiffies === null
+        ? null
+        : (lastCpuJiffies - firstCpuJiffies) / 100,
+    wall_time_ms:
+      lastSampleMs === null || firstSampleMs === null ? 0 : lastSampleMs - firstSampleMs,
+    peak_rss_bytes: peakRssBytes,
+  };
   const summary = {
     benchmark: "processor_smoke_engine_resources",
     mode,
-    hard_envelope_verified: mode === "strict",
     scope: "engine_container_pid1_subtree",
     observer: "excluded (separate docker exec session outside the subtree)",
     memory_basis: "sum of per-process VmRSS; kernel page cache excluded; not cgroup-charged memory",
     cpu_basis: "user+system jiffies incl. cutime/cstime of reaped children",
     sample_count: samples,
     sample_interval_ms: intervalMs,
-    wall_time_ms: lastSampleMs === null ? 0 : lastSampleMs - firstSampleMs,
-    cpu_jiffies: lastCpuJiffies === null ? 0 : lastCpuJiffies - firstCpuJiffies,
-    cpu_seconds: lastCpuJiffies === null ? 0 : (lastCpuJiffies - firstCpuJiffies) / 100,
+    cpu_jiffies:
+      lastCpuJiffies === null || firstCpuJiffies === null ? null : lastCpuJiffies - firstCpuJiffies,
     // What the daemon actually enforced, as opposed to the mode that asked.
-    ...observedCgroupLimits(),
-    peak_rss_bytes: peakRssBytes,
+    ...limits,
+    ...measurements,
+    // Derived from the observed limits and the measurement, never from `mode`:
+    // a strict invocation on a host that enforced nothing reports unverified.
+    ...envelopeVerdict(limits, measurements),
     peak_rss_mib: Math.round((peakRssBytes / (1024 * 1024)) * 10) / 10,
     stop_reason: reason,
   };

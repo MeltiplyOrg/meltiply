@@ -2611,14 +2611,15 @@ describeIntegration("post-owned media retention with PostgreSQL", () => {
     expect((scheduled.body as Post).distributions[0]?.status).toBe("scheduled");
 
     // The other workspace owns a ready video of the same shape with real bytes
-    // behind it; neither capability may address it, whichever one is asked for.
+    // behind it. Tenant scoping is RLS plus an explicit org predicate, so a
+    // foreign asset is indistinguishable from a missing one: both variants
+    // must answer 404 not_found. Accepting 403 here would also accept a role
+    // guard masking a broken tenant filter.
     const foreign = await createForeignReadyVideo((await renditionRow(upload.assetId)).profile);
     for (const variant of ["download", "preview"] as const) {
       const response = await api(`/api/v1/assets/${foreign}/${variant}-url`);
-      expect([403, 404]).toContain(response.status);
-      if (response.status === 404) {
-        expect(errorCode(response.body)).toBe("not_found");
-      }
+      expect(response.status, variant).toBe(404);
+      expect(errorCode(response.body), variant).toBe("not_found");
     }
   }, 120_000);
 

@@ -10,8 +10,6 @@ export default defineConfig({
     }),
   ],
   test: {
-    // Reuse transforms across runs without sharing test-file module state.
-    fsModuleCache: true,
     // Keep mock call history until a suite explicitly clears it, preserving
     // pre-migration behavior instead of adopting Vitest 5's automatic reset.
     clearMocks: false,

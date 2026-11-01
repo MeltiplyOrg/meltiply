@@ -111,13 +111,6 @@ jobs:
           key: vite-v1-${{ runner.os }}-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock', 'bunfig.toml', 'package.json', 'patches/**') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             vite-v1-${{ runner.os }}-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock', 'bunfig.toml', 'package.json', 'patches/**') }}-
-      - name: Restore Worker test transforms
-        uses: actions/cache@v5
-        with:
-          path: node_modules/.vitest-cache
-          key: vitest-v1-${{ runner.os }}-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock', 'bunfig.toml', 'package.json', 'patches/**', '**/vitest*.ts', '**/wrangler*.jsonc', 'vite.config.ts', 'scripts/lib/vitest-offline-collector.ts') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            vitest-v1-${{ runner.os }}-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock', 'bunfig.toml', 'package.json', 'patches/**', '**/vitest*.ts', '**/wrangler*.jsonc', 'vite.config.ts', 'scripts/lib/vitest-offline-collector.ts') }}-
       - name: Type-check, test, and build packages and Workers
         run: |
           bunx vp run --cache --filter './packages/*' --filter './workers/*' --concurrency-limit 1 type-check

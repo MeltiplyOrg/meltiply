@@ -109,10 +109,10 @@ describe("Effect provider safety", () => {
     // `ambiguous` — never a retry-eligible class, which would let a blind
     // retry duplicate the post.
     const cases: Array<[string, () => Promise<Response>, string, boolean]> = [
-      ["5xx", () => Response.json({}, { status: 503 }), "transient", true],
+      ["5xx", async () => Response.json({}, { status: 503 }), "transient", true],
       [
         "timeout",
-        () => {
+        async () => {
           throw new DOMException("remote may have committed", "TimeoutError");
         },
         "ambiguous",
@@ -120,7 +120,7 @@ describe("Effect provider safety", () => {
       ],
       [
         "malformed body",
-        () =>
+        async () =>
           new Response("not-json", {
             headers: { "Content-Type": "application/json" },
           }),
@@ -129,7 +129,7 @@ describe("Effect provider safety", () => {
       ],
       [
         "transport error",
-        () => {
+        async () => {
           throw new Error("network lost after commit");
         },
         "ambiguous",

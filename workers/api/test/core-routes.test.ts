@@ -2296,7 +2296,7 @@ describe("core API routes", () => {
     // exchange while two independent wildcards would still have passed.
     const verifierDigest = await crypto.subtle.digest(
       "SHA-256",
-      new TextEncoder().encode(record.pkce_verifier as string),
+      new TextEncoder().encode(record.pkce_verifier),
     );
     const expectedChallenge = btoa(String.fromCharCode(...new Uint8Array(verifierDigest)))
       .replace(/\+/g, "-")

@@ -44,9 +44,7 @@ function brandOwnedMutations(document: ContractDocument): string[] {
   for (const pathItem of Object.values(document.paths)) {
     for (const method of ["delete", "get", "patch", "post", "put"] as const) {
       const operation = pathItem[method];
-      const schema = operation?.requestBody?.content?.["application/json"]?.schema as
-        | JsonSchema
-        | undefined;
+      const schema = operation?.requestBody?.content?.["application/json"]?.schema;
       if (schema?.properties?.brand_profile_id && operation) owned.push(operation.operationId);
     }
   }

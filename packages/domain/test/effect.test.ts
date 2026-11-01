@@ -153,7 +153,7 @@ describe("RequestContext Scope & Isolation", () => {
     // process-wide context store. Each fiber reads the service before and
     // after a suspension point so a global-store implementation would show the
     // sibling's identifiers on the second read.
-    const request = (requestId: string, delay: string) =>
+    const request = (requestId: string, delay: number) =>
       Effect.gen(function* () {
         const ctx = yield* RequestContext;
         yield* Effect.sleep(delay);
@@ -170,8 +170,8 @@ describe("RequestContext Scope & Isolation", () => {
       );
 
     const program = Effect.gen(function* () {
-      const fiberA = yield* Effect.forkChild(request("req-A", "10 millis"));
-      const fiberB = yield* Effect.forkChild(request("req-B", "5 millis"));
+      const fiberA = yield* Effect.forkChild(request("req-A", 10));
+      const fiberB = yield* Effect.forkChild(request("req-B", 5));
       return [yield* Fiber.join(fiberA), yield* Fiber.join(fiberB)];
     });
 

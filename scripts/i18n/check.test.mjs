@@ -6,7 +6,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 
-const checkScript = fileURLToPath(new URL("./check.mjs", import.meta.url));
 const repositoryRoot = fileURLToPath(new URL("../..", import.meta.url));
 const temporaryRoots = [];
 

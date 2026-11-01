@@ -160,9 +160,12 @@ function renderComposer(
   return { ...view, queryClient };
 }
 
+/** A session that is genuinely valid this century; `new Date()` models an expired one. */
+const futureSessionExpiry = new Date("2099-07-18T16:00:00Z");
+
 beforeEach(() => {
   vi.spyOn(authClient, "getSession").mockResolvedValue({
-    session: { expiresAt: new Date(), id: "session-1", userId: "user-1" },
+    session: { expiresAt: futureSessionExpiry, id: "session-1", userId: "user-1" },
     user: { email: "user@example.com", id: "user-1" },
   });
   vi.mocked(createAssetUpload).mockReset().mockImplementation(neverSettlingUploadTask);

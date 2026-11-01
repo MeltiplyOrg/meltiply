@@ -14,9 +14,12 @@ Automatic checks run in separate jobs:
 - `frontend-fast`: app formatting, types, bindings, lint, coverage, production
   build, and public-site checks.
 - `cloudflare-fast`: spelling, contracts, Worker bindings, package/Worker types,
-  tests and builds, strict lint, dead code, formatting, drift/routing regressions,
-  local-tooling and release regressions, supply-chain/SBOM policy, costs, and PostgreSQL integration tests.
-  Release regressions verify that API and Automation mail bindings restrict the
+  tests and builds, strict lint, dead code, formatting, and PostgreSQL integration
+  tests.
+- `cloudflare-tooling`: all Node tooling suites (including drift/routing checks),
+  shell lifecycle and release regressions, supply-chain/SBOM policy, and costs;
+  runs alongside `cloudflare-fast` under the same routing rule. Release
+  regressions verify that API and Automation mail bindings restrict the
   configured sender and that the notifications Queue is rendered from IaC outputs.
 - `frontend-performance`: seeds a deterministic populated installation, builds
   production assets, and measures real signed-in Posts, Posts-to-media, composer
@@ -50,9 +53,40 @@ ancestry conservatively select every lane.
 
 The jobs use Node 24.18.0 and Bun 1.4.2. The database is a disposable local Docker
 PostgreSQL instance with fixture-only credentials; cleanup runs after failures.
+The development-launcher regression replaces sleeps only in its failed-DNS
+fixture, so it exercises all retries without waiting for real DNS propagation.
+Production retry timing and process-lifecycle waits remain unchanged.
 Tokens have read-only repository access, checkouts retain no credentials, and no
 deployment secrets are supplied. Do not execute contributor code through
 `pull_request_target` or persistent self-hosted runners.
+
+Both automatic backend CI and `cloudflare:check` run `bun run test:tooling`.
+It discovers the Node test files in CI helpers, local tooling, translations,
+infrastructure, releases, staging adapters, benchmarks, and self-hosted jobs.
+Shell regressions and PostgreSQL suites remain separate commands; none of these
+fixture-based tests require deployment credentials.
+
+Regression fixtures must isolate the rule named by the test. In particular,
+storage-boundary tests clear independent upload-count limits when modeling a
+monthly rollover, and performance tests of database aggregation use a fresh
+service cache for each cold observation. Error assertions distinguish policy
+rejection from unrelated authentication failures or server errors. Tests of a
+signed capability's expiry never allow it to outlive the persisted write hold.
+
+The November 2026 test-correctness review exercised the corrected code at
+`8654499` on hosted runners:
+
+| Verification                                                             | Hosted run                                                                      | Outcome                                                          |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Automatic CI, including PostgreSQL and both image architectures          | [41303548942](https://github.com/MeltiplyOrg/meltiply/actions/runs/41303548942) | Passed                                                           |
+| `cloudflare-full`: `bun run cloudflare:check` and provider/browser smoke | [41304074534](https://github.com/MeltiplyOrg/meltiply/actions/runs/41304074534) | Passed                                                           |
+| `frontend-ui`: both frontend checks and browser journeys                 | [41304762488](https://github.com/MeltiplyOrg/meltiply/actions/runs/41304762488) | 710 unit tests and 10 browser tests passed; React Doctor 100/100 |
+| `cloudflare-extended`: release, staging-adapter, and Terraform checks    | [41305370071](https://github.com/MeltiplyOrg/meltiply/actions/runs/41305370071) | Passed                                                           |
+| `performance-media`: native codec and restart smoke                      | [41305486899](https://github.com/MeltiplyOrg/meltiply/actions/runs/41305486899) | 212 assertions and restart replay passed                         |
+
+The changed live-staging browser locator was reviewed against the shared toolbar,
+but was not exercised against a deployed origin: that manual suite requires
+`STAGING_E2E_BASE_URL` and authenticated `STAGING_E2E_STORAGE_STATE`.
 
 The [extended workflow](../.github/workflows/extended.yml) exposes manually
 selected lanes: `frontend-full` for full browser/Lighthouse journeys,
@@ -133,8 +167,10 @@ All five implemented Providers exercise real authorization-state consumption,
 encrypted selection, explicit assignment, idempotent replay (including rejecting
 a changed Brand Profile), reconnection, and cancellation through API handlers and
 PostgreSQL persistence. Only actor authentication and external provider HTTP
-responses are controlled. The full application gate runs afterward, followed by a
-focused production-app browser journey covering mobile focus containment,
+responses are controlled. The full application gate runs afterward; because that
+gate deliberately transfers ownership and exhausts quota fixtures, the lane
+recreates the disposable seed before the browser step. The focused
+production-app browser journey covers mobile focus containment,
 portalled account-menu dismissal, and reconnect eligibility at desktop/phone widths
 in both palettes. Its owner, profiles, and Channels are real fixture state; pending
 selection metadata is controlled. Screenshots and traces are retained as artifacts.
@@ -154,11 +190,24 @@ must not attach Channels to the first seeded profile.
 The Analytics journey uses the same profile restoration before palette and phone
 captures. Its cohort values are deterministic, but Post and Distribution ids are
 unique per run so retries cannot collide in the shared Workspace.
+The suite clears sign-in buckets in the loopback test database between journeys,
+because more than ten owner sign-ins would otherwise hit the production
+per-email and per-address limits, and it gives proxied auth requests a unique
+edge IP. The limits themselves stay enforced in production and in integration
+coverage.
 User-facing journeys and screenshots use production assets without DevBox chrome.
+The performance step starts the local API and serves the built client through a
+compression-negotiating static preview, because Cloudflare compresses text assets
+at the edge while Vite's preview serves them identity-encoded. The existing
+Lighthouse budgets are applied to that production-like response.
 `frontend-ui` runs both frontend checks, dead-code detection,
 documentation links, React review, development CSS/font HTTP smoke, and the
-controlled-backend workspace/public browser journey. Artifacts include desktop,
-phone, and reported-user-width captures plus failure traces.
+controlled-backend workspace, Analytics, and public-site browser journeys. The
+public journeys cover landing and guide navigation, the clearly labeled
+interactive sample, build-time docs search and Markdown alternates, theme
+transfer between public surfaces, phone disclosure, and native reduced motion.
+Artifacts include desktop, phone, and reported-user-width captures plus failure
+traces.
 The React Doctor invocation is pinned in the workflow and receives no GitHub token.
 Its changed-scope comparison fetches the public base branch without credentials.
 The topology lane owns a separate backend process for load checks after smoke exits.
@@ -232,6 +281,8 @@ Bun's download store, keyed by runner OS/architecture, Bun version, lockfile,
 workspace configuration, and dependency patches. A compatible download-cache
 fallback avoids re-downloading unchanged packages; installation always uses
 `--frozen-lockfile`. Installed `node_modules` is not cached.
+Frontend-only installation passes `selfhost: "false"` to skip the separate
+self-hosted runtime's npm installation; other callers retain it by default.
 
 Docker layer caches are isolated by component and architecture. The runtime
 Dockerfile installs workspace dependencies from manifests, lockfiles, and patches
@@ -248,6 +299,9 @@ the cache at the first commit. Only type-check/build tasks use task caching;
 tests, integration tests, secret scans, and repository checks execute every time.
 No PostgreSQL state or credentials are cached. GitHub scopes PR caches separately
 from the default branch; cache size and retention remain subject to GitHub limits.
+Worker tests retain per-file isolation and coverage instrumentation. Do not enable
+Vitest's filesystem module cache with the pinned Cloudflare test plugin: a hosted
+trial failed because the Worker runtime tried to read host-only cache paths.
 
 ## Quality tools
 

@@ -5,7 +5,7 @@ import { memoryAdapter } from "better-auth/adapters/memory";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
-import { Effect } from "effect";
+import { Cause, Effect, Option } from "effect";
 import { AuthenticationRequiredError, ForbiddenError } from "@meltiply/domain";
 
 import {
@@ -129,10 +129,14 @@ describe("Better Auth JWT verification", () => {
   });
 
   it("omits the display name when the JWT carries no name claim", async () => {
-    await expect(verifyJwt(await signJwt({ name: undefined }))).resolves.toEqual({
+    const identity = await verifyJwt(await signJwt({ name: undefined }));
+    expect(identity).toEqual({
       email: "alpha@example.test",
       subject: "user-alpha",
     });
+    // `toEqual` ignores undefined-valued keys, so assert the claim is absent
+    // rather than merely undefined.
+    expect(identity).not.toHaveProperty("name");
   });
 
   it("rejects tokens signed by a different key", async () => {
@@ -196,9 +200,18 @@ describe("Cloudflare Access verification", () => {
 
   it("rejects the wrong audience and non-identity service tokens", async () => {
     await expect(verifyAccess(await signAccess({ aud: ["other-application"] }))).rejects.toThrow();
-    await expect(
-      verifyAccess(await signAccess({ email: undefined, type: "service" })),
-    ).rejects.toThrow("identity subject and email");
+    // Isolate the identity-type guard: this token still carries a subject and
+    // email, so only `type !== "app"` can reject it.
+    await expect(verifyAccess(await signAccess({ type: "service" }))).rejects.toThrow(
+      "identity subject and email",
+    );
+    await expect(verifyAccess(await signAccess({ email: undefined }))).rejects.toThrow(
+      "identity subject and email",
+    );
+    // Isolate the subject guard the same way: email and type are valid.
+    expect(() => accessClaims({ email: "operator@example.test", type: "app" })).toThrow(
+      "identity subject and email",
+    );
   });
 
   it("rejects non-Cloudflare and non-origin team domains", () => {
@@ -301,7 +314,9 @@ describe("Effect AuthService and verifier helpers", () => {
     );
     expect(jwtExit._tag).toBe("Failure");
     if (jwtExit._tag === "Failure") {
-      expect(jwtExit.cause.toString()).toContain("AuthenticationRequiredError");
+      expect(Option.getOrThrow(Cause.findErrorOption(jwtExit.cause))).toMatchObject({
+        _tag: "AuthenticationRequiredError",
+      });
     }
 
     const accessExit = await Effect.runPromiseExit(
@@ -312,7 +327,9 @@ describe("Effect AuthService and verifier helpers", () => {
     );
     expect(accessExit._tag).toBe("Failure");
     if (accessExit._tag === "Failure") {
-      expect(accessExit.cause.toString()).toContain("ForbiddenError");
+      expect(Option.getOrThrow(Cause.findErrorOption(accessExit.cause))).toMatchObject({
+        _tag: "ForbiddenError",
+      });
     }
 
     // Invalid config shapes fail closed
@@ -538,6 +555,9 @@ describe("Better Auth device protocol HTTP composition", () => {
     expect(cliSession.headers.get("set-auth-jwt")).toBeTruthy();
     const cliBody = await jsonRecord(cliSession);
     expect(cliBody.user).toMatchObject({ email });
+    // Pin the session object first: `not.toHaveProperty` on `undefined` would
+    // pass without proving the projection actually omitted the field.
+    expect(cliBody.session).toMatchObject({ id: expect.any(String) });
     expect(cliBody.session).not.toHaveProperty("clientChannel");
     expect(database.session.find((session) => session.token === accessToken)?.clientChannel).toBe(
       "cli",
@@ -596,6 +616,7 @@ describe("Better Auth device protocol HTTP composition", () => {
     );
     const replacedBody = await jsonRecord(replacedSession);
     expect(replacedBody.user).toMatchObject({ email });
+    expect(replacedBody.session).toMatchObject({ id: expect.any(String) });
     expect(replacedBody.session).not.toHaveProperty("clientChannel");
     expect(await auth.getSession(new Headers({ Cookie: browserCookie }))).toBeNull();
   });

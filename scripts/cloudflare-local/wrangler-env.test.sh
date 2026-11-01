@@ -29,14 +29,27 @@ append_local_wrangler_env_file args "$fixture/.env"
 [[ "${args[1]}" == "$fixture/.env" ]]
 [[ ${#args[@]} -eq 2 ]]
 
+append_local_wrangler_overrides args
+
 # Env-file values — secret or not — never become command-line arguments, which
-# prevents Wrangler's startup banner from logging them.
+# prevents Wrangler's startup banner from logging them. Checked after the
+# origin overrides are appended, because that helper is what actually adds
+# `--var` arguments and could leak an env value into them.
 if printf '%s\n' "${args[@]}" | grep -q "local-encryption-key\|local-auth-secret\|no-reply@meltiply.local"; then
   echo "env-file value was forwarded as a Wrangler command-line argument" >&2
   exit 1
 fi
 
+# The signing key must also stay out: it is the value most likely to be added by
+# mistake when a new override is introduced.
+WRANGLER_DEV_BETTER_AUTH_JWKS_URL="http://127.0.0.1:8787/api/auth/jwks"
+args=()
 append_local_wrangler_overrides args
+if printf '%s\n' "${args[@]}" | grep -q "local-encryption-key\|local-auth-secret\|no-reply@meltiply.local"; then
+  echo "configured override forwarded an env-file secret as an argument" >&2
+  exit 1
+fi
+unset WRANGLER_DEV_BETTER_AUTH_JWKS_URL
 
 for value in \
   "ALLOWED_ORIGINS:http://localhost:3000" \

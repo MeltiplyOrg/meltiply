@@ -3,7 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   ContractValidator,
   loadContractDocument,
-  operationsById,
   type ContractDocument,
   type ContractParameter,
 } from "../test-support/validation";
@@ -33,6 +32,32 @@ const brandProfileFixture = {
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
+
+/**
+ * Every operation whose request schema carries a `brand_profile_id` property.
+ * Descending from `properties` (not `required`) keeps the required-field check
+ * meaningful: a field that is declared but optional still has to be found here
+ * and then rejected by the assertion below.
+ */
+function brandOwnedMutations(document: ContractDocument): string[] {
+  const owned: string[] = [];
+  for (const pathItem of Object.values(document.paths)) {
+    for (const method of ["delete", "get", "patch", "post", "put"] as const) {
+      const operation = pathItem[method];
+      const schema = operation?.requestBody?.content?.["application/json"]?.schema;
+      const properties = schema && "properties" in schema ? schema.properties : undefined;
+      if (
+        operation &&
+        properties &&
+        typeof properties === "object" &&
+        "brand_profile_id" in properties
+      ) {
+        owned.push(operation.operationId);
+      }
+    }
+  }
+  return owned.sort();
+}
 
 /**
  * Resolves a dereferenced component schema by name, failing if it is absent.
@@ -78,7 +103,6 @@ function brandProfileQueryParameter(
 
 describe("brand profile contract", async () => {
   const document = await loadContractDocument();
-  const operations = operationsById(document);
   const validator = await ContractValidator.create();
 
   it("exposes the full brand profile management operation set", () => {
@@ -94,7 +118,6 @@ describe("brand profile contract", async () => {
     for (const [method, path, operationId] of expected) {
       const operation = document.paths[path]?.[method];
       expect(operation?.operationId, `${method.toUpperCase()} ${path}`).toBe(operationId);
-      expect(operations.get(operationId), operationId).toBeDefined();
     }
   });
 
@@ -120,14 +143,20 @@ describe("brand profile contract", async () => {
       expect(schema.properties?.[field]?.type, field).toEqual(["string", "null"]);
       expect(schema.properties?.[field]?.format, field).toBe("date-time");
     }
+    for (const field of ["created_at", "updated_at"] as const) {
+      expect(schema.properties?.[field]?.type, field).toBe("string");
+      expect(schema.properties?.[field]?.format, field).toBe("date-time");
+    }
   });
 
   /**
-   * Locks the optional short description contract so every Brand Profile response
-   * carries either a 280-character plain-text summary or null. This lets the Channels
-   * board describe a profile without inventing client-only profile metadata.
+   * Locks the nullable short description contract so every Brand Profile response
+   * carries either a 280-character plain-text summary or null. The field is always
+   * present in the response (never omitted) and stays optional on write payloads.
+   * This lets the Channels board describe a profile without inventing client-only
+   * profile metadata.
    */
-  it("exposes an optional short description on every brand profile", () => {
+  it("exposes a nullable short description on every brand profile", () => {
     const schema = schemaOf(document, "BrandProfile");
     expect(schema.required).toContain("description");
     expect(schema.properties?.description).toMatchObject({
@@ -176,6 +205,8 @@ describe("brand profile contract", async () => {
       ["get", "/distributions"],
       ["get", "/calendar"],
       ["get", "/analytics"],
+      ["get", "/analytics/posts"],
+      ["get", "/analytics/dashboard"],
       ["get", "/inbox"],
     ];
     for (const [method, path] of filtered) {
@@ -189,10 +220,23 @@ describe("brand profile contract", async () => {
     }
   });
 
+  it("requires a brand_profile_id query parameter to read queues", () => {
+    const parameter = brandProfileQueryParameter(document, "/queues", "get");
+    expect(parameter).toBeDefined();
+    expect(parameter!.required).toBe(true);
+    expect(parameter!.schema).toMatchObject({
+      type: "string",
+      format: "uuid",
+    });
+  });
+
   it("assigns the Brand Profile when confirming OAuth, not at start", () => {
     expect(
       brandProfileQueryParameter(document, "/platforms/{platform}/connect", "get"),
     ).toBeUndefined();
+
+    const startResponse = schemaOf(document, "OAuthStartResponse");
+    expect(Object.keys(startResponse.properties ?? {})).not.toContain("brand_profile_id");
 
     const selection = schemaOf(document, "OAuthSelection");
     expect(selection.required ?? []).not.toContain("brand_profile_id");
@@ -207,7 +251,9 @@ describe("brand profile contract", async () => {
 
   /**
    * Exercises the generated validator with the optional description payload so
-   * the OpenAPI limit protects both creation and description-only updates.
+   * the OpenAPI limit protects both creation and description-only updates. Each
+   * rejection asserts the failing keyword and field, so an unrelated validation
+   * failure (for example a missing required sibling) cannot satisfy it.
    */
   it("accepts and rejects brand profile payloads at the validator seam", () => {
     expect(
@@ -222,17 +268,32 @@ describe("brand profile contract", async () => {
         name: "Alpha Brand",
         color: "not-a-palette-color",
       }),
-    ).toBeDefined();
-    expect(validator.validateRequest("createBrandProfile", { name: "Alpha Brand" })).toBeDefined();
+    ).toMatch(/^data\/color must be equal to one of the allowed values/);
+    expect(validator.validateRequest("createBrandProfile", { name: "Alpha Brand" })).toMatch(
+      /required property 'color'/,
+    );
+    expect(
+      validator.validateRequest("createBrandProfile", {
+        name: "Alpha Brand",
+        color: paletteColor,
+        description: "",
+      }),
+    ).toMatch(/data\/description must match pattern/);
     expect(
       validator.validateRequest("updateBrandProfile", { color: paletteColor }),
+    ).toBeUndefined();
+    expect(validator.validateRequest("updateBrandProfile", { description: null })).toBeUndefined();
+    expect(
+      validator.validateRequest("updateBrandProfile", { description: "x".repeat(280) }),
     ).toBeUndefined();
     expect(
       validator.validateRequest("updateBrandProfile", {
         description: "x".repeat(281),
       }),
-    ).toBeDefined();
-    expect(validator.validateRequest("updateBrandProfile", {})).toBeDefined();
+    ).toMatch(/data\/description must NOT have more than 280 characters/);
+    expect(validator.validateRequest("updateBrandProfile", {})).toMatch(
+      /data must NOT have fewer than 1 properties/,
+    );
     expect(
       validator.validateResponse("listBrandProfiles", 200, {
         profiles: [brandProfileFixture],
@@ -242,22 +303,43 @@ describe("brand profile contract", async () => {
       validator.validateResponse("listBrandProfiles", 200, {
         profiles: [{ ...brandProfileFixture, color: "mauve" }],
       }),
-    ).toBeDefined();
+    ).toMatch(/data\/profiles\/0\/color must be equal to one of the allowed values/);
   });
 
   it("rejects brand-owned mutations that omit brand_profile_id", () => {
-    expect(
-      validator.validateRequest("createPost", {
-        default_text: "Hello world",
-      }),
-    ).toBeDefined();
+    const owned = brandOwnedMutations(document);
+    // Anti-vacuity guard: the derived set must still contain every mutation that
+    // owns content, so deleting the property from the contract fails loudly here
+    // instead of shrinking the loop to nothing.
+    expect(owned).toEqual(
+      expect.arrayContaining([
+        "confirmOAuthSelection",
+        "createPost",
+        "createQueue",
+        "createUploadSession",
+        "deletePost",
+        "deleteQueue",
+        "removePostFromQueue",
+        "replyToComment",
+        "schedulePost",
+        "updatePost",
+        "updateQueue",
+      ]),
+    );
+
+    for (const operationId of owned) {
+      expect(
+        validator.validateRequest(operationId, {}),
+        `${operationId} must require brand_profile_id`,
+      ).toMatch(/brand_profile_id/);
+    }
+
     expect(
       validator.validateRequest("createPost", {
         brand_profile_id: brandProfileId,
         default_text: "Hello world",
       }),
     ).toBeUndefined();
-    expect(validator.validateRequest("replyToComment", { text: "Thanks!" })).toBeDefined();
     expect(
       validator.validateRequest("replyToComment", {
         brand_profile_id: brandProfileId,

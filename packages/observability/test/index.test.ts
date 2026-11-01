@@ -13,6 +13,10 @@ import {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // `restoreAllMocks` does not undo `vi.stubGlobal`, so a test that replaced
+  // `fetch` would otherwise keep its double installed for every later test in
+  // this file (and mask a missing real fetch call).
+  vi.unstubAllGlobals();
   configureLogSampling(undefined);
 });
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { test } from "node:test";
 
 import { parseReleaseArguments } from "./release-options.mjs";
@@ -30,7 +31,16 @@ test("release options preserve repeated approval metadata and reject ambiguity",
   assert.equal(parsed.apply, true);
   assert.equal(parsed.phase, "api-update");
   assert.equal(parsed.step, "upload");
-  assert.equal(parsed.approvalMetadata.length, 2);
+  // Repeated flags are preserved in order and resolved to absolute paths, which
+  // is what later approval loading depends on.
+  assert.deepEqual(parsed.approvalMetadata, [
+    path.resolve("release-approval.json"),
+    path.resolve("traffic-approval.json"),
+  ]);
+  assert.equal(parsed.inputPath, path.resolve("release.json"));
+  assert.equal(parsed.iacOutputsPath, path.resolve("outputs.json"));
+  assert.equal(parsed.planDigest, "a".repeat(64));
+  assert.equal(parsed.confirm, `release staging ${"b".repeat(40)}`);
   assert.throws(
     () =>
       parseReleaseArguments(["preflight", "--input", "first.json", "--input", "second.json"], {}),

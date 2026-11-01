@@ -84,6 +84,7 @@ const acceptanceProjects = [
       "**/workspace-design.spec.ts",
       "**/analytics.spec.ts",
       "**/shared-components.spec.ts",
+      "**/public-site.spec.ts",
     ],
     use: { ...devices["Desktop Chrome"] },
   },

@@ -9,7 +9,8 @@
         "scripts/cloudflare-local/complete-env.mjs",
         "lint/boundaries-plugin.d.mts",
         "lint/astro-ui-contract.d.mts",
-        "scripts/cloudflare-local/worker-types.mjs"
+        "scripts/cloudflare-local/worker-types.mjs",
+        "scripts/ci/lighthouse-preview.mjs"
       ]
     },
     "frontend/app": {

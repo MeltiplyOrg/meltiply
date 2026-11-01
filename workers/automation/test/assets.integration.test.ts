@@ -1892,7 +1892,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       );
       return original.rows[0]!.id;
     });
-    expect(originalObjectId).toBeTruthy();
+    expect(originalObjectId).toMatch(/^[0-9a-f-]{36}$/);
     const processorJob = createAssetJobProcessor(processorEnv(processor), harness.storage);
 
     await expect(
@@ -4247,8 +4247,12 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       // back up. R2 DELETE is idempotent and the key was already absent here,
       // so the claim settles to `'deleted'` in this same `runMaintenance`
       // rather than lingering in `'deleting'` for a later sweep.
+      // The confirmed abort closed the hold at the moment it was claimed: a
+      // hold still running into the future would mean the dead upload id could
+      // write again after its reservation moved.
       const hold = state.rows[0]!.object_hold;
-      expect(hold === null || hold.getTime() <= Date.now() + 1_000).toBe(true);
+      expect(hold).toBeInstanceOf(Date);
+      expect(hold!.getTime()).toBeLessThanOrEqual(Date.now());
       const { object_hold: _hold, ...rest } = state.rows[0]!;
       expect(rest).toEqual({
         // The abandoned upload leaves its Asset durably failed with a stable
@@ -6082,23 +6086,29 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     });
   });
 
-  it("recovers unsent beyond-horizon and overdue lost distributions without duplicating active work", async () => {
-    const beyondHorizonId = "93000000-0000-4000-8000-000000000061";
+  it("arms within-horizon and overdue lost distributions, leaving beyond-horizon work for a later sweep", async () => {
+    // Twelve hours sits inside the 24-hour delayed-delivery horizon, so this
+    // row is the within-horizon case: the sweep arms its plain trigger now.
+    const withinHorizonId = "93000000-0000-4000-8000-000000000061";
     const overdueLostId = "93000000-0000-4000-8000-000000000062";
     const activePendingId = "93000000-0000-4000-8000-000000000063";
     const activeLeasedId = "93000000-0000-4000-8000-000000000064";
     const futureProtectedId = "93000000-0000-4000-8000-000000000065";
+    // Beyond the horizon: Queues cannot hold this delay, so the sweep must arm
+    // nothing and let a later sweep convert the row once it comes into range.
+    const beyondHorizonId = "93000000-0000-4000-8000-000000000066";
     const testIds = [
-      beyondHorizonId,
+      withinHorizonId,
       overdueLostId,
       activePendingId,
       activeLeasedId,
       futureProtectedId,
+      beyondHorizonId,
     ];
 
     try {
       await runSystemTransaction(env, async (client) => {
-        // Five scheduled rows on the seeded Channel need five Posts under the
+        // Six scheduled rows on the seeded Channel need six Posts under the
         // (post_id, platform_account_id) uniqueness; each composes the
         // canonical image like the old asset fixture.
         for (const distributionId of testIds) {
@@ -6131,20 +6141,26 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
              ($5, $6, $7,
               $12,
               '50000000-0000-4000-8000-000000000001',
-              'youtube', 'scheduled', now() + INTERVAL '2 hours', now())`,
+              'youtube', 'scheduled', now() + INTERVAL '2 hours', now()),
+             ($13, $6, $7,
+              $14,
+              '50000000-0000-4000-8000-000000000001',
+              'youtube', 'scheduled', now() + INTERVAL '25 hours', now())`,
           [
-            beyondHorizonId,
+            withinHorizonId,
             overdueLostId,
             activePendingId,
             activeLeasedId,
             futureProtectedId,
             organizationId,
             seededAlphaProfileId,
-            postIdForDistribution(beyondHorizonId),
+            postIdForDistribution(withinHorizonId),
             postIdForDistribution(overdueLostId),
             postIdForDistribution(activePendingId),
             postIdForDistribution(activeLeasedId),
             postIdForDistribution(futureProtectedId),
+            beyondHorizonId,
+            postIdForDistribution(beyondHorizonId),
           ],
         );
 
@@ -6198,8 +6214,9 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       await Effect.runPromise(sweepDueDistributions(env));
 
       await runSystemTransaction(env, async (client) => {
-        // beyondHorizonId: exactly 1 new pending event emitted with instant dedupe key
-        const beyondHorizonEvents = await client.query<{
+        // withinHorizonId: exactly 1 new pending event emitted with the
+        // instant dedupe key (no recovery suffix — nothing was lost).
+        const withinHorizonEvents = await client.query<{
           dedupe_key: string;
           payload: { distribution_id: string; version: number };
           state: string;
@@ -6209,19 +6226,27 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
            FROM outbox_events
            WHERE aggregate_id = $1
            ORDER BY created_at`,
-          [beyondHorizonId],
+          [withinHorizonId],
         );
-        expect(beyondHorizonEvents.rows).toHaveLength(1);
-        expect(beyondHorizonEvents.rows[0]).toMatchObject({
-          payload: { distribution_id: beyondHorizonId, version: 1 },
+        expect(withinHorizonEvents.rows).toHaveLength(1);
+        expect(withinHorizonEvents.rows[0]).toMatchObject({
+          payload: { distribution_id: withinHorizonId, version: 1 },
           state: "pending",
           topic: "distribution.publish.requested",
         });
-        expect(beyondHorizonEvents.rows[0]?.dedupe_key).toMatch(
+        expect(withinHorizonEvents.rows[0]?.dedupe_key).toMatch(
           new RegExp(
-            `^distribution:${beyondHorizonId}:distribution\\.publish\\.requested:at:\\d+$`,
+            `^distribution:${withinHorizonId}:distribution\\.publish\\.requested:at:\\d+$`,
           ),
         );
+
+        // beyondHorizonId: still outside the deliverable window, so the sweep
+        // must arm nothing at all.
+        const beyondHorizonEvents = await client.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM outbox_events WHERE aggregate_id = $1`,
+          [beyondHorizonId],
+        );
+        expect(beyondHorizonEvents.rows[0]?.count).toBe("0");
 
         // overdueLostId: 2 events total (original published + new recovery event with :recovery suffix)
         const overdueLostEvents = await client.query<{
@@ -6282,11 +6307,12 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
           [testIds],
         );
         expect(distributionsState.rows).toEqual([
-          { id: beyondHorizonId, status: "scheduled" },
+          { id: withinHorizonId, status: "scheduled" },
           { id: overdueLostId, status: "scheduled" },
           { id: activePendingId, status: "scheduled" },
           { id: activeLeasedId, status: "scheduled" },
           { id: futureProtectedId, status: "scheduled" },
+          { id: beyondHorizonId, status: "scheduled" },
         ]);
       });
 
@@ -6802,14 +6828,17 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       payload: { distribution_id: distributionId },
     } as const;
 
-    await expect(
-      Effect.runPromise(
+    // A live lease defers the delivery: the classified retryable outcome is the
+    // boundary contract, not the wrapper's prose.
+    const deferred = await Effect.runPromise(
+      Effect.flip(
         processDistributionMessage(env, message, {
           decryptToken: async (stored) => stored,
           providerRegistry: youtubeRegistry(publish),
         }),
       ),
-    ).rejects.toThrow("distribution event lease is still active");
+    );
+    expect(deferred).toBeInstanceOf(RetryableJobError);
     await runSystemTransaction(env, (client) =>
       client.query(
         `UPDATE async_job_events
@@ -7919,7 +7948,14 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const nextCommentsMessage = commentsMessages[1] as Parameters<
       typeof processProviderSyncMessage
     >[1];
-    expect(nextCommentsMessage).toBeDefined();
+    // The continuation must address the same Distribution on the comments
+    // workload with a freshly minted event identity; anything else would
+    // re-fetch the page that was just checkpointed.
+    expect(nextCommentsMessage).toMatchObject({
+      target_id: distributionId,
+      workload: "comments",
+    });
+    expect(nextCommentsMessage.event_id).not.toBe(commentsMessage.event_id);
     await expect(
       Effect.runPromise(
         Effect.provide(
@@ -8314,8 +8350,11 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     };
     expect(commentsItem.body.workload).toBe("comments");
     expect(commentsItem.body.target_id).toBe(distributionId);
-    expect(commentsItem.delaySeconds).toBeGreaterThan(0);
-    expect(commentsItem.delaySeconds).toBeLessThanOrEqual(86_400);
+    // Two hours out: the delay is derived from the durable next-due instant,
+    // so anything above that (a clamp to the 24-hour horizon, or a delay of
+    // zero) means the sweep ignored the recorded schedule.
+    expect(commentsItem.delaySeconds).toBeGreaterThan(7_100);
+    expect(commentsItem.delaySeconds).toBeLessThanOrEqual(7_200);
 
     // Cleanup
     await runSystemTransaction(env, async (client) => {

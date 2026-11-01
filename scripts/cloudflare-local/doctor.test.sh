@@ -271,6 +271,19 @@ expect_output() {
   fi
 }
 
+# Asserts the doctor's exit status: 0 healthy, 1 failed prerequisite, 2 degraded.
+# The status is the contract CI consumes, so every scenario pins it instead of
+# relying on the printed summary alone.
+expect_status() {
+  local expected=$1 label=$2
+  if [[ "$code" != "$expected" ]]; then
+    printf 'doctor exit status for %s was %s, expected %s\n' "$label" "$code" "$expected" >&2
+    printf 'captured stderr:\n' >&2
+    cat "$fixture/$label.stderr" >&2 2>/dev/null || true
+    exit 1
+  fi
+}
+
 # Reject an unexpected diagnostic and print its actual stream pair on failure.
 expect_absent() {
   local file=$1 unexpected=$2 label=$3 base=${1%.*}
@@ -288,8 +301,9 @@ export DOCKER_STATE="pg-running pg-queries"
 export CURL_STATE="api-up api-ready frontend-up"
 export SS_STATE=""
 : >"$COMMAND_LOG"
+code=0
 run_doctor >"$fixture/r1.stdout" 2>"$fixture/r1.stderr" || code=$?
-code=${code:-0}
+expect_status 0 r1
 expect_output "$fixture/r1.stdout" '[ok] Node v24.18.0' toolchain
 expect_output "$fixture/r1.stdout" '[ok] API Worker healthy' health
 expect_output "$fixture/r1.stdout" '[ok] API Worker ready' ready
@@ -302,8 +316,9 @@ expect_absent "$fixture/r1.stderr" '[error]' clean-stderr
 # error — the doctor treats it like missing emulation so the exit code stays
 # clean. MELTIPLY_CGROUP_ROOT keeps this deterministic on every host.
 printf 'threaded\n' >"$MELTIPLY_CGROUP_ROOT/docker/cgroup.type"
+code=0
 run_doctor >"$fixture/r1b.stdout" 2>"$fixture/r1b.stderr" || code=$?
-code=${code:-0}
+expect_status 0 r1b
 expect_output "$fixture/r1b.stdout" "[note] $fixture/cgroup/docker/cgroup.type is threaded" cgroup-threaded
 expect_output "$fixture/r1b.stdout" 'fully healthy' summary
 expect_absent "$fixture/r1b.stderr" '[error]' clean-stderr
@@ -315,8 +330,9 @@ export DOCKER_STATE="pg-running pg-queries"
 export CURL_STATE="frontend-up baked-origin-up"
 export STUB_BAKED_ORIGIN="http://127.0.0.1:8787"
 export SS_STATE="port8787-held"
+code=0
 run_doctor >"$fixture/r2.stdout" 2>"$fixture/r2.stderr" || code=$?
-code=${code:-0}
+expect_status 2 r2
 expect_output "$fixture/r2.stdout" 'could not refresh this view' cross-check
 expect_output "$fixture/r2.stderr" 'live-stack problem(s)' summary-degraded
 
@@ -325,8 +341,9 @@ expect_output "$fixture/r2.stderr" 'live-stack problem(s)' summary-degraded
 # report it as available instead of raising a false prerequisite note.
 export STUB_ARCH="arm64"
 export STUB_KERNEL="Darwin"
+code=0
 run_doctor >"$fixture/r2b.stdout" 2>"$fixture/r2b.stderr" || code=$?
-code=${code:-0}
+expect_status 2 r2b
 expect_output "$fixture/r2b.stdout" '[ok] local container runtime can execute linux/amd64' container-runtime
 unset STUB_ARCH STUB_KERNEL
 # Run 2c: a non-amd64 Linux host whose client namespace may hide binfmt_misc
@@ -336,13 +353,17 @@ export STUB_ARCH="aarch64"
 export STUB_KERNEL="Linux"
 export STUB_DOCKER_ARCH="aarch64"
 export STUB_BUILDX_PLATFORMS="linux/arm64, linux/amd64, linux/amd64/v2"
+code=0
 run_doctor >"$fixture/r2c.stdout" 2>"$fixture/r2c.stderr" || code=$?
+expect_status 2 r2c
 expect_output "$fixture/r2c.stdout" '[ok] local container runtime can execute linux/amd64' container-runtime
 
 # Run 2d: the same host with a daemon that reports no amd64 platform must get
 # the prerequisite note and the emulation remediation, never a false ok.
 export STUB_BUILDX_PLATFORMS="linux/arm64"
+code=0
 run_doctor >"$fixture/r2d.stdout" 2>"$fixture/r2d.stderr" || code=$?
+expect_status 2 r2d
 expect_output "$fixture/r2d.stdout" '[note] no linux/amd64 execution on this aarch64 host' container-runtime
 expect_output "$fixture/r2d.stderr" 'docker run --privileged --rm tonistiigi/binfmt --install amd64' remediation
 unset STUB_ARCH STUB_KERNEL STUB_DOCKER_ARCH STUB_BUILDX_PLATFORMS
@@ -357,8 +378,9 @@ sed -i '/^BETTER_AUTH_SECRET=/d' "$fixture/.env"
 export DOCKER_STATE=""
 export CURL_STATE=""
 export SS_STATE=""
+code=0
 run_doctor >"$fixture/r3.stdout" 2>"$fixture/r3.stderr" || code=$?
-code=${code:-0}
+expect_status 1 r3
 expect_output "$fixture/r3.stderr" '[error] Node v24.18.0' node-error
 expect_output "$fixture/r3.stderr" '[error] root .env has Better Auth/mail/encryption configuration' env-error
 expect_output "$fixture/r3.stderr" 'doctor found 2 error(s)' error-summary
@@ -388,8 +410,12 @@ EOF
 export DOCKER_STATE="pg-running pg-queries"
 export CURL_STATE="api-up api-ready frontend-up"
 export SS_STATE=""
+code=0
 run_doctor >"$fixture/r4.stdout" 2>"$fixture/r4.stderr" || code=$?
-code=${code:-0}
+# Run 3 deleted BETTER_AUTH_SECRET from the fixture .env and nothing restores
+# it, so this run still carries a hard prerequisite error and exits 1 rather
+# than 2. Only the diagnostic below is part of this scenario's claim.
+expect_status 1 r4
 expect_output "$fixture/r4.stderr" 'wrangler-2026-08-22_05-36-31_555.log' crash-log-path
 # Read-only diagnostics: the log must survive the doctor.
 [[ -f "$HOME/.config/.wrangler/logs/wrangler-2026-08-22_05-36-31_555.log" ]]

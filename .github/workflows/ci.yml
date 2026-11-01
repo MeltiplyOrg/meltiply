@@ -67,6 +67,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
+        with:
+          selfhost: "false"
       - name: Format, type, bindings, lint, coverage, and production builds
         run: |
           bun run --cwd frontend/app format-check
@@ -123,27 +125,9 @@ jobs:
         run: |
           bun run lint
           bun run lint:dead
-          bun run test:wrangler-drift
-          bun run test:frontend-directives
           bun run format-check:cloudflare
           bunx --no-install vp fmt .github/workflows/ci.yml .github/workflows/selfhost.yml .github/workflows/selfhost-ci.yml .github/actions/install-workspace/action.yml scripts/selfhost compose.selfhost.yml docs/public-ci.md --check
           git diff --exit-code -- packages/contracts
-          bun run test:ci-routing
-      - name: Local tooling, release, and supply-chain contracts
-        run: |
-          bun run test:local-setup
-          bun run test:available-port
-          bun run test:wrangler-env
-          bun run test:teardown
-          bun run test:dev
-          bun run test:quick-tunnel
-          bun run test:tunnel-hostname
-          bun run test:doctor
-          bun run test:k6-runner
-          bun run release:test
-          bun run test:supply-chain
-          bun run security:supply-chain
-          bun run cost:check
       - name: PostgreSQL integration tests
         env:
           MELTIPLY_DATABASE_TEST_URL: postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable
@@ -152,6 +136,29 @@ jobs:
       - name: Stop isolated PostgreSQL
         if: always()
         run: ./scripts/cloudflare-local/database.sh stop
+
+  cloudflare-tooling:
+    needs: changes
+    if: needs.changes.outputs.cloudflare == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-workspace
+      - name: Development launcher lifecycle
+        run: bun run test:dev
+      - name: Local tooling, release, and supply-chain contracts
+        run: |
+          bun run test:tooling
+          bun run test:local-setup
+          bun run test:wrangler-env
+          bun run test:teardown
+          bun run test:doctor
+          bun run test:k6-runner
+          bun run security:supply-chain
+          node scripts/infra/cost-model.mjs --check
 
   frontend-performance:
     needs: changes
@@ -191,7 +198,15 @@ jobs:
 
   ci-gate:
     needs:
-      [changes, baseline, frontend-fast, cloudflare-fast, frontend-performance, selfhost-images]
+      [
+        changes,
+        baseline,
+        frontend-fast,
+        cloudflare-fast,
+        cloudflare-tooling,
+        frontend-performance,
+        selfhost-images,
+      ]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -204,6 +219,7 @@ jobs:
           FRONTEND: ${{ needs.frontend-fast.result }}
           CLOUDFLARE_SELECTED: ${{ needs.changes.outputs.cloudflare }}
           CLOUDFLARE: ${{ needs.cloudflare-fast.result }}
+          CLOUDFLARE_TOOLING: ${{ needs.cloudflare-tooling.result }}
           PERFORMANCE_SELECTED: ${{ needs.changes.outputs.frontend == 'true' || needs.changes.outputs.cloudflare == 'true' }}
           PERFORMANCE: ${{ needs.frontend-performance.result }}
           SELFHOST_SELECTED: ${{ needs.changes.outputs.selfhost }}
@@ -228,6 +244,8 @@ jobs:
           fi
           if [ "$CLOUDFLARE_SELECTED" = true ]; then
             test "$CLOUDFLARE" = success
+            test "$CLOUDFLARE_TOOLING" = success
           else
             test "$CLOUDFLARE" = skipped
+            test "$CLOUDFLARE_TOOLING" = skipped
           fi

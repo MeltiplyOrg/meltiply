@@ -77,9 +77,13 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   const table = page.locator("div.hidden.lg\\:block table");
   await expect(table.locator("tbody tr")).toHaveCount(10);
   await expect(table.locator("tbody tr").first()).toContainText("Analytics E2E older");
-  await expect(table.getByText("Not supported")).toHaveCount(0);
   await page.getByRole("button", { name: "Load more" }).click();
   await expect(table.locator("tbody tr")).toHaveCount(12);
+  // The cohort's TikTok-only Post is measured in acceptance mode: the controlled
+  // Provider advertises TikTok analytics, so the row must show its stored counter
+  // rather than an unsupported-platform state.
+  const tiktokOnly = table.getByRole("row", { name: /Analytics E2E TikTok only/ });
+  await expect(tiktokOnly).toContainText("50");
   await expect(table.getByText("Not supported")).toHaveCount(0);
   // One fully un-synced Post renders the state in its four content cells.
   await expect(table.getByText("Awaiting sync", { exact: true })).toHaveCount(4);

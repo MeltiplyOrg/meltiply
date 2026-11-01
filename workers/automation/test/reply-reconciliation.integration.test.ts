@@ -456,6 +456,9 @@ describeIntegration("distribution reconciliation recovery with PostgreSQL", () =
         [[deadEventId, strandedId]],
       ),
     );
+    // Exactly one live trigger per fixture row: keying by aggregate_id alone
+    // would collapse a duplicate arm into the same entry and still match.
+    expect(recovered.rows).toHaveLength(2);
     const recoveredById: Record<string, (typeof recovered.rows)[number]> = {};
     for (const row of recovered.rows) recoveredById[row.aggregate_id] = row;
     expect(recoveredById[deadEventId]).toEqual({

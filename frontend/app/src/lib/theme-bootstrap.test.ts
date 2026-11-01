@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import themeBootstrapRuntime from "@meltiply/ui/theme-bootstrap-runtime?raw";
 import {
   renderThemeBootstrap,
-  themeBootstrapMarker,
   type ThemeBootstrapSettings,
 } from "@meltiply/ui/theme-bootstrap-source";
 import {
@@ -240,13 +239,25 @@ describe("before-paint theme runtime", () => {
 
 describe("theme bootstrap source", () => {
   it("serializes options without terminating the surrounding script", () => {
-    const source = renderThemeBootstrap(themeBootstrapRuntime, {
-      mode: "class",
-      siteUrls: ["https://example.test/</script><script>alert(1)</script>"],
-    });
+    const hostileOrigin = "https://example.test/</script><script>alert(1)</script>";
+    const source = renderThemeBootstrap(
+      "window.captured = window.__meltiplyThemeBootstrapOptions;",
+      {
+        mode: "class",
+        siteUrls: [hostileOrigin],
+      },
+    );
 
-    expect(themeBootstrapMarker).not.toBe("");
-    expect(source).toContain("window.__meltiplyThemeBootstrapOptions = ");
-    expect(source).not.toContain("</script><script>");
+    // Parse the actual HTML embedding boundary: an unescaped closing tag
+    // creates a second executable script before JavaScript parsing even begins.
+    const html = new DOMParser().parseFromString(`<script>${source}</script>`, "text/html");
+    const scripts = html.querySelectorAll("script");
+    expect(scripts).toHaveLength(1);
+    const browser: Record<string, unknown> = {};
+    new Function("window", scripts[0]!.textContent ?? "")(browser);
+    expect(browser.captured).toMatchObject({
+      mode: "class",
+      siteUrls: [hostileOrigin],
+    });
   });
 });

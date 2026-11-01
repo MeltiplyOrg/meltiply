@@ -120,6 +120,10 @@ describe("OAuthStateCoordinator", () => {
           expires_at: Date.now() - 1,
         });
         await instance.alarm();
+        // The surviving record's deadline is the next sweep time: without this
+        // the expired entries would be deleted but never re-armed, so the live
+        // record would linger past its own expiry.
+        await expect(storage.getAlarm()).resolves.toBe(liveExpiry);
       },
     );
 
@@ -910,6 +914,15 @@ describe("OAuthStateCoordinator", () => {
     );
 
     await expect(coordinator.consume("state-expired")).resolves.toBeNull();
+    // The expired selection master is swept by the same pass as the OAuth
+    // state; asserting only the live ticket would pass a sweep that never
+    // touched `selection:` entries at all.
+    await runInDurableObject(
+      coordinator,
+      async (_instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
+        await expect(ctx.storage.get("selection:sel-expired")).resolves.toBeUndefined();
+      },
+    );
     const publicLive = await coordinator.getSelection("sel-live", {
       organizationId: "org-combined-alarm",
       userId: "u1",

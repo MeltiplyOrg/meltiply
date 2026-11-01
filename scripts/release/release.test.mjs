@@ -120,6 +120,22 @@ test("command runner does not open stdin for read-only commands", async () => {
   const result = await runCommand("git", ["rev-parse", "HEAD"]);
   assert.match(result.stdout, /^[0-9a-f]{40}\n$/);
 
+  // The observable contract is the child's stdin descriptor. A command that
+  // reports whether fd 0 is a pipe distinguishes `ignore` from `pipe`; asking
+  // `git rev-parse` cannot, because it never reads stdin either way.
+  const stdinKind = await runCommand(process.execPath, [
+    "-e",
+    'const fs = require("node:fs"); process.stdout.write(fs.fstatSync(0).isFIFO() ? "pipe" : "ignored");',
+  ]);
+  assert.equal(stdinKind.stdout, "ignored");
+
+  const piped = await runCommand(
+    process.execPath,
+    ["-e", 'process.stdin.on("data", (chunk) => process.stdout.write(chunk))'],
+    { stdin: "payload" },
+  );
+  assert.equal(piped.stdout, "payload");
+
   const stress = spawnSync(
     process.execPath,
     [
@@ -475,6 +491,7 @@ test("preflight fails closed on checkout and toolchain drift", async () => {
       },
       spec,
     }),
+    /tracked working tree changes are not releasable/,
   );
   await assert.rejects(
     preflightRelease({
@@ -489,6 +506,37 @@ test("preflight fails closed on checkout and toolchain drift", async () => {
       },
       spec,
     }),
+    /release requires Wrangler 4\.148\.0/,
+  );
+  // A checkout at a different commit must be rejected for that reason, not by
+  // an incidental failure elsewhere in preflight.
+  await assert.rejects(
+    preflightRelease({
+      environment: {},
+      offline: true,
+      repoRoot: "/repo",
+      runCommand(command, args) {
+        if (command === "git" && args[0] === "rev-parse") {
+          return Promise.resolve({ code: 0, stderr: "", stdout: `${"f".repeat(40)}\n` });
+        }
+        return successfulPreflightCommand(command, args);
+      },
+      spec,
+    }),
+    /release git_sha does not match the checked-out commit/,
+  );
+  // The clean, matching checkout is the control: it must resolve to "ready".
+  assert.equal(
+    (
+      await preflightRelease({
+        environment: {},
+        offline: true,
+        repoRoot: "/repo",
+        runCommand: successfulPreflightCommand,
+        spec,
+      })
+    ).status,
+    "ready",
   );
 });
 

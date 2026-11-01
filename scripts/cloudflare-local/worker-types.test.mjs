@@ -55,12 +55,23 @@ async function fixture(t) {
 /** Env files must be masked inside the session mirror, not read or removed. */
 test("worker type generation ignores checkout env files and Cloudflare env", async (t) => {
   const { root, workerDir, output } = await fixture(t);
+  // Restore whatever the runner had, rather than deleting keys it may own:
+  // the generator is expected to neutralize them either way, and a caller's
+  // Cloudflare context must survive the test.
+  const previous = new Map(
+    ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_INCLUDE_PROCESS_ENV"].map((name) => [
+      name,
+      process.env[name],
+    ]),
+  );
+  t.after(() => {
+    for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
   process.env.CLOUDFLARE_ACCOUNT_ID = "leaked-account";
   process.env.CLOUDFLARE_INCLUDE_PROCESS_ENV = "true";
-  t.after(() => {
-    delete process.env.CLOUDFLARE_ACCOUNT_ID;
-    delete process.env.CLOUDFLARE_INCLUDE_PROCESS_ENV;
-  });
 
   await generateWorkerTypes(root);
 

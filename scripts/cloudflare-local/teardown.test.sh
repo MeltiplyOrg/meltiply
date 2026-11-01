@@ -308,10 +308,9 @@ fi
 # Run 3: a devcontainer teardown is bound to its own COMPOSE_PROJECT_NAME.
 # meltiply-deadbeef shares the meltiply- prefix with the baseline project and
 # carries its own processor container, so any unscoped down, name filter, or
-# ancestor sweep would visibly reap baseline rows from the table. compose.sh
-# resolves the owner through the meltiply.devcontainer.project label — the
-# seeded meltiply-cafebabe owner proves an exact label match cannot select a
-# sibling, and both owners must survive teardown.
+# ancestor sweep would visibly reap baseline rows from the table. The inner
+# daemon cannot see its outer devcontainer; teardown must not require an owner
+# lookup, and unrelated labeled resources must still survive.
 seed_resources
 : >"$COMMAND_LOG"
 (

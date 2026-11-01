@@ -1,0 +1,35 @@
+name: Devcontainer isolation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .devcontainer/**
+      - compose.dev.yml
+      - scripts/cloudflare-local/**
+      - .github/workflows/devcontainer.yml
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6.1.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-workspace
+      - name: Format and validate changed development files
+        run: |
+          bun run format -- .devcontainer/devcontainer.json .devcontainer/compose.yml .github/workflows/devcontainer.yml scripts/cloudflare-local/r2-gateway.mjs scripts/cloudflare-local/postgres-endpoint.mjs scripts/cloudflare-local/docker-listener-host.mjs README.md CONTRIBUTING.md --check
+          for script in .devcontainer/*.sh scripts/cloudflare-local/compose.sh; do bash -n "$script"; done
+          bun run docs:links
+          bun run test:wrangler-env
+          bun run test:teardown
+          node --test scripts/cloudflare-local/worker-config-session.test.mjs
+      - name: Install Dev Container CLI
+        run: npm install --global @devcontainers/cli@0.89.0
+      - name: Exercise isolated inner Docker daemon
+        run: bash .devcontainer/smoke.sh

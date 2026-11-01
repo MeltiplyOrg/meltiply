@@ -11,11 +11,14 @@ import {
   ProviderService,
   type OAuthConnection,
   type OAuthExchangeResult,
+  type FacebookPostType,
   type InstagramPostType,
   type InstagramTrialGraduation,
   type ProviderPublicationRequirements,
   type ProviderRegistry,
+  type ThreadsReplyControl,
   type TikTokPrivacyLevel,
+  type YouTubeLicense,
   type YouTubePrivacyStatus,
 } from "@meltiply/providers";
 import { errorDiagnostic, log } from "@meltiply/observability";
@@ -255,6 +258,27 @@ const YOUTUBE_PRIVACY_STATUSES: Record<YouTubePrivacyStatus, true> = {
 };
 
 /**
+ * YouTube `license` values accepted at the request boundary; mirrors the
+ * `YouTubeLicense` contract enum for runtime validation.
+ */
+const YOUTUBE_LICENSES: Record<YouTubeLicense, true> = {
+  creativeCommon: true,
+  youtube: true,
+};
+
+/**
+ * Threads `reply_control` values accepted at the request boundary; mirrors the
+ * `ThreadsReplyControl` contract enum for runtime validation.
+ */
+const THREADS_REPLY_CONTROLS = new Set<ThreadsReplyControl>([
+  "everyone",
+  "accounts_you_follow",
+  "mentioned_only",
+  "parent_post_author_only",
+  "followers_only",
+]);
+
+/**
  * Validates and normalizes saved Provider choices from a Post request body.
  *
  * Unknown keys and malformed supplied values are rejected, while unanswered
@@ -272,13 +296,62 @@ function providerOptionsField(body: Record<string, unknown>): PostProviderOption
     throw new CoreApiError(400, "validation_error", "provider_options must be an object.");
   }
   const options = value as Record<string, unknown>;
-  onlyKeys(options, ["tiktok", "youtube", "instagram"]);
+  onlyKeys(options, ["facebook", "instagram", "threads", "tiktok", "youtube"]);
   return {
+    ...(options.facebook !== undefined ? { facebook: facebookOptionsField(options.facebook) } : {}),
     ...(options.instagram !== undefined
       ? { instagram: instagramOptionsField(options.instagram) }
       : {}),
+    ...(options.threads !== undefined ? { threads: threadsOptionsField(options.threads) } : {}),
     ...(options.tiktok !== undefined ? { tiktok: tiktokOptionsField(options.tiktok) } : {}),
     ...(options.youtube !== undefined ? { youtube: youtubeOptionsField(options.youtube) } : {}),
+  };
+}
+
+/**
+ * Validates and normalizes the `provider_options.facebook` subtree.
+ *
+ * Accepts an unanswered post family for drafts — the adapter infers it from the
+ * resolved attachments — while rejecting unknown families, a non-boolean AI
+ * disclosure, and a link that is not an absolute HTTPS URL. Draft save must not
+ * invent a family the creator never chose.
+ *
+ * @param value - Raw `provider_options.facebook` value from the request payload.
+ * @returns Saved Facebook choices with camelCase fields.
+ * @throws {CoreApiError} 400 `validation_error` if option keys or types violate schema rules.
+ */
+function facebookOptionsField(value: unknown): NonNullable<PostProviderOptions["facebook"]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new CoreApiError(400, "validation_error", "provider_options.facebook must be an object.");
+  }
+  const facebook = value as Record<string, unknown>;
+  onlyKeys(facebook, ["post_type", "link", "is_ai_generated"]);
+  const postType = facebook.post_type;
+  if (postType !== undefined && !["post", "photo", "reel", "story"].includes(postType as string)) {
+    throw new CoreApiError(400, "validation_error", "provider_options.facebook is invalid.");
+  }
+  if (facebook.is_ai_generated !== undefined && typeof facebook.is_ai_generated !== "boolean") {
+    throw new CoreApiError(400, "validation_error", "provider_options.facebook is invalid.");
+  }
+  let link: string | undefined;
+  if (facebook.link !== undefined) {
+    if (typeof facebook.link !== "string" || facebook.link.length > 2_048) {
+      throw new CoreApiError(400, "validation_error", "provider_options.facebook is invalid.");
+    }
+    try {
+      const parsed = new URL(facebook.link);
+      if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error();
+      link = facebook.link;
+    } catch {
+      throw new CoreApiError(400, "validation_error", "provider_options.facebook is invalid.");
+    }
+  }
+  return {
+    ...(postType !== undefined ? { postType: postType as FacebookPostType } : {}),
+    ...(link !== undefined ? { link } : {}),
+    ...(facebook.is_ai_generated !== undefined
+      ? { isAiGenerated: facebook.is_ai_generated as boolean }
+      : {}),
   };
 }
 
@@ -302,15 +375,41 @@ function instagramOptionsField(value: unknown): NonNullable<PostProviderOptions[
     );
   }
   const instagram = value as Record<string, unknown>;
-  onlyKeys(instagram, ["post_type", "trial_reel", "trial_graduation"]);
+  onlyKeys(instagram, [
+    "post_type",
+    "trial_reel",
+    "trial_graduation",
+    "alt_text",
+    "location_id",
+    "user_tags",
+    "cover_url",
+    "cover_frame_ms",
+    "audio_name",
+    "is_ai_generated",
+  ]);
   const postType = instagram.post_type;
   const trialGraduation = instagram.trial_graduation;
+  const userTags = instagram.user_tags;
+  const coverFrameMs = instagram.cover_frame_ms;
   if (
     (postType !== undefined &&
       (typeof postType !== "string" || !["feed", "reel", "story"].includes(postType))) ||
     (instagram.trial_reel !== undefined && typeof instagram.trial_reel !== "boolean") ||
     (trialGraduation !== undefined &&
-      (typeof trialGraduation !== "string" || !["manual", "performance"].includes(trialGraduation)))
+      (typeof trialGraduation !== "string" ||
+        !["manual", "performance"].includes(trialGraduation))) ||
+    (instagram.alt_text !== undefined &&
+      (typeof instagram.alt_text !== "string" || instagram.alt_text.length > 1_000)) ||
+    (instagram.location_id !== undefined && typeof instagram.location_id !== "string") ||
+    (instagram.audio_name !== undefined &&
+      (typeof instagram.audio_name !== "string" || instagram.audio_name.length > 255)) ||
+    (instagram.is_ai_generated !== undefined && typeof instagram.is_ai_generated !== "boolean") ||
+    (coverFrameMs !== undefined &&
+      (typeof coverFrameMs !== "number" ||
+        !Number.isSafeInteger(coverFrameMs) ||
+        coverFrameMs < 0)) ||
+    (instagram.cover_url !== undefined && !httpsUrl(instagram.cover_url)) ||
+    (userTags !== undefined && !instagramUserTags(userTags))
   ) {
     throw new CoreApiError(400, "validation_error", "provider_options.instagram is invalid.");
   }
@@ -320,7 +419,185 @@ function instagramOptionsField(value: unknown): NonNullable<PostProviderOptions[
     ...(trialGraduation !== undefined
       ? { trialGraduation: trialGraduation as InstagramTrialGraduation }
       : {}),
+    ...(typeof instagram.alt_text === "string" ? { altText: instagram.alt_text } : {}),
+    ...(typeof instagram.location_id === "string" ? { locationId: instagram.location_id } : {}),
+    ...(userTags !== undefined
+      ? { userTags: userTags as NonNullable<PostProviderOptions["instagram"]>["userTags"] }
+      : {}),
+    ...(typeof instagram.cover_url === "string" ? { coverUrl: instagram.cover_url } : {}),
+    ...(typeof coverFrameMs === "number" ? { coverFrameMs } : {}),
+    ...(typeof instagram.audio_name === "string" ? { audioName: instagram.audio_name } : {}),
+    ...(typeof instagram.is_ai_generated === "boolean"
+      ? { isAiGenerated: instagram.is_ai_generated }
+      : {}),
   };
+}
+
+/**
+ * Confirms a value is a credential-free absolute HTTPS URL.
+ *
+ * @param value - Candidate URL from a request payload.
+ * @returns True when the URL has the documented shape.
+ */
+function httpsUrl(value: unknown): boolean {
+  if (typeof value !== "string" || value.length > 2_048) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && !parsed.username && !parsed.password;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validates the documented `user_tags` array: bounded count, a non-empty
+ * username per entry, and a normalized 0..1 position supplied as a pair.
+ *
+ * @param value - Raw `user_tags` value from a request payload.
+ * @returns True when every tag matches the documented shape.
+ */
+function instagramUserTags(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length > 30) return false;
+  return value.every((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+    const tag = entry as Record<string, unknown>;
+    const hasX = tag.x !== undefined;
+    const hasY = tag.y !== undefined;
+    if (hasX !== hasY) return false;
+    const positionOk = [tag.x, tag.y].every(
+      (coordinate) =>
+        coordinate === undefined ||
+        (typeof coordinate === "number" &&
+          Number.isFinite(coordinate) &&
+          coordinate >= 0 &&
+          coordinate <= 1),
+    );
+    return (
+      typeof tag.username === "string" &&
+      tag.username.length > 0 &&
+      tag.username.length <= 30 &&
+      positionOk
+    );
+  });
+}
+
+/**
+ * Validates and normalizes the `provider_options.threads` subtree.
+ *
+ * Accepts unanswered controls for drafts while rejecting unknown reply modes,
+ * out-of-range polls, more than ten spoiler entities, and malformed links.
+ * Media-versus-text compatibility is validated at scheduling time, when the
+ * resolved attachment set is known.
+ *
+ * @param value - Raw `provider_options.threads` value from the request payload.
+ * @returns Saved Threads controls with camelCase fields.
+ * @throws {CoreApiError} 400 `validation_error` if option keys or types violate schema rules.
+ */
+function threadsOptionsField(value: unknown): NonNullable<PostProviderOptions["threads"]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new CoreApiError(400, "validation_error", "provider_options.threads must be an object.");
+  }
+  const threads = value as Record<string, unknown>;
+  onlyKeys(threads, [
+    "topic_tag",
+    "reply_control",
+    "link_attachment",
+    "poll",
+    "spoiler_entities",
+    "is_spoiler_media",
+    "is_made_with_ai",
+  ]);
+  const invalid = () =>
+    new CoreApiError(400, "validation_error", "provider_options.threads is invalid.");
+  if (
+    (threads.topic_tag !== undefined &&
+      (typeof threads.topic_tag !== "string" ||
+        threads.topic_tag.length < 1 ||
+        threads.topic_tag.length > 50 ||
+        /[.&]/.test(threads.topic_tag))) ||
+    (threads.reply_control !== undefined &&
+      (typeof threads.reply_control !== "string" ||
+        !THREADS_REPLY_CONTROLS.has(threads.reply_control as ThreadsReplyControl))) ||
+    (threads.link_attachment !== undefined && !httpsUrl(threads.link_attachment)) ||
+    (threads.is_spoiler_media !== undefined && typeof threads.is_spoiler_media !== "boolean") ||
+    (threads.is_made_with_ai !== undefined && typeof threads.is_made_with_ai !== "boolean") ||
+    (threads.spoiler_entities !== undefined && !threadsSpoilers(threads.spoiler_entities)) ||
+    (threads.poll !== undefined && !threadsPoll(threads.poll))
+  ) {
+    throw invalid();
+  }
+  const poll = threads.poll as Record<string, unknown> | undefined;
+  const spoilers = threads.spoiler_entities as { length: number; offset: number }[] | undefined;
+  return {
+    ...(typeof threads.topic_tag === "string" ? { topicTag: threads.topic_tag } : {}),
+    ...(typeof threads.reply_control === "string"
+      ? { replyControl: threads.reply_control as ThreadsReplyControl }
+      : {}),
+    ...(typeof threads.link_attachment === "string"
+      ? { linkAttachment: threads.link_attachment }
+      : {}),
+    ...(poll
+      ? {
+          poll: {
+            optionA: poll.option_a as string,
+            optionB: poll.option_b as string,
+            ...(typeof poll.option_c === "string" ? { optionC: poll.option_c } : {}),
+            ...(typeof poll.option_d === "string" ? { optionD: poll.option_d } : {}),
+          },
+        }
+      : {}),
+    ...(spoilers ? { spoilerEntities: spoilers } : {}),
+    ...(typeof threads.is_spoiler_media === "boolean"
+      ? { isSpoilerMedia: threads.is_spoiler_media }
+      : {}),
+    ...(typeof threads.is_made_with_ai === "boolean"
+      ? { isMadeWithAi: threads.is_made_with_ai }
+      : {}),
+  };
+}
+
+/**
+ * Validates a Threads poll: 2-4 options of 1-25 characters, where option_d
+ * requires option_c.
+ *
+ * @param value - Raw `poll` value from a request payload.
+ * @returns True when the poll matches the documented shape.
+ */
+function threadsPoll(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const poll = value as Record<string, unknown>;
+  if (!["option_a", "option_b"].every((key) => typeof poll[key] === "string")) return false;
+  if (poll.option_d !== undefined && poll.option_c === undefined) return false;
+  return ["option_a", "option_b", "option_c", "option_d"].every((key) => {
+    const option = poll[key];
+    return (
+      option === undefined ||
+      (typeof option === "string" && option.length >= 1 && option.length <= 25)
+    );
+  });
+}
+
+/**
+ * Validates Threads text-spoiler ranges: at most ten, with a non-negative
+ * offset and a positive length each.
+ *
+ * @param value - Raw `spoiler_entities` value from a request payload.
+ * @returns True when every entity matches the documented shape.
+ */
+function threadsSpoilers(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length > 10) return false;
+  return value.every((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+    const entity = entry as Record<string, unknown>;
+    return (
+      typeof entity.offset === "number" &&
+      Number.isSafeInteger(entity.offset) &&
+      entity.offset >= 0 &&
+      typeof entity.length === "number" &&
+      Number.isSafeInteger(entity.length) &&
+      entity.length >= 1
+    );
+  });
 }
 
 /**
@@ -349,8 +626,10 @@ function tiktokOptionsField(value: unknown): NonNullable<PostProviderOptions["ti
     "music_usage_confirmed",
     "disclose_commercial_content",
     "auto_add_music",
+    "cover_timestamp_ms",
   ]);
   const privacyLevel = tiktok.privacy_level;
+  const coverTimestampMs = tiktok.cover_timestamp_ms;
   const booleanKeys = [
     "allow_comment",
     "allow_duet",
@@ -366,6 +645,10 @@ function tiktokOptionsField(value: unknown): NonNullable<PostProviderOptions["ti
     (tiktok.disclose_commercial_content !== undefined &&
       typeof tiktok.disclose_commercial_content !== "boolean") ||
     (tiktok.auto_add_music !== undefined && typeof tiktok.auto_add_music !== "boolean") ||
+    (coverTimestampMs !== undefined &&
+      (typeof coverTimestampMs !== "number" ||
+        !Number.isSafeInteger(coverTimestampMs) ||
+        coverTimestampMs < 0)) ||
     booleanKeys.some((key) => typeof tiktok[key] !== "boolean") ||
     tiktok.music_usage_confirmed !== true
   ) {
@@ -380,6 +663,7 @@ function tiktokOptionsField(value: unknown): NonNullable<PostProviderOptions["ti
     isAiGenerated: tiktok.is_ai_generated as boolean,
     musicUsageConfirmed: true,
     ...(typeof tiktok.auto_add_music === "boolean" ? { autoAddMusic: tiktok.auto_add_music } : {}),
+    ...(typeof coverTimestampMs === "number" ? { coverTimestampMs } : {}),
     ...(privacyLevel !== undefined ? { privacyLevel: privacyLevel as TikTokPrivacyLevel } : {}),
     ...(typeof tiktok.disclose_commercial_content === "boolean"
       ? { discloseCommercialContent: tiktok.disclose_commercial_content }
@@ -404,13 +688,34 @@ function youtubeOptionsField(value: unknown): NonNullable<PostProviderOptions["y
     throw new CoreApiError(400, "validation_error", "provider_options.youtube must be an object.");
   }
   const youtube = value as Record<string, unknown>;
-  onlyKeys(youtube, ["made_for_kids", "privacy_status"]);
+  onlyKeys(youtube, [
+    "made_for_kids",
+    "privacy_status",
+    "license",
+    "embeddable",
+    "public_stats_viewable",
+    "contains_synthetic_media",
+    "publish_at",
+    "recording_date",
+  ]);
   const privacyStatus = youtube.privacy_status;
+  const license = youtube.license;
+  const booleans = ["embeddable", "public_stats_viewable", "contains_synthetic_media"] as const;
+  const instants = ["publish_at", "recording_date"] as const;
   if (
     (youtube.made_for_kids !== undefined && typeof youtube.made_for_kids !== "boolean") ||
     (privacyStatus !== undefined &&
       (typeof privacyStatus !== "string" ||
-        !Object.hasOwn(YOUTUBE_PRIVACY_STATUSES, privacyStatus)))
+        !Object.hasOwn(YOUTUBE_PRIVACY_STATUSES, privacyStatus))) ||
+    (license !== undefined &&
+      (typeof license !== "string" || !Object.hasOwn(YOUTUBE_LICENSES, license))) ||
+    booleans.some((key) => youtube[key] !== undefined && typeof youtube[key] !== "boolean") ||
+    // An instant YouTube cannot parse is rejected at save time, not at publish.
+    instants.some(
+      (key) =>
+        youtube[key] !== undefined &&
+        (typeof youtube[key] !== "string" || Number.isNaN(Date.parse(youtube[key] as string))),
+    )
   ) {
     throw new CoreApiError(400, "validation_error", "provider_options.youtube is invalid.");
   }
@@ -418,6 +723,18 @@ function youtubeOptionsField(value: unknown): NonNullable<PostProviderOptions["y
     ...(typeof youtube.made_for_kids === "boolean" ? { madeForKids: youtube.made_for_kids } : {}),
     ...(privacyStatus !== undefined
       ? { privacyStatus: privacyStatus as YouTubePrivacyStatus }
+      : {}),
+    ...(license !== undefined ? { license: license as YouTubeLicense } : {}),
+    ...(typeof youtube.embeddable === "boolean" ? { embeddable: youtube.embeddable } : {}),
+    ...(typeof youtube.public_stats_viewable === "boolean"
+      ? { publicStatsViewable: youtube.public_stats_viewable }
+      : {}),
+    ...(typeof youtube.contains_synthetic_media === "boolean"
+      ? { containsSyntheticMedia: youtube.contains_synthetic_media }
+      : {}),
+    ...(typeof youtube.publish_at === "string" ? { publishAt: youtube.publish_at } : {}),
+    ...(typeof youtube.recording_date === "string"
+      ? { recordingDate: youtube.recording_date }
       : {}),
   };
 }

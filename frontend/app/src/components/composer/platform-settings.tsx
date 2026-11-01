@@ -287,6 +287,81 @@ function YoutubeEditor({
           </Select>
         </div>
       </div>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={`${fieldId}-license`} className="text-xs font-medium text-ink-3">
+          {t("License")}
+        </label>
+        <Select
+          value={yt.license ?? "standard"}
+          onValueChange={(value) => update("license", value === "standard" ? undefined : value)}
+        >
+          <SelectTrigger id={`${fieldId}-license`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="standard">{t("Standard YouTube license")}</SelectItem>
+            <SelectItem value="creativeCommon">{t("Creative Commons")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {/* publishAt is only valid on a private video, so the control is hidden
+          for other visibilities instead of producing a rejected publish. */}
+      {yt.type === "private" && (
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={`${fieldId}-publish-at`} className="text-xs font-medium text-ink-3">
+            {t("Publish at")}
+          </label>
+          <Input
+            id={`${fieldId}-publish-at`}
+            type="datetime-local"
+            value={yt.publishAt ?? ""}
+            onChange={(event) =>
+              update(
+                "publishAt",
+                event.target.value ? new Date(event.target.value).toISOString() : undefined,
+              )
+            }
+          />
+          <p className="text-xs text-ink-3">
+            {t("YouTube publishes the video at this time while it stays private until then.")}
+          </p>
+        </div>
+      )}
+      <div className="flex flex-col gap-2 rounded-control border border-line p-3">
+        <label
+          htmlFor={`${fieldId}-stats`}
+          className="flex min-h-12 items-center justify-between gap-3"
+        >
+          <span className="text-xs font-medium text-ink">{t("Show public stats")}</span>
+          <Switch
+            id={`${fieldId}-stats`}
+            checked={yt.publicStatsViewable ?? true}
+            onCheckedChange={(checked) => update("publicStatsViewable", checked)}
+          />
+        </label>
+        <label
+          htmlFor={`${fieldId}-embeddable`}
+          className="flex min-h-12 items-center justify-between gap-3"
+        >
+          <span className="text-xs font-medium text-ink">{t("Allow embedding")}</span>
+          <Switch
+            id={`${fieldId}-embeddable`}
+            checked={yt.embeddable ?? true}
+            onCheckedChange={(checked) => update("embeddable", checked)}
+          />
+        </label>
+        <label
+          htmlFor={`${fieldId}-synthetic`}
+          className="flex min-h-12 items-center justify-between gap-3"
+        >
+          <span className="text-xs font-medium text-ink">{t("Altered or synthetic content")}</span>
+          <Switch
+            id={`${fieldId}-synthetic`}
+            checked={yt.containsSyntheticMedia ?? false}
+            onCheckedChange={(checked) => update("containsSyntheticMedia", checked)}
+          />
+        </label>
+      </div>
     </ProviderPanel>
   );
 }
@@ -512,6 +587,26 @@ interface InstagramComposerSettings {
   post_type?: "feed" | "reel" | "story";
   trial_graduation?: "manual" | "performance";
   trial_reel?: boolean;
+  alt_text?: string;
+  location_id?: string;
+  cover_url?: string;
+  cover_frame_ms?: number;
+  audio_name?: string;
+  is_ai_generated?: boolean;
+}
+
+/**
+ * Composer-only Threads settings: the saved controls this editor owns.
+ */
+interface ThreadsComposerSettings {
+  topic_tag?: string;
+  reply_control?:
+    | "everyone"
+    | "accounts_you_follow"
+    | "mentioned_only"
+    | "parent_post_author_only"
+    | "followers_only";
+  link_attachment?: string;
 }
 
 /**
@@ -605,58 +700,284 @@ function InstagramEditor({
           )}
         </div>
       )}
+      {mediaKinds.includes("image") && (
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={`${fieldId}-alt`} className="text-xs font-medium text-ink-3">
+            {t("Alt text")}
+          </label>
+          <Input
+            id={`${fieldId}-alt`}
+            maxLength={1000}
+            value={instagram.alt_text ?? ""}
+            onChange={(event) => update("alt_text", event.target.value || undefined)}
+          />
+          <p className="text-xs text-ink-3">
+            {t("Describes the image for screen readers. Instagram limits it to 1,000 characters.")}
+          </p>
+        </div>
+      )}
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={`${fieldId}-location`} className="text-xs font-medium text-ink-3">
+          {t("Location ID")}
+        </label>
+        <Input
+          id={`${fieldId}-location`}
+          value={instagram.location_id ?? ""}
+          onChange={(event) => update("location_id", event.target.value.trim() || undefined)}
+        />
+        <p className="text-xs text-ink-3">
+          {t("The Facebook Page ID that carries the location you want to tag.")}
+        </p>
+      </div>
+      {postType === "reel" && (
+        <div className="flex flex-col gap-2 rounded-control border border-line p-3">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={`${fieldId}-cover`} className="text-xs font-medium text-ink-3">
+              {t("Cover image URL")}
+            </label>
+            <Input
+              id={`${fieldId}-cover`}
+              type="url"
+              inputMode="url"
+              placeholder={t("https://example.com/cover.jpg")}
+              value={instagram.cover_url ?? ""}
+              onChange={(event) => update("cover_url", event.target.value.trim() || undefined)}
+            />
+            <p className="text-xs text-ink-3">
+              {t("Optional. A cover image replaces the frame chosen by offset.")}
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={`${fieldId}-cover-ms`} className="text-xs font-medium text-ink-3">
+              {t("Cover frame offset (ms)")}
+            </label>
+            <Input
+              id={`${fieldId}-cover-ms`}
+              type="number"
+              min={0}
+              step={100}
+              value={instagram.cover_frame_ms ?? ""}
+              onChange={(event) =>
+                update(
+                  "cover_frame_ms",
+                  event.target.value === "" ? undefined : Number(event.target.value),
+                )
+              }
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={`${fieldId}-audio`} className="text-xs font-medium text-ink-3">
+              {t("Audio name")}
+            </label>
+            <Input
+              id={`${fieldId}-audio`}
+              maxLength={255}
+              value={instagram.audio_name ?? ""}
+              onChange={(event) => update("audio_name", event.target.value || undefined)}
+            />
+            <p className="text-xs text-ink-3">{t("Instagram allows one rename.")}</p>
+          </div>
+          <label
+            htmlFor={`${fieldId}-ai`}
+            className="flex min-h-12 items-center justify-between gap-3"
+          >
+            <span className="text-xs font-medium text-ink">{t("Made with AI")}</span>
+            <Switch
+              id={`${fieldId}-ai`}
+              checked={instagram.is_ai_generated ?? false}
+              onCheckedChange={(checked) => update("is_ai_generated", checked)}
+            />
+          </label>
+        </div>
+      )}
     </ProviderPanel>
   );
 }
 
 /**
- * Facebook Page Reels have implicit Public scope. Expose that sole audience
- * choice and the sharing consequence without inventing unsupported privacy
- * settings or storing a redundant target option.
+ * Composer-only Facebook settings: the saved Post contract plus the controls
+ * this editor owns. Every field maps onto `provider_options.facebook`.
+ */
+interface FacebookComposerSettings {
+  post_type?: "post" | "photo" | "reel" | "story";
+  link?: string;
+  is_ai_generated?: boolean;
+}
+
+/**
+ * Facebook settings editor covering each documented Page publishing family.
+ *
+ * Families are enabled only when the Channel's actual attachment kinds can
+ * carry them, mirroring the adapter's endpoint mapping: the feed takes text, a
+ * link, or photos; photo posts need 1-10 images; Reels and Stories need exactly
+ * one video. AI disclosure appears only for the two families that document it.
  */
 function FacebookEditor({
   channelName,
+  settings,
+  update,
+  updateMany,
+  mediaKinds,
   t,
-}: ProviderEditorProps<Record<string, never>>): React.ReactElement {
+}: ProviderEditorProps<FacebookComposerSettings>): React.ReactElement {
   const fieldId = useId();
+  const postType = settings.post_type ?? "";
+  const imageCount = mediaKinds.filter((kind) => kind === "image").length;
+  const hasVideo = mediaKinds.includes("video");
+  const single = mediaKinds.length === 1;
+  const onlyImages = mediaKinds.length > 0 && !hasVideo;
   return (
     <ProviderPanel channelName={channelName} t={t}>
       <div className="flex flex-col gap-1.5">
-        <label htmlFor={`${fieldId}-visibility`} className="text-xs font-medium text-ink-3">
-          {t("Visibility")}
+        <label htmlFor={`${fieldId}-post-type`} className="text-xs font-medium text-ink-3">
+          {t("Post type")}
         </label>
-        <Select value="public">
-          <SelectTrigger id={`${fieldId}-visibility`}>
-            <SelectValue />
+        <Select
+          value={postType}
+          onValueChange={(value) =>
+            updateMany({
+              post_type: value,
+              ...(value === "reel" || value === "story" ? {} : { is_ai_generated: false }),
+              ...(value === "post" ? {} : { link: undefined }),
+            })
+          }
+        >
+          <SelectTrigger id={`${fieldId}-post-type`}>
+            <SelectValue placeholder={t("Choose the Facebook post type")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="public">{t("Public")}</SelectItem>
+            <SelectItem value="post" disabled={hasVideo}>
+              {t("Post")}
+            </SelectItem>
+            <SelectItem value="photo" disabled={!onlyImages || imageCount > 10}>
+              {t("Photo post")}
+            </SelectItem>
+            <SelectItem value="reel" disabled={!single || !hasVideo}>
+              {t("Reel")}
+            </SelectItem>
+            <SelectItem value="story" disabled={!single || !hasVideo}>
+              {t("Story")}
+            </SelectItem>
           </SelectContent>
         </Select>
+        <p className="text-xs text-ink-3">
+          {t("Posts take text, a link, or up to ten photos. Reels and Stories take one video.")}
+        </p>
       </div>
-      <p className="text-xs text-ink-2">
-        {t("This Reel will be shared publicly on your Facebook Page.")}
-      </p>
-      <p className="text-xs text-ink-3">
-        {t(
-          "This Facebook connection publishes Reels only. Text backgrounds and text-only Page posts are not supported.",
-        )}
-      </p>
+      {postType === "post" && mediaKinds.length === 0 && (
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={`${fieldId}-link`} className="text-xs font-medium text-ink-3">
+            {t("Link")}
+          </label>
+          <Input
+            id={`${fieldId}-link`}
+            type="url"
+            inputMode="url"
+            placeholder={t("https://example.com")}
+            value={settings.link ?? ""}
+            onChange={(event) => update("link", event.target.value.trim() || undefined)}
+          />
+          <p className="text-xs text-ink-3">
+            {t("Optional. A Page post needs text, a link, or a photo.")}
+          </p>
+        </div>
+      )}
+      {(postType === "reel" || postType === "story") && (
+        <div className="flex flex-col gap-2 rounded-control border border-line p-3">
+          <label
+            htmlFor={`${fieldId}-ai`}
+            className="flex min-h-12 items-center justify-between gap-3"
+          >
+            <span className="text-xs font-medium text-ink">{t("Made with AI")}</span>
+            <Switch
+              id={`${fieldId}-ai`}
+              checked={settings.is_ai_generated ?? false}
+              onCheckedChange={(checked) => update("is_ai_generated", checked)}
+            />
+          </label>
+          <p className="text-xs text-ink-3">
+            {t("Discloses to Facebook that this media was created or edited with AI.")}
+          </p>
+        </div>
+      )}
+      {postType && (
+        <p className="text-xs text-ink-2">
+          {t("This will be shared publicly on your Facebook Page.")}
+        </p>
+      )}
     </ProviderPanel>
   );
 }
 
 /**
- * Threads settings editor: informational panel only — Threads posts use the
- * standard text and attached media with no provider-specific controls.
+ * Threads settings editor covering the controls Threads documents for a post.
+ *
+ * A topic tag is limited to one per post and forbids `.` and `&`; reply control
+ * narrows who may respond; a link attachment applies to text-only posts, which
+ * is why it is hidden as soon as the Channel carries media.
  */
-function ThreadsEditor({ t }: ProviderEditorProps<Record<string, never>>): React.ReactElement {
+function ThreadsEditor({
+  channelName,
+  settings,
+  update,
+  mediaKinds,
+  t,
+}: ProviderEditorProps<ThreadsComposerSettings>): React.ReactElement {
+  const fieldId = useId();
+  const hasMedia = mediaKinds.length > 0;
   return (
-    <div className="rounded-control border border-line bg-surface p-4 text-xs text-ink-3 flex items-center justify-between">
-      <div className="flex items-center gap-2">
-        <span>{t("Uses standard text and attached media.")}</span>
+    <ProviderPanel channelName={channelName} t={t}>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={`${fieldId}-topic`} className="text-xs font-medium text-ink-3">
+          {t("Topic tag")}
+        </label>
+        <Input
+          id={`${fieldId}-topic`}
+          maxLength={50}
+          value={settings.topic_tag ?? ""}
+          onChange={(event) => update("topic_tag", event.target.value.trim() || undefined)}
+        />
+        <p className="text-xs text-ink-3">
+          {t("One tag per post, up to 50 characters. Periods and ampersands are not allowed.")}
+        </p>
       </div>
-    </div>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={`${fieldId}-reply`} className="text-xs font-medium text-ink-3">
+          {t("Who can reply")}
+        </label>
+        <Select
+          value={settings.reply_control ?? "everyone"}
+          onValueChange={(value) => update("reply_control", value)}
+        >
+          <SelectTrigger id={`${fieldId}-reply`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="everyone">{t("Everyone")}</SelectItem>
+            <SelectItem value="accounts_you_follow">{t("Accounts you follow")}</SelectItem>
+            <SelectItem value="mentioned_only">{t("Mentioned accounts only")}</SelectItem>
+            <SelectItem value="followers_only">{t("Followers only")}</SelectItem>
+            <SelectItem value="parent_post_author_only">{t("Only the original author")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {!hasMedia && (
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={`${fieldId}-link`} className="text-xs font-medium text-ink-3">
+            {t("Link attachment")}
+          </label>
+          <Input
+            id={`${fieldId}-link`}
+            type="url"
+            inputMode="url"
+            placeholder={t("https://example.com")}
+            value={settings.link_attachment ?? ""}
+            onChange={(event) => update("link_attachment", event.target.value.trim() || undefined)}
+          />
+          <p className="text-xs text-ink-3">{t("Threads attaches links to text posts only.")}</p>
+        </div>
+      )}
+    </ProviderPanel>
   );
 }
 
@@ -676,11 +997,22 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
       const tags = (yt.tags ?? []).map((tag) => tag.label).filter(Boolean);
       if (tags.length > 0) target.hashtags = tags;
       target.provider_options = {
+        ...target.provider_options,
         youtube: {
           ...(yt.selfDeclaredMadeForKids !== undefined
             ? { made_for_kids: yt.selfDeclaredMadeForKids === "yes" }
             : {}),
           ...(yt.type ? { privacy_status: yt.type } : {}),
+          ...(yt.license ? { license: yt.license } : {}),
+          ...(yt.publicStatsViewable !== undefined
+            ? { public_stats_viewable: yt.publicStatsViewable }
+            : {}),
+          ...(yt.embeddable !== undefined ? { embeddable: yt.embeddable } : {}),
+          ...(yt.containsSyntheticMedia !== undefined
+            ? { contains_synthetic_media: yt.containsSyntheticMedia }
+            : {}),
+          ...(yt.publishAt ? { publish_at: yt.publishAt } : {}),
+          ...(yt.recordingDate ? { recording_date: yt.recordingDate } : {}),
         },
       };
     },
@@ -691,6 +1023,12 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
         title: target.title_override ?? undefined,
         tags: hashtags.map((tag) => ({ value: tag, label: tag })),
         type: target.provider_options?.youtube?.privacy_status,
+        license: target.provider_options?.youtube?.license,
+        publicStatsViewable: target.provider_options?.youtube?.public_stats_viewable,
+        embeddable: target.provider_options?.youtube?.embeddable,
+        containsSyntheticMedia: target.provider_options?.youtube?.contains_synthetic_media,
+        publishAt: target.provider_options?.youtube?.publish_at,
+        recordingDate: target.provider_options?.youtube?.recording_date,
         selfDeclaredMadeForKids:
           target.provider_options?.youtube?.made_for_kids !== undefined
             ? target.provider_options.youtube.made_for_kids
@@ -824,8 +1162,17 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
     Editor: InstagramEditor,
     applyTarget: (target, instagram) => {
       target.provider_options = {
+        ...target.provider_options,
         instagram: {
           ...(instagram.post_type ? { post_type: instagram.post_type } : {}),
+          ...(instagram.alt_text ? { alt_text: instagram.alt_text } : {}),
+          ...(instagram.location_id ? { location_id: instagram.location_id } : {}),
+          ...(instagram.cover_url ? { cover_url: instagram.cover_url } : {}),
+          ...(instagram.cover_frame_ms !== undefined
+            ? { cover_frame_ms: instagram.cover_frame_ms }
+            : {}),
+          ...(instagram.audio_name ? { audio_name: instagram.audio_name } : {}),
+          ...(instagram.is_ai_generated ? { is_ai_generated: true } : {}),
           ...(instagram.trial_reel ? { trial_reel: true } : {}),
           ...(instagram.trial_reel && instagram.trial_graduation
             ? { trial_graduation: instagram.trial_graduation }
@@ -840,6 +1187,12 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
         post_type: options.post_type,
         trial_reel: options.trial_reel,
         trial_graduation: options.trial_graduation,
+        alt_text: options.alt_text,
+        location_id: options.location_id,
+        cover_url: options.cover_url,
+        cover_frame_ms: options.cover_frame_ms,
+        audio_name: options.audio_name,
+        is_ai_generated: options.is_ai_generated,
       };
     },
     validate: ({ channelName, settings: instagram, mediaKinds, t }) => {
@@ -860,15 +1213,103 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
       return errors;
     },
   }),
-  defineProviderDescriptor<Record<string, never>>({
+  defineProviderDescriptor<FacebookComposerSettings>({
     providers: ["facebook"],
-    read: () => ({}),
+    read: (settings) => settings as Partial<FacebookComposerSettings>,
     Editor: FacebookEditor,
+    applyTarget: (target, facebook) => {
+      target.provider_options = {
+        facebook: {
+          ...(facebook.post_type ? { post_type: facebook.post_type } : {}),
+          ...(facebook.post_type === "post" && facebook.link ? { link: facebook.link } : {}),
+          ...(facebook.is_ai_generated ? { is_ai_generated: true } : {}),
+        },
+      };
+    },
+    // Rehydrates exactly the fields this editor owns; an absent subtree leaves
+    // every control unanswered so the adapter keeps inferring the family.
+    readTarget: (target) => {
+      const options = target.provider_options?.facebook;
+      if (!options) return {};
+      return {
+        post_type: options.post_type,
+        link: options.link,
+        is_ai_generated: options.is_ai_generated,
+      };
+    },
+    validate: ({ channelName, settings: facebook, mediaKinds, t }) => {
+      const errors: string[] = [];
+      const hasVideo = mediaKinds.includes("video");
+      const single = mediaKinds.length === 1;
+      const onlyImages = mediaKinds.length > 0 && !hasVideo;
+      if (facebook.post_type === "post" && hasVideo) {
+        errors.push(
+          t("{name}: Facebook posts cannot carry a video; use a Reel or Story.", {
+            name: channelName,
+          }),
+        );
+      }
+      if (
+        facebook.post_type === "photo" &&
+        (!onlyImages || mediaKinds.length < 1 || mediaKinds.length > 10)
+      ) {
+        errors.push(
+          t("{name}: Facebook photo posts need between one and ten images.", { name: channelName }),
+        );
+      }
+      if (
+        (facebook.post_type === "reel" || facebook.post_type === "story") &&
+        (!single || !hasVideo)
+      ) {
+        errors.push(
+          t("{name}: Facebook Reels and Stories need exactly one video.", { name: channelName }),
+        );
+      }
+      if (facebook.link && facebook.post_type !== "post") {
+        errors.push(t("{name}: a link applies to Facebook posts only.", { name: channelName }));
+      }
+      return errors;
+    },
   }),
-  defineProviderDescriptor<Record<string, never>>({
+  defineProviderDescriptor<ThreadsComposerSettings>({
     providers: ["threads"],
-    read: () => ({}),
+    read: (settings) => settings as Partial<ThreadsComposerSettings>,
     Editor: ThreadsEditor,
+    applyTarget: (target, threads) => {
+      target.provider_options = {
+        ...target.provider_options,
+        threads: {
+          ...(threads.topic_tag ? { topic_tag: threads.topic_tag } : {}),
+          ...(threads.reply_control && threads.reply_control !== "everyone"
+            ? { reply_control: threads.reply_control }
+            : {}),
+          ...(threads.link_attachment ? { link_attachment: threads.link_attachment } : {}),
+        },
+      };
+    },
+    readTarget: (target) => {
+      const options = target.provider_options?.threads;
+      if (!options) return {};
+      return {
+        topic_tag: options.topic_tag,
+        reply_control: options.reply_control,
+        link_attachment: options.link_attachment,
+      };
+    },
+    validate: ({ channelName, settings: threads, mediaKinds, t }) => {
+      const errors: string[] = [];
+      if (threads.topic_tag && /[.&]/.test(threads.topic_tag)) {
+        errors.push(
+          t("{name}: a Threads topic tag cannot contain a period or ampersand.", {
+            name: channelName,
+          }),
+        );
+      }
+      if (threads.link_attachment && mediaKinds.length > 0) {
+        errors.push(t("{name}: Threads attaches links to text posts only.", { name: channelName }));
+      }
+      return errors;
+    },
   }),
 ];
 

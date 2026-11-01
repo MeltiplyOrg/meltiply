@@ -2986,12 +2986,29 @@ export interface components {
              *     music the creator can later change in the app.
              */
             auto_add_music?: boolean;
+            /** @description Video posts only. The cover frame offset in milliseconds. */
+            cover_timestamp_ms?: number;
         };
         /** @enum {string} */
         YouTubePrivacyStatus: "public" | "unlisted" | "private";
+        /** @enum {string} */
+        YouTubeLicense: "youtube" | "creativeCommon";
         YouTubePublishOptions: {
             made_for_kids: boolean;
             privacy_status?: components["schemas"]["YouTubePrivacyStatus"];
+            license?: components["schemas"]["YouTubeLicense"];
+            embeddable?: boolean;
+            public_stats_viewable?: boolean;
+            /** @description YouTube's altered or synthetic content disclosure. */
+            contains_synthetic_media?: boolean;
+            /**
+             * Format: date-time
+             * @description Scheduled publication instant. YouTube accepts it only while
+             *     privacy_status is private.
+             */
+            publish_at?: string;
+            /** Format: date-time */
+            recording_date?: string;
         };
         /**
          * @description Saved creator choices. Privacy may remain unanswered in a draft.
@@ -3012,6 +3029,11 @@ export interface components {
             /** @constant */
             music_usage_confirmed: true;
             auto_add_music?: boolean;
+            /**
+             * @description Video posts only. The cover frame offset in milliseconds; TikTok
+             *     accepts a frame offset rather than an uploaded cover image.
+             */
+            cover_timestamp_ms?: number;
         };
         /**
          * @description Saved audience and visibility choices. An omitted made_for_kids is an
@@ -3021,9 +3043,48 @@ export interface components {
         YouTubePostOptions: {
             made_for_kids?: boolean;
             privacy_status?: components["schemas"]["YouTubePrivacyStatus"];
+            license?: components["schemas"]["YouTubeLicense"];
+            embeddable?: boolean;
+            public_stats_viewable?: boolean;
+            contains_synthetic_media?: boolean;
+            /** Format: date-time */
+            publish_at?: string;
+            /** Format: date-time */
+            recording_date?: string;
+        };
+        /** @enum {string} */
+        FacebookPostType: "post" | "photo" | "reel" | "story";
+        /**
+         * @description Saved Facebook Page publication choices. An omitted post_type infers the
+         *     family from the attachment set: no media publishes a text or link post,
+         *     images publish as a photo post, and a single video publishes as a Reel.
+         *     link attaches a Page feed link and needs no media. is_ai_generated is
+         *     honoured only for Reels and Stories, the families that document it.
+         */
+        FacebookPostOptions: {
+            post_type?: components["schemas"]["FacebookPostType"];
+            /** Format: uri */
+            link?: string;
+            is_ai_generated?: boolean;
+        };
+        FacebookPublishOptions: {
+            post_type?: components["schemas"]["FacebookPostType"];
+            /** Format: uri */
+            link?: string;
+            is_ai_generated?: boolean;
         };
         /** @enum {string} */
         InstagramPostType: "feed" | "reel" | "story";
+        /**
+         * @description One account tagged in the published media. x and y are normalized
+         *     0..1 positions and must be supplied together; Instagram accepts tags on
+         *     feed images, videos, Reels, and Stories, but not carousel children.
+         */
+        InstagramUserTag: {
+            username: string;
+            x?: number;
+            y?: number;
+        };
         /**
          * @description Saved Instagram publication choices. A single image defaults to feed
          *     and a single video defaults to reel; multiple attachments publish as
@@ -3037,12 +3098,75 @@ export interface components {
             trial_reel?: boolean;
             /** @enum {string} */
             trial_graduation?: "manual" | "performance";
+            /** @description Image-only accessible description. */
+            alt_text?: string;
+            location_id?: string;
+            user_tags?: components["schemas"]["InstagramUserTag"][];
+            /**
+             * Format: uri
+             * @description Reel cover image; wins over cover_frame_ms.
+             */
+            cover_url?: string;
+            /** @description Reel cover frame offset in milliseconds. */
+            cover_frame_ms?: number;
+            /** @description Reel audio label; Instagram allows one rename. */
+            audio_name?: string;
+            is_ai_generated?: boolean;
         };
         InstagramPublishOptions: {
             post_type?: components["schemas"]["InstagramPostType"];
             trial_reel?: boolean;
             /** @enum {string} */
             trial_graduation?: "manual" | "performance";
+            alt_text?: string;
+            location_id?: string;
+            user_tags?: components["schemas"]["InstagramUserTag"][];
+            /** Format: uri */
+            cover_url?: string;
+            cover_frame_ms?: number;
+            audio_name?: string;
+            is_ai_generated?: boolean;
+        };
+        /** @enum {string} */
+        ThreadsReplyControl: "everyone" | "accounts_you_follow" | "mentioned_only" | "parent_post_author_only" | "followers_only";
+        /**
+         * @description Text-only Threads poll. Each option is 1-25 characters and option_d
+         *     requires option_c.
+         */
+        ThreadsPoll: {
+            option_a: string;
+            option_b: string;
+            option_c?: string;
+            option_d?: string;
+        };
+        ThreadsSpoilerEntity: {
+            offset: number;
+            length: number;
+        };
+        /**
+         * @description Saved Threads publication controls. Polls, link attachments, and
+         *     spoiler entities apply to text-only posts; spoiler media requires an
+         *     attachment. topic_tag is limited to one tag per post.
+         */
+        ThreadsPostOptions: {
+            topic_tag?: string;
+            reply_control?: components["schemas"]["ThreadsReplyControl"];
+            /** Format: uri */
+            link_attachment?: string;
+            poll?: components["schemas"]["ThreadsPoll"];
+            spoiler_entities?: components["schemas"]["ThreadsSpoilerEntity"][];
+            is_spoiler_media?: boolean;
+            is_made_with_ai?: boolean;
+        };
+        ThreadsPublishOptions: {
+            topic_tag?: string;
+            reply_control?: components["schemas"]["ThreadsReplyControl"];
+            /** Format: uri */
+            link_attachment?: string;
+            poll?: components["schemas"]["ThreadsPoll"];
+            spoiler_entities?: components["schemas"]["ThreadsSpoilerEntity"][];
+            is_spoiler_media?: boolean;
+            is_made_with_ai?: boolean;
         };
         /**
          * @description One reusable signature. body may use {brand_profile}, {platform}, and
@@ -3100,14 +3224,18 @@ export interface components {
          *     Scheduling validates completeness before creating publication options.
          */
         PostProviderOptions: {
+            facebook?: components["schemas"]["FacebookPostOptions"];
             tiktok?: components["schemas"]["TikTokPostOptions"];
             youtube?: components["schemas"]["YouTubePostOptions"];
             instagram?: components["schemas"]["InstagramPostOptions"];
+            threads?: components["schemas"]["ThreadsPostOptions"];
         };
         ProviderPublishOptions: {
+            facebook?: components["schemas"]["FacebookPublishOptions"];
             tiktok?: components["schemas"]["TikTokPublishOptions"];
             youtube?: components["schemas"]["YouTubePublishOptions"];
             instagram?: components["schemas"]["InstagramPublishOptions"];
+            threads?: components["schemas"]["ThreadsPublishOptions"];
         };
         UpdateDistributionRequest: {
             /** Format: date-time */

@@ -907,3 +907,85 @@ describe("createThreadsAdapter", () => {
     expect(providerCalls.calls[0]!.url.pathname).toBe("/refresh_access_token");
   });
 });
+
+describe("createThreadsAdapter documented controls", () => {
+  /** Captures the container-creation query so each test can assert its fields. */
+  function containerQuery(captured: URL[]) {
+    return (url: URL) => {
+      captured.push(url);
+      return json({ id: "container-1" });
+    };
+  }
+
+  it("sends a poll, topic tag, and reply control on a text post", async () => {
+    const captured: URL[] = [];
+    const providerCalls = sequence(containerQuery(captured), () => json({ id: "post-1" }));
+    await expect(
+      adapter(providerCalls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: {
+            threads: {
+              poll: { optionA: "Yes", optionB: "No" },
+              replyControl: "followers_only",
+              topicTag: "launch",
+            },
+          },
+        }),
+      ),
+    ).resolves.toMatchObject({ outcome: "confirmed_success" });
+    const query = captured[0]!;
+    expect(query.searchParams.get("topic_tag")).toBe("launch");
+    expect(query.searchParams.get("reply_control")).toBe("followers_only");
+    expect(JSON.parse(query.searchParams.get("poll_attachment")!)).toEqual({
+      option_a: "Yes",
+      option_b: "No",
+    });
+  });
+
+  it("rejects a poll combined with media, which Threads does not accept", async () => {
+    await expect(
+      adapter(vi.fn<typeof fetch>()).publish!(
+        context,
+        credentials,
+        publishInput({
+          media: [
+            {
+              contentType: "image/jpeg",
+              fileSize: 1024,
+              mode: "remote_ingest",
+              url: "https://assets.example/one.jpg",
+            },
+          ],
+          providerOptions: { threads: { poll: { optionA: "Yes", optionB: "No" } } },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ProviderAdapterError);
+  });
+
+  it("masks text spoilers and refuses spoiler media without an attachment", async () => {
+    const captured: URL[] = [];
+    const providerCalls = sequence(containerQuery(captured), () => json({ id: "threads-2" }));
+    await expect(
+      adapter(providerCalls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: { threads: { spoilerEntities: [{ length: 4, offset: 0 }] } },
+        }),
+      ),
+    ).resolves.toMatchObject({ outcome: "confirmed_success" });
+    expect(JSON.parse(captured[0]!.searchParams.get("text_entities")!)).toEqual([
+      { entity_type: "SPOILER", length: 4, offset: 0 },
+    ]);
+
+    await expect(
+      adapter(vi.fn<typeof fetch>()).publish!(
+        context,
+        credentials,
+        publishInput({ providerOptions: { threads: { isSpoilerMedia: true } } }),
+      ),
+    ).rejects.toBeInstanceOf(ProviderAdapterError);
+  });
+});

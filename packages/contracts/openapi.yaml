@@ -5297,12 +5297,22 @@ components:
           description: |
             Only applies to photo posts. When true TikTok adds recommended
             music the creator can later change in the app.
+        cover_timestamp_ms:
+          type: integer
+          minimum: 0
+          description: |
+            Video posts only. The cover frame offset in milliseconds.
     YouTubePrivacyStatus:
       type: string
       enum:
         - public
         - unlisted
         - private
+    YouTubeLicense:
+      type: string
+      enum:
+        - youtube
+        - creativeCommon
     YouTubePublishOptions:
       type: object
       additionalProperties: false
@@ -5313,6 +5323,25 @@ components:
           type: boolean
         privacy_status:
           $ref: "#/components/schemas/YouTubePrivacyStatus"
+        license:
+          $ref: "#/components/schemas/YouTubeLicense"
+        embeddable:
+          type: boolean
+        public_stats_viewable:
+          type: boolean
+        contains_synthetic_media:
+          type: boolean
+          description: |
+            YouTube's altered or synthetic content disclosure.
+        publish_at:
+          type: string
+          format: date-time
+          description: |
+            Scheduled publication instant. YouTube accepts it only while
+            privacy_status is private.
+        recording_date:
+          type: string
+          format: date-time
     TikTokPostOptions:
       type: object
       additionalProperties: false
@@ -5352,6 +5381,12 @@ components:
           const: true
         auto_add_music:
           type: boolean
+        cover_timestamp_ms:
+          type: integer
+          minimum: 0
+          description: |
+            Video posts only. The cover frame offset in milliseconds; TikTok
+            accepts a frame offset rather than an uploaded cover image.
     YouTubePostOptions:
       type: object
       additionalProperties: false
@@ -5364,12 +5399,85 @@ components:
           type: boolean
         privacy_status:
           $ref: "#/components/schemas/YouTubePrivacyStatus"
+        license:
+          $ref: "#/components/schemas/YouTubeLicense"
+        embeddable:
+          type: boolean
+        public_stats_viewable:
+          type: boolean
+        contains_synthetic_media:
+          type: boolean
+        publish_at:
+          type: string
+          format: date-time
+        recording_date:
+          type: string
+          format: date-time
+    FacebookPostType:
+      type: string
+      enum:
+        - post
+        - photo
+        - reel
+        - story
+    FacebookPostOptions:
+      type: object
+      additionalProperties: false
+      description: |
+        Saved Facebook Page publication choices. An omitted post_type infers the
+        family from the attachment set: no media publishes a text or link post,
+        images publish as a photo post, and a single video publishes as a Reel.
+        link attaches a Page feed link and needs no media. is_ai_generated is
+        honoured only for Reels and Stories, the families that document it.
+      properties:
+        post_type:
+          $ref: "#/components/schemas/FacebookPostType"
+        link:
+          type: string
+          format: uri
+          maxLength: 2048
+        is_ai_generated:
+          type: boolean
+    FacebookPublishOptions:
+      type: object
+      additionalProperties: false
+      properties:
+        post_type:
+          $ref: "#/components/schemas/FacebookPostType"
+        link:
+          type: string
+          format: uri
+          maxLength: 2048
+        is_ai_generated:
+          type: boolean
     InstagramPostType:
       type: string
       enum:
         - feed
         - reel
         - story
+    InstagramUserTag:
+      type: object
+      additionalProperties: false
+      required:
+        - username
+      description: |
+        One account tagged in the published media. x and y are normalized
+        0..1 positions and must be supplied together; Instagram accepts tags on
+        feed images, videos, Reels, and Stories, but not carousel children.
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 30
+        x:
+          type: number
+          minimum: 0
+          maximum: 1
+        y:
+          type: number
+          minimum: 0
+          maximum: 1
     InstagramPostOptions:
       type: object
       additionalProperties: false
@@ -5390,6 +5498,33 @@ components:
           enum:
             - manual
             - performance
+        alt_text:
+          type: string
+          maxLength: 1000
+          description: Image-only accessible description.
+        location_id:
+          type: string
+          maxLength: 255
+        user_tags:
+          type: array
+          maxItems: 30
+          items:
+            $ref: "#/components/schemas/InstagramUserTag"
+        cover_url:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: Reel cover image; wins over cover_frame_ms.
+        cover_frame_ms:
+          type: integer
+          minimum: 0
+          description: Reel cover frame offset in milliseconds.
+        audio_name:
+          type: string
+          maxLength: 255
+          description: Reel audio label; Instagram allows one rename.
+        is_ai_generated:
+          type: boolean
     InstagramPublishOptions:
       type: object
       additionalProperties: false
@@ -5403,6 +5538,126 @@ components:
           enum:
             - manual
             - performance
+        alt_text:
+          type: string
+          maxLength: 1000
+        location_id:
+          type: string
+          maxLength: 255
+        user_tags:
+          type: array
+          maxItems: 30
+          items:
+            $ref: "#/components/schemas/InstagramUserTag"
+        cover_url:
+          type: string
+          format: uri
+          maxLength: 2048
+        cover_frame_ms:
+          type: integer
+          minimum: 0
+        audio_name:
+          type: string
+          maxLength: 255
+        is_ai_generated:
+          type: boolean
+    ThreadsReplyControl:
+      type: string
+      enum:
+        - everyone
+        - accounts_you_follow
+        - mentioned_only
+        - parent_post_author_only
+        - followers_only
+    ThreadsPoll:
+      type: object
+      additionalProperties: false
+      required: [option_a, option_b]
+      description: |
+        Text-only Threads poll. Each option is 1-25 characters and option_d
+        requires option_c.
+      properties:
+        option_a:
+          type: string
+          minLength: 1
+          maxLength: 25
+        option_b:
+          type: string
+          minLength: 1
+          maxLength: 25
+        option_c:
+          type: string
+          minLength: 1
+          maxLength: 25
+        option_d:
+          type: string
+          minLength: 1
+          maxLength: 25
+    ThreadsSpoilerEntity:
+      type: object
+      additionalProperties: false
+      required: [offset, length]
+      properties:
+        offset:
+          type: integer
+          minimum: 0
+        length:
+          type: integer
+          minimum: 1
+    ThreadsPostOptions:
+      type: object
+      additionalProperties: false
+      description: |
+        Saved Threads publication controls. Polls, link attachments, and
+        spoiler entities apply to text-only posts; spoiler media requires an
+        attachment. topic_tag is limited to one tag per post.
+      properties:
+        topic_tag:
+          type: string
+          minLength: 1
+          maxLength: 50
+        reply_control:
+          $ref: "#/components/schemas/ThreadsReplyControl"
+        link_attachment:
+          type: string
+          format: uri
+          maxLength: 2048
+        poll:
+          $ref: "#/components/schemas/ThreadsPoll"
+        spoiler_entities:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/ThreadsSpoilerEntity"
+        is_spoiler_media:
+          type: boolean
+        is_made_with_ai:
+          type: boolean
+    ThreadsPublishOptions:
+      type: object
+      additionalProperties: false
+      properties:
+        topic_tag:
+          type: string
+          minLength: 1
+          maxLength: 50
+        reply_control:
+          $ref: "#/components/schemas/ThreadsReplyControl"
+        link_attachment:
+          type: string
+          format: uri
+          maxLength: 2048
+        poll:
+          $ref: "#/components/schemas/ThreadsPoll"
+        spoiler_entities:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/ThreadsSpoilerEntity"
+        is_spoiler_media:
+          type: boolean
+        is_made_with_ai:
+          type: boolean
     SignatureTemplate:
       type: object
       additionalProperties: false
@@ -5516,22 +5771,30 @@ components:
         Provider choices saved on a Post, including incomplete drafts.
         Scheduling validates completeness before creating publication options.
       properties:
+        facebook:
+          $ref: "#/components/schemas/FacebookPostOptions"
         tiktok:
           $ref: "#/components/schemas/TikTokPostOptions"
         youtube:
           $ref: "#/components/schemas/YouTubePostOptions"
         instagram:
           $ref: "#/components/schemas/InstagramPostOptions"
+        threads:
+          $ref: "#/components/schemas/ThreadsPostOptions"
     ProviderPublishOptions:
       type: object
       additionalProperties: false
       properties:
+        facebook:
+          $ref: "#/components/schemas/FacebookPublishOptions"
         tiktok:
           $ref: "#/components/schemas/TikTokPublishOptions"
         youtube:
           $ref: "#/components/schemas/YouTubePublishOptions"
         instagram:
           $ref: "#/components/schemas/InstagramPublishOptions"
+        threads:
+          $ref: "#/components/schemas/ThreadsPublishOptions"
     UpdateDistributionRequest:
       type: object
       additionalProperties: false

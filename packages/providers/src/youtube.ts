@@ -40,6 +40,7 @@ import type {
   ProviderStreamMedia,
   ProviderTokenSet,
   PublishInput,
+  YouTubeLicense,
   YouTubePrivacyStatus,
 } from "./types";
 
@@ -102,6 +103,15 @@ interface UploadInput {
   madeForKids?: boolean;
   media: ProviderStreamMedia;
   privacyStatus: YouTubePrivacyStatus;
+  /** Documented `videos.insert` fields that were explicitly chosen. */
+  status: {
+    containsSyntheticMedia?: boolean;
+    embeddable?: boolean;
+    license?: YouTubeLicense;
+    publicStatsViewable?: boolean;
+    publishAt?: string;
+  };
+  recordingDate?: string;
   tags: string[];
   title: string;
 }
@@ -372,10 +382,19 @@ function uploadInput(input: PublishInput): UploadInput {
   }
   const providerOptions = input.providerOptions?.youtube;
   const privacyStatus = providerOptions?.privacyStatus ?? "public";
+  const publishAt = providerOptions?.publishAt;
+  const recordingDate = providerOptions?.recordingDate;
   if (
     providerOptions !== undefined &&
     (typeof providerOptions.madeForKids !== "boolean" ||
-      !["private", "public", "unlisted"].includes(privacyStatus))
+      !["private", "public", "unlisted"].includes(privacyStatus) ||
+      (providerOptions.license !== undefined &&
+        !["youtube", "creativeCommon"].includes(providerOptions.license)) ||
+      (providerOptions.publishAt !== undefined && !isIsoInstant(publishAt)) ||
+      (providerOptions.recordingDate !== undefined && !isIsoInstant(recordingDate)) ||
+      // YouTube accepts publishAt only while the video is private; sending it
+      // with any other visibility is rejected instead of silently dropped.
+      (publishAt !== undefined && privacyStatus !== "private"))
   ) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
@@ -391,9 +410,37 @@ function uploadInput(input: PublishInput): UploadInput {
     ...(providerOptions ? { madeForKids: providerOptions.madeForKids } : {}),
     media,
     privacyStatus,
+    ...(recordingDate === undefined ? {} : { recordingDate }),
+    status: {
+      ...(providerOptions?.containsSyntheticMedia === undefined
+        ? {}
+        : { containsSyntheticMedia: providerOptions.containsSyntheticMedia }),
+      ...(providerOptions?.embeddable === undefined
+        ? {}
+        : { embeddable: providerOptions.embeddable }),
+      ...(providerOptions?.license === undefined ? {} : { license: providerOptions.license }),
+      ...(providerOptions?.publicStatsViewable === undefined
+        ? {}
+        : { publicStatsViewable: providerOptions.publicStatsViewable }),
+      ...(publishAt === undefined ? {} : { publishAt }),
+    },
     tags: [...input.hashtags],
     title,
   };
+}
+
+/**
+ * Confirms a value is an absolute ISO-8601 instant Google will parse.
+ *
+ * `videos.insert` takes RFC 3339 timestamps; a bare date or a relative string
+ * is rejected locally so the creator sees the field, not an opaque 400.
+ *
+ * @param value - Candidate timestamp from the saved options.
+ * @returns True when the value round-trips as a full instant.
+ */
+function isIsoInstant(value: unknown): value is string {
+  if (typeof value !== "string" || Number.isNaN(Date.parse(value))) return false;
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value);
 }
 
 /**
@@ -1332,7 +1379,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
       const upload = uploadInput(input);
       const initiationUrl = new URL("/upload/youtube/v3/videos", apiOrigin);
       initiationUrl.searchParams.set("uploadType", "resumable");
-      initiationUrl.searchParams.set("part", "snippet,status");
+      initiationUrl.searchParams.set("part", "snippet,status,recordingDetails");
       const initiation = await googleRequest<undefined>(context, {
         body: JSON.stringify({
           snippet: {
@@ -1341,7 +1388,11 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
             tags: upload.tags,
             title: upload.title,
           },
+          ...(upload.recordingDate === undefined
+            ? {}
+            : { recordingDetails: { recordingDate: upload.recordingDate } }),
           status: {
+            ...upload.status,
             ...(upload.madeForKids === undefined
               ? {}
               : { selfDeclaredMadeForKids: upload.madeForKids }),

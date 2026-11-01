@@ -383,9 +383,12 @@ describe("ProviderRegistry", () => {
     }).get("facebook")!;
     expect(facebook.capability).toMatchObject({
       analytics: true,
-      asset_types: ["video"],
+      asset_types: ["image", "video"],
       comments: false,
       connect_available: true,
+      max_media_count: 10,
+      min_media_count: 0,
+      multi_asset_types: ["image"],
       publish: true,
       reply: false,
     });

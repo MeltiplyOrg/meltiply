@@ -287,6 +287,45 @@ export function validatePublishInput(
     });
   }
 
+  if (capability.platform !== "facebook" && input.providerOptions?.facebook) {
+    issues.push({
+      constraint: "unsupported_provider_options",
+      field: "providerOptions.facebook",
+      message: `${capability.platform} does not accept Facebook publish options`,
+    });
+  }
+
+  if (capability.platform === "facebook") {
+    const options = input.providerOptions?.facebook;
+    if (options) {
+      const kinds = input.media.map((media) =>
+        mediaKind(media.contentType.split(";", 1)[0]!.trim().toLowerCase()),
+      );
+      const publishesVideo = kinds.includes("video");
+      const hasLink = options.link !== undefined;
+      // Mirrors the family-to-endpoint mapping the adapter enforces, so a
+      // rejected shape never reaches a remote write.
+      let fits: boolean;
+      switch (options.postType ?? "post") {
+        case "post":
+          fits = !publishesVideo && (!hasLink || kinds.length <= 1);
+          break;
+        case "photo":
+          fits = !hasLink && kinds.length >= 1 && kinds.length <= 10 && !publishesVideo;
+          break;
+        default:
+          fits = !hasLink && publishesVideo && kinds.length === 1;
+      }
+      if (!fits) {
+        issues.push({
+          constraint: "facebook_post_options_invalid",
+          field: "providerOptions.facebook",
+          message: "The selected Facebook post type does not apply to this attachment set",
+        });
+      }
+    }
+  }
+
   if (capability.platform === "instagram") {
     const options = input.providerOptions?.instagram;
     if (options) {

@@ -118,20 +118,22 @@ describe("createFacebookAdapter", () => {
     });
   });
 
-  it("advertises only the implemented Page Reels subset", () => {
+  it("advertises every implemented Page publishing family", () => {
     const provider = adapter(vi.fn<typeof fetch>());
     expect(provider.capability).toMatchObject({
+      accepted_mime_types: ["image/jpeg", "image/png", "video/mp4", "video/quicktime"],
       analytics: true,
-      asset_types: ["video"],
+      asset_types: ["image", "video"],
       comments: false,
       connect_available: true,
       max_caption_length: 2_200,
       max_file_size: 500 * 1024 * 1024,
       max_hashtags: 30,
       max_video_duration_sec: 60,
-      max_media_count: 1,
-      min_media_count: 1,
-      multi_asset_types: [],
+      max_media_count: 10,
+      // Text and link posts need no attachment, so the Platform cannot demand one.
+      min_media_count: 0,
+      multi_asset_types: ["image"],
       platform: "facebook",
       publish: true,
       reply: false,
@@ -1255,7 +1257,7 @@ describe("createFacebookAdapter", () => {
     const fetcher = vi.fn<typeof fetch>();
     const provider = adapter(fetcher);
     const invalidInputs: PublishInput[] = [
-      publishInput({ media: [] }),
+      publishInput({ caption: "", media: [] }),
       publishInput({ caption: "x".repeat(2_201) }),
       publishInput({
         media: [
@@ -1683,5 +1685,160 @@ describe("createFacebookAdapter", () => {
         { limit: 100 },
       ),
     ).rejects.toBeInstanceOf(ProviderAdapterError);
+  });
+});
+
+describe("createFacebookAdapter Page publishing families", () => {
+  const image = {
+    contentType: "image/jpeg",
+    fileSize: 512 * 1024,
+    mode: "remote_ingest",
+    url: "https://assets.example/photo.jpg",
+  } as const;
+
+  it("publishes a text post through the feed edge", async () => {
+    const providerCalls = sequence((url) => {
+      expect(url.pathname).toBe("/v25.0/page-1/feed");
+      return json({ id: "page-1_101" });
+    });
+    const provider = adapter(providerCalls.fetcher);
+    await expect(
+      provider.publish!(
+        context,
+        credentials,
+        publishInput({ media: [], providerOptions: undefined }),
+      ),
+    ).resolves.toEqual({
+      outcome: "confirmed_success",
+      providerOperationId: "posted:page-1_101",
+      providerPostId: "page-1_101",
+    });
+    const body = new URLSearchParams(providerCalls.calls[0]!.init.body as string);
+    expect(body.get("message")).toContain("A Page Reel");
+  });
+
+  it("publishes a link post without any attachment", async () => {
+    const providerCalls = sequence((url) => {
+      expect(url.pathname).toBe("/v25.0/page-1/feed");
+      return json({ id: "page-1_102" });
+    });
+    const provider = adapter(providerCalls.fetcher);
+    await expect(
+      provider.publish!(
+        context,
+        credentials,
+        publishInput({
+          media: [],
+          providerOptions: { facebook: { postType: "post", link: "https://example.com/launch" } },
+        }),
+      ),
+    ).resolves.toMatchObject({ outcome: "confirmed_success", providerPostId: "page-1_102" });
+    const body = new URLSearchParams(providerCalls.calls[0]!.init.body as string);
+    expect(body.get("link")).toBe("https://example.com/launch");
+  });
+
+  it("publishes a single photo and keeps the returned post id", async () => {
+    const providerCalls = sequence((url) => {
+      expect(url.pathname).toBe("/v25.0/page-1/photos");
+      return json({ id: "photo-1", post_id: "page-1_103" });
+    });
+    const provider = adapter(providerCalls.fetcher);
+    await expect(
+      provider.publish!(context, credentials, publishInput({ media: [image] })),
+    ).resolves.toEqual({
+      outcome: "confirmed_success",
+      providerOperationId: "posted:page-1_103",
+      providerPostId: "page-1_103",
+      providerUrl: "https://www.facebook.com/page-1_103",
+    });
+    const body = new URLSearchParams(providerCalls.calls[0]!.init.body as string);
+    expect(body.get("url")).toBe("https://assets.example/photo.jpg");
+    expect(body.get("published")).toBe("true");
+  });
+
+  it("uploads each photo unpublished then attaches them to one feed post", async () => {
+    const providerCalls = sequence(
+      (url) => {
+        expect(url.pathname).toBe("/v25.0/page-1/photos");
+        return json({ id: "photo-a" });
+      },
+      (url) => {
+        expect(url.pathname).toBe("/v25.0/page-1/photos");
+        return json({ id: "photo-b" });
+      },
+      (url) => {
+        expect(url.pathname).toBe("/v25.0/page-1/feed");
+        return json({ id: "page-1_104" });
+      },
+    );
+    const provider = adapter(providerCalls.fetcher);
+    const second = { ...image, url: "https://assets.example/photo-2.jpg" };
+    await expect(
+      provider.publish!(
+        context,
+        credentials,
+        publishInput({
+          media: [image, second],
+          providerOptions: { facebook: { postType: "photo" } },
+        }),
+      ),
+    ).resolves.toMatchObject({ outcome: "confirmed_success", providerPostId: "page-1_104" });
+    const firstUpload = new URLSearchParams(providerCalls.calls[0]!.init.body as string);
+    expect(firstUpload.get("published")).toBe("false");
+    const feed = new URLSearchParams(providerCalls.calls[2]!.init.body as string);
+    expect(feed.get("attached_media[0]")).toBe('{"media_fbid":"photo-a"}');
+    expect(feed.get("attached_media[1]")).toBe('{"media_fbid":"photo-b"}');
+  });
+
+  it("reports an ambiguous feed write as unknown instead of failed", async () => {
+    const providerCalls = sequence(() => {
+      throw new TypeError("connection reset");
+    });
+    const provider = adapter(providerCalls.fetcher);
+    await expect(
+      provider.publish!(context, credentials, publishInput({ media: [] })),
+    ).resolves.toMatchObject({ outcome: "unknown" });
+  });
+
+  it("publishes a photo Story by referencing the unpublished photo", async () => {
+    const providerCalls = sequence(
+      () => json({ id: "photo-story-1" }),
+      (url) => {
+        expect(url.pathname).toBe("/v25.0/page-1/photo_stories");
+        expect(url.searchParams.get("photo_id")).toBe("photo-story-1");
+        return json({ post_id: "page-1_105", success: true });
+      },
+    );
+    const provider = adapter(providerCalls.fetcher);
+    await expect(
+      provider.publish!(
+        context,
+        credentials,
+        publishInput({ media: [image], providerOptions: { facebook: { postType: "story" } } }),
+      ),
+    ).resolves.toMatchObject({ outcome: "confirmed_success", providerPostId: "page-1_105" });
+  });
+
+  it("discloses AI generation on a Reel finish", async () => {
+    const providerCalls = sequence(
+      () =>
+        json({
+          upload_url: "https://rupload.facebook.com/video-upload/v25.0/video-9",
+          video_id: "video-9",
+        }),
+      () => json({ success: true }),
+      (url) => {
+        expect(url.searchParams.get("is_ai_generated")).toBe("true");
+        return json({ success: true });
+      },
+    );
+    const provider = adapter(providerCalls.fetcher);
+    await expect(
+      provider.publish!(
+        context,
+        credentials,
+        publishInput({ providerOptions: { facebook: { isAiGenerated: true } } }),
+      ),
+    ).resolves.toMatchObject({ outcome: "confirmed_success" });
   });
 });

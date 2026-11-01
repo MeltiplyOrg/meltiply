@@ -939,6 +939,11 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
             is_aigc: choices.isAiGenerated,
             privacy_level: choices.privacyLevel,
             title: caption,
+            // Documented video-only cover selector: a frame offset in
+            // milliseconds. Absent keeps TikTok's own default cover frame.
+            ...(choices.coverTimestampMs === undefined
+              ? {}
+              : { video_cover_timestamp_ms: choices.coverTimestampMs }),
           },
           source_info: {
             source: "PULL_FROM_URL",

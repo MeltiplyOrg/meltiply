@@ -976,3 +976,42 @@ describe("createTikTokAdapter", () => {
     ).rejects.toBeInstanceOf(ProviderAdapterError);
   });
 });
+
+describe("createTikTokAdapter documented cover option", () => {
+  it("sends the chosen cover frame timestamp on a video post", async () => {
+    const providerCalls = sequence(
+      () => creator(),
+      (_url, init) => {
+        const body = JSON.parse(String(init.body)) as { post_info: Record<string, unknown> };
+        // TikTok accepts a frame offset in milliseconds, never an image upload.
+        expect(body.post_info.video_cover_timestamp_ms).toBe(1_500);
+        return success({ publish_id: "v_pub_cover" });
+      },
+    );
+    await expect(
+      adapter(providerCalls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: {
+            tiktok: { ...publishInput().providerOptions!.tiktok!, coverTimestampMs: 1_500 },
+          },
+        }),
+      ),
+    ).resolves.toMatchObject({ outcome: "confirmed_success" });
+  });
+
+  it("omits the cover field when the creator chose no frame", async () => {
+    const providerCalls = sequence(
+      () => creator(),
+      (_url, init) => {
+        const body = JSON.parse(String(init.body)) as { post_info: Record<string, unknown> };
+        expect(body.post_info).not.toHaveProperty("video_cover_timestamp_ms");
+        return success({ publish_id: "v_pub_default" });
+      },
+    );
+    await expect(
+      adapter(providerCalls.fetcher).publish!(context, credentials, publishInput()),
+    ).resolves.toMatchObject({ outcome: "confirmed_success" });
+  });
+});

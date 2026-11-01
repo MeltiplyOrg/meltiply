@@ -32,6 +32,7 @@ import {
 import type { MetaContainerOperation } from "./meta-common";
 import type {
   InstagramPostType,
+  InstagramPublishOptions,
   OAuthConnection,
   ProviderAdapter,
   ProviderCredentials,
@@ -249,11 +250,19 @@ function carouselItemParameters(item: InstagramAttachment): URLSearchParams {
  * @param text - Trimmed caption for the published post.
  * @returns Parameters for the parent container creation request.
  */
-function carouselParentParameters(children: readonly string[], text: string): URLSearchParams {
+function carouselParentParameters(
+  children: readonly string[],
+  text: string,
+  extras: InstagramContainerExtras = {},
+): URLSearchParams {
   const parameters = new URLSearchParams();
   if (text) parameters.set("caption", text);
   parameters.set("media_type", "CAROUSEL");
   parameters.set("children", children.join(","));
+  // Instagram documents the AI disclosure and location on the parent only;
+  // child containers reject both.
+  if (extras.isAiGenerated) parameters.set("is_ai_generated", "true");
+  if (extras.locationId) parameters.set("location_id", extras.locationId);
   return parameters;
 }
 
@@ -305,25 +314,45 @@ function singleParameters(
     trialGraduation: "manual" | "performance";
     trialReel: boolean;
   },
+  extras: InstagramContainerExtras = {},
 ): URLSearchParams {
   const parameters = new URLSearchParams();
   if (text) parameters.set("caption", text);
+  // Location and tagging are documented for feed images, videos, and Reels;
+  // Stories accept user tags but not a location id, so each family opts in.
+  if (extras.locationId) parameters.set("location_id", extras.locationId);
   if (item.kind === "image") {
     parameters.set("image_url", item.url);
-    if (options.postType === "story") parameters.set("media_type", "STORIES");
+    if (extras.altText) parameters.set("alt_text", extras.altText);
+    if (options.postType === "story") {
+      parameters.set("media_type", "STORIES");
+      appendUserTags(parameters, extras.userTags);
+      return parameters;
+    }
+    appendUserTags(parameters, extras.userTags);
     return parameters;
   }
   parameters.set("video_url", item.url);
   if (options.postType === "story") {
     parameters.set("media_type", "STORIES");
+    appendUserTags(parameters, extras.userTags);
     return parameters;
   }
   if (options.postType === "feed") {
     parameters.set("media_type", "VIDEO");
+    appendUserTags(parameters, extras.userTags);
     return parameters;
   }
   parameters.set("media_type", "REELS");
   parameters.set("share_to_feed", "true");
+  // Instagram documents `cover_url` as taking precedence over `thumb_offset`.
+  if (extras.coverUrl) parameters.set("cover_url", extras.coverUrl);
+  else if (extras.coverFrameMs !== undefined) {
+    parameters.set("thumb_offset", String(extras.coverFrameMs));
+  }
+  if (extras.audioName) parameters.set("audio_name", extras.audioName);
+  if (extras.isAiGenerated) parameters.set("is_ai_generated", "true");
+  appendUserTags(parameters, extras.userTags);
   if (options.trialReel) {
     parameters.set(
       "trial_params",
@@ -334,6 +363,97 @@ function singleParameters(
     );
   }
   return parameters;
+}
+
+/**
+ * Resolved optional Instagram container parameters shared by the single-post
+ * and carousel paths. Keeping them in one resolved shape means the same saved
+ * choices cannot reach one family with different validation.
+ */
+interface InstagramContainerExtras {
+  altText?: string;
+  audioName?: string;
+  coverFrameMs?: number;
+  coverUrl?: string;
+  isAiGenerated?: boolean;
+  locationId?: string;
+  userTags?: { username: string; x?: number; y?: number }[];
+}
+
+/**
+ * Extracts the documented optional container parameters from a publish input.
+ *
+ * Every value is validated before any provider call so an unusable choice is
+ * reported against its field instead of becoming an opaque container error.
+ * Instagram limits alt text to 1,000 characters, caps user tags, and accepts a
+ * normalized 0..1 position per tag.
+ *
+ * @param input - Composed caption plus the Post's ordered attachments.
+ * @returns The optional parameters that were actually chosen.
+ * @throws ProviderAdapterError when a chosen value violates a documented limit.
+ */
+function instagramContainerExtras(input: PublishInput): InstagramContainerExtras {
+  const options = input.providerOptions?.instagram;
+  if (!options) return { isAiGenerated: false };
+  const invalid = () =>
+    new ProviderAdapterError(
+      classifyProviderFailure({ code: "instagram_publish_options_invalid", status: 400 }),
+    );
+  if (options.altText !== undefined && [...options.altText].length > 1_000) throw invalid();
+  if (options.coverUrl !== undefined && !secureUrl(options.coverUrl)) throw invalid();
+  if (
+    options.coverFrameMs !== undefined &&
+    (!Number.isSafeInteger(options.coverFrameMs) || options.coverFrameMs < 0)
+  ) {
+    throw invalid();
+  }
+  const userTags = options.userTags;
+  if (
+    userTags !== undefined &&
+    (userTags.length > 30 ||
+      userTags.some(
+        (tag) =>
+          typeof tag.username !== "string" ||
+          !tag.username ||
+          (tag.x !== undefined && (!Number.isFinite(tag.x) || tag.x < 0 || tag.x > 1)) ||
+          (tag.y !== undefined && (!Number.isFinite(tag.y) || tag.y < 0 || tag.y > 1)),
+      ))
+  ) {
+    throw invalid();
+  }
+  return {
+    ...(options.altText ? { altText: options.altText } : {}),
+    ...(options.audioName ? { audioName: options.audioName } : {}),
+    ...(options.coverFrameMs !== undefined ? { coverFrameMs: options.coverFrameMs } : {}),
+    ...(options.coverUrl ? { coverUrl: options.coverUrl } : {}),
+    isAiGenerated: options.isAiGenerated === true,
+    ...(options.locationId ? { locationId: options.locationId } : {}),
+    ...(userTags?.length ? { userTags } : {}),
+  };
+}
+
+/**
+ * Appends the documented `user_tags` parameter, preserving each tag's optional
+ * position. Instagram rejects tagging on carousel children, so callers attach
+ * tags only to posts that accept them.
+ *
+ * @param parameters - Container parameters being assembled.
+ * @param userTags - Tagged accounts with optional normalized positions.
+ */
+function appendUserTags(
+  parameters: URLSearchParams,
+  userTags: InstagramPublishOptions["userTags"],
+): void {
+  if (!userTags?.length) return;
+  parameters.set(
+    "user_tags",
+    JSON.stringify(
+      userTags.map((tag) => ({
+        ...(tag.x === undefined || tag.y === undefined ? {} : { x: tag.x, y: tag.y }),
+        username: tag.username,
+      })),
+    ),
+  );
 }
 
 /**
@@ -865,13 +985,14 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
       };
 
       const [only] = attachments;
+      const extras = instagramContainerExtras(input);
       if (attachments.length === 1) {
         return {
           outcome: "confirmed_success",
           providerOperationId: containerOperationId(
             "created",
             await createContainer(
-              singleParameters(only!, text, instagramOptions(input, attachments)),
+              singleParameters(only!, text, instagramOptions(input, attachments), extras),
             ),
           ),
         };
@@ -890,7 +1011,7 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
         outcome: "confirmed_success",
         providerOperationId: containerOperationId(
           "created",
-          await createContainer(carouselParentParameters(children, text)),
+          await createContainer(carouselParentParameters(children, text, extras)),
         ),
       };
     },

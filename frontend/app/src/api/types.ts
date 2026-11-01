@@ -56,6 +56,18 @@ export interface YoutubeSettings {
   selfDeclaredMadeForKids?: "no" | "yes";
   tags?: Array<{ value: string; label: string }>;
   thumbnail?: MediaItem;
+  /** YouTube `status.license`; omitted keeps the standard license. */
+  license?: "youtube" | "creativeCommon";
+  /** Hides public like and view counts when false. */
+  publicStatsViewable?: boolean;
+  /** Whether the video may be embedded elsewhere. */
+  embeddable?: boolean;
+  /** Altered or synthetic content disclosure. */
+  containsSyntheticMedia?: boolean;
+  /** Scheduled publication instant; requires private visibility. */
+  publishAt?: string;
+  /** Recording instant reported to YouTube. */
+  recordingDate?: string;
 }
 
 export interface TikTokSettings {

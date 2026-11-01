@@ -26,10 +26,12 @@ import {
   validatePageInput,
 } from "./meta-common";
 import type {
+  FacebookPostType,
   OAuthConnection,
   OAuthExchangeResult,
   ProviderAdapter,
   ProviderCredentials,
+  ProviderFailure,
   ProviderOperationResult,
   ProviderRequestContext,
   ProviderTokenSet,
@@ -57,33 +59,63 @@ const businessDiscoveryScope = "business_management";
 /** Facebook's caption ceiling remains known even before live publishing is configured. */
 export const FACEBOOK_MAX_CAPTION_LENGTH = 2_200;
 
+/** Documented per-photo ceiling for Page photo posts. */
+const photoMaximumBytes = 10 * 1024 * 1024;
+
+/** Documented ceiling for photos attached to one Page post. */
+const FACEBOOK_MAX_PHOTOS = 10;
+
+/**
+ * Reports whether a failed write may already have landed remotely.
+ *
+ * Meta accepts a request before its response reaches us when the connection
+ * times out or resets, so these classifications must reconcile rather than
+ * report a failure the Page may contradict.
+ */
+function isAmbiguousWrite(classification: ProviderFailure["classification"]): boolean {
+  return (
+    classification === "ambiguous" || classification === "timeout" || classification === "transient"
+  );
+}
+
 const capability: PlatformCapability = {
-  accepted_mime_types: ["video/mp4", "video/quicktime"],
+  accepted_mime_types: ["image/jpeg", "image/png", "video/mp4", "video/quicktime"],
   analytics: true,
-  asset_types: ["video"],
+  asset_types: ["image", "video"],
   comments: false,
   connect_available: true,
   max_caption_length: FACEBOOK_MAX_CAPTION_LENGTH,
   max_file_size: videoMaximumBytes,
   max_hashtags: 30,
-  max_media_count: 1,
+  max_media_count: 10,
   max_video_duration_sec: 60,
-  min_media_count: 1,
-  multi_asset_types: [],
+  min_media_count: 0,
+  multi_asset_types: ["image"],
   notes: [
     "Facebook Pages use an explicit Page access token; personal profiles are unsupported.",
+    "Text and link posts publish through the documented Page feed edge.",
+    "A single photo publishes as a Page photo post; 2-10 photos publish as one multi-photo post.",
+    "Photo posts accept JPEG or PNG up to 10 MiB each; Facebook strips embedded location metadata.",
     "Page Reels use a hosted HTTPS video and the documented remote-ingest flow.",
-    "One video publishes one Reel; carousels and photo posts are not supported.",
-    "Reels are limited to 500 MiB and 60 seconds.",
+    "Videos publish through the resumable Video API upload; Reels remain the single-video shortcut.",
+    "Stories publish one photo or one video and require media that was never published before.",
+    "Ordinary video is capped at 500 MiB; Reels and Stories at 60 seconds.",
     "Analytics reads Reel plays from Video Insights and likes/comments from the Video edges; shares come from the documented comments-plus-shares social-actions metric.",
     "Video Insights requires read_insights and pages_manage_engagement; old connections must reconnect to grant them.",
+    "Colored text backgrounds are not documented for Page publishing, so no such control is offered.",
   ],
   platform: "facebook",
   publish: true,
   reply: false,
 };
 
-type FacebookOperationPhase = "finish_submitted" | "finishing" | "upload_submitted" | "uploaded";
+type FacebookOperationPhase =
+  | "finish_submitted"
+  | "finishing"
+  | "post_submitted"
+  | "posted"
+  | "upload_submitted"
+  | "uploaded";
 
 interface FacebookOperation {
   id: string;
@@ -136,7 +168,9 @@ function operationId(phase: FacebookOperationPhase, id: string): string {
  */
 function parseOperationId(value: unknown): FacebookOperation | undefined {
   const normalized = providerIdentifier(value);
-  const match = normalized?.match(/^(finish_submitted|finishing|upload_submitted|uploaded):(.+)$/);
+  const match = normalized?.match(
+    /^(finish_submitted|finishing|posted|upload_submitted|uploaded):(.+)$/,
+  );
   const id = providerIdentifier(match?.[2]);
   return match && id ? { id, phase: match[1] as FacebookOperationPhase } : undefined;
 }
@@ -201,6 +235,87 @@ function validateUploadUrl(value: unknown, videoId: string): string {
     throw malformed();
   }
   return url.toString();
+}
+
+/**
+ * Chooses the Facebook publication family for one resolved input.
+ *
+ * The creator's saved `postType` wins when present. Otherwise a single video
+ * keeps the historical Reel behaviour, a single image becomes a photo post, and
+ * multiple images become one multi-photo post. Anything else — including a
+ * video mixed with images, which no Facebook endpoint accepts — fails closed
+ * rather than silently dropping attachments.
+ *
+ * @param input - Composed caption plus the Post's ordered attachments.
+ * @returns The family to publish, with its resolved media kinds.
+ * @throws ProviderAdapterError when the attachment set fits no family.
+ */
+function facebookPostType(input: PublishInput): FacebookPostType {
+  const requested = input.providerOptions?.facebook?.postType;
+  if (requested) return requested;
+  if (input.media.length === 0) return "post";
+  const allImages = input.media.every((media) =>
+    media.contentType.split(";", 1)[0]!.trim().toLowerCase().startsWith("image/"),
+  );
+  if (allImages) return "photo";
+  // A single video keeps the historical Reel behaviour; a video mixed with
+  // images fits no Facebook endpoint and is reported by the family validators.
+  return "reel";
+}
+
+/**
+ * Validates the caption and hashtag envelope shared by every Facebook family.
+ * @throws ProviderAdapterError with `code` when the envelope is not publishable.
+ */
+function facebookEnvelope(input: PublishInput, code: string): string {
+  required("idempotencyKey", input.idempotencyKey, 255);
+  const description = input.caption.trim();
+  if ([...description].length > FACEBOOK_MAX_CAPTION_LENGTH || input.hashtags.length > 30) {
+    throw new ProviderAdapterError(classifyProviderFailure({ code, status: 400 }));
+  }
+  return description;
+}
+
+/**
+ * Requires every attachment to be remote-ingest media of one allowed kind.
+ *
+ * Facebook fetches hosted HTTPS URLs directly, so a stream attachment cannot be
+ * published here. Each attachment is checked for kind, size, and reachability
+ * before any provider call, keeping a partial failure from publishing only the
+ * first photo of a multi-photo post.
+ *
+ * @param input - Composed caption plus the Post's ordered attachments.
+ * @param kind - Required attachment kind.
+ * @param maximum - Per-attachment byte ceiling.
+ * @param code - Failure code reported for any violation.
+ * @returns The validated secure URLs in attachment order.
+ * @throws ProviderAdapterError when an attachment cannot be sent.
+ */
+function facebookRemoteMedia(
+  input: PublishInput,
+  kind: "image" | "video",
+  maximum: number,
+  code: string,
+): string[] {
+  return input.media.map((media) => {
+    const url = media.mode === "remote_ingest" ? secureUrl(media.url) : undefined;
+    const resolvedKind = media.contentType
+      .split(";", 1)[0]!
+      .trim()
+      .toLowerCase()
+      .startsWith("image/")
+      ? "image"
+      : "video";
+    const accepted =
+      media.mode === "remote_ingest" &&
+      resolvedKind === kind &&
+      Number.isSafeInteger(media.fileSize) &&
+      media.fileSize > 0 &&
+      media.fileSize <= maximum &&
+      url !== undefined;
+    if (!accepted) throw new ProviderAdapterError(classifyProviderFailure({ code, status: 400 }));
+    return url;
+  });
 }
 
 /**
@@ -528,11 +643,353 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
     }
   };
 
+  /**
+   * Publishes a text, link, or multi-photo Page post through the feed edge.
+   *
+   * Multi-photo posts need each photo uploaded unpublished first, because the
+   * feed edge references them by `media_fbid`. An unpublished photo lasts about
+   * 24 hours, so the photo uploads and the feed call happen in one attempt; a
+   * failure part-way leaves orphaned unpublished photos that Facebook expires
+   * on its own rather than a half-published post.
+   *
+   * @returns Confirmed success carrying the Page post id, or the classified
+   *   outcome when the write may already have landed.
+   */
+  const publishFeedPost = async (
+    context: ProviderRequestContext,
+    credentials: ProviderCredentials,
+    pageId: string,
+    input: PublishInput,
+  ): Promise<ProviderOperationResult> => {
+    const description = facebookEnvelope(input, "facebook_post_invalid");
+    const links = facebookRemoteMedia(input, "image", photoMaximumBytes, "facebook_photo_invalid");
+    const link = input.providerOptions?.facebook?.link;
+    if (input.media.length > 1 && link) {
+      throw new ProviderAdapterError(
+        classifyProviderFailure({ code: "facebook_post_invalid", status: 400 }),
+      );
+    }
+    if (input.media.length === 0 && !description && !link) {
+      throw new ProviderAdapterError(
+        classifyProviderFailure({ code: "facebook_post_invalid", status: 400 }),
+      );
+    }
+    const photoIds: string[] = [];
+    for (const url of links) {
+      const body = new URLSearchParams({ published: "false", url });
+      const uploaded = await http.request<unknown>(context, {
+        body,
+        headers: {
+          ...bearer(credentials.accessToken),
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method: "POST",
+        sideEffectPossible: true,
+        url: `${graphOrigin}/${apiVersion}/${encodeURIComponent(pageId)}/photos`,
+      });
+      const photoId = providerIdentifier(record(uploaded.body)?.id);
+      if (!photoId) throw malformed(true);
+      photoIds.push(photoId);
+    }
+    const body = new URLSearchParams();
+    if (description) body.set("message", description);
+    if (link) body.set("link", link);
+    photoIds.forEach((photoId, index) => {
+      body.set(`attached_media[${index}]`, JSON.stringify({ media_fbid: photoId }));
+    });
+    try {
+      const response = await http.request<unknown>(context, {
+        body,
+        headers: {
+          ...bearer(credentials.accessToken),
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method: "POST",
+        sideEffectPossible: true,
+        url: `${graphOrigin}/${apiVersion}/${encodeURIComponent(pageId)}/feed`,
+      });
+      const postId = providerIdentifier(record(response.body)?.id);
+      if (!postId) throw malformed(true);
+      return {
+        outcome: "confirmed_success",
+        providerOperationId: operationId("posted", postId),
+        providerPostId: postId,
+      };
+    } catch (cause) {
+      if (!(cause instanceof ProviderAdapterError)) throw cause;
+      if (isAmbiguousWrite(cause.failure.classification)) {
+        return unknownResult(cause.failure, operationId("post_submitted", photoIds.join("_")));
+      }
+      return { failure: cause.failure, outcome: "confirmed_failure" };
+    }
+  };
+
+  /**
+   * Publishes one photo, or up to ten photos as one multi-photo post.
+   *
+   * A single photo is published in one `/photos` call, which returns both the
+   * photo id and the resulting post id. Multiple photos defer to the feed
+   * family, the only documented way to attach several photos to one Page post.
+   *
+   * @returns Confirmed success carrying the Page post id.
+   */
+  const publishPhotos = async (
+    context: ProviderRequestContext,
+    credentials: ProviderCredentials,
+    pageId: string,
+    input: PublishInput,
+  ): Promise<ProviderOperationResult> => {
+    if (input.media.length === 0 || input.media.length > FACEBOOK_MAX_PHOTOS) {
+      throw new ProviderAdapterError(
+        classifyProviderFailure({ code: "facebook_photo_invalid", status: 400 }),
+      );
+    }
+    if (input.media.length > 1) {
+      return publishFeedPost(context, credentials, pageId, input);
+    }
+    const description = facebookEnvelope(input, "facebook_photo_invalid");
+    const [url] = facebookRemoteMedia(input, "image", photoMaximumBytes, "facebook_photo_invalid");
+    const body = new URLSearchParams({ published: "true", url: url! });
+    if (description) body.set("caption", description);
+    try {
+      const response = await http.request<unknown>(context, {
+        body,
+        headers: {
+          ...bearer(credentials.accessToken),
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method: "POST",
+        sideEffectPossible: true,
+        url: `${graphOrigin}/${apiVersion}/${encodeURIComponent(pageId)}/photos`,
+      });
+      const uploaded = record(response.body);
+      const postId = providerIdentifier(uploaded?.post_id);
+      const photoId = providerIdentifier(uploaded?.id);
+      if (!postId || !photoId) throw malformed(true);
+      return {
+        outcome: "confirmed_success",
+        providerOperationId: operationId("posted", postId),
+        providerPostId: postId,
+        providerUrl: `https://www.facebook.com/${postId}`,
+      };
+    } catch (cause) {
+      if (!(cause instanceof ProviderAdapterError)) throw cause;
+      if (isAmbiguousWrite(cause.failure.classification)) {
+        return unknownResult(cause.failure);
+      }
+      return { failure: cause.failure, outcome: "confirmed_failure" };
+    }
+  };
+
+  /**
+   * Publishes one photo or one video as a Page Story.
+   *
+   * Stories accept exactly one attachment, and Meta rejects media that has
+   * already appeared in a published post. A video Story reuses the Reel upload
+   * handshake with the `/video_stories` edge; a photo Story uploads the picture
+   * unpublished and then references it by id.
+   *
+   * @returns Confirmed success carrying the Story post id when Meta reports it.
+   */
+  const publishStory = async (
+    context: ProviderRequestContext,
+    credentials: ProviderCredentials,
+    pageId: string,
+    input: PublishInput,
+  ): Promise<ProviderOperationResult> => {
+    if (input.media.length !== 1) {
+      throw new ProviderAdapterError(
+        classifyProviderFailure({ code: "facebook_story_invalid", status: 400 }),
+      );
+    }
+    // Stories take no caption on either edge, so only the shared envelope is
+    // validated here; nothing from it is sent.
+    facebookEnvelope(input, "facebook_story_invalid");
+    const media = input.media[0]!;
+    const isVideo = !media.contentType.split(";", 1)[0]!.trim().toLowerCase().startsWith("image/");
+    const [mediaUrl] = facebookRemoteMedia(
+      input,
+      isVideo ? "video" : "image",
+      isVideo ? videoMaximumBytes : photoMaximumBytes,
+      "facebook_story_media_invalid",
+    );
+    if (!isVideo) {
+      const uploadBody = new URLSearchParams({ published: "false", url: mediaUrl! });
+      const uploaded = await http.request<unknown>(context, {
+        body: uploadBody,
+        headers: {
+          ...bearer(credentials.accessToken),
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method: "POST",
+        sideEffectPossible: true,
+        url: `${graphOrigin}/${apiVersion}/${encodeURIComponent(pageId)}/photos`,
+      });
+      const photoId = providerIdentifier(record(uploaded.body)?.id);
+      if (!photoId) throw malformed(true);
+      return submitStoryFinish(context, credentials, pageId, {
+        edge: "photo_stories",
+        photoId,
+      });
+    }
+    const createUrl = new URL(
+      `/${apiVersion}/${encodeURIComponent(pageId)}/video_stories`,
+      graphOrigin,
+    );
+    createUrl.searchParams.set("upload_phase", "start");
+    const createResponse = await http.request<unknown>(context, {
+      headers: bearer(credentials.accessToken),
+      method: "POST",
+      sideEffectPossible: true,
+      url: createUrl.toString(),
+    });
+    const createBody = record(createResponse.body);
+    const videoId = providerIdentifier(createBody?.video_id);
+    if (!videoId) throw malformed(true);
+    const uploadUrl = validateUploadUrl(createBody?.upload_url, videoId);
+    try {
+      const uploadResponse = await http.request<unknown>(context, {
+        headers: {
+          Authorization: `OAuth ${required("accessToken", credentials.accessToken)}`,
+          file_url: mediaUrl!,
+        },
+        method: "POST",
+        sideEffectPossible: true,
+        url: uploadUrl,
+      });
+      if (record(uploadResponse.body)?.success !== true) throw malformed(true);
+      return submitStoryFinish(context, credentials, pageId, {
+        edge: "video_stories",
+        videoId,
+      });
+    } catch (cause) {
+      if (!(cause instanceof ProviderAdapterError)) throw cause;
+      if (isAmbiguousWrite(cause.failure.classification)) {
+        return unknownResult(cause.failure, operationId("upload_submitted", videoId));
+      }
+      return { failure: cause.failure, outcome: "confirmed_failure" };
+    }
+  };
+
+  /**
+   * Publishes one video as a Page Reel through the documented three-phase flow.
+   *
+   * @returns Confirmed success once Meta acknowledges the finish phase.
+   */
+  const publishReel = async (
+    context: ProviderRequestContext,
+    credentials: ProviderCredentials,
+    pageId: string,
+    input: PublishInput,
+  ): Promise<ProviderOperationResult> => {
+    const { description, mediaUrl } = reelInput(input);
+    const createUrl = new URL(
+      `/${apiVersion}/${encodeURIComponent(pageId)}/video_reels`,
+      graphOrigin,
+    );
+    createUrl.searchParams.set("upload_phase", "start");
+    const createResponse = await http.request<unknown>(context, {
+      headers: bearer(credentials.accessToken),
+      method: "POST",
+      sideEffectPossible: true,
+      url: createUrl.toString(),
+    });
+    const createBody = record(createResponse.body);
+    const videoId = providerIdentifier(createBody?.video_id);
+    if (!videoId) throw malformed(true);
+    const uploadUrl = validateUploadUrl(createBody?.upload_url, videoId);
+    try {
+      const uploadResponse = await http.request<unknown>(context, {
+        headers: {
+          Authorization: `OAuth ${required("accessToken", credentials.accessToken)}`,
+          file_url: mediaUrl,
+        },
+        method: "POST",
+        sideEffectPossible: true,
+        url: uploadUrl,
+      });
+      if (record(uploadResponse.body)?.success !== true) {
+        throw malformed(true);
+      }
+      return submitFinish(
+        context,
+        credentials,
+        videoId,
+        description,
+        input.providerOptions?.facebook?.isAiGenerated === true,
+      );
+    } catch (cause) {
+      if (!(cause instanceof ProviderAdapterError)) throw cause;
+      if (isAmbiguousWrite(cause.failure.classification)) {
+        return unknownResult(cause.failure, operationId("upload_submitted", videoId));
+      }
+      return {
+        failure: cause.failure,
+        outcome: "confirmed_failure",
+        providerOperationId: operationId("uploaded", videoId),
+      };
+    }
+  };
+
+  /**
+   * Completes a Story publication for an already uploaded photo or video.
+   *
+   * Photo Stories reference the unpublished photo by id, while video Stories
+   * repeat the Reel handshake against the `/video_stories` edge. Meta reports
+   * `post_id` for Stories but only `success` for Reels, so the id is optional
+   * here and a missing one is not treated as a failed publication.
+   *
+   * @param target - Which Stories edge to finish and the media id it references.
+   * @returns Confirmed success with the Story post id when Meta supplies it.
+   */
+  const submitStoryFinish = async (
+    context: ProviderRequestContext,
+    credentials: ProviderCredentials,
+    pageId: string,
+    target:
+      | { edge: "photo_stories" | "video_stories"; photoId: string }
+      | {
+          edge: "photo_stories" | "video_stories";
+          videoId: string;
+        },
+  ): Promise<ProviderOperationResult> => {
+    const url = new URL(`/${apiVersion}/${encodeURIComponent(pageId)}/${target.edge}`, graphOrigin);
+    if ("photoId" in target) url.searchParams.set("photo_id", target.photoId);
+    if ("videoId" in target) {
+      url.searchParams.set("video_id", target.videoId);
+      url.searchParams.set("upload_phase", "finish");
+      url.searchParams.set("video_state", "PUBLISHED");
+    }
+    try {
+      const response = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "POST",
+        sideEffectPossible: true,
+        url: url.toString(),
+      });
+      const body = record(response.body);
+      if (body?.success !== true) throw malformed(true);
+      const postId = providerIdentifier(body.post_id);
+      return {
+        outcome: "confirmed_success",
+        ...(postId ? { providerOperationId: operationId("posted", postId) } : {}),
+        ...(postId ? { providerPostId: postId } : {}),
+      };
+    } catch (cause) {
+      if (!(cause instanceof ProviderAdapterError)) throw cause;
+      if (isAmbiguousWrite(cause.failure.classification)) {
+        return unknownResult(cause.failure);
+      }
+      return { failure: cause.failure, outcome: "confirmed_failure" };
+    }
+  };
+
   const submitFinish = async (
     context: ProviderRequestContext,
     credentials: ProviderCredentials,
     videoId: string,
     description: string,
+    isAiGenerated: boolean,
   ): Promise<ProviderOperationResult> => {
     const url = new URL(
       `/${apiVersion}/${encodeURIComponent(accountId(credentials))}/video_reels`,
@@ -541,6 +998,9 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
     url.searchParams.set("video_id", videoId);
     url.searchParams.set("upload_phase", "finish");
     url.searchParams.set("video_state", "PUBLISHED");
+    // Reels document `is_ai_generated` on the finish phase only; the default
+    // stays absent so Meta's own false default applies.
+    if (isAiGenerated) url.searchParams.set("is_ai_generated", "true");
     if (description) url.searchParams.set("description", description);
     try {
       const response = await http.request<unknown>(context, {
@@ -1030,50 +1490,16 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
 
     async publish(context, credentials, input) {
       const pageId = accountId(credentials);
-      const { description, mediaUrl } = reelInput(input);
-      const createUrl = new URL(
-        `/${apiVersion}/${encodeURIComponent(pageId)}/video_reels`,
-        graphOrigin,
-      );
-      createUrl.searchParams.set("upload_phase", "start");
-      const createResponse = await http.request<unknown>(context, {
-        headers: bearer(credentials.accessToken),
-        method: "POST",
-        sideEffectPossible: true,
-        url: createUrl.toString(),
-      });
-      const createBody = record(createResponse.body);
-      const videoId = providerIdentifier(createBody?.video_id);
-      if (!videoId) throw malformed(true);
-      const uploadUrl = validateUploadUrl(createBody?.upload_url, videoId);
-      try {
-        const uploadResponse = await http.request<unknown>(context, {
-          headers: {
-            Authorization: `OAuth ${required("accessToken", credentials.accessToken)}`,
-            file_url: mediaUrl,
-          },
-          method: "POST",
-          sideEffectPossible: true,
-          url: uploadUrl,
-        });
-        if (record(uploadResponse.body)?.success !== true) {
-          throw malformed(true);
-        }
-        return submitFinish(context, credentials, videoId, description);
-      } catch (cause) {
-        if (!(cause instanceof ProviderAdapterError)) throw cause;
-        if (
-          cause.failure.classification === "ambiguous" ||
-          cause.failure.classification === "timeout" ||
-          cause.failure.classification === "transient"
-        ) {
-          return unknownResult(cause.failure, operationId("upload_submitted", videoId));
-        }
-        return {
-          failure: cause.failure,
-          outcome: "confirmed_failure",
-          providerOperationId: operationId("uploaded", videoId),
-        };
+      const postType = facebookPostType(input);
+      switch (postType) {
+        case "post":
+          return publishFeedPost(context, credentials, pageId, input);
+        case "photo":
+          return publishPhotos(context, credentials, pageId, input);
+        case "story":
+          return publishStory(context, credentials, pageId, input);
+        case "reel":
+          return publishReel(context, credentials, pageId, input);
       }
     },
 

@@ -337,7 +337,7 @@ describe("createYouTubeAdapter", () => {
       (url, init) => {
         expect(url.pathname).toBe("/upload/youtube/v3/videos");
         expect(Object.fromEntries(url.searchParams)).toEqual({
-          part: "snippet,status",
+          part: "snippet,status,recordingDetails",
           uploadType: "resumable",
         });
         expect(new Headers(init.headers).get("X-Upload-Content-Length")).toBe("4");
@@ -1250,6 +1250,103 @@ describe("createYouTubeAdapter", () => {
         credentials,
         { providerPostId: "video-1" },
         { limit: 100 },
+      ),
+    ).rejects.toBeInstanceOf(ProviderAdapterError);
+  });
+});
+
+describe("createYouTubeAdapter documented insert options", () => {
+  /** Captures the initiation body so each test can assert the sent fields. */
+  function initiatingAdapter(options: Partial<PublishInput>) {
+    const sent: unknown[] = [];
+    const providerCalls = sequence(
+      (_url, init) => {
+        sent.push(JSON.parse(String(init.body)));
+        return new Response(null, {
+          headers: {
+            Location:
+              "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&upload_id=upload_1&part=snippet%2Cstatus",
+          },
+        });
+      },
+      () =>
+        new Response(JSON.stringify({ id: "video-1" }), {
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const provider = adapter(providerCalls.fetcher);
+    return { call: provider.publish!(context, credentials, publishInput(options)), sent };
+  }
+
+  it("sends every documented status field the creator chose", async () => {
+    const { call, sent } = initiatingAdapter({
+      providerOptions: {
+        youtube: {
+          containsSyntheticMedia: true,
+          embeddable: false,
+          license: "creativeCommon",
+          madeForKids: false,
+          privacyStatus: "unlisted",
+          publicStatsViewable: false,
+          recordingDate: "2026-01-02T03:04:05Z",
+        },
+      },
+    });
+    await expect(call).resolves.toMatchObject({ outcome: "confirmed_success" });
+    expect(sent[0]).toMatchObject({
+      recordingDetails: { recordingDate: "2026-01-02T03:04:05Z" },
+      status: {
+        containsSyntheticMedia: true,
+        embeddable: false,
+        license: "creativeCommon",
+        privacyStatus: "unlisted",
+        publicStatsViewable: false,
+        selfDeclaredMadeForKids: false,
+      },
+    });
+  });
+
+  it("schedules publication only while the video is private", async () => {
+    const scheduled = initiatingAdapter({
+      providerOptions: {
+        youtube: {
+          madeForKids: true,
+          privacyStatus: "private",
+          publishAt: "2026-05-01T10:00:00Z",
+        },
+      },
+    });
+    await expect(scheduled.call).resolves.toMatchObject({ outcome: "confirmed_success" });
+    expect(scheduled.sent[0]).toMatchObject({
+      status: { privacyStatus: "private", publishAt: "2026-05-01T10:00:00Z" },
+    });
+
+    // YouTube rejects publishAt unless the video is private, so this fails closed.
+    await expect(
+      adapter(vi.fn<typeof fetch>()).publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: {
+            youtube: {
+              madeForKids: true,
+              privacyStatus: "public",
+              publishAt: "2026-05-01T10:00:00Z",
+            },
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ProviderAdapterError);
+  });
+
+  it("rejects an instant Google could not parse", async () => {
+    await expect(
+      adapter(vi.fn<typeof fetch>()).publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: { youtube: { madeForKids: true, recordingDate: "2026-01-02" } },
+        }),
       ),
     ).rejects.toBeInstanceOf(ProviderAdapterError);
   });

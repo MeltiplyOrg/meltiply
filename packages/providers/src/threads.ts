@@ -40,6 +40,8 @@ import type {
   ProviderRequestContext,
   ProviderTokenSet,
   PublishInput,
+  ThreadsPublishOptions,
+  ThreadsReplyControl,
 } from "./types";
 
 const apiOrigin = "https://graph.threads.com";
@@ -195,7 +197,7 @@ function carouselItemParameters(item: ThreadsAttachment): URLSearchParams {
  * @returns Parameters for the TEXT container creation request.
  * @throws ProviderAdapterError when there is no text to publish.
  */
-function textParameters(text: string): URLSearchParams {
+function textParameters(text: string, extras: ThreadsContainerExtras = {}): URLSearchParams {
   if (!text) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
@@ -207,6 +209,7 @@ function textParameters(text: string): URLSearchParams {
   const parameters = new URLSearchParams();
   parameters.set("text", text);
   parameters.set("media_type", "TEXT");
+  appendThreadsControls(parameters, extras, false);
   return parameters;
 }
 
@@ -218,12 +221,130 @@ function textParameters(text: string): URLSearchParams {
  * @param text - Trimmed post text, omitted when empty.
  * @returns Parameters for the container creation request.
  */
-function singleParameters(item: ThreadsAttachment, text: string): URLSearchParams {
+function singleParameters(
+  item: ThreadsAttachment,
+  text: string,
+  extras: ThreadsContainerExtras = {},
+): URLSearchParams {
   const parameters = new URLSearchParams();
   if (text) parameters.set("text", text);
   parameters.set("media_type", item.kind === "image" ? "IMAGE" : "VIDEO");
   parameters.set(item.kind === "image" ? "image_url" : "video_url", item.url);
+  appendThreadsControls(parameters, extras, false);
   return parameters;
+}
+
+/**
+ * Resolved optional Threads container parameters shared by the text, single,
+ * and carousel paths, so one saved choice cannot reach two families with
+ * different validation.
+ */
+interface ThreadsContainerExtras {
+  isMadeWithAi?: boolean;
+  isSpoilerMedia?: boolean;
+  linkAttachment?: string;
+  poll?: ThreadsPublishOptions["poll"];
+  replyControl?: ThreadsReplyControl;
+  spoilerEntities?: { length: number; offset: number }[];
+  topicTag?: string;
+}
+
+/**
+ * Extracts and validates the documented optional Threads controls.
+ *
+ * Polls, link attachments, and long-form text attachments are text-only on
+ * Threads, and spoiler media is media-only; mixing them is rejected before any
+ * provider call rather than producing a container Threads will refuse.
+ *
+ * @param input - Composed text plus the Post's ordered attachments.
+ * @returns The controls that were actually chosen.
+ * @throws ProviderAdapterError when a control violates a documented rule.
+ */
+function threadsContainerExtras(input: PublishInput): ThreadsContainerExtras {
+  const options = input.providerOptions?.threads;
+  if (!options) return {};
+  const invalid = () =>
+    new ProviderAdapterError(
+      classifyProviderFailure({ code: "threads_publish_options_invalid", status: 400 }),
+    );
+  const hasMedia = input.media.length > 0;
+  const poll = options.poll;
+  if (
+    (options.topicTag !== undefined &&
+      (options.topicTag.length < 1 ||
+        options.topicTag.length > 50 ||
+        /[.&]/.test(options.topicTag))) ||
+    (options.linkAttachment !== undefined && !secureUrl(options.linkAttachment)) ||
+    // Threads documents polls, links, and text attachments as text-only.
+    ((poll !== undefined || options.linkAttachment !== undefined) && hasMedia) ||
+    (options.isSpoilerMedia === true && !hasMedia) ||
+    (options.spoilerEntities !== undefined &&
+      (options.spoilerEntities.length > 10 ||
+        options.spoilerEntities.some(
+          (entity) =>
+            !Number.isSafeInteger(entity.offset) ||
+            !Number.isSafeInteger(entity.length) ||
+            entity.offset < 0 ||
+            entity.length < 1,
+        ))) ||
+    (poll !== undefined &&
+      (!poll.optionA ||
+        !poll.optionB ||
+        [poll.optionA, poll.optionB, poll.optionC, poll.optionD].some(
+          (value) => value !== undefined && (value.length < 1 || value.length > 25),
+        ) ||
+        (poll.optionD !== undefined && poll.optionC === undefined)))
+  ) {
+    throw invalid();
+  }
+  return {
+    ...(options.isMadeWithAi ? { isMadeWithAi: true } : {}),
+    ...(options.isSpoilerMedia ? { isSpoilerMedia: true } : {}),
+    ...(options.linkAttachment ? { linkAttachment: options.linkAttachment } : {}),
+    ...(poll ? { poll } : {}),
+    ...(options.replyControl ? { replyControl: options.replyControl } : {}),
+    ...(options.spoilerEntities?.length ? { spoilerEntities: options.spoilerEntities } : {}),
+    ...(options.topicTag ? { topicTag: options.topicTag } : {}),
+  };
+}
+
+/**
+ * Adds the controls Threads documents for the container being built.
+ *
+ * @param parameters - Container parameters being assembled.
+ * @param extras - Validated optional controls.
+ * @param carousel - True when the container is a carousel parent, which is the
+ *   only family Threads lets carry the AI label alongside media.
+ */
+function appendThreadsControls(
+  parameters: URLSearchParams,
+  extras: ThreadsContainerExtras,
+  carousel: boolean,
+): void {
+  if (extras.topicTag) parameters.set("topic_tag", extras.topicTag);
+  if (extras.replyControl) parameters.set("reply_control", extras.replyControl);
+  if (extras.isMadeWithAi && carousel) parameters.set("is_made_with_ai", "true");
+  if (extras.isSpoilerMedia && !carousel) parameters.set("is_spoiler_media", "true");
+  if (extras.linkAttachment) parameters.set("link_attachment", extras.linkAttachment);
+  if (extras.spoilerEntities?.length) {
+    parameters.set(
+      "text_entities",
+      JSON.stringify(
+        extras.spoilerEntities.map((entity) => ({ ...entity, entity_type: "SPOILER" })),
+      ),
+    );
+  }
+  if (extras.poll) {
+    parameters.set(
+      "poll_attachment",
+      JSON.stringify({
+        option_a: extras.poll.optionA,
+        option_b: extras.poll.optionB,
+        ...(extras.poll.optionC ? { option_c: extras.poll.optionC } : {}),
+        ...(extras.poll.optionD ? { option_d: extras.poll.optionD } : {}),
+      }),
+    );
+  }
 }
 
 /**
@@ -234,11 +355,16 @@ function singleParameters(item: ThreadsAttachment, text: string): URLSearchParam
  * @param text - Trimmed post text, omitted when empty.
  * @returns Parameters for the parent container creation request.
  */
-function carouselParentParameters(children: readonly string[], text: string): URLSearchParams {
+function carouselParentParameters(
+  children: readonly string[],
+  text: string,
+  extras: ThreadsContainerExtras = {},
+): URLSearchParams {
   const parameters = new URLSearchParams();
   if (text) parameters.set("text", text);
   parameters.set("media_type", "CAROUSEL");
   parameters.set("children", children.join(","));
+  appendThreadsControls(parameters, extras, true);
   return parameters;
 }
 
@@ -836,11 +962,12 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         return containerId;
       };
 
+      const extras = threadsContainerExtras(input);
       if (attachments.length === 0) {
         return publishContainer(
           context,
           credentials.accessToken,
-          await createContainer(textParameters(text)),
+          await createContainer(textParameters(text, extras)),
         );
       }
       const [only] = attachments;
@@ -849,7 +976,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
           outcome: "confirmed_success",
           providerOperationId: containerOperationId(
             "created",
-            await createContainer(singleParameters(only!, text)),
+            await createContainer(singleParameters(only!, text, extras)),
           ),
         };
       }
@@ -864,7 +991,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         outcome: "confirmed_success",
         providerOperationId: containerOperationId(
           "created",
-          await createContainer(carouselParentParameters(children, text)),
+          await createContainer(carouselParentParameters(children, text, extras)),
         ),
       };
     },

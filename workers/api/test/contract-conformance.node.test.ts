@@ -1066,6 +1066,11 @@ describe("API Worker OpenAPI conformance", () => {
             );
             const expectedParams = new URLSearchParams(expectedUrl.search);
             expectedParams.delete("selection_id");
+            // The catalog's TikTok URL is an example; this request selects its
+            // own Platform, which must survive the callback redirect.
+            const platform = new URL(testCase.path, expectedUrl.origin).pathname.split("/")[4];
+            if (!platform) throw new Error("The callback fixture must name a Platform");
+            expectedParams.set("provider", platform);
             const actualParams = new URLSearchParams(actualUrl.search);
             const actualTicket = actualParams.get("selection_id");
             // The ticket is freshly minted per request, so assert its shape and

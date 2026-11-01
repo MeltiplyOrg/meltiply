@@ -228,9 +228,13 @@ describe("contract-driven UI preview HTTP boundary", () => {
     for (const event of calendar.events) {
       const post = posts.find((post) => post.id === event.post_id);
       expect(post).toBeDefined();
-      expect(
-        post?.distributions.find((distribution) => distribution.id === event.id)?.scheduled_at,
-      ).toBe(event.scheduled_at);
+      // The calendar event must fold back onto a real Distribution; comparing two
+      // optional values would also pass when the Distribution is missing.
+      const distribution = post?.distributions.find(
+        (distribution: { id: string }) => distribution.id === event.id,
+      );
+      expect(distribution).toBeDefined();
+      expect(distribution?.scheduled_at).toBe(event.scheduled_at);
     }
   });
 });

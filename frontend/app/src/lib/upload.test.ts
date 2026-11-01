@@ -484,7 +484,7 @@ describe("contract upload sessions", () => {
       sessionResponse({
         asset_id: "asset-1",
         content_type: "video/mp4",
-        expires_at: "2026-07-18T16:00:00Z",
+        expires_at: "2099-07-18T16:00:00Z",
         file_size: 1,
         id: "session-fail",
         multipart: null,

@@ -63,7 +63,11 @@ describe("processor job capabilities", () => {
     // The output grant stays create-only, so a retry cannot overwrite bytes an
     // earlier attempt already committed.
     expect(output.searchParams.get("X-Amz-SignedHeaders")).toBe("host;if-none-match");
-    expect(Number(output.searchParams.get("X-Amz-Expires"))).toBeLessThanOrEqual(120);
+    // The persisted write hold is the binding constraint: the grant must be
+    // clamped to the ~120s remaining on it, not stretched to the 900s default.
+    const outputExpiry = Number(output.searchParams.get("X-Amz-Expires"));
+    expect(outputExpiry).toBeGreaterThan(100);
+    expect(outputExpiry).toBeLessThanOrEqual(120);
     expect(urls.output_url).not.toContain("s3-secret");
   });
 

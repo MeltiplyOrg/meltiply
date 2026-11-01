@@ -31,6 +31,9 @@ variables {
   zone_id                            = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 }
 
+# These root-module tests assert the exported release-manifest contract.
+# Child-module outputs for attachment and pause state currently echo inputs;
+# they do not establish the state of the child modules' private resources.
 run "staging_plan" {
   command = plan
 
@@ -40,12 +43,12 @@ run "staging_plan" {
 
   assert {
     condition     = output.release_resources.environment == "staging"
-    error_message = "The default infrastructure plan must target staging."
+    error_message = "The release manifest must name the staging environment."
   }
 
   assert {
     condition     = output.release_resources.app_hostname == "staging.meltiply.com"
-    error_message = "The staging plan must derive the dashboard/API hostname from app_url."
+    error_message = "The release manifest must derive the dashboard/API hostname from app_url."
   }
 
   assert {
@@ -60,7 +63,7 @@ run "staging_plan" {
       output.worker_bindings.DB_SYSTEM ==
       "22222222222222222222222222222222"
     )
-    error_message = "The staging plan must preserve distinct authenticated and system Hyperdrive bindings."
+    error_message = "The manifest must export distinct authenticated and system Hyperdrive bindings."
   }
 
   assert {
@@ -69,7 +72,7 @@ run "staging_plan" {
       output.worker_bindings.queues["publish-tiktok"] ==
       "meltiply-publish-tiktok-staging"
     )
-    error_message = "The staging plan must include all bounded workload queues."
+    error_message = "The manifest must export all bounded workload queue names."
   }
 
   assert {
@@ -83,7 +86,7 @@ run "staging_plan" {
       !output.release_resources.queue_consumers_attached &&
       output.release_resources.queue_delivery_paused
     )
-    error_message = "The default plan must bootstrap safely without Worker attachments and with Queue delivery paused."
+    error_message = "The manifest must record the bootstrap transition: no attachments, Queue delivery paused."
   }
 
 }
@@ -106,7 +109,7 @@ run "worker_integrations_attached_paused" {
       output.release_resources.queue_consumers_attached &&
       output.release_resources.queue_delivery_paused
     )
-    error_message = "Worker integrations must support attachment while Queue delivery remains paused for rollout checks."
+    error_message = "The manifest must record attached domains and consumers with Queue delivery still paused."
   }
 }
 
@@ -127,7 +130,7 @@ run "queue_delivery_activated" {
       output.release_resources.queue_consumers_attached &&
       !output.release_resources.queue_delivery_paused
     )
-    error_message = "An accepted rollout must support explicitly resuming Queue delivery."
+    error_message = "The manifest must record the accepted rollout with Queue delivery resumed."
   }
 }
 

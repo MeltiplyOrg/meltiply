@@ -195,7 +195,13 @@ test("migrator holds one advisory lock and records each migration transactionall
     2,
   );
   assert.equal(ended, true);
-  assert.doesNotMatch(JSON.stringify(evidence), /database\.example|secret/);
+  // Evidence must not carry the connection string or its credential; the
+  // fixture host lives in the Neon pooler domain, so it is checked by value.
+  const serialized = JSON.stringify(evidence);
+  assert.ok(!serialized.includes("system:secret"));
+  assert.ok(!serialized.includes("ep-staging-pooler.us-east-2.aws.neon.tech"));
+  assert.ok(!serialized.includes("postgresql://"));
+  assert.ok(!serialized.includes("secret"));
 });
 
 test("migrator rolls back a failed migration and still closes the session", async (context) => {

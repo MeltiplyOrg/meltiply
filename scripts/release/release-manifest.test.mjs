@@ -418,9 +418,12 @@ test("manifest publishes deterministic redacted provenance for a complete update
   assert.equal(manifest.git_sha, gitSha);
   assert.equal(manifest.environment, "staging");
 
-  // Every publishable artifact is listed with byte size and digest.
+  // Every publishable artifact is listed with byte size and digest, and the set
+  // is exactly the release's evidence — not a subset that could silently drop a
+  // required review artifact.
   const names = manifest.evidence.map((entry) => entry.file);
-  assert.ok(names.length >= 30, "all allowlisted evidence is published");
+  const expectedNames = Object.keys(files).sort();
+  assert.deepEqual(names, expectedNames, "every required evidence file is published");
   for (const entry of manifest.evidence) {
     assert.match(entry.sha256, /^[0-9a-f]{64}$/);
     assert.ok(entry.bytes > 0);
@@ -810,15 +813,18 @@ function bootstrapEvidenceSet(spec) {
 
 test("manifest publishes bound provenance for a complete bootstrap release", async (context) => {
   const spec = validateReleaseSpec(releaseInput({ deployment_mode: "bootstrap" }));
-  const outDir = await withReleaseDir(context, bootstrapEvidenceSet(spec));
+  const files = bootstrapEvidenceSet(spec);
+  const outDir = await withReleaseDir(context, files);
 
   const manifest = await buildReleaseManifest(manifestParams(outDir, spec));
   assert.equal(manifest.deployment_mode, "bootstrap");
-  const names = manifest.evidence.map((entry) => entry.file);
-  assert.ok(names.includes("worker-api-deployment.json"));
-  assert.ok(names.includes("smoke-live.json"));
-  assert.ok(names.includes("paused-consumers-plan.sha256"));
-  assert.ok(!names.some((name) => name.startsWith("api-rollout-")));
+  // The published set must be exactly the bootstrap evidence: a subset would let
+  // a dropped foundation artifact pass review as a complete release.
+  assert.deepEqual(
+    manifest.evidence.map((entry) => entry.file),
+    Object.keys(files).sort(),
+  );
+  assert.ok(!manifest.evidence.some((entry) => entry.file.startsWith("api-rollout-")));
   assert.equal(manifest.git_sha, gitSha);
 });
 

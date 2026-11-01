@@ -158,9 +158,13 @@ test("promotion evidence rejects mutable or ambiguous artifact references", asyn
 test("valid immutable staging and acceptance evidence passes", async () => {
   const { catalog, openApi } = await loadCanonicalInputs();
   const candidate = structuredClone(catalog);
+  // Staging-ready must NOT require the acceptance artifact: if the ladder ever
+  // collapsed staging-ready into accepted, this fixture would be rejected.
+  const stagingEvidence = promotionEvidence();
+  delete stagingEvidence.acceptance;
   candidate.operations.getHealth = {
     ...candidate.operations.getHealth,
-    promotionEvidence: promotionEvidence(),
+    promotionEvidence: stagingEvidence,
     state: "staging-ready",
   };
   candidate.operations.getReadiness = {
@@ -202,6 +206,37 @@ test("promotion verification fetches and authenticates every required artifact",
   }
 });
 
+test("promotion verification only sends the authorization header to the configured origin", async () => {
+  const { catalog, openApi } = await loadCanonicalInputs();
+  const candidate = structuredClone(catalog);
+  const { bodies, references } = fetchedEvidence("getHealth");
+  candidate.operations.getHealth = {
+    ...candidate.operations.getHealth,
+    promotionEvidence: references,
+    state: "staging-ready",
+  };
+  const sent = [];
+
+  await verifyPromotionEvidence(openApi, candidate, {
+    environment: {
+      MELTIPLY_READINESS_EVIDENCE_AUTHORIZATION: "Bearer test-token",
+      // A different origin than the artifact URLs: the credential must be withheld.
+      MELTIPLY_READINESS_EVIDENCE_AUTH_ORIGIN: "https://other.example.test",
+    },
+    fetchImplementation: async (url, init) => {
+      sent.push(init.headers);
+      return fetchFrom(bodies)(url);
+    },
+  });
+
+  // `staging-ready` requires release, conformance, smoke, and telemetry, so four
+  // distinct artifacts are fetched; `acceptance` is not resolved at this state.
+  assert.equal(sent.length, 4);
+  for (const headers of sent) {
+    assert.equal(headers, undefined);
+  }
+});
+
 test("promotion verification fails when evidence is unavailable or has the wrong digest", async () => {
   const { catalog, openApi } = await loadCanonicalInputs();
   const candidate = structuredClone(catalog);
@@ -214,6 +249,7 @@ test("promotion verification fails when evidence is unavailable or has the wrong
 
   await assert.rejects(
     verifyPromotionEvidence(openApi, candidate, {
+      environment: {},
       fetchImplementation: async () => {
         throw new Error("network unavailable");
       },
@@ -224,6 +260,7 @@ test("promotion verification fails when evidence is unavailable or has the wrong
   candidate.operations.getHealth.promotionEvidence.smoke.digest = `sha256:${"b".repeat(64)}`;
   await assert.rejects(
     verifyPromotionEvidence(openApi, candidate, {
+      environment: {},
       fetchImplementation: fetchFrom(bodies),
     }),
     /evidence artifact digest mismatch/,
@@ -233,7 +270,7 @@ test("promotion verification fails when evidence is unavailable or has the wrong
 test("promotion verification rejects oversized evidence before reading it", async () => {
   const { catalog, openApi } = await loadCanonicalInputs();
   const candidate = structuredClone(catalog);
-  const { bodies, references } = fetchedEvidence("getHealth");
+  const { references } = fetchedEvidence("getHealth");
   candidate.operations.getHealth = {
     ...candidate.operations.getHealth,
     promotionEvidence: references,
@@ -242,11 +279,18 @@ test("promotion verification rejects oversized evidence before reading it", asyn
 
   await assert.rejects(
     verifyPromotionEvidence(openApi, candidate, {
-      fetchImplementation: async (url) =>
-        new Response(bodies.get(url), {
-          headers: { "content-length": String(1024 * 1024 + 1) },
-          status: 200,
+      // A body that cannot be read at all: if the implementation streamed before
+      // consulting Content-Length, this getter's error would surface instead.
+      fetchImplementation: async () => ({
+        body: Object.defineProperty({}, "getReader", {
+          get() {
+            throw new Error("evidence body must not be read when Content-Length is oversized");
+          },
         }),
+        headers: new Headers({ "content-length": String(1024 * 1024 + 1) }),
+        ok: true,
+        status: 200,
+      }),
     }),
     /evidence artifact exceeds 1048576 bytes/,
   );
@@ -307,6 +351,9 @@ test("check mode fails when a promoted artifact cannot be fetched", async () => 
     ]);
     await assert.rejects(
       run(["--check", "--metadata", metadata, "--openapi", openApiPath, "--output", output], {
+        // An explicit empty environment keeps a developer's real evidence
+        // credential from changing which error this asserts.
+        environment: {},
         fetchImplementation: async () => {
           throw new Error("artifact unavailable");
         },
@@ -330,12 +377,22 @@ test("generator output is deterministic and check mode rejects drift", async () 
   try {
     await writeFile(output, renderEndpointReadiness(openApi, catalog), "utf8");
     await assert.doesNotReject(
-      run(["--check", "--metadata", metadataPath, "--openapi", openApiPath, "--output", output]),
+      run(["--check", "--metadata", metadataPath, "--openapi", openApiPath, "--output", output], {
+        // Every checked-in operation is `specified`, so check mode resolves no
+        // artifacts; an empty environment proves that no real credential is
+        // consulted. `fetchImplementation` fails loudly if that ever changes.
+        environment: {},
+        fetchImplementation: async () => {
+          throw new Error("check mode must not fetch evidence for specified operations");
+        },
+      }),
     );
 
     await writeFile(output, "stale\n", "utf8");
     await assert.rejects(
-      run(["--check", "--metadata", metadataPath, "--openapi", openApiPath, "--output", output]),
+      run(["--check", "--metadata", metadataPath, "--openapi", openApiPath, "--output", output], {
+        environment: {},
+      }),
       /is stale/,
     );
   } finally {

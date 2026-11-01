@@ -594,11 +594,13 @@ describe("createFacebookAdapter", () => {
     expect(result.accounts[1]!.account.username).toBeUndefined();
   });
 
+  // Shared Pages are returned by several edges with edge-specific tokens, so the
+  // retained token proves which discovery record survived deduplication.
   it("includes business-assigned Pages across pagination and deduplicates shared Pages", async () => {
-    const page = (id: string) => ({
+    const page = (id: string, accessToken = `page-token-${id}`) => ({
       id,
       name: `Page ${id}`,
-      access_token: `page-token-${id}`,
+      access_token: accessToken,
       tasks: ["CREATE_CONTENT"],
     });
     const fetcher = vi.fn<typeof fetch>(async (input, init = {}) => {
@@ -637,7 +639,9 @@ describe("createFacebookAdapter", () => {
         return url.searchParams.has("after")
           ? json({ data: [page("business-2")] })
           : json({
-              data: [page("direct"), page("business-1")],
+              // `direct` is also reachable through /me/accounts; its edge token
+              // must not replace the record discovered first.
+              data: [page("direct", "page-token-direct-via-business"), page("business-1")],
               paging: {
                 cursors: { after: "next" },
                 next: "https://graph.facebook.com/v25.0/business-user-1/assigned_pages?after=next",
@@ -645,7 +649,9 @@ describe("createFacebookAdapter", () => {
             });
       }
       if (url.pathname.endsWith("/business-user-2/assigned_pages")) {
-        return json({ data: [page("business-2"), page("business-3")] });
+        return json({
+          data: [page("business-2", "page-token-business-2-via-user-2"), page("business-3")],
+        });
       }
       throw new Error(`Unexpected discovery endpoint: ${url.pathname}`);
     });
@@ -857,6 +863,13 @@ describe("createFacebookAdapter", () => {
     if (!("accounts" in result)) throw new Error("Expected account selection");
     expect(result.accounts).toHaveLength(2);
     expect(result.accounts.map((item) => item.account.id)).toEqual(["page-1", "page-2"]);
+    // The first record for `page-1` wins; a later duplicate must not replace the
+    // retained token or display name.
+    expect(result.accounts.map((item) => item.accessToken)).toEqual([
+      "page-one-token",
+      "page-two-token",
+    ]);
+    expect(result.accounts[0]!.account.displayName).toBe("Page One");
   });
 
   it("returns empty accounts list when no Pages are eligible for content creation", async () => {
@@ -952,6 +965,38 @@ describe("createFacebookAdapter", () => {
    * An excessive empty chain must fail before a later Page can disguise the unbounded traversal.
    */
   it("bounds pagination without discovered Pages", async () => {
+    // Exactly 1,000 empty pages is still inside the request ceiling: the chain
+    // ends with a terminal page that omits paging, so traversal stops normally.
+    // Without this control a stricter bound (e.g. 999) would pass the test below.
+    const atLimitPages = Array.from(
+      { length: 1_000 },
+      (_, index) => () =>
+        json({
+          data: [],
+          ...(index === 999
+            ? {}
+            : {
+                paging: {
+                  cursors: { after: `at-limit-${index}` },
+                  next: `https://graph.facebook.com/v25.0/me/accounts?after=at-limit-${index}`,
+                },
+              }),
+        }),
+    );
+    const atLimit = sequence(
+      () => json({ access_token: "short" }),
+      () => json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
+      defaultGrantedPermissions,
+      ...atLimitPages,
+    );
+    await expect(
+      adapter(atLimit.fetcher).exchangeAuthorizationCode!(context, {
+        code: "code",
+        codeVerifier: "unused",
+        redirectUri,
+      }),
+    ).resolves.toEqual({ accounts: [] });
+
     const responders: Responder[] = [
       () => json({ access_token: "short" }),
       () => json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
@@ -998,6 +1043,37 @@ describe("createFacebookAdapter", () => {
         name: `Page ${prefix} ${idx}`,
         tasks: ["CREATE_CONTENT"],
       }));
+
+    // Exactly 1,000 discovered Pages is still inside the documented ceiling and
+    // must be accepted; only the 1,001st record fails closed below.
+    const atLimitResponders = [
+      () => json({ access_token: "short" }),
+      () => json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
+      defaultGrantedPermissions,
+    ];
+    for (let pageIdx = 0; pageIdx < 10; pageIdx++) {
+      atLimitResponders.push(() =>
+        json({
+          data: generatePages(100, `at-limit-${pageIdx}`),
+          ...(pageIdx === 9
+            ? {}
+            : {
+                paging: {
+                  cursors: { after: `at-limit-cursor-${pageIdx}` },
+                  next: `https://graph.facebook.com/v25.0/me/accounts?after=at-limit-cursor-${pageIdx}`,
+                },
+              }),
+        }),
+      );
+    }
+    const atLimitProvider = adapter(sequence(...atLimitResponders).fetcher);
+    const atLimit = await atLimitProvider.exchangeAuthorizationCode!(context, {
+      code: "code",
+      codeVerifier: "unused",
+      redirectUri,
+    });
+    if (!("accounts" in atLimit)) throw new Error("Expected account selection");
+    expect(atLimit.accounts).toHaveLength(1_000);
 
     const responders = [
       () => json({ access_token: "short" }),
@@ -1370,13 +1446,25 @@ describe("createFacebookAdapter", () => {
   });
 
   it("maps processing failures and HTTP 404 without provider detail leakage", async () => {
+    // The provider payload carries detail the adapter must never echo: the
+    // published result is a canonical failure code, so any raw passthrough of
+    // the response body surfaces here.
+    const providerDetail = "private provider detail code=abc123";
+    // Meta reports Reel processing detail under `status.processing_phase.error.message`,
+    // so the fixture uses that documented envelope rather than an invented field.
     const failedCalls = sequence(() =>
-      json(
-        reelStatus("video-failed", {
-          processing: "error",
-          video: "error",
-        }),
-      ),
+      json({
+        id: "video-failed",
+        status: {
+          processing_phase: {
+            error: { message: providerDetail },
+            status: "error",
+          },
+          publishing_phase: { status: "not_started" },
+          uploading_phase: { status: "complete" },
+          video_status: "error",
+        },
+      }),
     );
     const failed = await adapter(failedCalls.fetcher).lookupPublication!(context, credentials, {
       providerOperationId: "finishing:video-failed",
@@ -1399,7 +1487,7 @@ describe("createFacebookAdapter", () => {
         providerPostId: "video-missing",
       }),
     ).resolves.toEqual({ state: "not_found" });
-    expect(JSON.stringify(failed)).not.toContain("private");
+    expect(JSON.stringify(failed)).not.toContain(providerDetail);
   });
 
   it("refreshes the user token and derives a replacement Page token", async () => {

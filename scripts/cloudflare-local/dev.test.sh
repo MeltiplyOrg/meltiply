@@ -631,7 +631,7 @@ expect_contains "$log_file" "cloudflared tunnel login" dns-remedy
 expect_contains "$log_file" "propagate" dns-propagation-hint
 # A dead public URL is worse than no tunnel: nothing may boot.
 [[ ! -e "$fixture/frontend.started" ]] || fail "services booted with an unresolvable tunnel"
-[[ ! -d "$fixture/.wrangler/logs/named-tunnel.log" ]] ||
+[[ ! -e "$fixture/.wrangler/logs/named-tunnel.log" ]] ||
   fail "the connector was started despite the hostname not resolving"
 
 # --- run 8: a second launch replaces only this checkout's running stack -------

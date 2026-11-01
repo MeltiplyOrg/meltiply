@@ -273,6 +273,15 @@ for id in c-foreign c-prefix-sib c-proc-foreign c-owner-deadbeef c-owner-cafebab
   assert_kept "$id"
 done
 assert_kept 'meltiply-deadbeef_postgres'
+# The scoped Compose `down` is the primary path and must actually run; the
+# force-remove fallback must not be reached while `down` succeeds.
+grep -Eq '^docker compose .* down ' "$COMMAND_LOG" ||
+  { echo "teardown never ran a project-scoped compose down" >&2; cat "$COMMAND_LOG" >&2; exit 1; }
+if grep -q '^docker rm -f' "$COMMAND_LOG"; then
+  echo "force-remove ran even though compose down succeeded" >&2
+  cat "$COMMAND_LOG" >&2
+  exit 1
+fi
 # Bound docker call count — protect against EMFILE regressions.
 calls="$(grep -c '^docker ' "$COMMAND_LOG" || true)"
 if [[ "$calls" -gt 12 ]]; then
@@ -298,6 +307,10 @@ for id in c-foreign c-prefix-sib c-proc-foreign c-owner-deadbeef c-owner-cafebab
   assert_kept "$id"
 done
 assert_kept 'meltiply-deadbeef_postgres'
+# A no-op `down` must be followed by the label-scoped force-remove of exactly
+# this project's leftovers, which is what proves the fallback path exists.
+grep -q '^docker rm -f' "$COMMAND_LOG" ||
+  { echo "force-remove fallback never reaped the leftover rows" >&2; cat "$COMMAND_LOG" >&2; exit 1; }
 calls="$(grep -c '^docker ' "$COMMAND_LOG" || true)"
 if [[ "$calls" -gt 12 ]]; then
   echo "too many docker calls on force-remove path ($calls)" >&2

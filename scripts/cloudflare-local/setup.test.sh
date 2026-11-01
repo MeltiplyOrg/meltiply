@@ -130,23 +130,35 @@ fi
 
 # A cold PostgreSQL volume briefly becomes ready during image initialization,
 # then restarts before the final server. Migration must wait through that gap.
+# The stub models the exact argv database.sh issues. The initialization marker
+# check arrives as `exec -T postgres sh -c 'test -f ...'`, so matching the
+# joined argv is what keeps that wait observable; an argument shape the stub
+# does not model fails loudly instead of exiting 0 through a fall-through case.
 cat >"$fixture/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'docker %s\n' "$*" >>"$COMMAND_LOG"
 case " $* " in
+  *" up -d postgres "*)
+    exit 0
+    ;;
   *" exec -T postgres pg_isready "*)
     count="$(cat "$PG_READY_COUNT")"
     count=$((count + 1))
     printf '%s\n' "$count" >"$PG_READY_COUNT"
     [[ "$count" -ne 2 ]]
     ;;
-  *" exec -T postgres test -f "*)
+  *" exec -T postgres sh -c test -f "*)
+    printf 'marker-checked\n' >>"$INIT_CHECKS"
     exit 0
     ;;
   *" exec -T postgres /local/migrate.sh "*)
     [[ "$(cat "$PG_READY_COUNT")" -ge 5 ]]
     touch "$MIGRATION_RAN"
+    ;;
+  *)
+    printf 'unexpected docker invocation: %s\n' "$*" >&2
+    exit 1
     ;;
 esac
 EOF
@@ -157,9 +169,14 @@ EOF
 chmod +x "$fixture/bin/docker" "$fixture/bin/sleep"
 export PG_READY_COUNT="$fixture/pg-ready-count"
 export MIGRATION_RAN="$fixture/migration-ran"
+export INIT_CHECKS="$fixture/init-checks"
 printf '0\n' >"$PG_READY_COUNT"
+: >"$INIT_CHECKS"
 "$repo_root/scripts/cloudflare-local/database.sh" start
 [[ "$(cat "$PG_READY_COUNT")" == "5" ]]
 [[ -f "$MIGRATION_RAN" ]]
+# The entrypoint-marker wait must run before migrations; a start() that skips it
+# would migrate into a volume whose initialization is still in flight.
+[[ -s "$INIT_CHECKS" ]]
 
 printf 'cloudflare local setup tests passed\n'

@@ -43,6 +43,34 @@ Tokens have read-only repository access, checkouts retain no credentials, and no
 deployment secrets are supplied. Do not execute contributor code through
 `pull_request_target` or persistent self-hosted runners.
 
+Both automatic backend CI and `cloudflare:check` run `bun run test:tooling`.
+It discovers the Node test files in CI helpers, local tooling, translations,
+infrastructure, releases, staging adapters, benchmarks, and self-hosted jobs.
+Shell regressions and PostgreSQL suites remain separate commands; none of these
+fixture-based tests require deployment credentials.
+
+Regression fixtures must isolate the rule named by the test. In particular,
+storage-boundary tests clear independent upload-count limits when modeling a
+monthly rollover, and performance tests of database aggregation use a fresh
+service cache for each cold observation. Error assertions distinguish policy
+rejection from unrelated authentication failures or server errors. Tests of a
+signed capability's expiry never allow it to outlive the persisted write hold.
+
+The November 2026 test-correctness review exercised the corrected code at
+`8654499` on hosted runners:
+
+| Verification                                                             | Hosted run                                                                      | Outcome                                                          |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Automatic CI, including PostgreSQL and both image architectures          | [41303548942](https://github.com/MeltiplyOrg/meltiply/actions/runs/41303548942) | Passed                                                           |
+| `cloudflare-full`: `bun run cloudflare:check` and provider/browser smoke | [41304074534](https://github.com/MeltiplyOrg/meltiply/actions/runs/41304074534) | Passed                                                           |
+| `frontend-ui`: both frontend checks and browser journeys                 | [41304762488](https://github.com/MeltiplyOrg/meltiply/actions/runs/41304762488) | 710 unit tests and 10 browser tests passed; React Doctor 100/100 |
+| `cloudflare-extended`: release, staging-adapter, and Terraform checks    | [41305370071](https://github.com/MeltiplyOrg/meltiply/actions/runs/41305370071) | Passed                                                           |
+| `performance-media`: native codec and restart smoke                      | [41305486899](https://github.com/MeltiplyOrg/meltiply/actions/runs/41305486899) | 212 assertions and restart replay passed                         |
+
+The changed live-staging browser locator was reviewed against the shared toolbar,
+but was not exercised against a deployed origin: that manual suite requires
+`STAGING_E2E_BASE_URL` and authenticated `STAGING_E2E_STORAGE_STATE`.
+
 The [extended workflow](../.github/workflows/extended.yml) exposes manually
 selected lanes: `frontend-full` for full browser/Lighthouse journeys,
 `frontend-ui` for focused UI verification, `cloudflare-full` for

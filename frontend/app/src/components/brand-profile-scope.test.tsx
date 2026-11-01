@@ -112,6 +112,9 @@ vi.mock("@/lib/i18n", async (importOriginal) => {
   return {
     ...actual,
     useI18n: () => ({
+      // Consumers format dates and numbers with this language, so pinning it to
+      // "en" keeps every calendar label assertion independent of the machine locale.
+      language: "en" as const,
       t: (value: string, values?: Record<string, string | number>) =>
         actual.translate("en", value, values),
       tStatus: (value: string) => value,
@@ -396,9 +399,15 @@ beforeAll(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 beforeEach(() => {
   resetScope();
+  // The calendar fixtures are stamped at render time and the assertions rebuild
+  // today's label from the clock. Pinning only `Date` (timers stay real) keeps a
+  // run that crosses local midnight from seeding one day and asserting another.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-15T12:00:00.000Z"));
 });
 
 describe("Channels table contract", () => {
@@ -525,7 +534,8 @@ describe("Channels table contract", () => {
     workspace.isAdmin = false;
     renderChannels();
 
-    expect(screen.queryByRole("button", { name: /Add Channels/ })).not.toBeInTheDocument();
+    // "Add account" is the directory's only channel-adding affordance; asserting
+    // on it is the real guard (a plural "Add Channels" control never existed).
     expect(screen.queryByRole("button", { name: "Add account" })).not.toBeInTheDocument();
     expect(screen.getByText("Ask a workspace admin to create a Brand Profile.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Create Brand Profile" })).not.toBeInTheDocument();
@@ -879,9 +889,11 @@ describe("Channels table contract", () => {
     openChannelFilters();
     fireEvent.click(screen.getByRole("combobox", { name: "Alpha Brand" }));
 
-    expect(screen.queryByRole("button", { name: "Edit profile" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Edit / })).not.toBeInTheDocument();
     const selectedOption = screen.getByRole("option", { name: "Alpha Brand" });
+    const listbox = selectedOption.closest('[role="listbox"]');
+    if (!(listbox instanceof HTMLElement)) throw new Error("Brand Profile listbox is missing");
+    // The list is pure selection: no button of any label may live inside it.
+    expect(within(listbox).queryAllByRole("button")).toEqual([]);
     expect(selectedOption).toHaveAttribute("data-state", "checked");
     expect(selectedOption.querySelector("svg")).not.toBeNull();
   });
@@ -946,9 +958,6 @@ describe("Channels table contract", () => {
     expect(platformControl).toBeVisible();
     expect(profileControl).toBeVisible();
     expect(statusControl).toBeVisible();
-
-    expect(screen.queryByText(/^\d+ channels connected$/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/^\d+ \/ \d+ channels$/)).not.toBeInTheDocument();
 
     const alphaTikTokRow = screen.getByTestId(`channel-row-${connectedAccount.id}`);
     const alphaYouTubeRow = screen.getByTestId(`channel-row-${expiredAccount.id}`);

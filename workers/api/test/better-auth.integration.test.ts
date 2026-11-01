@@ -711,8 +711,10 @@ describe("bootstrap and invite-only sign-up", () => {
     expect(first.status).toBe(200);
 
     // Once actor resolution has claimed the first account, public sign-up is
-    // closed. Simulate that durable state directly: the auth surface reads the
-    // internal owner marker, not a Better Auth column.
+    // closed. That gate reads `EXISTS (SELECT 1 FROM "user")` — the Better Auth
+    // identity table — which `first` above already populated. The internal
+    // owner row below is irrelevant to the gate; it is inserted so later
+    // invitation assertions run against a realistic installation owner.
     await systemPoolFor(systemEnv()).query(
       `INSERT INTO users (id, auth_user_id, email, display_name, installation_owner)
        VALUES ($1, $2, $3, 'Owner', TRUE)`,
@@ -815,7 +817,10 @@ describe("bootstrap and invite-only sign-up", () => {
       [authUserId, email],
     );
     const signIn = await authPost(auth, "/api/auth/sign-in/email", { email, password });
-    expect(signIn.status).toBeGreaterThanOrEqual(400);
+    // The session hook refuses creation, so Better Auth reports 401. A loose
+    // >= 400 would also accept a 500 crash in the suspension lookup, which must
+    // never look like a policy denial.
+    expect(signIn.status).toBe(401);
     const sessions = await systemPoolFor(systemEnv()).query<{ count: string }>(
       `SELECT count(*)::text AS count FROM "session" WHERE "userId" = $1`,
       [authUserId],
@@ -983,13 +988,20 @@ describe("optional authenticator lifecycle", () => {
     const invalidPassword = await post("two-factor/generate-backup-codes", {
       password: crypto.randomUUID(),
     });
-    expect(invalidPassword.status).toBeGreaterThanOrEqual(400);
+    // Password reauthentication is rejected with 400 INVALID_PASSWORD; a loose
+    // >= 400 would also accept a 500 from the code-generation boundary.
+    expect(invalidPassword.status).toBe(400);
+    expect(await invalidPassword.json()).toMatchObject({ code: "INVALID_PASSWORD" });
     jar.clear();
     await post("sign-in/email", { email, password });
-    expect(
-      (await post("two-factor/verify-backup-code", { code: backups[0], trustDevice: false }))
-        .status,
-    ).toBeGreaterThanOrEqual(400);
+    const consumedReplay = await post("two-factor/verify-backup-code", {
+      code: backups[0],
+      trustDevice: false,
+    });
+    // A consumed code is refused as an invalid backup code (401), not by an
+    // arbitrary server failure that a loose >= 400 would also accept.
+    expect(consumedReplay.status).toBe(401);
+    expect(await consumedReplay.json()).toMatchObject({ code: "INVALID_BACKUP_CODE" });
     expect(
       (await post("two-factor/verify-backup-code", { code: backups[1], trustDevice: false }))
         .status,
@@ -1003,10 +1015,14 @@ describe("optional authenticator lifecycle", () => {
     expect(currentSession !== null).toBe(true);
     jar.clear();
     await post("sign-in/email", { email, password });
-    expect(
-      (await post("two-factor/verify-backup-code", { code: backups[2], trustDevice: false }))
-        .status,
-    ).toBeGreaterThanOrEqual(400);
+    const supersededReplay = await post("two-factor/verify-backup-code", {
+      code: backups[2],
+      trustDevice: false,
+    });
+    // Regeneration replaced the set, so a code from the previous set is
+    // specifically an invalid backup code (401), never a generic failure.
+    expect(supersededReplay.status).toBe(401);
+    expect(await supersededReplay.json()).toMatchObject({ code: "INVALID_BACKUP_CODE" });
     const replacement = recordOf(await regenerated.json()).backupCodes;
     if (!Array.isArray(replacement)) throw new Error("Expected replacement codes");
     expect(

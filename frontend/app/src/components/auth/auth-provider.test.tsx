@@ -37,6 +37,12 @@ function renderConsumers() {
   );
 }
 
+/**
+ * A session that is genuinely valid. `new Date()` would hand the provider an
+ * already-expired session, which no real sign-in produces.
+ */
+const futureSessionExpiry = new Date("2099-07-18T16:00:00Z");
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -46,7 +52,7 @@ afterEach(() => {
 describe("Better Auth JWT session lifecycle", () => {
   it("resolves one session for every mounted consumer", async () => {
     const getSessionMock = vi.spyOn(authClient, "getSession").mockResolvedValue({
-      session: { expiresAt: new Date(), id: "session-1", userId: "user-1" },
+      session: { expiresAt: futureSessionExpiry, id: "session-1", userId: "user-1" },
       user: { email: "user@example.com", id: "user-1" },
     });
 
@@ -64,11 +70,11 @@ describe("Better Auth JWT session lifecycle", () => {
     const getSessionMock = vi
       .spyOn(authClient, "getSession")
       .mockResolvedValueOnce({
-        session: { expiresAt: new Date(), id: "session-1", userId: "user-1" },
+        session: { expiresAt: futureSessionExpiry, id: "session-1", userId: "user-1" },
         user: { email: "first@example.com", id: "user-1" },
       })
       .mockResolvedValueOnce({
-        session: { expiresAt: new Date(), id: "session-2", userId: "user-1" },
+        session: { expiresAt: futureSessionExpiry, id: "session-2", userId: "user-1" },
         user: { email: "second@example.com", id: "user-1" },
       });
 
@@ -88,7 +94,7 @@ describe("Better Auth JWT session lifecycle", () => {
   it("shares scheduled and explicit JWT refreshes with every consumer", async () => {
     vi.useFakeTimers();
     const getSessionMock = vi.spyOn(authClient, "getSession").mockResolvedValue({
-      session: { expiresAt: new Date(), id: "session-1", userId: "user-1" },
+      session: { expiresAt: futureSessionExpiry, id: "session-1", userId: "user-1" },
       user: { email: "user@example.com", id: "user-1" },
     });
 
@@ -112,11 +118,11 @@ describe("Better Auth JWT session lifecycle", () => {
     const getSessionMock = vi
       .spyOn(authClient, "getSession")
       .mockResolvedValueOnce({
-        session: { expiresAt: new Date(), id: "session-1", userId: "user-1" },
+        session: { expiresAt: futureSessionExpiry, id: "session-1", userId: "user-1" },
         user: { email: "first@example.com", id: "user-1" },
       })
       .mockResolvedValueOnce({
-        session: { expiresAt: new Date(), id: "session-2", userId: "user-2" },
+        session: { expiresAt: futureSessionExpiry, id: "session-2", userId: "user-2" },
         user: { email: "other@example.com", id: "user-2" },
       });
 
@@ -150,7 +156,7 @@ describe("Better Auth JWT session lifecycle", () => {
 
   it("RequireAuth renders children when signed in", async () => {
     vi.spyOn(authClient, "getSession").mockResolvedValue({
-      session: { expiresAt: new Date(), id: "session-1", userId: "user-1" },
+      session: { expiresAt: futureSessionExpiry, id: "session-1", userId: "user-1" },
       user: { email: "user@example.com", id: "user-1" },
     });
 

@@ -50,6 +50,12 @@ describe("workspace capability model", () => {
     expect(can("editor", false, "content:write")).toBe(true);
     expect(can("viewer", false, "content:write")).toBe(false);
     expect(INSTALLATION_OWNER_CAPABILITIES).toContain("member:assign-admin");
+    // Ownership only adds authority: every Workspace Admin capability survives
+    // in the Installation Owner set, so an owner never loses an Admin power.
+    expect(INSTALLATION_OWNER_CAPABILITIES).toEqual(
+      expect.arrayContaining([...WORKSPACE_ROLE_CAPABILITIES.admin]),
+    );
+    expect(WORKSPACE_ROLE_CAPABILITIES.admin).not.toContain("installation:manage");
   });
 
   it("narrows untrusted role values", () => {
@@ -59,6 +65,5 @@ describe("workspace capability model", () => {
     expect(isWorkspaceRole("member")).toBe(false);
     expect(isWorkspaceRole("")).toBe(false);
     expect(isWorkspaceRole(null)).toBe(false);
-    expect(WORKSPACE_ROLE_CAPABILITIES.admin.length).toBeGreaterThan(0);
   });
 });

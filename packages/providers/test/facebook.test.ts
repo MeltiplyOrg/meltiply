@@ -1842,3 +1842,44 @@ describe("createFacebookAdapter Page publishing families", () => {
     ).resolves.toMatchObject({ outcome: "confirmed_success" });
   });
 });
+
+describe("createFacebookAdapter post reconciliation", () => {
+  it("confirms an ambiguous feed write by reading the Page post back", async () => {
+    const providerCalls = sequence((url) => {
+      expect(url.pathname).toBe("/v25.0/page-1_101");
+      expect(url.searchParams.get("fields")).toBe("id,permalink_url");
+      return json({ id: "page-1_101", permalink_url: "https://www.facebook.com/page-1_101" });
+    });
+    await expect(
+      adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
+        providerOperationId: "post_submitted:page-1_101",
+      }),
+    ).resolves.toEqual({
+      result: {
+        outcome: "confirmed_success",
+        providerOperationId: "post_submitted:page-1_101",
+        providerPostId: "page-1_101",
+        providerUrl: "https://www.facebook.com/page-1_101",
+      },
+      state: "published",
+    });
+  });
+
+  it("keeps an unconfirmed submitted write unknown instead of failing it", async () => {
+    const providerCalls = sequence(() => json({ error: { message: "gone" } }, { status: 404 }));
+    await expect(
+      adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
+        providerOperationId: "post_submitted:page-1_202",
+      }),
+    ).resolves.toMatchObject({ state: "unknown" });
+  });
+
+  it("reports a confirmed post id that no longer exists as not found", async () => {
+    const providerCalls = sequence(() => json({ error: { message: "gone" } }, { status: 404 }));
+    await expect(
+      adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
+        providerOperationId: "posted:page-1_303",
+      }),
+    ).resolves.toEqual({ state: "not_found" });
+  });
+});

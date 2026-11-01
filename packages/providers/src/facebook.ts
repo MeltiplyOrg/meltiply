@@ -169,7 +169,7 @@ function operationId(phase: FacebookOperationPhase, id: string): string {
 function parseOperationId(value: unknown): FacebookOperation | undefined {
   const normalized = providerIdentifier(value);
   const match = normalized?.match(
-    /^(finish_submitted|finishing|posted|upload_submitted|uploaded):(.+)$/,
+    /^(finish_submitted|finishing|post_submitted|posted|upload_submitted|uploaded):(.+)$/,
   );
   const id = providerIdentifier(match?.[2]);
   return match && id ? { id, phase: match[1] as FacebookOperationPhase } : undefined;
@@ -621,6 +621,39 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
       accessToken,
       expiresAt,
     };
+  };
+
+  /**
+   * Confirms a Page post exists by reading it back.
+   *
+   * Feed, photo, and Story writes return a Page post id rather than a video id,
+   * so their reconciliation must read the post node instead of polling the
+   * video status endpoint. Meta documents read-after-write on these edges, so a
+   * present node proves the ambiguous write landed and a 404 proves it did not.
+   *
+   *  context - Provider request context carrying cancellation.
+   *  accessToken - Page access token.
+   *  postId - Page post id reported or retained for the write.
+   *  True when the post exists on the Page.
+   */
+  const pagePostExists = async (
+    context: ProviderRequestContext,
+    accessToken: string,
+    postId: string,
+  ): Promise<boolean> => {
+    const url = new URL(`/${apiVersion}/${encodeURIComponent(postId)}`, graphOrigin);
+    url.searchParams.set("fields", "id,permalink_url");
+    try {
+      const response = await http.request<unknown>(context, {
+        headers: bearer(accessToken),
+        method: "GET",
+        url: url.toString(),
+      });
+      return providerIdentifier(record(response.body)?.id) === postId;
+    } catch (cause) {
+      if (isHttp404(cause)) return false;
+      throw cause;
+    }
   };
 
   const getReelStatus = async (
@@ -1448,6 +1481,43 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
       const operation = parseOperationId(lookup.providerOperationId);
       if (lookup.providerOperationId && !operation) throw malformed();
       const videoId = providerPostId ?? operation?.id;
+      // Post-family writes carry a Page post id, not a video id; reading it
+      // back is the only documented way to confirm one landed.
+      const postFamily =
+        operation?.phase === "posted" ||
+        operation?.phase === "post_submitted" ||
+        (providerPostId !== undefined && operation === undefined);
+      if (postFamily) {
+        const postId = operation?.id ?? providerPostId;
+        if (!postId) throw malformed();
+        const retainedOperationId = operationId(operation?.phase ?? "posted", postId);
+        const exists = await pagePostExists(context, credentials.accessToken, postId);
+        if (!exists) {
+          // The retained id is the only evidence of a possible write, so a
+          // missing node is inconclusive until the caller stops reconciling.
+          return operation?.phase === "post_submitted"
+            ? {
+                result: unknownResult(
+                  classifyProviderFailure({
+                    code: "facebook_post_evidence_pending",
+                    sideEffectPossible: true,
+                  }),
+                  retainedOperationId,
+                ),
+                state: "unknown",
+              }
+            : { state: "not_found" };
+        }
+        return {
+          result: {
+            outcome: "confirmed_success",
+            providerOperationId: retainedOperationId,
+            providerPostId: postId,
+            providerUrl: `https://www.facebook.com/${postId}`,
+          },
+          state: "published",
+        };
+      }
       if (!videoId) throw malformed();
       const status = await getReelStatus(context, credentials.accessToken, videoId);
       if (!status) return { state: "not_found" };

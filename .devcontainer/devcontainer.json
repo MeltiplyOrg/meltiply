@@ -1,9 +1,10 @@
 {
   "name": "meltiply",
-  // The image bakes in docker-outside-of-docker, mounts the host socket, and
-  // includes the project toolchain. No features: no per-worktree derived image.
+  // Use the image's bundled Docker daemon; no project image or feature build.
   "image": "ghcr.io/tmih06/herdr-devcontainer-vibecode-essential:latest",
-  // Match daemon-host paths so Compose and docker run bind mounts resolve.
+  "privileged": true,
+  "init": true,
+  // Inner-daemon bind mounts resolve directly inside this devcontainer.
   "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
   "workspaceFolder": "${localWorkspaceFolder}",
   "remoteUser": "dev",
@@ -21,27 +22,36 @@
     "COMPOSE_PROJECT_NAME": "meltiply-${devcontainerId}",
     "MELTIPLY_DEVCONTAINER_WORKSPACE": "${localWorkspaceFolder}",
     "MELTIPLY_DEVCONTAINER_CONFIG": "/opt/meltiply-devcontainer",
-    "MELTIPLY_DEVCONTAINER_HOST_CONFIG": "${localWorkspaceFolder}/.devcontainer",
     "MELTIPLY_CLOUDFLARED_BIN": "/usr/local/bin/cloudflared"
   },
   "updateRemoteUserUID": true,
   "runArgs": [
     "--network=bridge",
+    "--cgroupns=private",
     "--label=meltiply.devcontainer.project=meltiply-${devcontainerId}"
   ],
-  // Create the host-side Wrangler config directory before the CLI bind-mounts it.
+  // Create Wrangler's host-side config directory before bind mounting it.
   "initializeCommand": ["bash", "${localWorkspaceFolder}/.devcontainer/initialize.sh"],
+  "onCreateCommand": ["bash", "/opt/meltiply-devcontainer/docker-init.sh"],
   // Prepare the Bun cache and derive GitHub-backed Git identity from mounted gh auth.
   "postCreateCommand": [
     "bash",
     "-lc",
     "sudo chown \"$(id -u):$(id -g)\" \"$BUN_INSTALL_CACHE_DIR\" && gh auth setup-git && gh api user --jq '\"git config --global user.name \" + (if (.name // \"\" | length) > 0 then .name else .login end | @sh), \"git config --global user.email \" + ((.id|tostring) + \"+\" + .login + \"@users.noreply.github.com\" | @sh)' | sh && sudo chown dev:dev /home/dev/.config && sudo mkdir -p \"${localEnv:HOME}/.local\" && if [ ! -e \"${localEnv:HOME}/.local/bin\" ]; then sudo ln -s /usr/local/bin \"${localEnv:HOME}/.local/bin\"; fi"
   ],
-  "postStartCommand": ["bash", "/opt/meltiply-devcontainer/container-network.sh", "start"],
+  "postStartCommand": [
+    "bash",
+    "-lc",
+    "bash /opt/meltiply-devcontainer/docker-init.sh && bash /opt/meltiply-devcontainer/container-network.sh start"
+  ],
   // OMP and Wrangler configs are shared read-write for state and OAuth refreshes.
   // GitHub login and WakaTime configuration are shared read-only.
   "mounts": [
+    // Override the image's inherited host-socket mount with an inert device.
+    "source=/dev/null,target=/var/run/docker-host.sock,type=bind,readonly",
     "source=meltiply-bun-cache,target=/home/dev/.bun/install/cache,type=volume",
+    "source=meltiply-dind-docker-${devcontainerId},target=/var/lib/docker,type=volume",
+    "source=meltiply-dind-containerd-${devcontainerId},target=/var/lib/containerd,type=volume",
     "source=${localWorkspaceFolder}/.devcontainer,target=/opt/meltiply-devcontainer,type=bind,readonly",
     "source=${localEnv:HOME}/.omp,target=/home/dev/.omp,type=bind",
     "source=${localEnv:HOME}/.config/gh,target=/home/dev/.config/gh,type=bind,readonly",

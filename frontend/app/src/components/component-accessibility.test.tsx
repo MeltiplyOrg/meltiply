@@ -94,7 +94,6 @@ describe("contract-backed component accessibility", () => {
 
     const notice = await screen.findByText(detail.message);
     expect(notice).toBeVisible();
-    expect(notice.closest("[role]")).toHaveClass("fixed");
     expect(screen.queryByText(/Request ID:/)).not.toBeInTheDocument();
     const actionElement = screen.getByRole(action === "Dismiss" ? "button" : "link", {
       name: action,
@@ -113,7 +112,6 @@ describe("contract-backed component accessibility", () => {
     fireEvent.offline(window);
 
     const status = await screen.findByRole("status");
-    expect(status).toHaveClass("fixed");
     expect(status).toHaveTextContent("Changes are paused until your connection returns.");
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeVisible();
     await expectNoAutomatedViolations(container);

@@ -362,6 +362,11 @@ describe("createInstagramAdapter", () => {
       image_url: "https://assets.example/three.jpg",
       is_carousel_item: "true",
     });
+    // A caption on a child would publish the text once per carousel item, so
+    // only the parent may carry it.
+    expect(
+      providerCalls.calls.slice(0, 3).every(({ url }) => url.searchParams.has("caption") === false),
+    ).toBe(true);
     // The parent carries the caption exactly once and the children in order.
     expect(Object.fromEntries(providerCalls.calls[3]!.url.searchParams)).toEqual({
       caption: "An Instagram post #launch",
@@ -444,7 +449,7 @@ describe("createInstagramAdapter", () => {
     expect(JSON.stringify(result)).not.toContain("abc123");
   });
 
-  it("rejects video above Instagram's documented Reel size ceiling before HTTP", async () => {
+  it("rejects video above Meltiply's conservative Reel size ceiling before HTTP", async () => {
     const fetcher = vi.fn<typeof fetch>();
     await expect(
       adapter(fetcher).publish!(

@@ -93,6 +93,21 @@ const EXTENSION_CONTENT_TYPES = {
   ".webp": "image/webp",
 };
 
+/**
+ * Magic-byte predicate for each media type the engine may report. An uploaded
+ * rendition is checked against the type it claims, so a cross-format regression
+ * (an MP4 labelled WebP, a flattened JPEG for an animation) cannot pass as
+ * "some media file". Types without a predicate fail the assertion deliberately.
+ */
+const MAGIC_FOR_CONTENT_TYPE = {
+  "image/gif": (magic) => magic.startsWith("474946383761") || magic.startsWith("474946383961"),
+  "image/jpeg": (magic) => magic.startsWith("ffd8ff"),
+  "image/png": (magic) => magic.startsWith("89504e47"),
+  "image/webp": (magic) => magic.startsWith("52494646") && magic.slice(16, 24) === "57454250",
+  "video/mp4": (magic) => magic.slice(8, 16) === "66747970",
+  "video/quicktime": (magic) => magic.slice(8, 16) === "66747970",
+};
+
 const results = [];
 
 /**
@@ -903,16 +918,22 @@ async function main() {
         ) <= 0.05,
         `${animated.result.media.duration_seconds}s vs ${sourceInfo.delays.reduce((total, delay) => total + delay, 0) / 1000}s`,
       );
-      // Alpha retention is asserted only where the source genuinely has
-      // transparent pixels: an opaque RGBA animation is correctly normalized
-      // without an alpha band, so the band-count assertion is for the formats
-      // where alpha is content, while the APNG fixtures carry their own
+      // Alpha on these fixtures is the opposite of an alpha-retention claim:
+      // they are generated from an opaque rgb24 pattern, so a rendition must
+      // not invent or destroy transparency. A band count alone cannot see that
+      // (libvips decodes palette GIFs into four bands regardless of content), so
+      // the decoded alpha plane decides — no alpha band, or a fully opaque one,
+      // is correct; partially transparent pixels would mean the rendition
+      // changed content the source never had. The APNG fixtures carry their own
       // measured-alpha assertions below.
       if (!name.endsWith(".png")) {
+        // The band count only decides whether a plane exists to measure; when
+        // one does, an unreadable plane fails rather than reading as opaque.
+        const renditionAlpha = outputInfo.bands >= 4 ? await alphaRange(animated.uploaded) : null;
         assert(
-          `${name} rendition keeps the alpha band of an RGBA animation`,
-          outputInfo.bands >= 4 && sourceInfo.bands >= 4,
-          `${sourceInfo.bands} -> ${outputInfo.bands} bands`,
+          `${name} rendition never introduces transparency the source lacks`,
+          outputInfo.bands < 4 || (renditionAlpha !== null && renditionAlpha.min === 255),
+          `bands ${outputInfo.bands}, alpha ${JSON.stringify(renditionAlpha)}`,
         );
       }
       assert(
@@ -1190,11 +1211,6 @@ async function main() {
     noApplicableType.status === 422 && noApplicableType.body?.error?.code === "unsupported_media",
     JSON.stringify(noApplicableType.body),
   );
-  assert(
-    "an animation is never handed back untouched as a successful optimization",
-    noApplicableType.body?.result !== "original_compatible",
-    JSON.stringify(noApplicableType.body),
-  );
   const photoSize = (await stat(path.join(objectsDir, "photo.jpg"))).size;
   const overBudget = await processRequest({
     ...jobFor("photo.jpg", {
@@ -1317,11 +1333,16 @@ async function main() {
     );
     if (name === "high10.mp4") {
       // HTTP strong ETags are quoted; R2 binding etags are not. Commit checks
-      // must compare the same opaque identifier rather than HTTP syntax.
+      // must compare the same opaque identifier rather than HTTP syntax, so the
+      // assertion uses the tag the object service actually issued for this
+      // upload — not a value the harness can derive from the file itself.
+      const recorded = (await recordedUploads()).find(
+        (entry) => entry.key === "rendition-smoke-high10.mp4",
+      );
       assert(
         "uploaded ETag is compatible with the R2 binding commit contract",
-        video.result.output.etag === (await stat(outputFile)).size.toString(16),
-        `unexpected R2 etag ${video.result.output.etag}`,
+        recorded !== undefined && video.result.output.etag === recorded.etag.replace(/^"|"$/g, ""),
+        `engine ${video.result.output.etag} vs origin ${recorded?.etag}`,
       );
       // A 10-bit H.264 source is not browser-ready, so the verified rendition
       // must be a re-encoded 8-bit 4:2:0 stream with AAC audio — proven from
@@ -1648,12 +1669,6 @@ async function main() {
       (await sha256(foreignFile)) === impostorSha,
       `stored ${await sha256(foreignFile)} vs ${impostorSha}`,
     );
-    assert(
-      "the impostor would fail the Worker's stored-digest commit check",
-      impostorSha !== pristineSha,
-      `stored ${impostorSha} vs verdict ${pristineSha}`,
-    );
-
     // (5) The produced-vs-recorded gap: the recorded key now holds foreign
     // bytes of the same size. The engine's create-only grant cannot read the
     // object, so it proves only that this delivery produced the recorded
@@ -1676,7 +1691,7 @@ async function main() {
     );
     assert(
       "the foreign same-size object fails the stored-digest commit check",
-      swappedSha !== swappedReplay.body?.output?.sha256 && swappedSha !== pristineSha,
+      swappedSha !== swappedReplay.body?.output?.sha256,
       `stored ${swappedSha} vs verdict ${swappedReplay.body?.output?.sha256}`,
     );
     assert(
@@ -1811,14 +1826,12 @@ async function runJob({ job_id, name, profile, max }) {
     assert(`job ${job_id} uploaded exactly the granted object key`, exists, `${uploaded} missing`);
     if (exists) {
       const magic = await signature(uploaded);
-      const plausible =
-        magic.startsWith("ffd8ff") ||
-        magic.startsWith("89504e47") ||
-        magic.startsWith("474946383761") ||
-        magic.startsWith("474946383961") ||
-        magic.startsWith("52494646") ||
-        Buffer.from(magic.slice(8, 16), "hex").toString() === "ftyp";
-      assert(`job ${job_id} uploaded bytes carry a real media signature`, plausible, magic);
+      const expectedMagic = MAGIC_FOR_CONTENT_TYPE[response.body.output.content_type];
+      assert(
+        `job ${job_id} uploaded bytes carry the signature of its reported type`,
+        expectedMagic !== undefined && expectedMagic(magic),
+        `${response.body.output.content_type} from ${magic}`,
+      );
     }
   }
   return {

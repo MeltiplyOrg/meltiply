@@ -4,7 +4,13 @@ import { test } from "node:test";
 import { alertQueue } from "./queue-alert.mjs";
 import { parseQueueArguments } from "./queue-ops.mjs";
 
-test("unsampled Queue alerts reach the webhook; metrics or delivery failures cannot appear healthy", async () => {
+// A fixed epoch keeps the age threshold deterministic: the fixture's
+// "oldest message" and the monitor's own clock are the same process, so a
+// mocked Date makes the 120-second age independent of how long the test runs.
+// Only the Date API is faked; fetch timeouts stay on real timers.
+test("unsampled Queue alerts reach the webhook; metrics or delivery failures cannot appear healthy", async (t) => {
+  const now = Date.parse("2026-01-01T00:02:00Z");
+  t.mock.timers.enable({ apis: ["Date"], now });
   let mode = "unhealthy";
   const alerts = [];
   const server = createServer(async (request, response) => {
@@ -28,7 +34,7 @@ test("unsampled Queue alerts reach the webhook; metrics or delivery failures can
         : {
             backlog_bytes: 10,
             backlog_count: mode === "healthy" ? 0 : 1,
-            oldest_message_timestamp_ms: mode === "healthy" ? 0 : Date.now() - 120_000,
+            oldest_message_timestamp_ms: mode === "healthy" ? 0 : now - 120_000,
           }
       : [
           { queue_id: "source", queue_name: "meltiply-publish-threads-staging-dlq" },

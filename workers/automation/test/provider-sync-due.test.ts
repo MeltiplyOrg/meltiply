@@ -700,7 +700,7 @@ describe("delayed delivery trigger scheduling", () => {
     expect(typeof sentTriggers[0]?.eventId).toBe("string");
   });
 
-  it("suppresses queue send when cadence exceeds horizon while keeping row durably armed", async () => {
+  it("sends at exactly the delivery horizon while keeping the row durably armed", async () => {
     const sentTriggers: Array<{ delaySeconds: number }> = [];
     const sendTrigger = vi.fn(async (_w: string, _t: string, _e: string, delaySeconds: number) => {
       sentTriggers.push({ delaySeconds });
@@ -749,7 +749,8 @@ describe("delayed delivery trigger scheduling", () => {
       ),
     );
 
-    // Exact horizon (86400) sends
+    // The horizon is inclusive: 86400s is still a delay a Queue accepts, so the
+    // boundary itself must send rather than be suppressed.
     expect(sentTriggers).toHaveLength(1);
     expect(sentTriggers[0]?.delaySeconds).toBe(86400);
 
@@ -891,7 +892,9 @@ describe("hourly provider sync recovery sweep", () => {
     expect(executedQueries).toHaveLength(3);
     const [analyticsQuery, commentsQuery, tokenRefreshQuery] = executedQueries;
 
-    expect(analyticsQuery?.sql).toContain("FROM distributions");
+    // The discriminator between the three claims is the cursor column each
+    // one reads; a workload wired to its neighbour's cursor is the regression
+    // these lines exist to catch.
     expect(analyticsQuery?.sql).toContain("analytics_next_sync_at");
     expect(analyticsQuery?.params).toEqual([
       50,
@@ -902,7 +905,6 @@ describe("hourly provider sync recovery sweep", () => {
       60,
     ]);
 
-    expect(commentsQuery?.sql).toContain("FROM distributions");
     expect(commentsQuery?.sql).toContain("comments_next_sync_at");
     expect(commentsQuery?.params).toEqual([
       50,
@@ -913,7 +915,6 @@ describe("hourly provider sync recovery sweep", () => {
       60,
     ]);
 
-    expect(tokenRefreshQuery?.sql).toContain("FROM platform_accounts");
     expect(tokenRefreshQuery?.sql).toContain("token_refresh_next_attempt_at");
     expect(tokenRefreshQuery?.params).toEqual([
       50,

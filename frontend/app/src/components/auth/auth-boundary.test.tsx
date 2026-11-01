@@ -8,6 +8,9 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { AuthBoundary } from "./auth-boundary";
 import * as authClientModule from "@/lib/auth-client";
 
+/** A session that is genuinely valid; `new Date()` would model an expired one. */
+const futureSessionExpiry = new Date("2099-07-18T16:00:00Z");
+
 function renderBoundary() {
   return render(
     <AuthBoundary>
@@ -24,7 +27,7 @@ afterEach(() => {
 describe("AuthBoundary", () => {
   it("renders children when session resolves", async () => {
     vi.spyOn(authClientModule.authClient, "getSession").mockResolvedValue({
-      session: { id: "sess-1", userId: "user-1", expiresAt: new Date() },
+      session: { id: "sess-1", userId: "user-1", expiresAt: futureSessionExpiry },
       user: { id: "user-1", email: "user@example.com" },
     });
 

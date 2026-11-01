@@ -33,20 +33,32 @@ Public tunnels require `MELTIPLY_DEV_TUNNEL=1 make dev`. Use the printed URLs;
 callback and webhook URLs must match the chosen origin. For app-only iteration
 against an existing backend, use `make frontend-boot`.
 
-Each devcontainer uses its own Compose project/network and `node_modules`, sharing
-only the Bun download cache and Docker image cache. Use
-[`compose.sh`](scripts/cloudflare-local/compose.sh), not a direct baseline Compose
-invocation, so database and telemetry operations stay in the correct checkout.
+Each devcontainer has a dedicated Docker-in-Docker daemon and persistent volumes
+for `/var/lib/docker` and `/var/lib/containerd`, keyed by `${devcontainerId}`.
+Docker images, containers, networks, and application volumes are not shared with
+the host daemon or sibling devcontainers. The Bun download cache remains shared.
+Use [`compose.sh`](scripts/cloudflare-local/compose.sh) so database and telemetry
+operations select the devcontainer overlay. Its `host` network is the
+devcontainer's namespace, not the outer host; PostgreSQL remains on port 5433.
 Do not install concurrently into the same checkout.
 
-The devcontainer builds from the official Node image with Docker and GitHub CLI
-features. It mounts no host credentials, AI-agent state, or editor telemetry
-configuration. Authenticate inside the container only when needed (`gh auth login`
-or `bunx wrangler login`); configure Git identity explicitly. Tunnels and AI tools
-are optional, not startup requirements. Docker socket access grants host-admin
-capabilities: open only trusted checkouts. The optional
-`.devcontainer/container-network.sh start` repair needs privileged Docker access;
-use it only for the workerd reverse-path filtering problem described in that file.
+The VibeCode Essential image is used directly, without a project image build.
+The config overrides its inherited host-socket mount with read-only `/dev/null`.
+Lifecycle hooks stop the resulting inert socket proxy and start the image's
+bundled DinD daemon; the real host socket is never exposed. Startup also prepares
+private cgroup v2 delegation so nested containers can enforce CPU and memory limits.
+
+Rebuild existing devcontainers and run `make setup` after switching. The new inner
+daemon does not import or delete old host-daemon images, containers, or database
+volumes. Its two storage volumes persist independently of the devcontainer's
+writable layer.
+
+Host OMP and Wrangler state and GitHub/WakaTime configuration remain mounted;
+GitHub authentication is used by the existing post-create Git setup. Privileged
+DinD is not a security sandbox: containers still share the host kernel, and these
+explicit host mounts remain accessible. Open only trusted checkouts.
+The workerd reverse-path repair runs inside this devcontainer and logs to
+`/tmp/meltiply-container-network-<uid>/watcher.log`.
 
 ## Commands and testing
 

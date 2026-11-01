@@ -159,7 +159,13 @@ test("restore point creates one named Neon snapshot and waits for completion", a
   assert.equal(operationPolls, 1);
   assert.equal(evidence.snapshot_id, snapshotId);
   assert.equal(evidence.status, "ready");
-  assert.doesNotMatch(JSON.stringify(evidence), /NEON_API_KEY|neon-api-key/);
+  // The secret values themselves must never reach evidence — checking only the
+  // variable name would pass an implementation that embedded the token text.
+  const serialized = JSON.stringify(evidence);
+  assert.ok(!serialized.includes("fixture-token-0000000000"));
+  assert.ok(!serialized.includes("secret"));
+  assert.ok(!serialized.includes("NEON_API_KEY"));
+  assert.ok(!serialized.includes("neon-api-key"));
   assert.equal(requests.filter((request) => request.method === "POST").length, 1);
 });
 

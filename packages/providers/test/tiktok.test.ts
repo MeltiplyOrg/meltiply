@@ -737,9 +737,13 @@ describe("createTikTokAdapter", () => {
     );
     await expect(
       adapter(providerCalls.fetcher).refreshAccessToken!(context, "refresh-original"),
-    ).resolves.toMatchObject({
+    ).resolves.toEqual({
       accessToken: "access-rotated",
+      expiresAt: "2026-07-20T00:00:00.000Z",
       refreshToken: "refresh-rotated",
+      // A refresh response without `scope` keeps the publishing grant instead
+      // of inventing or dropping it (see refreshAccessToken in src/tiktok.ts).
+      scopes: ["user.info.basic", "video.publish"],
     });
   });
 

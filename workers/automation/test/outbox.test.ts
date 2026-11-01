@@ -232,6 +232,9 @@ describe("outbox relay delayed delivery", () => {
     // one bounded delay per message, and an already-due publish sends
     // immediately with no delay option.
     expect(delayOf(sent, eventId(1))).toBe(Math.max(0, Math.ceil((now + 600_000 - sentAt) / 1000)));
+    // A schedule a full day out must produce a delay near the 24-hour cap;
+    // `<= 86400` alone would also accept an immediate or zero-delay send.
+    expect(delayOf(sent, eventId(2))).toBeGreaterThan(86_390);
     expect(delayOf(sent, eventId(2))).toBeLessThanOrEqual(86_400);
     expect(delayOf(sent, eventId(3))).toBeUndefined();
     expect(sent.map(eventOf)).toEqual([eventId(1), eventId(2), eventId(3)]);

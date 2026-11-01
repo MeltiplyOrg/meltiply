@@ -227,7 +227,13 @@ describe("installation ownership transfer", () => {
       expect(wrongPassword.status).toBe(401);
 
       const invalidTarget = await transfer("owner", editorId, "MeltiplyLocal1!");
+      // Only the "target must be an active admin" guard can fire here: the
+      // target is a different user than the actor, so the self-transfer guard
+      // (the other 409 producer) cannot satisfy this assertion.
       expect(invalidTarget.status).toBe(409);
+      await expect(invalidTarget.json()).resolves.toMatchObject({
+        error: { code: "owner_transfer_invalid" },
+      });
 
       const toAdmin = await transfer("owner", adminId, "MeltiplyLocal1!");
       expect(toAdmin.status).toBe(200);

@@ -42,9 +42,9 @@ vi.mock("@/lib/queries", () => ({
     data: {
       installation_owner_user_id: workspace.user.id,
       invitations_pending: 1,
-      members_active: 3,
+      members_active: 4,
       seat_limit: 10,
-      seats_used: 4,
+      seats_used: 5,
       workspace: {
         created_at: "2026-01-01T00:00:00.000Z",
         id: workspace.user.orgId,
@@ -95,6 +95,20 @@ vi.mock("@/lib/queries", () => ({
           suspended_at: "2026-01-03T00:00:00.000Z",
           updated_at: "2026-01-03T00:00:00.000Z",
           user_id: "10000000-0000-4000-8000-000000000005",
+        },
+        {
+          // A second, non-owner admin: only the Installation Owner may remove
+          // an admin, so this row is the one that actually exercises that guard.
+          avatar_url: null,
+          created_at: "2026-01-04T00:00:00.000Z",
+          display_name: "Beta Admin",
+          email: "beta@meltiply.local",
+          is_installation_owner: false,
+          role: "admin",
+          status: "active",
+          suspended_at: null,
+          updated_at: "2026-01-04T00:00:00.000Z",
+          user_id: "10000000-0000-4000-8000-000000000002",
         },
       ],
     },
@@ -198,7 +212,7 @@ describe("settings administration surface", () => {
     fireEvent.mouseDown(workspaceTab);
     fireEvent.click(workspaceTab);
     expect(screen.getByText("Seat usage")).toBeInTheDocument();
-    expect(screen.getByText("4 / 10")).toBeInTheDocument();
+    expect(screen.getByText("5 / 10")).toBeInTheDocument();
 
     const auditTab = screen.getByRole("tab", { name: "Audit" });
     fireEvent.mouseDown(auditTab);

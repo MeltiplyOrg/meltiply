@@ -223,7 +223,10 @@ test("health probe rejects mismatched and malformed envelopes", async (context) 
         origin: spec.app_url,
         requestBudgetMs: 5000,
       }),
-      /staging contract|outside the release traffic set/,
+      // Each payload breaks exactly one clause of the staging envelope, which
+      // is validated (not version-filtered) here, so the failure must name the
+      // envelope contract.
+      /API health response is not the staging contract/,
     );
   }
   const failing = await withServer(context, (_request, response) => {

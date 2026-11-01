@@ -19,6 +19,7 @@ const operation = {
         content: {
           "application/json": {
             schema: {
+              additionalProperties: false,
               properties: { status: { type: "string" } },
               required: ["status"],
               type: "object",
@@ -59,6 +60,22 @@ function run() {
   );
 }
 
+/**
+ * Fails when the diff could not execute the comparison at all. A missing
+ * `go`/`oasdiff`, or a parser error the wrapper reports as `oasdiff failed`,
+ * also exits non-zero, which would otherwise satisfy the breaking-change
+ * assertion for the wrong reason.
+ */
+function assertDiffRan(result, label) {
+  const output = `${result.stdout}${result.stderr}`;
+  if (result.error || /unable to run |oasdiff failed/u.test(output)) {
+    throw new Error(
+      `${label}: contract diff could not run oasdiff:\n${output}${result.error ?? ""}`,
+    );
+  }
+  return output;
+}
+
 try {
   writeFileSync(base, document({ "/probe": operation }));
   writeFileSync(baseChangelog, "## Unreleased\n\n- **Breaking:** historical unrelated change\n");
@@ -67,6 +84,7 @@ try {
   extra.get.operationId = "getExtra";
   writeFileSync(current, document({ "/probe": operation, "/extra": extra }));
   const additive = run();
+  assertDiffRan(additive, "additive");
   assert.equal(additive.status, 0, `${additive.stdout}${additive.stderr}`);
 
   const removedField = structuredClone(operation);
@@ -74,7 +92,7 @@ try {
   removedField.get.responses[200].content["application/json"].schema.required = [];
   writeFileSync(current, document({ "/probe": removedField }));
   const unreviewed = run();
-  const diagnostic = `${unreviewed.stdout}${unreviewed.stderr}`;
+  const diagnostic = assertDiffRan(unreviewed, "unreviewed");
   assert.equal(unreviewed.status, 1, diagnostic);
   assert.match(diagnostic, /\/probe/);
   assert.match(diagnostic, /status/);
@@ -210,8 +228,10 @@ try {
       encoding: "utf8",
       env: { ...process.env, GITHUB_STEP_SUMMARY: "" },
     });
-    assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
-    const value = `${result.stdout}${result.stderr}`.match(/contract-change:[a-f0-9]{64}/)?.[0];
+    assert.equal(result.status, 1, assertDiffRan(result, `review token ${ref}`));
+    const value = assertDiffRan(result, `review token ${ref}`).match(
+      /contract-change:[a-f0-9]{64}/,
+    )?.[0];
     assert.ok(value);
     return value;
   };
@@ -223,7 +243,11 @@ try {
     `## Unreleased\n\n- **Breaking:** [${mergeToken}] Remove probe operations; regenerate clients immediately.\n`,
   );
   const mergeOnly = ci("pull_request");
-  assert.equal(mergeOnly.status, 1, "PR review must also cover the cumulative release span");
+  assert.equal(
+    mergeOnly.status,
+    1,
+    assertDiffRan(mergeOnly, "PR review must also cover the cumulative release span"),
+  );
   assert.match(`${mergeOnly.stdout}${mergeOnly.stderr}`, new RegExp(releaseToken));
   writeFileSync(
     notes,

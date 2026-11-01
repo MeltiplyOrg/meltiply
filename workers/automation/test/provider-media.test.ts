@@ -139,19 +139,19 @@ describe("provider media resolver", () => {
   });
 
   it("delivers a promoted rendition key but never an unpromoted staging key", async () => {
-    const head = vi.fn(async () => metadata("image/webp", 256));
     const signDownload = vi.fn(
       async () => "https://r2.example/signed/rendition.webp?signature=ephemeral",
     );
     const signer = { signDownload } as unknown as ObjectUrlSigner;
+    // The mock under assertion is the one the resolver actually holds: an
+    // unwired spy would make the "rejected before any read" claim vacuous.
+    const head = vi.fn(async (key: string) =>
+      key.endsWith("rendition.webp") ? { ...metadata("image/webp", 256), key } : null,
+    );
     const resolve = createProviderMediaResolver(
       {
         ...baseEnv,
-        ASSETS: {
-          head: vi.fn(async (key: string) =>
-            key.endsWith("rendition.webp") ? { ...metadata("image/webp", 256), key } : null,
-          ) as unknown as R2Bucket["head"],
-        } as unknown as R2Bucket,
+        ASSETS: { head } as unknown as R2Bucket,
       },
       signer,
     );
@@ -186,7 +186,10 @@ describe("provider media resolver", () => {
         transferMode: "remote_ingest",
       }),
     ).rejects.toThrow("object key is invalid");
-    expect(head).not.toHaveBeenCalled();
+    // The promoted request above read metadata once; the rejected staging key
+    // must not add a second read.
+    expect(head).toHaveBeenCalledTimes(1);
+    expect(head).toHaveBeenCalledWith("org-1/asset-1/rendition.webp");
   });
 
   /**

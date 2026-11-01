@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { afterEach, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -12,11 +12,6 @@ import {
 } from "./tunnel-hostname.mjs";
 
 const scriptPath = fileURLToPath(new URL("./tunnel-hostname.mjs", import.meta.url));
-
-afterEach(() => {
-  delete process.env.MELTIPLY_TUNNEL_BRANCH;
-  delete process.env.MELTIPLY_TUNNEL_DOMAIN;
-});
 
 /**
  * Runs the script as a subprocess.
@@ -63,10 +58,20 @@ describe("branchLabelFrom", () => {
   });
 
   it("leaves room for the longest suffix inside a DNS label", () => {
-    const label = branchLabelFrom("b".repeat(80));
-    // `-public-dev` is the longest suffix that is ever appended.
-    assert.ok(label.length <= 40);
-    assert.equal(`${label}-public-dev.meltiply.com`.split(".")[0].length <= 63, true);
+    // `-public-dev` is the longest suffix any layout appends, so the truncated
+    // slug plus that suffix must still fit RFC 1035's 63-character label. A
+    // longer slug limit would make this hostname fail validation outright.
+    const hostname = hostnameFor({
+      branch: "b".repeat(80),
+      domain: "meltiply.com",
+      kind: "public",
+      style: "flat",
+      devLabel: "dev",
+    });
+    const [label] = hostname.split(".");
+    assert.ok(label.length <= 63, `${label} exceeds a DNS label`);
+    assert.ok(label.endsWith("-public-dev"));
+    assert.ok(label.length > "b".repeat(20).length, "the branch slug was truncated to nothing");
   });
 });
 
@@ -103,51 +108,59 @@ describe("hostnameFor", () => {
     );
   });
 
-  it("matches the literal <branch>-dev.<domain> form in flat style", () => {
+  it("folds the service suffix into the branch label in flat style", () => {
+    // A branch name without "dev" in it keeps the expected shapes unambiguous.
+    for (const [kind, expected] of [
+      ["app", "feature-app.meltiply.com"],
+      ["public", "feature-public.meltiply.com"],
+    ]) {
+      assert.equal(
+        hostnameFor({ branch: "feature", domain: "meltiply.com", kind, style: "flat" }),
+        expected,
+      );
+    }
+    // A dev label is folded into the same label rather than gaining a level.
     assert.equal(
       hostnameFor({
-        branch: "dev-tunnel",
+        branch: "feature",
         domain: "meltiply.com",
         kind: "app",
         style: "flat",
+        devLabel: "dev",
       }),
-      "dev-tunnel-app.meltiply.com",
-    );
-    assert.equal(
-      hostnameFor({
-        branch: "dev-tunnel",
-        domain: "meltiply.com",
-        kind: "public",
-        style: "flat",
-      }),
-      "dev-tunnel-public.meltiply.com",
+      "feature-app-dev.meltiply.com",
     );
   });
 
   it("keeps every branch hostname under one wildcard label in wildcard style", () => {
-    // `*.dev.meltiply.com` must cover both, which requires `dev` to be a label
-    // of its own rather than part of the branch label.
-    for (const kind of ["app", "public"]) {
-      const hostname = hostnameFor({
-        branch: "dev-tunnel",
-        domain: "meltiply.com",
-        kind,
-      });
-      assert.equal(`*.${hostname.split(".").slice(1).join(".")}`, "*.meltiply.com");
+    // One `*.<domain>` record covers both services only when they share the
+    // parent domain and differ in the first label; a layout that pushed one
+    // service under an extra label would need a second record.
+    const domain = "meltiply.com";
+    const hostnames = ["app", "public"].map((kind) =>
+      hostnameFor({ branch: "feature", domain, kind }),
+    );
+    assert.deepEqual(hostnames, ["feature.meltiply.com", "feature-public.meltiply.com"]);
+    for (const hostname of hostnames) {
+      assert.equal(hostname.slice(hostname.indexOf(".") + 1), domain);
     }
+    assert.notEqual(
+      hostnames[0].split(".")[0],
+      hostnames[1].split(".")[0],
+      "services must be distinguishable within the wildcard",
+    );
   });
 
-  it("cannot wildcard the flat layout, because `dev` is inside the branch label", () => {
-    // This is the constraint that makes `wildcard` the default: Access and
-    // cloudflared both refuse wildcards in the middle of a hostname.
-    const hostname = hostnameFor({
-      branch: "dev-tunnel",
-      domain: "meltiply.com",
-      kind: "app",
-      style: "flat",
-    });
-    assert.equal(hostname, "dev-tunnel-app.meltiply.com");
-    assert.notEqual(hostname.split(".")[0], "dev");
+  it("cannot wildcard the flat layout, because both services claim label one", () => {
+    // In flat style the service suffix sits inside the branch label, so app and
+    // public already differ in the first label and no single wildcard covers
+    // both. That is what makes `wildcard` the default layout.
+    const domain = "meltiply.com";
+    const app = hostnameFor({ branch: "feature", domain, kind: "app", style: "flat" });
+    const pub = hostnameFor({ branch: "feature", domain, kind: "public", style: "flat" });
+    assert.notEqual(app.split(".")[0], pub.split(".")[0]);
+    assert.equal(app.split(".").slice(1).join("."), domain);
+    assert.equal(pub.split(".").slice(1).join("."), domain);
   });
 
   it("honours a custom dev label", () => {

@@ -179,5 +179,17 @@ describe("objectStorageBindings", () => {
         S3_ENDPOINT: "http://objects.example.com",
       }),
     ).toEqual([]);
+
+    // Readiness is only trustworthy if construction rejects the same settings;
+    // otherwise a green probe could sit over a provider that cannot be built.
+    expect(() =>
+      createObjectStoreFromEnv({ ...s3Env, S3_ENDPOINT: "https://objects.example.com/prefix" }),
+    ).toThrow("must not include");
+    expect(() =>
+      createObjectStoreFromEnv({ ...s3Env, S3_ENDPOINT: "http://objects.example.com" }),
+    ).toThrow("HTTPS");
+    expect(() => createObjectStoreFromEnv({ ...s3Env, S3_FORCE_PATH_STYLE: "maybe" })).toThrow(
+      "S3_FORCE_PATH_STYLE",
+    );
   });
 });

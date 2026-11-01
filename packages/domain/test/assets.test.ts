@@ -162,7 +162,9 @@ describe("asset upload policy", () => {
       const layout = uploadLayout(fileSize);
       expect(layout.strategy).toBe("multipart");
       if (layout.strategy !== "multipart") throw new Error("expected multipart layout");
-      expect(layout.partCount).toBe(Math.ceil(fileSize / partSize));
+      // The inequality pair pins the count without restating the implementation's
+      // own `ceil(fileSize / partSize)` expression: the parts must cover the
+      // whole file and dropping the last one must leave a shortfall.
       expect(layout.partSize * layout.partCount).toBeGreaterThanOrEqual(fileSize);
       expect(layout.partSize * (layout.partCount - 1)).toBeLessThan(fileSize);
       expect(layout.maxParallelParts).toBe(ASSET_UPLOAD_POLICY.maxParallelParts);

@@ -273,6 +273,15 @@ for id in c-foreign c-prefix-sib c-proc-foreign c-owner-deadbeef c-owner-cafebab
   assert_kept "$id"
 done
 assert_kept 'meltiply-deadbeef_postgres'
+# The scoped Compose `down` is the primary path and must actually run; the
+# force-remove fallback must not be reached while `down` succeeds.
+grep -Eq '^docker compose .* down ' "$COMMAND_LOG" ||
+  { echo "teardown never ran a project-scoped compose down" >&2; cat "$COMMAND_LOG" >&2; exit 1; }
+if grep -q '^docker rm -f' "$COMMAND_LOG"; then
+  echo "force-remove ran even though compose down succeeded" >&2
+  cat "$COMMAND_LOG" >&2
+  exit 1
+fi
 # Bound docker call count — protect against EMFILE regressions.
 calls="$(grep -c '^docker ' "$COMMAND_LOG" || true)"
 if [[ "$calls" -gt 12 ]]; then
@@ -298,6 +307,10 @@ for id in c-foreign c-prefix-sib c-proc-foreign c-owner-deadbeef c-owner-cafebab
   assert_kept "$id"
 done
 assert_kept 'meltiply-deadbeef_postgres'
+# A no-op `down` must be followed by the label-scoped force-remove of exactly
+# this project's leftovers, which is what proves the fallback path exists.
+grep -q '^docker rm -f' "$COMMAND_LOG" ||
+  { echo "force-remove fallback never reaped the leftover rows" >&2; cat "$COMMAND_LOG" >&2; exit 1; }
 calls="$(grep -c '^docker ' "$COMMAND_LOG" || true)"
 if [[ "$calls" -gt 12 ]]; then
   echo "too many docker calls on force-remove path ($calls)" >&2
@@ -308,10 +321,9 @@ fi
 # Run 3: a devcontainer teardown is bound to its own COMPOSE_PROJECT_NAME.
 # meltiply-deadbeef shares the meltiply- prefix with the baseline project and
 # carries its own processor container, so any unscoped down, name filter, or
-# ancestor sweep would visibly reap baseline rows from the table. compose.sh
-# resolves the owner through the meltiply.devcontainer.project label — the
-# seeded meltiply-cafebabe owner proves an exact label match cannot select a
-# sibling, and both owners must survive teardown.
+# ancestor sweep would visibly reap baseline rows from the table. The inner
+# daemon cannot see its outer devcontainer; teardown must not require an owner
+# lookup, and unrelated labeled resources must still survive.
 seed_resources
 : >"$COMMAND_LOG"
 (

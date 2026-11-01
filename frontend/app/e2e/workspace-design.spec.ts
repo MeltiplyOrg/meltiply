@@ -1164,3 +1164,67 @@ test("keeps Channel identity rows compact and copies their text directly", async
     }
   }
 });
+
+/**
+ * Real-stack proof of the disconnect workflow: channel settings hand off to a
+ * single destructive confirmation, a rejected request keeps the account in the
+ * directory with an actionable error, and a successful retry removes it for
+ * good, including after reload.
+ */
+test("disconnects a controlled Channel with retryable failure recovery", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(120_000);
+  const workspace = await openIsolatedOwnerWorkspace(page);
+  const provisioned = await provisionControlledChannels(request, workspace.profileName, [
+    {
+      platform: "threads",
+      displayName: "Disconnecting Threads",
+      providerUserId: controlledProviderAccountId("threads"),
+    },
+  ]);
+  const account = provisioned.channels.find((channel) => channel.platform === "threads");
+  if (!account) throw new Error("Expected the provisioned Threads Channel");
+
+  await page.goto("/channels");
+  const row = page.getByRole("row", { name: /Disconnecting Threads/ });
+  await expect(row).toBeVisible();
+
+  const disconnectRoute = `**/api/v1/platforms/${account.id}`;
+  await page.route(disconnectRoute, (route) =>
+    route.fulfill({
+      status: 500,
+      json: { error: { code: "internal_error", message: "Controlled disconnect failure" } },
+    }),
+  );
+  await row.getByRole("button", { name: "Channel settings", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "Disconnecting Threads", exact: true });
+  await expect(settings).toBeVisible();
+  await settings.getByRole("button", { name: "Disconnect", exact: true }).click();
+  const confirmation = page.getByRole("alertdialog", {
+    name: "Disconnect Disconnecting Threads?",
+    exact: true,
+  });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await expect(
+    page.locator("[data-sileo-title]", { hasText: "The platform could not be disconnected" }),
+  ).toBeVisible();
+  await expect(row).toBeVisible();
+
+  await page.unroute(disconnectRoute);
+  await row.getByRole("button", { name: "Channel settings", exact: true }).click();
+  await expect(settings).toBeVisible();
+  await settings.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await expect(
+    page.locator("[data-sileo-title]", { hasText: "Channel disconnected" }),
+  ).toBeVisible();
+  await expect(row).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
+  await expect(row).toHaveCount(0);
+});

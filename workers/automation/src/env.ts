@@ -28,7 +28,7 @@ export interface AutomationEnv {
   MAIL?: SendEmail;
   MAIL_FROM_ADDRESS?: string;
   MAIL_FROM_NAME?: string;
-  /** Queue carrying durable owner notification deliveries. */
+  /** Queue carrying durable notification deliveries to configured recipients. */
   NOTIFICATIONS_QUEUE?: Queue<unknown>;
   FACEBOOK_CLIENT_ID?: string;
   FACEBOOK_CLIENT_SECRET?: string;

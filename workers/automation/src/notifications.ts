@@ -29,12 +29,11 @@ interface DeliveryRow extends Record<string, unknown> {
 }
 
 interface StoredNotificationPreferences {
-  channels: { email: boolean };
+  channels: { email: { enabled: boolean; recipients: string[] } };
   events: { channel_disconnected: boolean; publication_failed: boolean };
 }
 
 interface PreferenceRow extends Record<string, unknown> {
-  email: string | null;
   notification_preferences: StoredNotificationPreferences | null;
 }
 
@@ -53,6 +52,8 @@ interface PublicationFailureRow extends Record<string, unknown> {
 const maximumDeliveryAttempts = 5;
 /** A crashed sender's claim may be retried after five minutes. */
 const sendingLeaseSeconds = 300;
+/** Matches the API's saved recipient limit so a hand-written row stays bounded. */
+const maximumNotificationRecipients = 20;
 
 /** Classifies notification payloads without trusting arbitrary queue contents. */
 function notificationPayload(value: Record<string, unknown>): NotificationPayload | null {
@@ -93,17 +94,12 @@ function notificationPayload(value: Record<string, unknown>): NotificationPayloa
   };
 }
 
-/** Resolves the single Installation Owner's current delivery address. */
-function ownerEmailEffect(env: AutomationEnv, organizationId: string) {
+/** Reads the Workspace's saved notification channel and event choices. */
+function notificationPreferencesEffect(env: AutomationEnv, organizationId: string) {
   return withSystemTransactionEffect(env, (client) =>
     client.query<PreferenceRow>(
-      `SELECT owner.email, preferences.notification_preferences
+      `SELECT preferences.notification_preferences
          FROM organizations organization
-         JOIN LATERAL (
-           SELECT email FROM users
-            WHERE installation_owner = true AND suspended_at IS NULL
-            ORDER BY created_at, id LIMIT 1
-         ) AS owner ON true
          LEFT JOIN publishing_preferences preferences ON preferences.org_id = organization.id
         WHERE organization.id = $1`,
       [organizationId],
@@ -233,10 +229,22 @@ function renderEmail(
   };
 }
 
-/** Submits one message through the Cloudflare Email Sending binding exactly once. */
-async function submitMail(env: AutomationEnv, email: NotificationEmail, recipient: string) {
+/**
+ * Submits one message through the Cloudflare Email Sending binding exactly once.
+ *
+ * The first saved recipient appears in `to`; any others ride `bcc`, so a team
+ * inbox can receive the alert without exposing every address to the whole list.
+ * The binding call remains all-or-nothing, preserving the existing retry and
+ * idempotency semantics for the event.
+ */
+async function submitMail(
+  env: AutomationEnv,
+  email: NotificationEmail,
+  recipients: readonly string[],
+) {
   const sender = mailSenderConfiguration(env);
-  if (typeof env.MAIL?.send !== "function" || sender === undefined) {
+  const [primary, ...copies] = recipients;
+  if (typeof env.MAIL?.send !== "function" || sender === undefined || primary === undefined) {
     throw new RetryableJobError({
       cause: "notification_mail_unavailable",
       message: "Notification email delivery is not configured.",
@@ -249,7 +257,8 @@ async function submitMail(env: AutomationEnv, email: NotificationEmail, recipien
     html: email.html,
     subject: email.subject,
     text: email.text,
-    to: recipient,
+    to: primary,
+    ...(copies.length > 0 ? { bcc: copies } : {}),
   });
   if (!result || typeof result.messageId !== "string" || result.messageId.length === 0) {
     throw new RetryableJobError({
@@ -268,7 +277,8 @@ async function submitMail(env: AutomationEnv, email: NotificationEmail, recipien
  * terminal state and acks without sending again. Claiming atomically marks
  * `sending`, uses `updated_at` as the lease start, and counts only claimed send
  * attempts; a deferred duplicate leaves the lease and attempt count untouched.
- * Disabled preferences are recorded as skipped, never sent.
+ * Disabled preferences, including an email channel without recipients, are
+ * recorded as skipped and never sent.
  *
  * @param env - Automation bindings including the Email Sending binding.
  * @param message - Validated outbox message carrying a notification payload.
@@ -289,7 +299,7 @@ export function processNotificationMessage(
         }),
       );
     }
-    const preferences = yield* ownerEmailEffect(env, message.organization_id).pipe(
+    const preferences = yield* notificationPreferencesEffect(env, message.organization_id).pipe(
       Effect.mapError(
         () =>
           new RetryableJobError({
@@ -299,13 +309,18 @@ export function processNotificationMessage(
       ),
     );
     const preference = preferences.rows[0];
-    const email = preference?.email ?? null;
-    const channels = preference?.notification_preferences?.channels;
+    const emailChannel = preference?.notification_preferences?.channels?.email;
     const events = preference?.notification_preferences?.events;
-    const enabled =
+    const recipients = Array.isArray(emailChannel?.recipients)
+      ? emailChannel.recipients.filter(
+          (recipient): recipient is string => typeof recipient === "string",
+        )
+      : [];
+    const eventEnabled =
       payload.kind === "publication_failed"
         ? events?.publication_failed === true
         : events?.channel_disconnected === true;
+    const channelEnabled = eventEnabled && emailChannel?.enabled === true;
 
     const row = yield* withSystemTransactionEffect(env, (client) =>
       Effect.gen(function* () {
@@ -330,13 +345,15 @@ export function processNotificationMessage(
         if (!existing || ["delivered", "skipped", "dead"].includes(existing.state)) {
           return existing;
         }
-        const disabledReason = !enabled
-          ? "The owner disabled this notification event."
-          : channels?.email !== true
+        const disabledReason = !eventEnabled
+          ? "This notification event is disabled."
+          : !channelEnabled
             ? "The email channel is disabled."
-            : email === null
-              ? "The Installation Owner has no delivery address."
-              : null;
+            : recipients.length === 0
+              ? "No email recipients are configured."
+              : recipients.length > maximumNotificationRecipients
+                ? "The email recipient list is larger than supported."
+                : null;
         const nextState = disabledReason
           ? "skipped"
           : existing.attempt_count >= maximumDeliveryAttempts
@@ -365,7 +382,7 @@ export function processNotificationMessage(
         }),
       );
     }
-    if (row.state !== "sending" || email === null) return "skipped" as const;
+    if (row.state !== "sending" || recipients.length === 0) return "skipped" as const;
 
     const context =
       payload.kind === "publication_failed"
@@ -400,7 +417,7 @@ export function processNotificationMessage(
               cause: "notification_send_failed",
               message: safeErrorMessage(cause, "Notification email delivery failed."),
             }),
-      try: () => submitMail(env, emailBody, email),
+      try: () => submitMail(env, emailBody, recipients),
     }).pipe(Effect.exit);
 
     if (sent._tag === "Failure") {

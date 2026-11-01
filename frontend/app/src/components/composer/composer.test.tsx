@@ -116,7 +116,7 @@ function renderComposer(
     options.preferences ?? {
       email_available: false,
       notifications: {
-        channels: { email: false },
+        channels: { email: { enabled: false, recipients: [] } },
         events: { channel_disconnected: false, publication_failed: false },
       },
       signature_templates: [],
@@ -398,7 +398,7 @@ describe("Composer recovery consent", () => {
           ],
           email_available: false,
           notifications: {
-            channels: { email: false },
+            channels: { email: { enabled: false, recipients: [] } },
             events: { channel_disconnected: false, publication_failed: false },
           },
           updated_at: "2026-10-01T10:00:00.000Z",
@@ -631,7 +631,7 @@ describe("Composer schedule restoration", () => {
         signature_templates: [],
         email_available: false,
         notifications: {
-          channels: { email: false },
+          channels: { email: { enabled: false, recipients: [] } },
           events: { channel_disconnected: false, publication_failed: false },
         },
         updated_at: "2026-01-01T00:00:00.000Z",
@@ -811,7 +811,7 @@ describe("Composer provider publication choices", () => {
       preferences: {
         email_available: false,
         notifications: {
-          channels: { email: false },
+          channels: { email: { enabled: false, recipients: [] } },
           events: { channel_disconnected: false, publication_failed: false },
         },
         signature_templates: [

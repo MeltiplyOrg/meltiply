@@ -1376,11 +1376,11 @@ paths:
       summary: Read owner publishing preferences
       description: |
         Returns the Workspace's persistent publishing timezone, reusable
-        signature templates, and owner notification choices. An untouched
-        Workspace returns a null timezone, no templates, and both notification
-        events disabled. `email_available` reports whether the installation can
-        actually deliver mail; clients must not offer a channel when it is
-        false.
+        signature templates, and notification choices. An untouched Workspace
+        returns a null timezone, no templates, both notification events
+        disabled, and an empty email recipient list. `email_available` reports
+        whether the installation can actually deliver mail; clients must not
+        offer a channel when it is false.
       responses:
         "200":
           description: Current publishing preferences.
@@ -1398,7 +1398,8 @@ paths:
         Atomically replaces the complete timezone, signature template list, and
         notification choices. A template list carries the full desired order,
         so create, edit, reorder, delete, and default selection are one
-        replacement. Changing the display timezone never rewrites a stored
+        replacement. An enabled email channel requires at least one valid
+        recipient. Changing the display timezone never rewrites a stored
         Schedule instant. Requires the workspace admin role.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -5447,16 +5448,36 @@ components:
           required: [email]
           properties:
             email:
-              type: boolean
+              $ref: "#/components/schemas/EmailNotificationChannel"
+    EmailNotificationChannel:
+      type: object
+      additionalProperties: false
+      required: [enabled, recipients]
+      description: |
+        Email delivery for enabled notification events. recipients is the
+        explicit list of addresses that receive each alert; it is not derived
+        from the Installation Owner. A disabled channel may retain recipients
+        so they survive a temporary pause.
+      properties:
+        enabled:
+          type: boolean
+        recipients:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            format: email
+            maxLength: 254
     PublishingPreferences:
       type: object
       additionalProperties: false
       required: [timezone, signature_templates, notifications, email_available, updated_at]
       description: |
-        Persistent owner preferences for the shared Workspace. timezone null
-        means the browser's timezone remains in effect. email_available is
-        false when the installation has no working mail sender, and clients
-        must not offer to enable that channel.
+        Persistent Workspace preferences. timezone null means the browser's
+        timezone remains in effect. email_available is false when the
+        installation has no working mail sender, and clients must not offer to
+        enable that channel.
       properties:
         timezone:
           type: [string, "null"]

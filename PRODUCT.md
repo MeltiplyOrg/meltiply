@@ -101,8 +101,9 @@ cards. Its background and canonical controls match Posts; its directory
 composition stays distinct. Connection health is one accessible icon per row,
 with recovery beside the affected account.
 
-Settings is a full route with Appearance, Language, read-only Account, and
-inline Security. Every section shares one bounded content layout and background.
+Settings is a full route grouped into General (Appearance, Language, and
+Publishing), Account (read-only Account and inline Security), and Workspace
+(Administration). Every section shares one bounded content layout and background.
 Light/Dark/System and supported languages use the existing consent-aware owners.
 System follows live OS palette changes. Password verification, authenticator
 enrollment, and recovery-code handling retain their real security requirements.

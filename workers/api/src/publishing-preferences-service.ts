@@ -14,7 +14,7 @@ import {
   hashIdempotencyRequestEffect,
   reserveIdempotencyEffect,
 } from "./idempotency";
-import { mailSenderConfiguration } from "@meltiply/domain/mail-content";
+import { isMailSenderAddress, mailSenderConfiguration } from "@meltiply/domain/mail-content";
 import type { PostServiceError } from "./post-types";
 
 type Schemas = components["schemas"];
@@ -149,31 +149,80 @@ function normalizeSignatureTemplates(
   });
 }
 
+/** Maximum number of explicit email recipients stored for one Workspace. */
+const maximumNotificationRecipients = 20;
+
+/**
+ * Normalizes the submitted recipient list before persistence.
+ *
+ * Addresses are trimmed and lowercased so the saved list is deterministic and
+ * duplicate submissions cannot send the same alert twice. Local single-label
+ * domains are rejected because a real delivery address needs a DNS domain.
+ *
+ * @param recipients - Raw addresses from the replacement document.
+ * @returns Unique normalized addresses in submission order.
+ * @throws {CoreApiError} 422 when the list is oversized or an address is invalid.
+ */
+function normalizeNotificationRecipients(recipients: readonly string[]): string[] {
+  if (recipients.length > maximumNotificationRecipients) {
+    throw new CoreApiError(
+      422,
+      "validation_error",
+      `Use no more than ${maximumNotificationRecipients} email recipients.`,
+    );
+  }
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const candidate of recipients) {
+    const email = candidate.trim().toLowerCase();
+    if (!isMailSenderAddress(email, true)) {
+      throw new CoreApiError(422, "validation_error", "Use valid email recipients.");
+    }
+    if (!seen.has(email)) {
+      seen.add(email);
+      normalized.push(email);
+    }
+  }
+  return normalized;
+}
+
 /**
  * Validates notification choices against the events and channels the product
  * actually supports. An unconfigured mail sender cannot be enabled, because
- * accepting that choice would promise delivery that cannot happen.
+ * accepting that choice would promise delivery that cannot happen. Enabled
+ * email also requires at least one recipient, while a disabled channel may keep
+ * its saved addresses for a later re-enable.
  */
 function validateNotifications(
   notifications: Schemas["NotificationPreferences"],
   emailAvailable: boolean,
 ): Schemas["NotificationPreferences"] {
+  const email = notifications.channels?.email;
   if (
     typeof notifications.events?.publication_failed !== "boolean" ||
     typeof notifications.events?.channel_disconnected !== "boolean" ||
-    typeof notifications.channels?.email !== "boolean"
+    typeof email?.enabled !== "boolean" ||
+    !Array.isArray(email.recipients)
   ) {
     throw new CoreApiError(422, "validation_error", "Notification choices are invalid.");
   }
-  if (notifications.channels.email && !emailAvailable) {
+  const recipients = normalizeNotificationRecipients(email.recipients);
+  if (email.enabled && !emailAvailable) {
     throw new CoreApiError(
       422,
       "notification_channel_unavailable",
       "Email delivery is not configured for this installation.",
     );
   }
+  if (email.enabled && recipients.length === 0) {
+    throw new CoreApiError(
+      422,
+      "validation_error",
+      "Add at least one email recipient before enabling email.",
+    );
+  }
   return {
-    channels: { email: notifications.channels.email },
+    channels: { email: { enabled: email.enabled, recipients } },
     events: {
       channel_disconnected: notifications.events.channel_disconnected,
       publication_failed: notifications.events.publication_failed,
@@ -185,9 +234,10 @@ function validateNotifications(
  * Projects a stored preference row onto the contract response.
  *
  * An untouched Workspace has no row; it reports the documented defaults
- * (browser timezone, no templates, both events and email disabled) and the
- * epoch as `updated_at` rather than inventing a write. `email_available` is
- * always the current installation capability, not persisted state.
+ * (browser timezone, no templates, both events disabled, and email disabled
+ * with no recipients) and the epoch as `updated_at` rather than inventing a
+ * write. `email_available` is always the current installation capability, not
+ * persisted state.
  *
  * @param row - Stored row, or undefined before the first save.
  * @param emailAvailable - Whether this installation can actually deliver mail.
@@ -201,7 +251,7 @@ function mapPreferences(
     return {
       email_available: emailAvailable,
       notifications: {
-        channels: { email: false },
+        channels: { email: { enabled: false, recipients: [] } },
         events: { channel_disconnected: false, publication_failed: false },
       },
       signature_templates: [],

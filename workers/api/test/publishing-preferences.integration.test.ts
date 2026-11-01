@@ -22,6 +22,12 @@ const env = {
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
 
+const mailEnv = {
+  ...env,
+  MAIL: { send: async () => ({ messageId: "mail_test" }) } as unknown as SendEmail,
+  MAIL_FROM_ADDRESS: "notifications@meltiply.test",
+} satisfies ApiWorkerEnv;
+
 const organizationId = "2f000000-0000-4000-8000-000000000001";
 const identities: Record<string, JwtIdentity> = {
   admin: { email: "alpha@meltiply.local", emailVerified: true, subject: "auth_user_local_alpha" },
@@ -58,7 +64,13 @@ const app = createApiApp({
   verifyJwtToken: async (_env, token) => identities[token]!,
 });
 
-function request(method: string, body?: unknown, key = randomUUID(), role = "admin") {
+function request(
+  method: string,
+  body?: unknown,
+  key = randomUUID(),
+  role = "admin",
+  runtimeEnv: ApiWorkerEnv = env,
+) {
   return app.request(
     "/api/v1/publishing-preferences",
     {
@@ -70,7 +82,7 @@ function request(method: string, body?: unknown, key = randomUUID(), role = "adm
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
-    env,
+    runtimeEnv,
   );
 }
 
@@ -114,7 +126,7 @@ describe("publishing preferences HTTP", () => {
     expect(body).toMatchObject({
       email_available: false,
       notifications: {
-        channels: { email: false },
+        channels: { email: { enabled: false, recipients: [] } },
         events: { channel_disconnected: false, publication_failed: false },
       },
       signature_templates: [],
@@ -125,7 +137,7 @@ describe("publishing preferences HTTP", () => {
   it("persists timezone, ordered signatures, and notification choices", async () => {
     const response = await request("PUT", {
       notifications: {
-        channels: { email: false },
+        channels: { email: { enabled: false, recipients: [] } },
         events: { channel_disconnected: true, publication_failed: false },
       },
       signature_templates: [firstTemplate, secondTemplate],
@@ -144,10 +156,71 @@ describe("publishing preferences HTTP", () => {
     expect(await read.json()).toEqual(saved);
   });
 
+  it("persists multiple normalized email recipients and requires one when enabled", async () => {
+    const response = await request(
+      "PUT",
+      {
+        notifications: {
+          channels: {
+            email: {
+              enabled: true,
+              recipients: [" Ops@Example.com ", "alpha@meltiply.local", "ops@example.com"],
+            },
+          },
+          events: { channel_disconnected: false, publication_failed: true },
+        },
+        signature_templates: [],
+        timezone: null,
+      },
+      randomUUID(),
+      "admin",
+      mailEnv,
+    );
+    expect(response.status).toBe(200);
+    const saved: Schemas["PublishingPreferences"] = await response.json();
+    expect(saved.email_available).toBe(true);
+    expect(saved.notifications.channels.email).toEqual({
+      enabled: true,
+      recipients: ["ops@example.com", "alpha@meltiply.local"],
+    });
+
+    const empty = await request(
+      "PUT",
+      {
+        notifications: {
+          channels: { email: { enabled: true, recipients: [] } },
+          events: { channel_disconnected: false, publication_failed: true },
+        },
+        signature_templates: [],
+        timezone: null,
+      },
+      randomUUID(),
+      "admin",
+      mailEnv,
+    );
+    expect(empty.status).toBe(422);
+
+    const invalid = await request(
+      "PUT",
+      {
+        notifications: {
+          channels: { email: { enabled: true, recipients: ["not-an-address"] } },
+          events: { channel_disconnected: false, publication_failed: true },
+        },
+        signature_templates: [],
+        timezone: null,
+      },
+      randomUUID(),
+      "admin",
+      mailEnv,
+    );
+    expect(invalid.status).toBe(422);
+  });
+
   it("replaces the whole ordered list and keeps exactly one default", async () => {
     const response = await request("PUT", {
       notifications: {
-        channels: { email: false },
+        channels: { email: { enabled: false, recipients: [] } },
         events: { channel_disconnected: false, publication_failed: false },
       },
       signature_templates: [
@@ -167,7 +240,7 @@ describe("publishing preferences HTTP", () => {
   it("rejects an unsupported timezone, unknown placeholder, and missing default", async () => {
     const invalidTimezone = await request("PUT", {
       notifications: {
-        channels: { email: false },
+        channels: { email: { enabled: false, recipients: [] } },
         events: { channel_disconnected: false, publication_failed: false },
       },
       signature_templates: [],
@@ -177,7 +250,7 @@ describe("publishing preferences HTTP", () => {
 
     const invalidPlaceholder = await request("PUT", {
       notifications: {
-        channels: { email: false },
+        channels: { email: { enabled: false, recipients: [] } },
         events: { channel_disconnected: false, publication_failed: false },
       },
       signature_templates: [{ ...firstTemplate, body: "Hello {unknown}" }],
@@ -187,7 +260,7 @@ describe("publishing preferences HTTP", () => {
 
     const missingDefault = await request("PUT", {
       notifications: {
-        channels: { email: false },
+        channels: { email: { enabled: false, recipients: [] } },
         events: { channel_disconnected: false, publication_failed: false },
       },
       signature_templates: [{ ...firstTemplate, is_default: false }],
@@ -197,7 +270,12 @@ describe("publishing preferences HTTP", () => {
 
     const unavailableEmail = await request("PUT", {
       notifications: {
-        channels: { email: true },
+        channels: {
+          email: {
+            enabled: true,
+            recipients: ["alpha@meltiply.local", "ops@meltiply.local"],
+          },
+        },
         events: { channel_disconnected: false, publication_failed: false },
       },
       signature_templates: [],
@@ -213,7 +291,7 @@ describe("publishing preferences HTTP", () => {
       "PUT",
       {
         notifications: {
-          channels: { email: false },
+          channels: { email: { enabled: false, recipients: [] } },
           events: { channel_disconnected: false, publication_failed: false },
         },
         signature_templates: [],
@@ -229,7 +307,7 @@ describe("publishing preferences HTTP", () => {
     const key = randomUUID();
     const body = {
       notifications: {
-        channels: { email: false },
+        channels: { email: { enabled: false, recipients: [] } },
         events: { channel_disconnected: false, publication_failed: false },
       },
       signature_templates: [firstTemplate],

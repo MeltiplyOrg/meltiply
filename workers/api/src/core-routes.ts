@@ -623,16 +623,34 @@ function publishingPreferencesInput(
   const channels = notifications.channels as Record<string, unknown>;
   onlyKeys(events, ["publication_failed", "channel_disconnected"]);
   onlyKeys(channels, ["email"]);
+  const email = channels.email;
+  if (!email || typeof email !== "object" || Array.isArray(email)) {
+    throw new CoreApiError(400, "validation_error", "Notification email must be an object.");
+  }
+  const emailChannel = email as Record<string, unknown>;
+  onlyKeys(emailChannel, ["enabled", "recipients"]);
   if (
     typeof events.publication_failed !== "boolean" ||
     typeof events.channel_disconnected !== "boolean" ||
-    typeof channels.email !== "boolean"
+    typeof emailChannel.enabled !== "boolean" ||
+    !Array.isArray(emailChannel.recipients) ||
+    emailChannel.recipients.length > 20 ||
+    emailChannel.recipients.some((recipient) => typeof recipient !== "string")
   ) {
-    throw new CoreApiError(400, "validation_error", "Notification choices must be booleans.");
+    throw new CoreApiError(
+      400,
+      "validation_error",
+      "Notification choices must include booleans and a recipient array.",
+    );
   }
   return {
     notifications: {
-      channels: { email: channels.email },
+      channels: {
+        email: {
+          enabled: emailChannel.enabled,
+          recipients: emailChannel.recipients as string[],
+        },
+      },
       events: {
         channel_disconnected: events.channel_disconnected,
         publication_failed: events.publication_failed,

@@ -80,10 +80,11 @@ Analytics Day/Week/Month changes morph the marks in place. Bars keep the chart m
 All sections share one layout; Security does not get a separate width rule.
 
 - Navigation and content use the same surface background.
-- Below 768px, section navigation is a horizontally scrollable row; from 768px it is a 220px rail.
+- Below 768px, section navigation is a horizontally scrollable row with separators between groups; from 768px it is a 220px rail with uppercase group labels for General, Account, and Workspace.
+- A group disappears with its last visible section. Publishing is absent for non-admins, and Workspace exists only for administrators.
 - Settings content uses the collection pages' **16px phone / 24px small-breakpoint** top padding and the **16/24px** horizontal gutter, so its heading aligns with Posts and Channels at desktop; the 220px section rail explains its additional x offset.
 - The horizontal section rail centers its `aria-current="page"` section with its own `scrollLeft` on mount, on section change (including reload and history navigation), on language change, when late label growth, a resolved section roster, or a resize changes the rail geometry; it clamps to the scrollable range and leaves a non-scrolling desktop rail untouched. A section change also returns the content pane to the top, while a language change keeps the reader's position.
-- Appearance, Language, Account, and Security all use one left-aligned **672px maximum** content column with full available width below that limit.
+- Appearance, Language, Publishing, Account, and Security all use one left-aligned **672px maximum** content column with full available width below that limit.
 - Administration uses the directory composition: a centered **1200px** ceiling, a content-width tab strip, and shared **spreadsheet grid tables** for Members and pending invitations. Workspace is a 672px settings form with its seat counts as a compact label/value summary rather than a table. The Administration route is height-locked — only each list scrolls. The Installation Owner is marked by a crown tooltip; their lifecycle control is a toggle and row actions collapse into a three-dot menu. Its Audit tab owns a bounded scroll viewport — a pinned header over 100-entry pages with a paging footer — while the toolbar's search, action, and target filters have fixed widths, Refresh re-reads the current page, and every filter applies server-side across the whole trail.
 - Light, Dark, and System cards are **192px**, wrap, and do not stretch to fill a wide screen.
 - The content pane owns vertical scrolling. Security forms and authenticator controls are inline; focused confirmation/enrollment steps retain their real security requirements.

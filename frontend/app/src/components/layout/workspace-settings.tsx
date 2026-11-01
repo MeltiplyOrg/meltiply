@@ -28,6 +28,21 @@ const SECTION_IDS = ["appearance", "language", "publishing", "account", "securit
 type SettingsSection = (typeof SECTION_IDS)[number] | "administration";
 const LANGUAGE_CODES = supportedLanguages.map(({ code }) => code);
 
+/**
+ * Section rail groups. General and Account are personal surfaces; Workspace
+ * carries the admin-only directory. A group with no visible section disappears
+ * with its last member, so a member never sees an empty heading.
+ */
+const SECTION_GROUPS = [
+  { id: "general", label: "General", sections: ["appearance", "language", "publishing"] },
+  { id: "account", label: "Account", sections: ["account", "security"] },
+  { id: "workspace", label: "Workspace", sections: ["administration"] },
+] as const satisfies readonly {
+  id: string;
+  label: string;
+  sections: readonly SettingsSection[];
+}[];
+
 /** Decorative miniature lines shared by both halves of every theme preview; no palette values are copied. */
 function PreviewLines() {
   return (
@@ -85,7 +100,7 @@ export default function WorkspaceSettings() {
       label: t("Publishing"),
       navLabel: t("Publishing"),
       description: t(
-        "Choose the publishing timezone, reusable signatures, and owner notifications.",
+        "Choose the publishing timezone, reusable signatures, and notification choices.",
       ),
       icon: Send,
     },
@@ -106,11 +121,15 @@ export default function WorkspaceSettings() {
   };
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSection = searchParams.get("section");
-  // Publishing preferences are admin-managed, so the section roster is the
-  // canonical list minus that destination for everyone else.
-  const sectionIds: readonly SettingsSection[] = canManageSettings
-    ? ["administration", ...SECTION_IDS]
-    : SECTION_IDS.filter((id) => id !== "publishing");
+  // Publishing and Administration are admin-managed, so their groups shrink or
+  // disappear for everyone else before the route resolves its active section.
+  const visibleGroups = SECTION_GROUPS.map((group) => ({
+    ...group,
+    sections: group.sections.filter(
+      (id) => canManageSettings || (id !== "publishing" && id !== "administration"),
+    ),
+  })).filter((group) => group.sections.length > 0);
+  const sectionIds: readonly SettingsSection[] = visibleGroups.flatMap((group) => group.sections);
   const section = sectionIds.find((id) => id === requestedSection) ?? "appearance";
   const current = sections[section];
   const handleSignOut = useWorkspaceSignOut();
@@ -206,26 +225,44 @@ export default function WorkspaceSettings() {
         <span className="hidden px-2 pb-2 text-(length:--font-size-micro) font-semibold uppercase tracking-wide text-ink-3 md:block">
           {t("Settings")}
         </span>
-        {sectionIds.map((id) => {
-          const Icon = sections[id].icon;
-          const isCurrent = section === id;
-          return (
-            <Button
-              key={id}
-              variant={isCurrent ? "secondary" : "ghost"}
-              data-sidebar-item=""
-              className={cn(
-                "relative z-10 h-8 shrink-0 justify-start px-2 text-(length:--font-size-control) font-normal",
-                isCurrent ? "hover:bg-secondary" : "hover:bg-transparent",
-              )}
-              aria-current={isCurrent ? "page" : undefined}
-              onClick={() => setSearchParams({ section: id })}
-            >
-              <Icon className="size-3.5" />
-              {sections[id].navLabel}
-            </Button>
-          );
-        })}
+        {visibleGroups.map((group, groupIndex) => (
+          <div
+            key={group.id}
+            role="group"
+            aria-label={t(group.label)}
+            className="contents md:flex md:flex-col md:gap-1"
+          >
+            {groupIndex > 0 && (
+              <span
+                aria-hidden="true"
+                className="mx-1 my-1 h-5 w-px shrink-0 self-center bg-line md:hidden"
+              />
+            )}
+            <span className="hidden px-2 pb-1 pt-2 text-(length:--font-size-micro) font-semibold uppercase tracking-wide text-ink-3 md:block">
+              {t(group.label)}
+            </span>
+            {group.sections.map((id) => {
+              const Icon = sections[id].icon;
+              const isCurrent = section === id;
+              return (
+                <Button
+                  key={id}
+                  variant={isCurrent ? "secondary" : "ghost"}
+                  data-sidebar-item=""
+                  className={cn(
+                    "relative z-10 h-8 shrink-0 justify-start px-2 text-(length:--font-size-control) font-normal",
+                    isCurrent ? "hover:bg-secondary" : "hover:bg-transparent",
+                  )}
+                  aria-current={isCurrent ? "page" : undefined}
+                  onClick={() => setSearchParams({ section: id })}
+                >
+                  <Icon className="size-3.5" />
+                  {sections[id].navLabel}
+                </Button>
+              );
+            })}
+          </div>
+        ))}
       </nav>
       <div
         ref={contentRef}

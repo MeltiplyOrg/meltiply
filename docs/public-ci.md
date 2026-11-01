@@ -24,7 +24,7 @@ Automatic checks run in separate jobs:
   Medians are gated against the checked-in budgets; the same harness asserts that
   delayed readiness, lost input, and layout movement fail those budgets. A
   separate Settings → Publishing browser journey saves and reloads the timezone,
-  signature, and notification choices. Traces and JSON reports are retained.
+  signature, notification choices, and multiple email recipients. Traces and JSON reports are retained.
   Journey evidence is attached before budget assertions, and the layout-shift
   self-check resets its collector so page-load movement cannot make it pass.
 - `selfhost-images`: when production image inputs change, build the three images

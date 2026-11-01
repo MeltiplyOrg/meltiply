@@ -1091,7 +1091,11 @@ operations:
             publication_failed: true
             channel_disconnected: false
           channels:
-            email: true
+            email:
+              enabled: true
+              recipients:
+                - alpha@meltiply.local
+                - ops@meltiply.local
         email_available: true
         updated_at: 2026-01-01T00:00:00Z
     errors:
@@ -1112,7 +1116,11 @@ operations:
           publication_failed: true
           channel_disconnected: false
         channels:
-          email: true
+          email:
+            enabled: true
+            recipients:
+              - alpha@meltiply.local
+              - ops@meltiply.local
     success:
       status: 200
       body: *publishing_preferences

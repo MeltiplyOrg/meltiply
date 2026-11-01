@@ -11,8 +11,9 @@ const credentials = {
 /**
  * Exercises the reachable Settings → Publishing surface against the real
  * PostgreSQL/API stack: the timezone choice, one reusable default signature,
- * and notification event choices survive a reload. It also proves the composer
- * interprets schedules in that timezone rather than the browser's zone.
+ * notification event choices, and multiple explicit email recipients survive a
+ * reload. It also proves the composer interprets schedules in that timezone
+ * rather than the browser's zone.
  */
 test("persists publishing timezone, signature, and notification choices", async ({ page }) => {
   test.setTimeout(120_000);
@@ -46,6 +47,23 @@ test("persists publishing timezone, signature, and notification choices", async 
   const failedEvent = page.getByRole("switch", { name: "Publication failed" });
   if (!(await failedEvent.isChecked())) await failedEvent.click();
 
+  const emailSwitch = page.getByRole("switch", { name: "Email notifications" });
+  if (await emailSwitch.isEnabled()) {
+    if (!(await emailSwitch.isChecked())) await emailSwitch.click();
+    // `getByLabel` substring-matches the remove buttons' "Remove recipient N"
+    // names, so address the fields by role and exact name.
+    const recipient = (index: number) =>
+      page.getByRole("textbox", { name: `Recipient ${index}`, exact: true });
+    if (!(await recipient(1).count())) {
+      await page.getByRole("button", { name: "Add recipient" }).click();
+    }
+    await recipient(1).fill("ops@meltiply.local");
+    if (!(await recipient(2).count())) {
+      await page.getByRole("button", { name: "Add recipient" }).click();
+    }
+    await recipient(2).fill("alpha@meltiply.local");
+  }
+
   await page.getByRole("button", { name: "Save preferences" }).click();
   await expect(page.getByText("Publishing preferences saved")).toBeVisible({ timeout: 15_000 });
 
@@ -64,6 +82,15 @@ test("persists publishing timezone, signature, and notification choices", async 
       ),
   ).toBe(true);
   await expect(page.getByRole("switch", { name: "Publication failed" })).toBeChecked();
+  if (await page.getByRole("switch", { name: "Email notifications" }).isEnabled()) {
+    await expect(page.getByRole("switch", { name: "Email notifications" })).toBeChecked();
+    await expect(page.getByRole("textbox", { name: "Recipient 1", exact: true })).toHaveValue(
+      "ops@meltiply.local",
+    );
+    await expect(page.getByRole("textbox", { name: "Recipient 2", exact: true })).toHaveValue(
+      "alpha@meltiply.local",
+    );
+  }
 
   // The schedule picker names the saved zone and converts the same wall-clock
   // value to the selected zone on submit. Assert the visible zone contract here;

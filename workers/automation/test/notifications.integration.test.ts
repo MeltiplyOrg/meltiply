@@ -17,6 +17,7 @@ if (!process.env.MELTIPLY_DATABASE_TEST_URL) {
 }
 
 interface SentMail {
+  bcc?: string[];
   html?: string;
   text?: string;
   subject?: string;
@@ -68,6 +69,7 @@ function message(
 async function setPreferences(
   events: { channel_disconnected: boolean; publication_failed: boolean },
   email: boolean,
+  recipients: readonly string[] = ["alpha@meltiply.local"],
 ) {
   await runSystemTransaction(env, (client) =>
     client.query(
@@ -79,7 +81,7 @@ async function setPreferences(
       [
         organizationId,
         JSON.stringify({
-          channels: { email },
+          channels: { email: { enabled: email, recipients } },
           events,
         }),
       ],
@@ -115,7 +117,7 @@ afterAll(async () => {
   );
 });
 
-describeIntegration("owner notification delivery", () => {
+describeIntegration("notification delivery", () => {
   it("records a skipped delivery when the event is disabled", async () => {
     sendMail.mockClear();
     await setPreferences({ channel_disconnected: false, publication_failed: false }, true);
@@ -154,6 +156,7 @@ describeIntegration("owner notification delivery", () => {
     expect(sendMail).toHaveBeenCalledTimes(1);
     const sent = sendMail.mock.calls[0]?.[0];
     expect(sent?.to).toBe("alpha@meltiply.local");
+    expect(sent?.bcc).toBeUndefined();
     expect(sent?.subject).toContain("Publication failed");
     expect(sent?.subject).not.toMatch(/[\r\n]/);
     expect(sent?.subject?.length).toBeLessThanOrEqual(160);
@@ -171,6 +174,33 @@ describeIntegration("owner notification delivery", () => {
       ),
     );
     expect(row.rows[0]?.state).toBe("delivered");
+  });
+
+  it("delivers to every configured recipient without exposing the list", async () => {
+    sendMail.mockClear();
+    await setPreferences({ channel_disconnected: false, publication_failed: true }, true, [
+      "alpha@meltiply.local",
+      "ops@meltiply.local",
+      "team@meltiply.local",
+    ]);
+    const distribution = await runSystemTransaction(env, (client) =>
+      client.query<{ id: string }>(
+        "SELECT id FROM distributions WHERE org_id = $1 ORDER BY id LIMIT 1",
+        [organizationId],
+      ),
+    );
+    const aggregateId = distribution.rows[0]?.id;
+    expect(aggregateId).toBeDefined();
+    const key = `notification-test:recipients:${randomUUID()}`;
+
+    expect(
+      await Effect.runPromise(
+        processNotificationMessage(env, message(key, "publication_failed", aggregateId!)),
+      ),
+    ).toBe("processed");
+    const sent = sendMail.mock.calls[0]?.[0];
+    expect(sent?.to).toBe("alpha@meltiply.local");
+    expect(sent?.bcc).toEqual(["ops@meltiply.local", "team@meltiply.local"]);
   });
 
   it("defers a duplicate sender without consuming an attempt", async () => {

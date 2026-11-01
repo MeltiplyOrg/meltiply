@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useId, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 
 import { useSessionScope } from "@/hooks/use-session-scope";
@@ -43,9 +43,9 @@ function draftOf(data: PublishingPreferences | undefined): PublishingPreferences
 }
 
 /**
- * Owner preferences for the shared Workspace: the publishing timezone reused by
- * scheduling and displayed dates, reusable signature templates, and the events
- * and channels that may deliver publishing alerts.
+ * Workspace preferences for the shared Workspace: the publishing timezone
+ * reused by scheduling and displayed dates, reusable signature templates, and
+ * the events and explicit email recipients that may receive publishing alerts.
  *
  * The form is a whole-document draft because the API replaces timezone,
  * ordered templates, and notification choices atomically. Email is offered only
@@ -62,6 +62,7 @@ export function PublishingPreferencesSection(): React.ReactElement {
     value: PublishingPreferencesUpdate;
   } | null>(null);
   const [saving, setSaving] = useState(false);
+  const emailFieldId = useId();
   const browserTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const draft: PublishingPreferencesUpdate | null =
     edited && edited.source === query.data ? edited.value : draftOf(query.data);
@@ -153,9 +154,81 @@ export function PublishingPreferencesSection(): React.ReactElement {
     });
   }
 
+  /** Appends one empty email row while the list is below the server limit. */
+  function addRecipient() {
+    setDraft((current) => {
+      const email = current?.notifications.channels.email;
+      if (current === null || !email || email.recipients.length >= 20) return current;
+      return {
+        ...current,
+        notifications: {
+          ...current.notifications,
+          channels: { email: { ...email, recipients: [...email.recipients, ""] } },
+        },
+      };
+    });
+  }
+
+  /** Replaces one recipient without disturbing the remaining order. */
+  function patchRecipient(index: number, recipient: string) {
+    setDraft((current) => {
+      const email = current?.notifications.channels.email;
+      if (current === null || !email) return current;
+      return {
+        ...current,
+        notifications: {
+          ...current.notifications,
+          channels: {
+            email: {
+              ...email,
+              recipients: email.recipients.map((value, position) =>
+                position === index ? recipient : value,
+              ),
+            },
+          },
+        },
+      };
+    });
+  }
+
+  /** Removes one recipient; the channel may retain an empty list while disabled. */
+  function removeRecipient(index: number) {
+    setDraft((current) => {
+      const email = current?.notifications.channels.email;
+      if (current === null || !email) return current;
+      return {
+        ...current,
+        notifications: {
+          ...current.notifications,
+          channels: {
+            email: {
+              ...email,
+              recipients: email.recipients.filter((_, position) => position !== index),
+            },
+          },
+        },
+      };
+    });
+  }
+
   /** Persists the complete draft; positions are rewritten to display order. */
   async function save() {
     if (draft === null || saving) return;
+    const email = draft.notifications.channels.email;
+    if (email.enabled && email.recipients.length === 0) {
+      toast(t("Add at least one recipient before enabling email."), {
+        description: t("Email recipients"),
+        variant: "error",
+      });
+      return;
+    }
+    if (email.enabled && email.recipients.some((recipient) => recipient.trim().length === 0)) {
+      toast(t("Enter an email address for every recipient."), {
+        description: t("Remove blank recipients before enabling email."),
+        variant: "error",
+      });
+      return;
+    }
     setSaving(true);
     try {
       const templates = draft.signature_templates.map((template, position) => ({
@@ -166,7 +239,10 @@ export function PublishingPreferencesSection(): React.ReactElement {
         notifications: {
           ...draft.notifications,
           channels: {
-            email: emailAvailable ? draft.notifications.channels.email : false,
+            email: {
+              enabled: emailAvailable ? email.enabled : false,
+              recipients: email.recipients,
+            },
           },
         },
         signature_templates: templates,
@@ -398,34 +474,99 @@ export function PublishingPreferencesSection(): React.ReactElement {
               />
             </label>
           ))}
-          <label className="flex min-h-11 items-center justify-between gap-4 rounded-control border border-line px-3 py-2">
-            <span className="text-sm">
-              {t("Email")}
-              <span className="block text-xs text-ink-3">
-                {emailAvailable
-                  ? t("Send alerts to the Installation Owner's email.")
-                  : t("Email delivery is not configured for this installation.")}
+          <div className="rounded-control border border-line p-3">
+            <label className="flex min-h-11 items-center justify-between gap-4">
+              <span className="text-sm">
+                {t("Email")}
+                <span className="block text-xs text-ink-3">
+                  {emailAvailable
+                    ? t("Send alerts to one or more email addresses.")
+                    : t("Email delivery is not configured for this installation.")}
+                </span>
               </span>
-            </span>
-            <Switch
-              aria-label={t("Email notifications")}
-              checked={draft.notifications.channels.email}
-              disabled={saving || !emailAvailable}
-              onCheckedChange={(checked) =>
-                setDraft((current) =>
-                  current === null
-                    ? current
-                    : {
-                        ...current,
-                        notifications: {
-                          ...current.notifications,
-                          channels: { email: checked },
+              <Switch
+                aria-label={t("Email notifications")}
+                checked={emailAvailable && draft.notifications.channels.email.enabled}
+                disabled={saving || !emailAvailable}
+                onCheckedChange={(checked) =>
+                  setDraft((current) =>
+                    current === null
+                      ? current
+                      : {
+                          ...current,
+                          notifications: {
+                            ...current.notifications,
+                            channels: {
+                              email: {
+                                ...current.notifications.channels.email,
+                                enabled: checked,
+                              },
+                            },
+                          },
                         },
-                      },
-                )
-              }
-            />
-          </label>
+                  )
+                }
+              />
+            </label>
+            {emailAvailable && draft.notifications.channels.email.enabled && (
+              <div className="mt-3 space-y-3 border-t border-line pt-3">
+                <div>
+                  <p className="text-xs font-medium text-ink-3">{t("Email recipients")}</p>
+                  <p className="mt-1 text-xs text-ink-2">
+                    {t("The first recipient appears in To; the rest are blind-copied.")}
+                  </p>
+                </div>
+                {draft.notifications.channels.email.recipients.map((recipient, index) => (
+                  <div key={index} className="flex items-end gap-2">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                      <label
+                        htmlFor={`${emailFieldId}-recipient-${index}`}
+                        className="text-xs font-medium text-ink-3"
+                      >
+                        {t("Recipient {number}", { number: index + 1 })}
+                      </label>
+                      <Input
+                        id={`${emailFieldId}-recipient-${index}`}
+                        type="email"
+                        autoComplete="email"
+                        inputMode="email"
+                        maxLength={254}
+                        value={recipient}
+                        disabled={saving}
+                        placeholder="name@example.com"
+                        onChange={(event) => patchRecipient(index, event.target.value)}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={t("Remove recipient {number}", { number: index + 1 })}
+                      disabled={saving}
+                      onClick={() => removeRecipient(index)}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+                {draft.notifications.channels.email.recipients.length === 0 && (
+                  <p className="text-xs text-ink-2">
+                    {t("Add at least one recipient before enabling email.")}
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={saving || draft.notifications.channels.email.recipients.length >= 20}
+                  onClick={addRecipient}
+                >
+                  <Plus className="size-4" />
+                  {t("Add recipient")}
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

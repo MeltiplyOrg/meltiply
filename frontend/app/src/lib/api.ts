@@ -461,10 +461,10 @@ export function listQueues(
 }
 
 /**
- * Reads the Workspace's persistent timezone, signature templates, and owner
+ * Reads the Workspace's persistent timezone, signature templates, and
  * notification choices. An untouched Workspace returns null timezone, no
- * templates, both events disabled, and `email_available` reflecting the real
- * mail capability.
+ * templates, both events disabled, an empty email recipient list, and
+ * `email_available` reflecting the real mail capability.
  *
  * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
  * @param options Request options with optional abort signal.

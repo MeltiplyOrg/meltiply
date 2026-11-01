@@ -2973,10 +2973,8 @@ describe("OAuth Page selection flow", () => {
 
   it("GET /api/v1/oauth-selections/:selectionId returns 404 for wrong, foreign, or expired tickets", async () => {
     const routingKey = await oauthStateRoutingKey(actor.workspace.id);
-    // A canonical 22-character routing key from another workspace: it must
-    // satisfy OAUTH_ROUTING_KEY_PATTERN so the foreign-key guard is the only
-    // thing that can reject it. A short fixture would fail the pattern and be
-    // refused later by the missing-selection guard instead.
+    // Keep the foreign key canonical so syntax rejection cannot mask tenant
+    // isolation. A foreign ticket must be refused without reading the DO.
     const foreignKey = "foreign-routing-key-01";
     const getSelection = vi.fn(async () => null);
     const oauthEnv: ApiWorkerEnv = {
@@ -2993,6 +2991,7 @@ describe("OAuth Page selection flow", () => {
       oauthEnv,
     );
     expect(foreignRes.status).toBe(404);
+    expect(getSelection).not.toHaveBeenCalled();
 
     const missingRes = await app.request(
       `/api/v1/oauth-selections/${routingKey}.nonexistentnonce12345`,
@@ -3000,6 +2999,7 @@ describe("OAuth Page selection flow", () => {
       oauthEnv,
     );
     expect(missingRes.status).toBe(404);
+    expect(getSelection).toHaveBeenCalledOnce();
   });
 
   it("POST /api/v1/oauth-selections/:selectionId/confirm connects chosen Page only and saves connection", async () => {

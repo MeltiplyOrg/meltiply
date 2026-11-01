@@ -3722,7 +3722,7 @@ describe("provider option subtrees", () => {
       postService: postService({
         createPost: (_env, _session, input) =>
           Effect.sync(() => {
-            captured = input.targets[0]?.providerOptions as Record<string, unknown>;
+            captured = input.targets?.[0]?.providerOptions as Record<string, unknown>;
             return { replayed: false, value: post };
           }),
       }),

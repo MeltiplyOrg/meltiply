@@ -1314,9 +1314,16 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       const revoke = vi.fn(async () => undefined);
       const revokeRegistry = new ProviderRegistry();
       revokeRegistry.register("youtube", {
-        capability: service
-          .platformCapabilities()
-          .find((capability) => capability.platform === "youtube")!,
+        capability: {
+          ...service
+            .platformCapabilities()
+            .find((capability) => capability.platform === "youtube")!,
+          analytics: false,
+          comments: false,
+          connect_available: false,
+          publish: false,
+          reply: false,
+        },
         revoke,
         transferModes: [],
       });

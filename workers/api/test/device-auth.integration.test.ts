@@ -1049,6 +1049,12 @@ describe("browser verification and consent ownership", () => {
     // must redeem the same grant exactly once.
     expect((await decideDeviceCode(browser.cookie, "approve", userCode)).status).toBe(200);
     await advanceTokenPollingWindow();
+    // Clear the plugin's separate per-grant polling gate too. This case proves
+    // approval/session transitions; the preceding slow_down case tests timing.
+    await systemPoolFor(env).query(
+      `UPDATE "deviceCode" SET "lastPolledAt" = NULL WHERE "deviceCode" = $1`,
+      [deviceCode],
+    );
     const response = await redeemDeviceCode(deviceCode);
     expect(response.status, "device token exchange").toBe(200);
     const accessToken = stringField(recordOf(await response.json()), "access_token");

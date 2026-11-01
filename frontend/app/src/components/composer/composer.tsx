@@ -1465,6 +1465,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    * Merges partial override updates (custom caption, override enablement, or
    * provider settings) for one Channel.
    *
+   * The previous entry is spread first so the saved signature snapshot — which
+   * may be an explicit `null` — survives an edit. Rebuilding the row from its
+   * individual fields would drop that key, and `signatureFor` would then resolve
+   * the current default template over an existing Post.
+   *
    * @param channelId - Target Channel id.
    * @param updates - Partial override fields to merge.
    */
@@ -1473,6 +1478,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       setChannelOverrides((previous) => ({
         ...previous,
         [channelId]: {
+          ...previous[channelId],
           content: previous[channelId]?.content ?? sharedContent,
           hasOverride: previous[channelId]?.hasOverride ?? false,
           settings: previous[channelId]?.settings ?? {},

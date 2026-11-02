@@ -14,7 +14,7 @@ const script = fileURLToPath(new URL("./notices.mjs", import.meta.url));
 test("notice bundle covers runtime dependencies and excludes development tools", () => {
   const text = buildNoticeBundle("frontend/public");
   assert.match(text, /^Meltiply — Third-party notices/m);
-  assert.match(text, /Sustainable Use License 1\.0/);
+  assert.match(text, /^License: GNU Affero General Public License v3\.0 or later$/m);
   for (const dependency of ["react", "dompurify", "fumadocs-ui"]) {
     assert.match(
       text,

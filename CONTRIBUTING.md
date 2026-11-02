@@ -6,12 +6,13 @@ changes, or data resets; use [CONTEXT.md](CONTEXT.md) for domain vocabulary.
 
 ## Licensing
 
-Original contributions are submitted under the [Sustainable Use License](LICENSE.md)
-unless a separate agreement applies. Identify third-party sources and licenses,
-preserve required notices, and update [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-Submit only code and assets you have permission to redistribute. SUL submission is
-not an assignment or an unrestricted relicensing grant; obtain additional rights
-in writing from the actual rights holder when needed.
+Original contributions are submitted under the [GNU Affero General Public License
+version 3 or later](LICENSE.md) unless a separate agreement applies. Identify
+third-party sources and licenses, preserve required notices, and update
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Submit only code and assets you
+have permission to redistribute. Submission under the AGPL is not a copyright
+assignment; it licenses your contribution to everyone who receives the software
+under the same terms, and it does not grant the maintainers additional rights.
 
 For dependency/license changes, run `bun run test:supply-chain` and
 `bun run security:supply-chain`. See [release licensing](docs/licensing.md) for

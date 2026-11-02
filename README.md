@@ -128,6 +128,6 @@ This repository uses GitHub Actions. See [CI checks](docs/public-ci.md).
 
 ## License
 
-Meltiply is source-available under the [Sustainable Use License](LICENSE.md), based on [n8n's SUL](https://docs.n8n.io/n8n-community-license/). It permits personal/non-commercial and internal business use; paid hosting requires separate permission. It is not OSI-approved open source.
+Meltiply is free software under the [GNU Affero General Public License, version 3 or later](LICENSE.md). It is OSI-approved open source. You may run it, modify it, and redistribute it; if you run a modified version as a network service, section 13 requires you to offer its Corresponding Source to that service's users. There is no charge or separate permission for hosting it.
 
 Third-party material retains its own terms; see [third-party notices](THIRD_PARTY_NOTICES.md). Before publishing source, history, compiled bundles, or native images, follow the [licensing and publication guide](docs/licensing.md). The dependency license gate does not establish contributor ownership or certify binary redistribution.

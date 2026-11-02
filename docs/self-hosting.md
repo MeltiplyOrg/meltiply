@@ -365,20 +365,6 @@ The migration service runs the existing migration ledger before starting the
 runtime. A runtime rollback does not reverse database migrations; restore a
 compatible backup if schema compatibility requires it.
 
-The published Queue migration retains `016_publishing_queues.sql`. The
-Channel-return and Analytics migrations follow it as `017` through `021`, in
-their original relative order and without SQL changes. Fresh databases and
-databases upgraded only from master use the normal migration ledger.
-
-Databases initialized from earlier development branches may instead record
-`012_one_channel_per_provider.sql`, `016_one_channel_per_provider.sql`, or the
-former Analytics sequence `016` through `020`. Those pre-release ledgers are not
-compatible with this merged sequence.
-Do not rename ledger entries to bypass checksum or ordering checks: that would
-leave the published Queue migration unapplied. Back up any needed data before
-recreating a disposable development database; retain the backup and use a
-reviewed data migration for any non-disposable database.
-
 ## Administration and recovery
 
 Administrator operations use a mode-0600 Unix socket inside the runtime container;
@@ -433,30 +419,17 @@ Allow the configured 11-minute graceful stop for in-flight media jobs. Monitor
 `/api/v1/ready`, container health, logs, disk space, and queue backlog; local
 persistence cannot survive loss of its host without backups.
 
-The hosted self-host acceptance suite also restores a full disposable clone:
-PostgreSQL dump, stopped `/data` runtime volume, matching image revision, and
-protected environment are recovered together before real authenticated identity,
-R2, OAuth, Queue and Workflow probes run. `artifacts/cache/compose-<arch>-restore.json`
-records archive sizes and backup/restore wall times for that CI fixture only.
-Those measurements do not establish a production RPO or RTO; operators must
-record the age of the latest verified protected backup and a timed restore on
-their own infrastructure. Stop writes for consistency. Preserve the encryption
-keys and the exact application revision.
+The self-host acceptance suite restores a full disposable clone — PostgreSQL dump,
+stopped `/data` volume, matching image revision, and protected environment — before
+running identity, R2, OAuth, Queue, and Workflow probes. Stop writes for consistency,
+and preserve the encryption keys and the exact application revision.
 
-[Hosted run 40194950426](https://github.com/MeltiplyOrg/meltiply/actions/runs/40194950426),
-at `63bb2a2`, passed the complete image/Compose acceptance and full fresh-volume
-restore on both architectures. The isolated clone started its own controlled
-SMTP dependency; it did not reuse the source database, runtime volume, or process.
-Authenticated identity and the ready Asset survived; storage, single-use OAuth
-state, queued delivery and Workflow completion probes recovered.
+The CI fixture records one sample per architecture in
+`artifacts/cache/compose-<arch>-restore.json`. Those measurements cover a tiny
+disposable database and explicitly record `production_rpo_rto_verified: false`; they
+are not production RPO or RTO. Take a timed restore on your own infrastructure.
 
-| Architecture | Backup seconds | Restore to authenticated ready seconds | PostgreSQL archive bytes | Runtime archive bytes |
-| ------------ | -------------: | -------------------------------------: | -----------------------: | --------------------: |
-| amd64        |          0.919 |                                 23.157 |                  268,200 |             1,093,632 |
-| arm64        |          0.822 |                                 22.035 |                  268,038 |             1,093,632 |
-
-These are one sample per architecture on a tiny disposable CI fixture, not
-production recovery capacity. Preserved raw measurements:
-[amd64](benchmarks/results/2026-10-25-authenticated/compose-x64-restore.json) and
-[arm64](benchmarks/results/2026-10-25-authenticated/compose-arm64-restore.json).
-Both explicitly record `production_rpo_rto_verified: false`.
+The migration ledger is append-only. Do not rename entries to bypass checksum or
+ordering checks: a skipped entry leaves its migration unapplied. Pre-release
+development databases may carry an incompatible ledger; back up before recreating
+one, and use a reviewed data migration for any non-disposable database.

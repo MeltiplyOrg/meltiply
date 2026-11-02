@@ -57,7 +57,8 @@ For every image/binary release:
 
 Primary references: [Alpine 3.23 FFmpeg package](https://pkgs.alpinelinux.org/package/v3.23/community/x86_64/ffmpeg), [FFmpeg legal guidance](https://ffmpeg.org/legal.html), [libvips license](https://github.com/libvips/libvips/blob/master/COPYING), [GNU GPL FAQ](https://www.gnu.org/licenses/gpl-faq.html), and [MPL 2.0 FAQ](https://www.mozilla.org/en-US/MPL/2.0/FAQ/).
 
-No native image or binary redistribution package was built or certified in this remediation. Do not publish such artifacts until their exact-version notices and source obligations are satisfied.
+No native image or binary redistribution package is certified by this document. Do not
+publish such artifacts until their exact-version notices and source obligations are satisfied.
 
 ## Rights confirmation and future contributions
 
@@ -67,4 +68,5 @@ AGPL section 5(c) requires a modified version to be licensed as a whole under th
 
 Continue retaining third-party notices and obtaining the required rights for new contributions. An incoming AGPL contribution is already licensed to downstream recipients under the AGPL; it does not by itself grant the maintainers the right to relicense it under different terms, so obtain any necessary separate written rights. See [contribution licensing](../CONTRIBUTING.md#licensing).
 
-Source publication does not certify binary/image releases or codec patents. Apply the artifact-specific requirements above when distributing those artifacts.
+Source publication does not certify binary/image releases or codec patents; apply the
+artifact-specific requirements above when distributing them.

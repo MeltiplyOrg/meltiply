@@ -63,11 +63,7 @@ No native image or binary redistribution package was built or certified in this 
 
 The repository owner confirmed control of the rights to original Meltiply code and branding, including necessary employer/contractor permissions, and permission to publish under the AGPL. This is an owner attestation, not an independently verified legal opinion. Third-party material remains under its original terms.
 
-### Outstanding: Gr8r-derived interface code
-
-AGPL section 5(c) requires a modified version to be licensed **as a whole** under the AGPL to anyone who receives a copy. The Gr8r Studio adaptation recorded in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) is used under a written permission that "is limited to Meltiply and does not grant rights to third parties," and that applies to the workspace layout and component styling in `frontend/shared/src/components` and `frontend/app/src/components`. Meltiply cannot grant downstream AGPL rights to that material, so the whole-work condition is not yet satisfied.
-
-Resolve before publishing an AGPL source release: obtain Gr8r Studio's permission to sublicense the adapted material under the AGPL, or replace the affected components with original implementations and remove the permission-based notice. This attestation covers original Meltiply material only and does not cure the third-party gap.
+AGPL section 5(c) requires a modified version to be licensed as a whole under the AGPL. The Gr8r Studio adaptation recorded in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) is used under a written permission limited to Meltiply that grants no rights to third parties, so Meltiply cannot license that material to downstream recipients. Publishing an AGPL source release therefore requires either Gr8r's permission to sublicense the adapted components or original replacements for them. This attestation covers original Meltiply material only.
 
 Continue retaining third-party notices and obtaining the required rights for new contributions. An incoming AGPL contribution is already licensed to downstream recipients under the AGPL; it does not by itself grant the maintainers the right to relicense it under different terms, so obtain any necessary separate written rights. See [contribution licensing](../CONTRIBUTING.md#licensing).
 

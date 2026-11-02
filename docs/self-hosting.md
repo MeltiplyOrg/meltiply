@@ -125,19 +125,17 @@ docker compose --env-file .env.selfhost -f compose.selfhost.yml build
 docker compose --env-file .env.selfhost -f compose.selfhost.yml up -d --wait
 ```
 
-The generator records the native architecture as `SELFHOST_PLATFORM=linux/amd64`
-or `linux/arm64`. Existing environment files must add this setting explicitly.
-Only 64-bit ARM is supported; 32-bit ARM is not a release target.
-
-The generator creates private random credentials in `.env.selfhost` with mode
-0600 and refuses to overwrite an existing file. Keep it outside version control
-and backups accessible only to administrators.
+The generator records the native architecture as `SELFHOST_PLATFORM=linux/amd64` or
+`linux/arm64`; only 64-bit ARM is a release target, and existing environment files
+must add the setting explicitly. It writes private random credentials to
+`.env.selfhost` with mode 0600 and refuses to overwrite an existing file. Keep that
+file out of version control, in backups readable only by administrators.
 
 `APP_URL` is the single public dashboard/API origin. It defaults to
-`http://localhost:8080` in the generated file; set it to your public HTTPS origin
-when exposing the installation. Authentication, OAuth callbacks and return links,
-signed media URLs, browser API requests, and the optional TLS gateway use that
-same origin. There is no separate API or authentication URL to configure.
+`http://localhost:8080`; set your public HTTPS origin when exposing the installation.
+Authentication, OAuth callbacks and return links, signed media URLs, browser API
+requests, and the optional TLS gateway all use it. There is no separate API or
+authentication URL.
 Mail is optional. When `MAIL_FROM_ADDRESS` and `SELFHOST_SMTP_URL` are both set,
 startup verifies the SMTP connection and email verification remains required. Use
 an authenticated `smtps://` URL or a properly configured STARTTLS SMTP server;
@@ -154,11 +152,6 @@ verification link, then sign in; without SMTP, setup completes without a
 verification step. Once the owner exists, registration closes, including direct
 API requests. Development fixtures and passwords are not installed. PostgreSQL is
 not published to the host. Only loopback application ports are published by default.
-
-Signed storage URLs support a path prefix of at most 128 characters after
-boundary slashes are removed. Prefix normalization scans boundary slashes in
-linear time, including oversized input; interior empty or traversal segments
-remain invalid.
 
 Set optional Provider/billing variables in `.env.selfhost` using the names in
 [`.env.example`](../.env.example). Self-hosting does not bypass Provider live-mode

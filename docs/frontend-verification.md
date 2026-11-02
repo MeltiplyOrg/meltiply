@@ -28,6 +28,7 @@ platform audit, or real public posting.
 | Scheduling, Now, weekly Queues, retry, cancellation                 | `posts-publication.spec.ts`, `publishing-queues.spec.ts`                                          |
 | Appearance, language, account, security preferences                 | `shared-components.spec.ts`, `workspace-design.spec.ts`                                           |
 | Landing and guide navigation, truthful samples, docs search, 404    | `public-site.spec.ts`                                                                             |
+| Analytics cohort, filters, charts, ranking, empty states            | `analytics.spec.ts`                                                                               |
 | Desktop, phone, keyboard, both palettes, reduced motion             | Screenshots and assertions across the journeys above                                              |
 
 The public sample stays explicitly labeled (`Interactive demo · sample content`,

@@ -6,7 +6,7 @@ import {
 } from "@meltiply/domain";
 
 import { assertHttpsOrLoopbackUrl } from "./meta-common";
-import { createFacebookAdapter, FACEBOOK_MAX_CAPTION_LENGTH } from "./facebook";
+import { createFacebookAdapter } from "./facebook";
 import { createInstagramAdapter, INSTAGRAM_MAX_CAPTION_LENGTH } from "./instagram";
 import { createThreadsAdapter, THREADS_MAX_CAPTION_LENGTH } from "./threads";
 import { createTikTokAdapter, TIKTOK_MAX_CAPTION_LENGTH } from "./tiktok";
@@ -19,8 +19,8 @@ import type {
 import { createYouTubeAdapter, YOUTUBE_MAX_CAPTION_LENGTH } from "./youtube";
 
 /** Draft caption constraints are independent of credentials and runtime activation. */
-const captionLimits: Readonly<Record<Platform, number>> = {
-  facebook: FACEBOOK_MAX_CAPTION_LENGTH,
+const captionLimits: Readonly<Record<Platform, number | null>> = {
+  facebook: null,
   instagram: INSTAGRAM_MAX_CAPTION_LENGTH,
   threads: THREADS_MAX_CAPTION_LENGTH,
   tiktok: TIKTOK_MAX_CAPTION_LENGTH,
@@ -30,8 +30,12 @@ const captionLimits: Readonly<Record<Platform, number>> = {
 export * from "./effect";
 export * from "./failures";
 export * from "./facebook";
+export * from "./facebook-options";
+export * from "./threads-options";
+export * from "./instagram-content";
 export * from "./http";
 export * from "./instagram";
+export * from "./instagram-options";
 export * from "./rate-limit";
 export * from "./threads";
 export * from "./tiktok";

@@ -30,9 +30,17 @@ description: "Author, create, or revise a pull request using Markdown and the na
    gh pr create --base <base> --head <branch> --title '<type>(<scope>): <change>' --body-file /tmp/pr.md
    ```
 
-   For an existing PR, use `gh pr edit <number> --body-file /tmp/pr.md`; update the
-   title with `--title` when needed. Never create a duplicate, push directly to
-   `master`/`main`, or merge the PR yourself.
+   For an existing PR, update it through the REST API. `gh pr edit` exits non-zero
+   in this repository on a Projects-classic deprecation warning even after it writes,
+   so it cannot be trusted as a gate:
+
+   ```bash
+   gh api -X PATCH repos/<owner>/<repo>/pulls/<number> \
+     -f title='<type>(<scope>): <change>' -F body=@/tmp/pr.md
+   ```
+
+   Never create a duplicate, push directly to `master`/`main`, or merge the PR
+   yourself.
 
 Done: the body matches the final shipping diff and observed evidence, every
 template placeholder is resolved, and attribution names the observed tool/model.

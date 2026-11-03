@@ -96,6 +96,7 @@ interface DistributionRow extends Record<string, unknown> {
   reconciliation_attempt_count: number;
   refresh_token: string | null;
   scheduled_at: Date | string | null;
+  signature_text: string | null;
   status: string;
   attempt_count: number;
   title_override: string | null;
@@ -373,6 +374,7 @@ interface PublicationSnapshot {
   content: {
     hashtags: string[];
     provider_options?: ProviderPublishOptions;
+    signature?: string | null;
     text: string;
     title: string;
   };
@@ -410,6 +412,7 @@ function publicationSnapshot(
     content: {
       title: row.title_override ?? row.post_title,
       text: row.description_override ?? row.post_default_text,
+      signature: row.signature_text ?? null,
       hashtags: row.hashtags ?? [],
       ...(row.provider_options ? { provider_options: row.provider_options } : {}),
     },
@@ -569,6 +572,7 @@ function prepare(
                 distribution.platform_post_id,
                 distribution.title_override,
                 distribution.description_override,
+                distribution.signature_text,
                 distribution.hashtags, distribution.provider_options,
                 post.title AS post_title, post.default_text AS post_default_text,
                 composition.media,
@@ -876,7 +880,7 @@ function prepare(
              error_message = 'The provider outcome requires reconciliation.',
              next_attempt_at = now(),
              updated_at = now()
-         WHERE id = $1 AND status NOT IN ('published', 'cancelled')`,
+         WHERE id = $1 AND status NOT IN ('delivered', 'published', 'cancelled')`,
           [distribution.id],
         );
         yield* client.query(
@@ -917,7 +921,7 @@ function prepare(
  * Maps a provider operation result into database lifecycle and operation statuses.
  *
  * Distinguishes confirmed failures, ambiguous unknown results, asynchronous started operations
- * ('awaiting_provider'), and confirmed publications ('published').
+ * ('awaiting_provider'), terminal native handoffs ('delivered'), and publications ('published').
  *
  * @param result - Provider operation result.
  * @returns Status descriptors for the distribution and provider operation records.
@@ -928,7 +932,7 @@ function failureState(result: ProviderOperationResult): {
   message: string | null;
   operationStatus: "failed" | "needs_reconciliation" | "started" | "succeeded";
   retryable: boolean | null;
-  status: "awaiting_provider" | "failed" | "needs_reconciliation" | "published";
+  status: "awaiting_provider" | "delivered" | "failed" | "needs_reconciliation" | "published";
 } {
   if (result.outcome === "unknown") {
     return {
@@ -948,6 +952,16 @@ function failureState(result: ProviderOperationResult): {
       operationStatus: "failed",
       retryable: result.failure.retryable,
       status: "failed",
+    };
+  }
+  if (result.delivery) {
+    return {
+      code: null,
+      errorClass: null,
+      message: null,
+      operationStatus: "succeeded",
+      retryable: null,
+      status: "delivered",
     };
   }
   if (!result.providerPostId) {
@@ -1169,6 +1183,7 @@ function recordPublishOutcome(
           `UPDATE distributions
        SET status = CASE
              WHEN $2 = 'published' THEN 'published'
+             WHEN $2 = 'delivered' THEN 'delivered'
              WHEN status = 'processing' THEN $2
              ELSE status
            END,
@@ -1221,8 +1236,9 @@ function recordPublishOutcome(
              WHEN $2 = 'awaiting_provider' AND status = 'processing' THEN 0
              ELSE provider_poll_attempts
            END,
+           provider_warnings = COALESCE($11::jsonb, provider_warnings),
            next_attempt_at = CASE
-             WHEN $2 = 'published' THEN NULL
+             WHEN $2 IN ('published', 'delivered') THEN NULL
              WHEN status = 'processing' AND $9::integer IS NULL THEN NULL
              WHEN status = 'processing' THEN now() + ($9 * INTERVAL '1 second')
              ELSE next_attempt_at
@@ -1244,6 +1260,9 @@ function recordPublishOutcome(
             state.message,
             nextAttemptDelay,
             env.RECURRING_COMMENTS_ENABLED === "true",
+            result.outcome === "confirmed_success" && result.warnings
+              ? JSON.stringify(result.warnings)
+              : null,
           ],
         );
         analyticsEventId = updated.rows[0]?.analytics_event_id;
@@ -1475,7 +1494,7 @@ function reconciliationState(execution: DistributionLookupExecution): {
   providerUrl: string | null;
   retryable: boolean | null;
   shouldPoll: boolean;
-  status: "awaiting_provider" | "failed" | "needs_reconciliation" | "published";
+  status: "awaiting_provider" | "delivered" | "failed" | "needs_reconciliation" | "published";
 } {
   if (execution.result.kind === "lookup_failure") {
     const { failure } = execution.result;
@@ -1511,6 +1530,19 @@ function reconciliationState(execution: DistributionLookupExecution): {
         retryable: null,
         shouldPoll: true,
         status: "awaiting_provider",
+      };
+    case "delivered":
+      return {
+        code: null,
+        errorClass: null,
+        message: null,
+        operationStatus: "succeeded",
+        providerOperationId: status.result.providerOperationId ?? null,
+        providerPostId: null,
+        providerUrl: null,
+        retryable: null,
+        shouldPoll: false,
+        status: "delivered",
       };
     case "published":
       return {
@@ -1685,7 +1717,7 @@ function recordReconciliationOutcome(
           status: string;
         }>(
           `UPDATE distributions
-         SET status = CASE WHEN status = 'cancel_requested' THEN status ELSE $2 END,
+         SET status = CASE WHEN $2 = 'delivered' THEN 'delivered' WHEN status = 'cancel_requested' THEN status ELSE $2 END,
              provider_operation_id = COALESCE($3, provider_operation_id),
              platform_post_id = COALESCE($4, platform_post_id),
              platform_url = COALESCE($5, platform_url),
@@ -1721,6 +1753,7 @@ function recordReconciliationOutcome(
                WHEN status = 'cancel_requested' OR $9::integer IS NULL THEN NULL
                ELSE now() + ($9 * INTERVAL '1 second')
              END,
+             provider_warnings = COALESCE($12::jsonb, provider_warnings),
              updated_at = now()
          WHERE id = $1
            AND status IN ('awaiting_provider', 'needs_reconciliation', 'cancel_requested')
@@ -1739,6 +1772,12 @@ function recordReconciliationOutcome(
             nextAttemptDelay,
             providerStillProcessing,
             env.RECURRING_COMMENTS_ENABLED === "true",
+            execution.result.kind === "publication" &&
+            (execution.result.status.state === "published" ||
+              execution.result.status.state === "delivered") &&
+            execution.result.status.result.warnings
+              ? JSON.stringify(execution.result.status.result.warnings)
+              : null,
           ],
         );
         analyticsEventId = updated.rows[0]?.analytics_event_id;
@@ -2012,6 +2051,7 @@ export function processDistributionMessage(
           postId: row.post_id,
           providerAccountId: row.platform_user_id ?? undefined,
           providerOptions: snapshot.content.provider_options,
+          signature: snapshot.content.signature ?? null,
           storedAccessToken: row.access_token ?? "",
           storedRefreshToken: row.refresh_token,
           textContent: snapshot.content.text,

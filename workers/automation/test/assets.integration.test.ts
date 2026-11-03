@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 // Response.json() is `unknown` under the pool's types but `any` in eslint's
 // project, so the necessary body assertions look unnecessary to the rule
 // (AUD-055); the assertions are required for tsc.
@@ -99,6 +100,7 @@ let currentUsageBefore:
   | undefined;
 
 let baselineDistributionIds: string[] = [];
+let baselineOutboxIds: string[] = [];
 
 const send = vi.fn(async () => ({
   metadata: { metrics: { backlogBytes: 0, backlogCount: 0 } },
@@ -106,13 +108,21 @@ const send = vi.fn(async () => ({
 const youtubePublishSend = vi.fn(async (..._arguments: unknown[]) => ({
   metadata: { metrics: { backlogBytes: 0, backlogCount: 0 } },
 }));
+// Publication failures now enqueue notification deliveries on the same outbox.
+// The relay claims every pending row in this shared database, so routing needs
+// the real binding shape even though these scenarios never assert its payload.
+const notificationsSend = vi.fn(async (..._arguments: unknown[]) => ({
+  metadata: { metrics: { backlogBytes: 0, backlogCount: 0 } },
+}));
 const env = {
   ASSET_PROCESSING_QUEUE: { sendBatch: send } as unknown as Queue<unknown>,
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   ENVIRONMENT: "test",
+  NOTIFICATIONS_QUEUE: {
+    sendBatch: notificationsSend,
+  } as unknown as Queue<unknown>,
   // These scenarios exercise the explicitly enabled recurring engagement product.
   RECURRING_COMMENTS_ENABLED: "true",
   VERSION: "1.0.0-target.0",
@@ -133,17 +143,25 @@ const queuePublisherLayer = createQueuePublisherLive();
  * the live QueuePublisher drives the recorded fake bindings, and the live
  * PublishQueueResolver maps platforms through publishingQueueFor against the
  * supplied env, so distribution rows still exercise real binding lookup.
+ * Baseline events are skip-locked on a separate transaction so unrelated seed
+ * or earlier-suite work cannot consume the fixture's batch or alter its counts.
  */
 function runRelay(relayEnv: AutomationEnv, batchSize?: number): Promise<OutboxRelayResult> {
-  return Effect.runPromise(
-    Effect.provide(
-      relayOutbox(relayEnv, batchSize),
-      Layer.mergeAll(
-        queuePublisherLayer,
-        createPublishQueueResolverLive((platform) => publishingQueueFor(relayEnv, platform)),
+  return runSystemTransaction(relayEnv, async (client) => {
+    await client.query(
+      "SELECT id FROM outbox_events WHERE id = ANY($1::uuid[]) FOR UPDATE SKIP LOCKED",
+      [baselineOutboxIds],
+    );
+    return Effect.runPromise(
+      Effect.provide(
+        relayOutbox(relayEnv, batchSize),
+        Layer.mergeAll(
+          queuePublisherLayer,
+          createPublishQueueResolverLive((platform) => publishingQueueFor(relayEnv, platform)),
+        ),
       ),
-    ),
-  );
+    );
+  });
 }
 
 /**
@@ -996,10 +1014,10 @@ function outboxMessage(eventId: string, aggregateId: string, topic = "asset.proc
  * the Distribution ids alone.
  *
  * @param distributionId - UUID of the Distribution the Post will own.
- * @returns UUID in the `4d000000-…` fixture family with the Distribution's id suffix.
+ * @returns UUID in the fixture-owned `4da00000-…` family, separate from seeded Posts.
  */
 function postIdForDistribution(distributionId: string): string {
-  return `4d000000-0000-4000-8000-${distributionId.slice(24)}`;
+  return `4da00000-0000-4000-8000-${distributionId.slice(24)}`;
 }
 
 /**
@@ -1366,6 +1384,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
          WHERE status NOT IN ('published', 'cancelled')`,
       );
       baselineDistributionIds = baseline.rows.map((row) => row.id);
+      const outbox = await client.query<{ id: string }>("SELECT id FROM outbox_events");
+      baselineOutboxIds = outbox.rows.map((row) => row.id);
       const usage = await client.query<{
         api_calls: string;
         distributions: string;
@@ -7739,10 +7759,12 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         });
         const events = await client.query<{ count: string }>(
           `SELECT COUNT(*)::text AS count FROM outbox_events
-           WHERE aggregate_id = $1`,
+           WHERE aggregate_id = $1 AND topic = 'distribution.reconcile.requested'`,
           [distributionId],
         );
-        // No further reconcile trigger is armed once the budget is spent.
+        // No further reconcile trigger is armed once the budget is spent. The
+        // terminal failure may still enqueue an unrelated notification event
+        // for the same aggregate, so only the reconcile topic is asserted.
         expect(events.rows[0]?.count).toBe("0");
       });
     } finally {

@@ -39,14 +39,18 @@ export function QueueTimezonePicker({
   onChange,
   onOpenChange,
   disabled,
+  label,
 }: {
   value: string;
   onChange: (zone: string) => void;
   /** Lets the owning dialog keep Escape scoped to the panel while it is open. */
   onOpenChange?: (open: boolean) => void;
   disabled: boolean;
+  /** Field label; defaults to the Queue configuration label. */
+  label?: string;
 }) {
   const { t } = useI18n();
+  const fieldLabel = label ?? t("Queue timezone");
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -95,13 +99,13 @@ export function QueueTimezonePicker({
   }
   return (
     <div className="grid min-w-0 gap-1.5">
-      <span className="text-sm">{t("Queue timezone")}</span>
+      <span className="text-sm">{fieldLabel}</span>
       <Button
         ref={triggerRef}
         type="button"
         variant="outline"
         disabled={disabled}
-        aria-label={`${t("Queue timezone")}: ${value}`}
+        aria-label={`${fieldLabel}: ${value}`}
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         className="min-w-0 justify-between font-normal"
@@ -143,7 +147,7 @@ export function QueueTimezonePicker({
           </div>
           <ListBox
             ref={listRef}
-            aria-label={t("Queue timezone")}
+            aria-label={fieldLabel}
             selectionMode="single"
             selectedKeys={[value]}
             items={matches}

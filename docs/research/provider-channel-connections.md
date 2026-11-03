@@ -150,10 +150,13 @@ personal or Brand Account. [Google's channel ownership guide](https://support.go
 explains how one Google account can manage separate Brand Accounts.
 
 The adapter requests offline access, account selection and consent, PKCE S256,
-upload and read-only scopes, requires a refresh token at initial connection, and preserves
-it when a refresh response omits a replacement. Deployment still needs its own
-Google consent-screen access, registered exact redirect URI and permitted test
-users or production verification. App configuration is not proven by fixtures.
+upload/read-only/analytics scopes, and `youtube.force-ssl` for the separate Live
+stream/broadcast/bind workflow. Existing grants must reconnect for Live consent.
+The legacy `YOUTUBE_SHORTS_CLIENT_ID`/`YOUTUBE_SHORTS_CLIENT_SECRET` binding names
+identify the same Google app for ordinary videos, Shorts, and Live; they do not
+restrict upload shape. Deployment still needs Google consent-screen access,
+the exact redirect URI, and live-channel eligibility. Fixtures prove neither
+app approval nor a real encoder stream.
 
 [Google's web-server OAuth contract](https://developers.google.com/identity/protocols/oauth2/web-server#incrementalAuth)
 allows incremental authorization to combine grants made by other clients of the

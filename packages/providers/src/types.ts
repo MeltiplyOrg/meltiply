@@ -1,4 +1,6 @@
-import type { PlatformCapability } from "@meltiply/contracts";
+import type { components, PlatformCapability } from "@meltiply/contracts";
+import type { ThreadsPublishOptions } from "./threads-options";
+import type { InstagramContentOptions } from "./instagram-content";
 
 import type { RateLimitBudget } from "./rate-limit";
 
@@ -40,7 +42,10 @@ export interface ProviderFailure {
 export type ProviderOperationResult =
   | {
       metadata?: ProviderOperationMetadata;
+      /** Terminal remote handoff, not a published Post (native draft/inbox/experiment). */
+      delivery?: "draft" | "inbox" | "experiment" | "broadcast";
       outcome: "confirmed_success";
+      warnings?: components["schemas"]["Distribution"]["provider_warnings"];
       providerOperationId?: string;
       providerPostId?: string;
       providerUrl?: string;
@@ -68,6 +73,10 @@ export type ProviderPublicationStatus = (
       metadata?: ProviderOperationMetadata;
       result: Extract<ProviderOperationResult, { outcome: "confirmed_success" }>;
       state: "published";
+    }
+  | {
+      result: Extract<ProviderOperationResult, { outcome: "confirmed_success" }>;
+      state: "delivered";
     }
   | {
       result: Extract<ProviderOperationResult, { outcome: "confirmed_failure" }>;
@@ -126,14 +135,33 @@ export type TikTokPrivacyLevel =
   | "SELF_ONLY";
 
 export interface TikTokPublishOptions {
+  postMode?: "direct" | "inbox";
   allowComment: boolean;
   allowDuet: boolean;
   allowStitch: boolean;
+  autoAddMusic?: boolean;
   brandContent: boolean;
   brandOrganic: boolean;
   isAiGenerated: boolean;
   musicUsageConfirmed: true;
-  privacyLevel: TikTokPrivacyLevel;
+  privacyLevel?: TikTokPrivacyLevel;
+}
+
+export type InstagramPostType = "feed" | "reel" | "story";
+
+export type InstagramTrialGraduation = "manual" | "performance";
+
+/**
+ * Creator-selected Instagram publication shape. `postType` defaults to `feed`
+ * for images and `reel` for videos; `trialReel` is valid only for a single
+ * video Reel and asks Instagram to test it with non-followers first.
+ */
+export interface InstagramPublishOptions {
+  content?: InstagramContentOptions;
+  mediaOptions?: InstagramContentOptions[];
+  postType?: InstagramPostType;
+  trialGraduation?: InstagramTrialGraduation;
+  trialReel?: boolean;
 }
 
 export type YouTubePrivacyStatus = "public" | "unlisted" | "private";
@@ -144,11 +172,67 @@ export type YouTubePrivacyStatus = "public" | "unlisted" | "private";
  * adapter applies the established public default when it is omitted.
  */
 export interface YouTubePublishOptions {
+  postType?: "video" | "live";
   madeForKids: boolean;
   privacyStatus?: YouTubePrivacyStatus;
 }
 
+export type FacebookPostType =
+  | "feed"
+  | "video"
+  | "reel"
+  | "story"
+  | "slideshow"
+  | "crosspost"
+  | "ab_test"
+  | "live";
+
+/** A link carousel card; Meta requires a public preview image for each card. */
+export interface FacebookLinkCard {
+  link: string;
+  picture: string;
+  name?: string;
+  description?: string;
+}
+
+export type FacebookOptimizationGoal =
+  | "AVG_TIME_WATCHED"
+  | "COMMENTS"
+  | "IMPRESSIONS"
+  | "IMPRESSIONS_UNIQUE"
+  | "LINK_CLICKS"
+  | "REACTIONS"
+  | "REELS_PLAYS"
+  | "SHARES"
+  | "VIDEO_VIEWS_60S";
+
+/** Saved experiment intent; drafts may retain unanswered required choices. */
+export interface FacebookABTestOptions {
+  name?: string;
+  controlVideoId?: string;
+  experimentVideoIds?: string[];
+  optimizationGoal?: FacebookOptimizationGoal;
+  durationSeconds?: number;
+}
+
+/**
+ * Page publication intent. Omitted type uses a Reel for one video and a feed
+ * post otherwise. Links and link carousels apply only to media-free feed
+ * posts. Live broadcasts use an external encoder rather than Asset uploads.
+ */
+export interface FacebookPublishOptions {
+  postType?: FacebookPostType;
+  deliveryMode?: "publish" | "draft";
+  link?: string;
+  linkCards?: FacebookLinkCard[];
+  crosspostedVideoId?: string;
+  abTest?: FacebookABTestOptions;
+}
+
 export interface ProviderPublishOptions {
+  facebook?: FacebookPublishOptions;
+  threads?: ThreadsPublishOptions;
+  instagram?: InstagramPublishOptions;
   tiktok?: TikTokPublishOptions;
   youtube?: YouTubePublishOptions;
 }
@@ -253,6 +337,18 @@ export interface ProviderTokenSet {
   scopes: string[];
 }
 
+/**
+ * Encoder credentials read on demand for an authorized content writer.
+ * Never persist in publication IDs, shared read models, analytics, or logs.
+ */
+export interface ProviderBroadcastInfo {
+  state: "ready" | "testing" | "live" | "ended";
+  ingestUrl?: string;
+  streamKey?: string;
+  providerUrl?: string;
+  providerPostId?: string;
+}
+
 export interface ProviderRetryPolicy {
   baseDelaySeconds: number;
   maxAttempts: number;
@@ -292,6 +388,16 @@ export type OAuthExchangeResult = OAuthConnection | OAuthAccountSelection;
  * construction, capability inspection, and injected boundary fakes.
  */
 export interface ProviderAdapter {
+  getBroadcastInfo?(
+    context: ProviderRequestContext,
+    credentials: ProviderCredentials,
+    lookup: ProviderPublicationLookup,
+  ): Promise<ProviderBroadcastInfo>;
+  endBroadcast?(
+    context: ProviderRequestContext,
+    credentials: ProviderCredentials,
+    lookup: ProviderPublicationLookup,
+  ): Promise<ProviderOperationResult>;
   authorizationUrl?(input: OAuthAuthorizationInput): string;
   extractRateLimitBudget?(headers: Headers): RateLimitBudget | null;
   cancelPublication?(

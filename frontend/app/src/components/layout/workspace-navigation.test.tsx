@@ -33,6 +33,11 @@ vi.mock("@/context/workspace.context", () => ({
   useWorkspace: () => mocks.workspace,
 }));
 
+vi.mock("@/context/publishing-timezone.context", () => ({
+  PublishingTimeZoneProvider: ({ children }: { children: React.ReactNode }) => children,
+  usePublishingTimeZone: () => "UTC",
+}));
+
 vi.mock("@/lib/theme", () => ({
   useTheme: () => ({ requestedTheme: "light", setTheme: mocks.setTheme }),
 }));

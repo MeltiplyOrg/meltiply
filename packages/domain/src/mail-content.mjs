@@ -49,6 +49,31 @@ export function isMailSenderName(value) {
 }
 
 /**
+ * Resolves the configured sender identity for both Worker mail paths.
+ *
+ * `MAIL_FROM_ADDRESS` must be a bare dot-atom address; malformed values yield
+ * undefined so delivery fails closed as unavailable rather than dispatching an
+ * invalid sender. `MAIL_FROM_NAME` is optional; a nonblank unsafe name also
+ * fails closed instead of silently dropping it, and a blank name is omitted.
+ * @param {{ MAIL_FROM_ADDRESS?: string, MAIL_FROM_NAME?: string }} env - Worker variables.
+ * @returns {{ email: string, name?: string } | undefined} The validated sender, or undefined.
+ */
+export function mailSenderConfiguration(env) {
+  const email = env.MAIL_FROM_ADDRESS?.trim();
+  if (email === undefined || !isMailSenderAddress(email)) {
+    return undefined;
+  }
+  const name = env.MAIL_FROM_NAME?.trim();
+  if (name !== undefined && name.length > 0) {
+    if (!isMailSenderName(name)) {
+      return undefined;
+    }
+    return { email, name };
+  }
+  return { email };
+}
+
+/**
  * Escapes raw mail-template text once for HTML content and quoted attributes.
  * Replaces &, <, >, and both quotes in one pass; existing entities are raw input
  * too, so `&amp;` becomes `&amp;amp;`. Plain-text bodies must stay unescaped.

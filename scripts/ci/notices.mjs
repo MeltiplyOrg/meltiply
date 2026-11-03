@@ -40,8 +40,8 @@ const LICENSE_FILE_PATTERNS = [
 /**
  * Copied or adapted interface code that is not represented by an installed npm
  * package. The generated dependency section already covers lucide-react; this
- * list keeps the copied geometry and the permission-only Gr8r adaptation visible
- * in every distributed notice bundle.
+ * list keeps the copied geometry and the Gr8r-derived adaptation visible in every
+ * distributed notice bundle.
  */
 const COPIED_INTERFACE_NOTICES = [
   {
@@ -64,8 +64,8 @@ const COPIED_INTERFACE_NOTICES = [
   },
   {
     name: "Gr8r Studio",
-    license: "Used with written permission",
-    note: "The workspace layout and component styling adapt Gr8r Studio revision 904205c626918ee96054eb35495c394a60c0c601. The upstream repository publishes no general license; Meltiply's repository owner obtained permission for this reuse. That permission is limited to Meltiply and does not grant rights to third parties.",
+    license: "Used with written permission; redistributable under this project's license",
+    note: "The workspace layout and component styling adapt Gr8r Studio revision 904205c626918ee96054eb35495c394a60c0c601. The upstream repository publishes no general license. Meltiply's repository owner obtained Gr8r Studio's written permission to reuse that source and to sublicense the adapted material under the GNU Affero General Public License, so redistributors receive it under the same terms as the rest of this project.",
     licenseFile: null,
   },
 ];
@@ -198,11 +198,13 @@ function projectLicenseSection() {
   return [
     "=".repeat(80),
     "Meltiply",
-    "License: Sustainable Use License 1.0",
+    "License: GNU Affero General Public License v3.0 or later",
     "-".repeat(80),
-    "Original Meltiply code and branding are source-available under the Sustainable",
-    "Use License 1.0. The license permits personal/non-commercial and internal",
-    "business use; it does not grant a right to sell or provide hosted Meltiply.",
+    "Original Meltiply code and branding are licensed under the GNU Affero General",
+    "Public License, version 3 or (at your option) any later version. You may run,",
+    "modify, and redistribute the software, including commercially. Section 13",
+    "requires a network-service operator running a modified version to offer its",
+    "Corresponding Source to that service's users.",
     "The third-party notices below do not relicense Meltiply material.",
     "",
     normalizeText(readFileSync(projectLicensePath, "utf8")),

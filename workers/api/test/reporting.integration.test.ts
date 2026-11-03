@@ -205,26 +205,19 @@ async function resetReportingState() {
   // Reporting is the only writer of these actions in this suite, so clearing
   // them keeps the audit count assertion scoped to the current test.
   await database.query("DELETE FROM workspace_audit_entries WHERE action LIKE 'reporting.%'");
-  // The flip runs in one transaction so the intermediate "no owner" state is
-  // never visible to another session. The two statements must stay ordered: the
-  // partial unique index is checked per row and is not deferrable, so clearing
-  // first is what keeps the second statement legal. Leaving the window observable
-  // would let actor resolution promote whichever account it was resolving into
-  // the vacancy, turning a concurrent suite's Viewer into the Owner.
-  const client = await database.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query("UPDATE users SET installation_owner = FALSE WHERE installation_owner");
-    await client.query("UPDATE users SET installation_owner = TRUE WHERE email = $1", [
-      "alpha@meltiply.local",
-    ]);
-    await client.query("COMMIT");
-  } catch (cause) {
-    await client.query("ROLLBACK");
-    throw cause;
-  } finally {
-    client.release();
-  }
+  // Handing ownership to another account is deliberately exercised below, and
+  // actor resolution promotes the current Owner to Workspace Admin. That write
+  // outlives the ownership flip, so the canonical roles are restored here —
+  // otherwise a later suite in the same run sees the Viewer as an Admin.
+  await database.query(
+    `UPDATE org_members SET role = 'viewer', updated_at = now()
+     WHERE org_id = $1 AND user_id = $2`,
+    [workspaceId, viewerUserId],
+  );
+  await database.query("UPDATE users SET installation_owner = FALSE WHERE installation_owner");
+  await database.query("UPDATE users SET installation_owner = TRUE WHERE email = $1", [
+    "alpha@meltiply.local",
+  ]);
 }
 
 /** Builds the production reporting service for the current bindings. */
@@ -428,6 +421,8 @@ describe("reporting policy over real HTTP", () => {
 
     expect((await setPreferences(true, true, "owner")).status).toBe(403);
     expect((await setPreferences(true, true, "viewer")).status).toBe(200);
+    // `afterEach` restores the canonical Owner and the membership roles this
+    // case changed, so the next suite never inherits a promoted Viewer.
   });
 
   it("replays an idempotent preference change without a second audit entry", async () => {

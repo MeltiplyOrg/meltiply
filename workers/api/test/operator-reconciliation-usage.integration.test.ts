@@ -72,8 +72,11 @@ async function seedDomain(): Promise<void> {
   await database.query("DELETE FROM brand_profiles WHERE id = $1", [profileId]);
   await database.query("DELETE FROM organizations WHERE id = $1", [organizationId]);
 
+  // Not a shared Workspace: the canonical installation already owns that
+  // singleton, and this suite drives the operator service directly rather than
+  // through actor resolution, so it needs an ordinary tenant of its own.
   await database.query(
-    `INSERT INTO organizations (id, name, slug, is_shared) VALUES ($1, 'Ops Usage', 'ops-usage', TRUE)`,
+    `INSERT INTO organizations (id, name, slug, is_shared) VALUES ($1, 'Ops Usage', 'ops-usage', FALSE)`,
     [organizationId],
   );
   await database.query(

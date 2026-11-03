@@ -135,16 +135,6 @@ function sameOrigin(request: Request, url: URL): boolean {
   return request.headers.get("Origin") === url.origin;
 }
 
-/** Approved diagnostic class for one sanitized telemetry payload. */
-function diagnosticCategoryFor(payload: TelemetryPayload): string {
-  return payload.kind === "frontend-error" ? "client_exception" : "request_failure";
-}
-
-/** Approved operation grouping for one telemetry field tag. */
-function operationForField(field: string | undefined): string {
-  return (field && operationByField[field]) ?? "other";
-}
-
 /**
  * Forwards one sanitized client failure to the API's consent-gated diagnostics route.
  *
@@ -190,11 +180,12 @@ function relayAuthenticatedDiagnostic(
   if (!authorization || !/^Bearer \S+$/.test(authorization)) return;
   const stack =
     typeof payload.stack === "string" ? payload.stack.slice(0, maximumRelayStackCharacters) : "";
+  const field = safeField(payload.field);
   const body = JSON.stringify({
-    category: diagnosticCategoryFor(payload),
+    category: "client_exception",
     ...(stack ? { error_stack: stack } : {}),
     error_name: safeField(payload.valueType) ?? "Error",
-    operation: operationForField(safeField(payload.field)),
+    operation: (field && operationByField[field]) ?? "other",
   });
   const work = (async () => {
     try {

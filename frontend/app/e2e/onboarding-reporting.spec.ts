@@ -12,6 +12,8 @@ const adminDatabaseUrl =
   process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
   "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
 const egressUrl = process.env.MELTIPLY_E2E_EGRESS_URL?.trim() || "http://127.0.0.1:9787";
+/** Origin of the API Worker the acceptance stack exposes to the browser. */
+const apiOrigin = process.env.MELTIPLY_E2E_API_BASE_URL?.trim() || "http://127.0.0.1:8787";
 const databaseHelper = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "support/onboarding-db.mjs",
@@ -78,6 +80,27 @@ function runInstallationFixture(action: "resume" | "complete"): void {
   execFileSync(process.execPath, [databaseHelper, adminDatabaseUrl, action], {
     stdio: "inherit",
   });
+}
+
+/**
+ * Runs the Automation Worker's daily scheduled pass through the acceptance
+ * trigger.
+ *
+ * Reporting delivery is a scheduled responsibility: a feedback or diagnostic
+ * write only enqueues a row, and the daily unit is what claims and sends it.
+ * The acceptance entry exposes the same production scheduled handler, so this
+ * advances the real lifecycle instead of waiting on a clock the suite cannot
+ * move.
+ *
+ * @returns Nothing; a non-204 response fails the journey.
+ */
+async function runScheduledDelivery(): Promise<void> {
+  const response = await fetch(`${apiOrigin}/__test__/automation/scheduled?cron=0 0 * * *`, {
+    method: "POST",
+  });
+  if (response.status !== 204) {
+    throw new Error(`scheduled reporting delivery failed: ${response.status}`);
+  }
 }
 
 /**
@@ -166,6 +189,8 @@ test("resumes optional onboarding, keeps reporting off unless chosen, and withdr
 
     await page.getByRole("button", { name: "Share feedback", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "Queued to send" })).toBeVisible();
+    // The share is durable but unsent until the reporting queue drains.
+    await runScheduledDelivery();
     const feedback = await waitForEvent(receiver.events, "meltiply_feedback_discovery_source");
     expect(feedback, "the explicit share must reach the reporting destination").not.toBeNull();
     expect(feedback?.body.properties).toMatchObject({ discovery_source: "github" });

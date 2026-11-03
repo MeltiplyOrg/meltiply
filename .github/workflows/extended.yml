@@ -457,6 +457,28 @@ jobs:
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
           bun run --cwd frontend/app test:e2e e2e/workspace-design.spec.ts --project workspace \
             --grep "keeps navigation focus and reconnect assignment correct" --trace on
+      - name: Exercise first-run setup and opt-in reporting
+        if: inputs.lane == 'cloudflare-full'
+        env:
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+          MELTIPLY_E2E_ACCEPTANCE: "1"
+          # Controlled loopback receiver the journey starts itself; the
+          # acceptance configs point both Workers at the same origin.
+          MELTIPLY_E2E_EGRESS_URL: http://127.0.0.1:9787
+        run: |
+          bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+          status=0
+          # The journey resumes optional onboarding for the seeded Owner, so it
+          # needs the deterministic seed from the reset above, not an empty
+          # installation. It disables screenshots and traces itself because it
+          # types a password and a session credential; assertions are its
+          # evidence, and this step must not add capture flags back.
+          bun run --cwd frontend/app test:e2e e2e/onboarding-reporting.spec.ts \
+            --project onboarding --trace off --retries 0 || status=1
+          # Nothing from this journey is published: no screenshot, trace, or
+          # captured report body may leave the runner.
+          rm -rf frontend/app/test-results/onboarding-reporting*
+          exit "$status"
       - uses: actions/setup-go@v6
         if: inputs.lane == 'object-storage'
         with:

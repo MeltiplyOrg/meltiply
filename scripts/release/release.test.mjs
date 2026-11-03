@@ -317,6 +317,98 @@ test("IaC outputs must be non-sensitive, staging-scoped, and internally consiste
   );
 });
 
+test("optional improvement reporting renders only a complete destination", () => {
+  const plain = validateReleaseSpec(releaseInput());
+  assert.equal(plain.runtime.reporting_forced_off, false);
+  assert.equal(plain.runtime.reporting_posthog_host, undefined);
+
+  const configured = validateReleaseSpec({
+    ...releaseInput(),
+    runtime: {
+      ...releaseInput().runtime,
+      reporting_posthog_project_token: "phc_maintainer000000000000",
+      reporting_posthog_host: "https://us.i.posthog.com/",
+    },
+  });
+  assert.equal(configured.runtime.reporting_posthog_host, "https://us.i.posthog.com");
+  assert.equal(configured.runtime.reporting_posthog_project_token, "phc_maintainer000000000000");
+
+  // A destination is never half-configured: the token authorizes ingestion for
+  // the matching origin, so shipping one without the other would silently
+  // disable reporting while looking configured.
+  assert.throws(
+    () =>
+      validateReleaseSpec({
+        ...releaseInput(),
+        runtime: {
+          ...releaseInput().runtime,
+          reporting_posthog_project_token: "phc_maintainer000000000000",
+        },
+      }),
+    /must be set together/,
+  );
+  assert.throws(
+    () =>
+      validateReleaseSpec({
+        ...releaseInput(),
+        runtime: { ...releaseInput().runtime, reporting_posthog_host: "https://us.i.posthog.com" },
+      }),
+    /must be set together/,
+  );
+  assert.throws(
+    () =>
+      validateReleaseSpec({
+        ...releaseInput(),
+        runtime: {
+          ...releaseInput().runtime,
+          reporting_posthog_project_token: "personal-api-key",
+          reporting_posthog_host: "https://us.i.posthog.com",
+        },
+      }),
+    /reporting_posthog_project_token is invalid/,
+  );
+
+  const iac = validateIacOutputs(iacOutput(), validateReleaseSpec(releaseInput()));
+  const withoutDestination = renderWranglerConfigs(
+    {
+      api: { name: "meltiply-api" },
+      automation: { name: "meltiply-automation", queues: { producers: [] } },
+      state: { name: "meltiply-state" },
+    },
+    plain,
+    iac,
+  );
+  for (const worker of [withoutDestination.api, withoutDestination.automation]) {
+    assert.equal(worker.vars.DEPLOYMENT_CATEGORY, "managed");
+    assert.equal(worker.vars.REPORTING_FORCED_OFF, "false");
+    assert.ok(!("REPORTING_POSTHOG_PROJECT_TOKEN" in worker.vars));
+    assert.ok(!("REPORTING_POSTHOG_HOST" in worker.vars));
+  }
+
+  const withDestination = renderWranglerConfigs(
+    {
+      api: { name: "meltiply-api" },
+      automation: { name: "meltiply-automation", queues: { producers: [] } },
+      state: { name: "meltiply-state" },
+    },
+    validateReleaseSpec({
+      ...releaseInput(),
+      runtime: {
+        ...releaseInput().runtime,
+        reporting_posthog_project_token: "phc_maintainer000000000000",
+        reporting_posthog_host: "https://eu.i.posthog.com",
+        reporting_forced_off: true,
+      },
+    }),
+    iac,
+  );
+  for (const worker of [withDestination.api, withDestination.automation]) {
+    assert.equal(worker.vars.REPORTING_POSTHOG_HOST, "https://eu.i.posthog.com");
+    assert.equal(worker.vars.REPORTING_POSTHOG_PROJECT_TOKEN, "phc_maintainer000000000000");
+    assert.equal(worker.vars.REPORTING_FORCED_OFF, "true");
+  }
+});
+
 test("rendering replaces placeholders with reviewed non-secret bindings", () => {
   const spec = validateReleaseSpec(releaseInput());
   const iac = validateIacOutputs(iacOutput(), spec);

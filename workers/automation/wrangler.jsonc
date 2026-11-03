@@ -32,6 +32,10 @@
     "INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED": "false",
     "INSTAGRAM_LIVE_ACCEPTED": "false",
     "APP_URL": "https://staging.meltiply.com",
+    // Optional improvement reporting, rendered the same way for API and
+    // Automation: absent destination means both categories stay off.
+    "DEPLOYMENT_CATEGORY": "managed",
+    "REPORTING_FORCED_OFF": "false",
     "TIKTOK_LIVE_ACCEPTED": "false",
     "THREADS_ENGAGEMENT_LIVE_ACCEPTED": "false",
     "THREADS_LIVE_ACCEPTED": "false",

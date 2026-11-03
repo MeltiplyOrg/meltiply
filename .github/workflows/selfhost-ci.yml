@@ -46,7 +46,15 @@ jobs:
           file: ${{ matrix.image.file }}
           target: ${{ matrix.image.target }}
           platforms: linux/${{ matrix.platform.arch }}
-          build-args: PROCESSOR_PLATFORM=linux/${{ matrix.platform.arch }}
+          # The runtime image bakes the maintainer's improvement-reporting
+          # destination so a self-hoster needs no PostHog account. Both values
+          # are publishable configuration in repository variables, not secrets;
+          # when they are unset the image ships no destination and both
+          # reporting categories stay off instead of failing the build.
+          build-args: |
+            PROCESSOR_PLATFORM=linux/${{ matrix.platform.arch }}
+            REPORTING_POSTHOG_PROJECT_TOKEN=${{ vars.REPORTING_POSTHOG_PROJECT_TOKEN }}
+            REPORTING_POSTHOG_HOST=${{ vars.REPORTING_POSTHOG_HOST }}
           push: false
           outputs: type=docker,dest=${{ runner.temp }}/selfhost-${{ matrix.image.component }}-${{ matrix.platform.arch }}.tar
           tags: ${{ env.SELFHOST_IMAGE_PREFIX }}-${{ matrix.image.component }}:ci

@@ -125,6 +125,11 @@ fixtures:
     members_active: 3
     invitations_pending: 1
     workspace: *workspace
+  onboarding_progress: &onboarding_progress
+    status: in_progress
+    workspace_name: Alpha Studio
+    workspace_named: true
+    completed_at: null
   reporting_category_off: &reporting_category_off
     requested: false
     effective: false
@@ -825,6 +830,47 @@ operations:
         body: *forbidden_error
       - status: 409
         body: *invalid_state_error
+  getOnboarding:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: *onboarding_progress
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+  saveOnboarding:
+    headers: *bearer_authorization
+    request:
+      workspace_name: Alpha Studio
+    success:
+      status: 200
+      body: *onboarding_progress
+    errors:
+      - status: 400
+        body: *validation_error
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 409
+        body: *invalid_state_error
+  completeOnboarding:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        <<: *onboarding_progress
+        status: completed
+        completed_at: 2026-01-01T00:10:00Z
+    errors:
+      - status: 400
+        body: *invalid_request_error
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
   getReportingPolicy:
     headers: *bearer_authorization
     success:

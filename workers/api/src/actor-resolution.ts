@@ -175,6 +175,12 @@ function ensureInternalUser(
  * idempotent through `one_shared_workspace`. The Owner always holds the Admin
  * membership in that Workspace.
  *
+ * A chosen setup Workspace name recorded by the serialized first sign-up is
+ * applied here, once: the insert uses it, the onboarding row records that the
+ * name is settled, and a later Settings rename is therefore never overwritten.
+ * Without a chosen name the historical `<display name>'s workspace` default
+ * stands and the onboarding row keeps `workspace_named = FALSE`.
+ *
  * @param client - Active system EffectTransactionClient.
  * @param user - Internal user row being resolved.
  * @returns Effect resolving void after ownership and workspace rows exist.
@@ -192,6 +198,11 @@ function ensureInstallation(
       [user.id],
     );
 
+    const chosen = yield* client.query<{ workspace_name: string | null }>(
+      `SELECT workspace_name FROM installation_bootstrap WHERE auth_user_id = $1`,
+      [user.auth_user_id],
+    );
+    const chosenName = chosen.rows[0]?.workspace_name ?? null;
     const label = (user.display_name?.trim() || user.email.split("@")[0] || "Meltiply").slice(
       0,
       180,
@@ -201,7 +212,20 @@ function ensureInstallation(
        SELECT $1, $2, TRUE
        WHERE NOT EXISTS (SELECT 1 FROM organizations WHERE is_shared)
        ON CONFLICT DO NOTHING`,
-      [`${label}'s workspace`, `workspace-${user.id.replaceAll("-", "")}`],
+      [chosenName ?? `${label}'s workspace`, `workspace-${user.id.replaceAll("-", "")}`],
+    );
+    // A concurrent first sign-in may have won the Workspace insert with the
+    // derived default. Apply the chosen name while no onboarding progress
+    // exists yet, which is the only window where the name is still unsettled;
+    // after that a rename belongs to Settings and is never overwritten here.
+    yield* client.query(
+      `UPDATE organizations o
+       SET name = $1, updated_at = now()
+       WHERE o.is_shared
+         AND $1::text IS NOT NULL
+         AND o.name IS DISTINCT FROM $1
+         AND NOT EXISTS (SELECT 1 FROM installation_onboarding ob WHERE ob.org_id = o.id)`,
+      [chosenName],
     );
 
     yield* client.query(
@@ -219,6 +243,20 @@ function ensureInstallation(
       `INSERT INTO usage_reconciliation_state (org_id)
        SELECT id FROM organizations WHERE is_shared
        ON CONFLICT (org_id) DO NOTHING`,
+    );
+    // The bootstrapped Owner gets a progress row so the wizard can resume
+    // across verification, sign-in, and browser restarts. Members never do.
+    yield* client.query(
+      `INSERT INTO installation_onboarding (org_id, workspace_name, workspace_named)
+       SELECT o.id, $2::text, $2::text IS NOT NULL
+       FROM organizations o
+       JOIN users u ON u.id = $1 AND u.installation_owner
+       WHERE o.is_shared
+       ON CONFLICT (org_id) DO UPDATE
+         SET workspace_name = COALESCE(installation_onboarding.workspace_name, EXCLUDED.workspace_name),
+             workspace_named = installation_onboarding.workspace_named OR EXCLUDED.workspace_named,
+             updated_at = now()`,
+      [user.id, chosenName],
     );
   });
 }

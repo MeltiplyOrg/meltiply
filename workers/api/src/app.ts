@@ -42,6 +42,7 @@ import {
   registerFlowRoutes,
 } from "./flow-observability";
 import { registerInstallationRoutes } from "./installation-routes";
+import { registerOnboardingRoutes } from "./onboarding";
 import { registerReportingRoutes, type ReportingRouteDependencies } from "./reporting-routes";
 import { registerOperatorRoutes, type OperatorRouteDependencies } from "./operator-routes";
 import { scheduleEagerOutboxRelay } from "./outbox-relay";
@@ -804,6 +805,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
 
   registerCoreRoutes(app, dependencies);
   registerInstallationRoutes(app);
+  registerOnboardingRoutes(app);
   registerReportingRoutes(app, {
     reportingServiceLayer: dependencies.reportingServiceLayer,
   });

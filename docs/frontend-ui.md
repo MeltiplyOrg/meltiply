@@ -22,6 +22,7 @@ are implementation truth; reference demo features are not product requirements.
 | Icon sizing/hover/animation loop                             | `frontend/shared/animated-icons/icon-motion-frame.tsx`, `use-icon-loop.ts` |
 | Theme, consent, clipboard, toast store, animation recipes    | Existing modules in `frontend/shared`                                      |
 | Navigation roster, jump search, Settings, collection state   | `frontend/app/src/components`, owning context/hooks                        |
+| First-run wizard and reporting disclosure                    | `components/onboarding`, `components/settings/reporting-disclosure.tsx`    |
 | Loading placeholders and boot frame                          | `layout/workspace-loading-skeleton.tsx`                                    |
 | Document and nested-container smooth scrolling               | `layout/smooth-scroll.tsx`                                                 |
 | Sidebar/Settings sign-out                                    | `hooks/use-workspace-sign-out.ts`                                          |

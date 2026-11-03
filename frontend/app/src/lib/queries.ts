@@ -33,6 +33,7 @@ import type {
   CalendarEvent,
   CreateBrandProfileInput,
   CreatePostInput,
+  DiscoverySource,
   DistributionQueryParams,
   OAuthSelectionConfirmRequest,
   Platform,
@@ -99,6 +100,9 @@ export const queryKeys = {
   installation: () => ["installation"] as const,
   workspaceMembers: () => ["workspace-members"] as const,
   workspaceInvitations: () => ["workspace-invitations"] as const,
+  onboarding: () => ["onboarding"] as const,
+  reportingPolicy: () => ["reporting-policy"] as const,
+  reportingFeedback: () => ["reporting-feedback"] as const,
   workspaceAudit: (params?: AuditQueryParams) =>
     params === undefined
       ? (["workspace-audit"] as const)
@@ -1774,4 +1778,122 @@ export function useInvitationPreview(token: string | null) {
       ),
     enabled: token !== null && token.length >= 16,
   });
+}
+
+/**
+ * Reads the current Installation Owner's resumable onboarding progress.
+ *
+ * The API answers `not_applicable` for upgraded installations and refuses
+ * members outright, so the wizard gate never invents a journey for an upgraded
+ * installation or an invited teammate.
+ *
+ * @param scope Session scope gating execution.
+ * @param enabled Whether the query may run (signed in, and the caller is Owner).
+ * @returns Query result with the onboarding progress.
+ */
+export function useOnboarding(scope: SessionScope, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.onboarding(),
+    queryFn: ({ signal }) => runApiQuery(scope, (api) => api.getOnboarding(), signal),
+    enabled: scope.isSignedIn && enabled,
+  });
+}
+
+/**
+ * Applies a Workspace name chosen in a resumed journey. Repeating the same name
+ * is a no-op, and after completion the API refuses the write so Settings owns
+ * later renames.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting the chosen name.
+ */
+export function useSaveOnboarding(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, input: { workspaceName: string }, idempotencyKey) =>
+      api.saveOnboarding({ workspace_name: input.workspaceName }, { idempotencyKey }),
+    () => [queryKeys.onboarding(), queryKeys.currentUser(), queryKeys.installation()],
+  );
+}
+
+/**
+ * Completes onboarding once the Owner enters the Workspace, the first Channel
+ * flow, or the teammate invitation. Completion is idempotent and never renames
+ * the Workspace.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting no variables.
+ */
+export function useCompleteOnboarding(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, _input: Record<string, never>, idempotencyKey) =>
+      api.completeOnboarding({ idempotencyKey }),
+    () => [queryKeys.onboarding()],
+  );
+}
+
+/**
+ * Reads the installation improvement-reporting policy. Every active member may
+ * read it so the Owner's choice and its effective state stay visible.
+ *
+ * @param scope Session scope gating execution.
+ * @param enabled Whether the query may run.
+ * @returns Query result with the requested and effective policy.
+ */
+export function useReportingPolicy(scope: SessionScope, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.reportingPolicy(),
+    queryFn: ({ signal }) => runApiQuery(scope, (api) => api.getReportingPolicy(), signal),
+    enabled: scope.isSignedIn && enabled,
+  });
+}
+
+/**
+ * Replaces both reporting choices for the current Installation Owner. The
+ * response carries the effective state, so the surface can report a disabled
+ * destination or operator override honestly.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting the independent usage and diagnostics choices.
+ */
+export function useUpdateReportingPreferences(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, input: { diagnostics: boolean; usage: boolean }, idempotencyKey) =>
+      api.updateReportingPreferences(input, { idempotencyKey }),
+    () => [queryKeys.reportingPolicy()],
+  );
+}
+
+/**
+ * Reads the one-time discovery-source answer and its delivery state. Owner
+ * only, because the answer belongs to the installation.
+ *
+ * @param scope Session scope gating execution.
+ * @param enabled Whether the query may run.
+ * @returns Query result with the attribution state.
+ */
+export function useReportingFeedback(scope: SessionScope, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.reportingFeedback(),
+    queryFn: ({ signal }) => runApiQuery(scope, (api) => api.getReportingFeedback(), signal),
+    enabled: scope.isSignedIn && enabled,
+  });
+}
+
+/**
+ * Shares the fixed-enum discovery-source answer as a separate explicit action.
+ * It never changes either reporting switch.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting the fixed discovery-source value.
+ */
+export function useSubmitReportingFeedback(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, input: { discoverySource: DiscoverySource }, idempotencyKey) =>
+      api.submitReportingFeedback({ discovery_source: input.discoverySource }, { idempotencyKey }),
+    () => [queryKeys.reportingFeedback()],
+  );
 }

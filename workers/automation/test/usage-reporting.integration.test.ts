@@ -1,6 +1,6 @@
 import { createHyperdrivePool } from "@meltiply/database";
 import { Effect } from "effect";
-import { ProviderRegistry, type ProviderAdapter } from "@meltiply/providers";
+import { createThreadsAdapter, ProviderRegistry, type ProviderAdapter } from "@meltiply/providers";
 import {
   REPORTING_DISCLOSURE_VERSION,
   REPORTING_SCHEMA_VERSION,
@@ -114,11 +114,37 @@ const env: AutomationEnv = {
   VERSION: "1.0.0-target.0",
 };
 
-/** A registry whose Platforms declare analytics support, without any Provider I/O. */
+/**
+ * Zero-ambiguity contract of the real Threads adapter.
+ *
+ * Threads normalizes an absent insight to zero, so the canonical adapter
+ * declares those metrics ambiguous. The fake has to state the same contract, or
+ * it would be asserting that Threads zeros are trustworthy. The adapter is
+ * constructed only for its metadata: it performs no request until an operation
+ * is invoked, and the producer below must never invoke one.
+ *
+ * @returns The metric names the canonical adapter cannot distinguish from zero.
+ */
+function canonicalThreadsAmbiguousZeroMetrics(): readonly string[] {
+  return (
+    createThreadsAdapter({
+      clientId: "usage-reporting-test-client",
+      clientSecret: "usage-reporting-test-secret",
+      redirectUri: "https://example.test/api/v1/platforms/threads/callback",
+    }).ambiguousZeroMetrics ?? []
+  );
+}
+
 function registryWithAnalytics(platforms: Array<"threads" | "youtube">): ProviderRegistry {
   const registry = new ProviderRegistry();
   for (const platform of platforms) {
     registry.register(platform, {
+      // Declared for every fake, from the canonical adapter when one exists.
+      // An adapter that returns zeros for absent insights must say so, because
+      // the producer treats them as unknown rather than as measured zeroes.
+      ...(platform === "threads"
+        ? { ambiguousZeroMetrics: canonicalThreadsAmbiguousZeroMetrics() }
+        : {}),
       capability: {
         accepted_mime_types: [],
         analytics: true,
@@ -1139,9 +1165,10 @@ describe("daily usage producer with PostgreSQL", () => {
   it("omits a metric one mixed-cohort contributor could not establish", async () => {
     await seedConsent({ intervalStartedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1_000) });
     const secondDistributionId = "7e000000-0000-4000-8000-00000000000b";
-    // Two published Threads Distributions form one Platform cohort. One carries a
-    // decisive snapshot; the other carries the adapter's ambiguous all-zero shape,
-    // which cannot be told apart from an absent insight.
+    // Two published Threads Distributions form one Platform cohort, so both
+    // reach `published` through the real publish path — a fixture that only
+    // flipped a column would not be the cohort the producer selects.
+    await publish("threads", "usage-mixed-cohort-first", threadsDistributionId);
     await runSystemTransaction(env, async (client) => {
       await client.query(
         `INSERT INTO distributions

@@ -7,6 +7,8 @@ import {
   javascriptComponents,
 } from "../ci/supply-chain.mjs";
 
+const licensePathPattern = /^(LICENSE|license|LICENCE|licence|COPYING|licenses\/|LICENSES\/)/;
+
 const root = resolve(import.meta.dirname, "../..");
 const output = resolve(root, "dist/selfhost/notices");
 const policy = JSON.parse(readFileSync(join(root, "scripts/ci/allowed-licenses.json"), "utf8"));
@@ -60,7 +62,7 @@ function onPackage({ manifestPath, metadata, license }) {
     const target = join(destination, relative(directory, source));
     mkdirSync(dirname(target), { recursive: true });
     cpSync(source, target);
-    if (/^(LICENSE|license|LICENCE|licence|COPYING|licenses\/|LICENSES\/)/.test(path)) {
+    if (licensePathPattern.test(path)) {
       copiedLicense = true;
     }
   }

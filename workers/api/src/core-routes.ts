@@ -81,6 +81,13 @@ import { runRouteEffect } from "./effect/runtime";
 import { fromPromise } from "./effect/route";
 import type { OAuthConnectionOwner } from "./oauth-connection";
 
+const weakEtagPrefixPattern = /^W\//;
+const base64PaddingPattern = /=+$/;
+const base64UrlPattern = /^[A-Za-z0-9_-]+$/;
+const unsafeMediaKeyPattern = /[/\\\p{Cc}]/u;
+const expiryPattern = /^\d{1,15}$/;
+const deterministicDatabaseErrorPattern = /^(22|23)[0-9A-Z]{3}$/;
+
 type Schemas = components["schemas"];
 
 export interface CoreRouteDependencies {
@@ -176,7 +183,7 @@ function entityTagMatches(header: string | undefined, current: string): boolean 
   return (
     header?.split(",").some((candidate) => {
       const value = candidate.trim();
-      return value === "*" || value.replace(/^W\//, "") === current;
+      return value === "*" || value.replace(weakEtagPrefixPattern, "") === current;
     }) ?? false
   );
 }
@@ -538,7 +545,7 @@ function oauthCallbackUrl(env: ApiWorkerEnv, provider: Platform): string {
 function base64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(base64PaddingPattern, "");
 }
 
 /**
@@ -612,7 +619,7 @@ function providerMediaPayload(expiresAtSeconds: number, key: string): string {
  * @returns Decoded bytes, or undefined when the text is not well-formed Base64url.
  */
 function base64UrlDecode(value: string): Uint8Array | undefined {
-  if (!/^[A-Za-z0-9_-]+$/.test(value)) return undefined;
+  if (!base64UrlPattern.test(value)) return undefined;
   const base64 = value.replaceAll("-", "+").replaceAll("_", "/");
   try {
     const binary = atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4));
@@ -692,7 +699,7 @@ function providerMediaKey(pathname: string): string | undefined {
       segment === ".." ||
       // Decoded separators would let one segment smuggle extra path depth past the
       // split, and control characters can hide traversal in downstream tooling.
-      /[/\\\p{Cc}]/u.test(segment)
+      unsafeMediaKeyPattern.test(segment)
     ) {
       return undefined;
     }
@@ -1130,7 +1137,7 @@ export function registerCoreRoutes(
     const key = providerMediaKey(c.req.path);
     const expires = c.req.query("expires");
     const signature = c.req.query("signature");
-    const expiresAt = expires && /^\d{1,15}$/.test(expires) ? Number(expires) : NaN;
+    const expiresAt = expires && expiryPattern.test(expires) ? Number(expires) : NaN;
     if (
       !key ||
       !signature ||
@@ -1968,7 +1975,7 @@ export function registerCoreRoutes(
                 typeof databaseCause === "object" &&
                 "code" in databaseCause &&
                 typeof databaseCause.code === "string" &&
-                /^(22|23)[0-9A-Z]{3}$/.test(databaseCause.code);
+                deterministicDatabaseErrorPattern.test(databaseCause.code);
               if (failure instanceof CoreApiError || deterministicDatabaseFailure) {
                 yield* fromPromise(() =>
                   oauthStateStub(c.env, routingKey).releaseSelectionClaim(

@@ -15,7 +15,8 @@ export function resolvePreviewReference(value: unknown, document: PreviewObject)
   for (const segment of object.$ref.slice(2).split("/")) {
     if (target === null || typeof target !== "object" || Array.isArray(target))
       throw new Error(`Missing preview reference: ${object.$ref}`);
-    const next: PreviewValue | undefined = target[segment.replace(/~1/g, "/").replace(/~0/g, "~")];
+    const next: PreviewValue | undefined =
+      target[segment.replaceAll("~1", "/").replaceAll("~0", "~")];
     if (next === undefined) throw new Error(`Missing preview reference: ${object.$ref}`);
     target = next;
   }

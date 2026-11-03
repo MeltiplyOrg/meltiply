@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
-import { managedOwnerCookie } from "../../../frontend/app/e2e/cache-smoke.mjs";
-import { cacheSmoke } from "./cache-smoke.mjs";
+import { managedOwnerCookie } from "../../frontend/app/e2e/cache-smoke.mjs";
+import { cacheSmoke } from "../lib/cache-smoke.mjs";
 
 const origin = "http://127.0.0.1:8787";
 const frontendOrigin = "http://127.0.0.1:3000";
@@ -36,30 +36,6 @@ async function ready(url, child) {
   }
   throw new Error(`Runtime did not become ready: ${url}`);
 }
-/**
- * Samples only descendants of the process roots this fixture launched.
- * Detached Wrangler children remain descendants of their launcher; unrelated
- * workerd processes are never enumerated. A failed process probe blocks evidence.
- */
-function observeOwnedMemory() {
-  const pending = children.filter((child) => child.exitCode === null).map((child) => child.pid);
-  let bytes = 0;
-  while (pending.length > 0) {
-    const parent = pending.pop();
-    if (parent === undefined) continue;
-    const result = spawnSync("ps", ["--ppid", String(parent), "-o", "pid=,rss=,comm="], {
-      encoding: "utf8",
-    });
-    if (result.status === 1 && result.stdout.trim() === "") continue;
-    assert.equal(result.status, 0, "Fixture-owned process observation failed");
-    for (const line of result.stdout.trim().split("\n")) {
-      const [pid, rss, name] = line.trim().split(/\s+/);
-      pending.push(Number(pid));
-      if (name === "workerd") bytes += Number(rss) * 1024;
-    }
-  }
-  return { owned_workerd_rss_bytes: bytes };
-}
 try {
   await pool.query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements");
   const backend = start("bash", ["scripts/cloudflare-local/dev-backend.sh"], {
@@ -88,7 +64,6 @@ try {
     cookie,
     query: pool.query.bind(pool),
     label: "managed-local-workerd",
-    observeMemory: async () => observeOwnedMemory(),
   });
 } finally {
   for (const child of children) {

@@ -55,13 +55,15 @@ type PlatformCapability = Schemas["PlatformCapability"];
 type Post = Schemas["Post"];
 type PostStatus = Schemas["PostStatus"];
 
+const postQueueMembershipColumn = `(
+  SELECT jsonb_build_object('queue_id', membership.queue_id,
+           'queue_name', membership.queue_name, 'assigned_at', membership.assigned_at)
+  FROM publishing_queue_memberships membership
+  WHERE membership.post_id = posts.id AND membership.released_at IS NULL
+) AS queue_membership`;
 const postColumns = `
   id, org_id, brand_profile_id, title, default_text, status, revision,
-  created_at, updated_at,
-  (SELECT jsonb_build_object('queue_id', membership.queue_id,
-           'queue_name', membership.queue_name, 'assigned_at', membership.assigned_at)
-     FROM publishing_queue_memberships membership
-    WHERE membership.post_id = posts.id AND membership.released_at IS NULL) AS queue_membership`;
+  created_at, updated_at, ${postQueueMembershipColumn}`;
 
 /**
  * Columns selected for every attachment projection. `r2_key` no longer lives on
@@ -71,7 +73,7 @@ const postColumns = `
 const assetColumns = `
   asset.id, asset.org_id, asset.brand_profile_id, asset.uploaded_by,
   asset.asset_type, asset.title, asset.duration_sec, asset.file_size,
-  asset.mime_type, asset.width, asset.height, asset.original_filename,
+  asset.mime_type, asset.width, asset.height,
   asset.status, asset.failure_code, asset.failure_message,
   asset.failure_retryable, asset.failure_at, asset.created_at, asset.updated_at`;
 
@@ -79,7 +81,6 @@ interface PostRow extends Record<string, unknown> {
   brand_profile_id: string;
   created_at: Date | string;
   default_text: string;
-  deleted_at: Date | string | null;
   id: string;
   org_id: string;
   revision: number | string;
@@ -88,6 +89,11 @@ interface PostRow extends Record<string, unknown> {
   title: string;
   updated_at: Date | string;
 }
+
+type PostMutationRow = Pick<
+  PostRow,
+  "id" | "org_id" | "brand_profile_id" | "title" | "default_text" | "queue_membership"
+>;
 
 /**
  * One saved target row.
@@ -525,23 +531,35 @@ export function assembleSinglePostEffect(
  *
  * @param client - Active tenant transaction client.
  * @param postId - Post UUID being mutated.
- * @returns Effect resolving to the locked Post row.
+ * @param readModel - Select the response fields as well; defaults to mutation inputs only.
+ * @returns The locked mutation inputs, or the complete response row when requested.
  * @throws {CoreApiError} 404 `post_not_found` when the Post is missing, owned by another workspace, or deleted.
  */
 export function lockPostEffect(
   client: EffectTransactionClient,
   postId: string,
-): Effect.Effect<PostRow, CoreApiError | DatabaseError> {
+  readModel: true,
+): Effect.Effect<PostRow, CoreApiError | DatabaseError>;
+export function lockPostEffect(
+  client: EffectTransactionClient,
+  postId: string,
+  readModel?: false,
+): Effect.Effect<PostMutationRow, CoreApiError | DatabaseError>;
+export function lockPostEffect(
+  client: EffectTransactionClient,
+  postId: string,
+  readModel = false,
+): Effect.Effect<PostMutationRow, CoreApiError | DatabaseError> {
   return Effect.gen(function* () {
-    const result = yield* client.query<PostRow>(
-      `SELECT ${postColumns}, deleted_at
+    const result = yield* client.query<PostMutationRow>(
+      `SELECT ${readModel ? postColumns : `id, org_id, brand_profile_id, title, default_text, ${postQueueMembershipColumn}`}
          FROM posts
-        WHERE id = $1 AND org_id = public.auth_active_org_id()
+        WHERE id = $1 AND org_id = public.auth_active_org_id() AND deleted_at IS NULL
         FOR UPDATE`,
       [postId],
     );
     const row = result.rows[0];
-    if (!row || row.deleted_at !== null) {
+    if (!row) {
       return yield* Effect.fail(new CoreApiError(404, "post_not_found", "The post was not found."));
     }
     return row;
@@ -588,7 +606,10 @@ function lockPostAttachmentAssetsEffect(
  * @param brandProfileId - Brand Profile the request asserted.
  * @throws {CoreApiError} 422 `brand_profile_mismatch` when the profiles differ.
  */
-function requireMatchingBrandProfile(post: PostRow, brandProfileId: string): void {
+function requireMatchingBrandProfile(
+  post: Pick<PostRow, "brand_profile_id">,
+  brandProfileId: string,
+): void {
   if (post.brand_profile_id !== brandProfileId) {
     throw new CoreApiError(
       422,
@@ -617,7 +638,7 @@ function requireMatchingBrandProfile(post: PostRow, brandProfileId: string): voi
  * @param attachmentIds - Ordered, de-duplicated Asset identifiers being attached.
  * @param alsoLockIds - Additional Assets the same transaction will detach; they
  *   are locked but not revalidated because their ownership was proven when attached.
- * @returns Effect resolving to the locked asset rows in the requested order.
+ * @returns Effect resolving once the selected assets are locked and validated.
  * @throws {CoreApiError} 422 `validation_error` when the selection repeats an Asset.
  * @throws {CoreApiError} 404 `asset_not_found` when an Asset is missing or owned by another workspace.
  * @throws {CoreApiError} 422 `brand_profile_mismatch` when an Asset belongs to another Brand Profile.
@@ -628,7 +649,7 @@ function lockAttachmentAssetsEffect(
   brandProfileId: string,
   attachmentIds: readonly string[],
   alsoLockIds: readonly string[] = [],
-): Effect.Effect<AssetRow[], CoreApiError | DatabaseError> {
+): Effect.Effect<void, CoreApiError | DatabaseError> {
   return Effect.gen(function* () {
     if (new Set(attachmentIds).size !== attachmentIds.length) {
       return yield* Effect.fail(
@@ -636,9 +657,14 @@ function lockAttachmentAssetsEffect(
       );
     }
     const lockIds = [...new Set([...alsoLockIds, ...attachmentIds])].sort();
-    if (lockIds.length === 0) return [];
-    const locked = yield* client.query<AssetRow>(
-      `SELECT ${assetColumns},
+    if (lockIds.length === 0) return;
+    const locked = yield* client.query<{
+      id: string;
+      brand_profile_id: string;
+      status: AssetRow["status"];
+      has_live_session: boolean;
+    }>(
+      `SELECT asset.id, asset.brand_profile_id, asset.status,
               EXISTS (
                 SELECT 1
                   FROM asset_upload_sessions AS upload_session
@@ -692,7 +718,6 @@ function lockAttachmentAssetsEffect(
         );
       }
     }
-    return attachmentIds.map((assetId) => byId.get(assetId)!);
   });
 }
 
@@ -715,7 +740,7 @@ function lockAttachmentAssetsEffect(
  */
 function replaceAttachmentsEffect(
   client: EffectTransactionClient,
-  post: PostRow,
+  post: PostMutationRow,
   assetIds: readonly string[],
   previousIds?: readonly string[],
 ): Effect.Effect<void, DatabaseError> {
@@ -767,7 +792,7 @@ function replaceAttachmentsEffect(
  */
 function replaceTargetsEffect(
   client: EffectTransactionClient,
-  post: PostRow,
+  post: PostMutationRow,
   targets: readonly PostTargetInput[],
 ): Effect.Effect<void, CoreApiError | DatabaseError> {
   return Effect.gen(function* () {
@@ -1164,7 +1189,7 @@ function validateProviderOptions(
  * @returns Effect resolving to the platform and complete publication target, or an actionable failure.
  */
 function validateTargetScheduleEffect(
-  post: PostRow,
+  post: PostMutationRow,
   target: PostTargetInput,
   selection: readonly string[],
   account: AccountRow | undefined,
@@ -1481,7 +1506,7 @@ function reschedulePendingDistributionsEffect(
 function insertPendingDistributionsEffect(
   client: EffectTransactionClient,
   organizationId: string,
-  post: PostRow,
+  post: PostMutationRow,
   postId: string,
   rows: readonly ResolvedTargetRow[],
   status: Schemas["DistributionStatus"],
@@ -2171,7 +2196,21 @@ export function createPostApiService(
             // never charges quota. Locking the Workspace here would serialize
             // every deletion in one tenant behind a single lock row without
             // protecting anything deletion writes.
-            const post = yield* lockPostEffect(client, postId);
+            const current = yield* client.query<
+              Pick<PostRow, "brand_profile_id" | "queue_membership">
+            >(
+              `SELECT brand_profile_id, ${postQueueMembershipColumn}
+               FROM posts
+               WHERE id = $1 AND org_id = public.auth_active_org_id() AND deleted_at IS NULL
+               FOR UPDATE`,
+              [postId],
+            );
+            const post = current.rows[0];
+            if (!post) {
+              return yield* Effect.fail(
+                new CoreApiError(404, "post_not_found", "The post was not found."),
+              );
+            }
             // Deleting is scoped like every other Post mutation: the request must
             // name the Brand Profile that owns the Post, so an aggregate-view
             // caller with no identity selected cannot destroy one.

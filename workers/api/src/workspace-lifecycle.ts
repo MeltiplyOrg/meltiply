@@ -36,6 +36,8 @@ import {
   uuidParam,
 } from "./validation";
 
+const unsafeSubjectCharactersPattern = /[\p{Cc}\p{Cf}]+/gu;
+
 /**
  * Workspace lifecycle REST surface implemented natively on the resolved actor.
  *
@@ -452,7 +454,7 @@ function resolveMailServiceLayer(
  * @returns Control-free name, or "your team" when nothing printable remains.
  */
 function invitationSubjectWorkspaceName(name: string): string {
-  const sanitized = name.replace(/[\p{Cc}\p{Cf}]+/gu, " ").trim();
+  const sanitized = name.replace(unsafeSubjectCharactersPattern, " ").trim();
   return sanitized.length > 0 ? sanitized : "your team";
 }
 
@@ -767,7 +769,7 @@ export function registerWorkspaceLifecycleRoutes(
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ email, role }));
         const rawToken =
-          crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+          crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
         const tokenHash = yield* Effect.promise(() => sha256Hex(rawToken));
         const result = yield* idempotentMutation(
           c.env,
@@ -890,7 +892,7 @@ export function registerWorkspaceLifecycleRoutes(
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ invitationId }));
         const rawToken =
-          crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+          crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
         const tokenHash = yield* Effect.promise(() => sha256Hex(rawToken));
         const result = yield* idempotentMutation(
           c.env,

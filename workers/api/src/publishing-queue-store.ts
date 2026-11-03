@@ -19,6 +19,9 @@ export interface QueueRow extends Record<string, unknown> {
   updated_at: Date | string;
 }
 
+export const queueColumns =
+  "id, org_id, brand_profile_id, name, timezone, slots, created_at, updated_at";
+
 /** Projects a validated stored Queue; retired plans remain available only through historical membership. */
 export function mapQueue(row: QueueRow): PublishingQueue {
   return {
@@ -40,7 +43,7 @@ export function readQueueEffect(
 ) {
   return Effect.gen(function* () {
     const result = yield* client.query<QueueRow>(
-      "SELECT * FROM publishing_queues WHERE id = $1 AND deleted_at IS NULL",
+      `SELECT ${queueColumns} FROM publishing_queues WHERE id = $1 AND deleted_at IS NULL`,
       [id],
     );
     const row = result.rows[0];
@@ -50,6 +53,26 @@ export function readQueueEffect(
       );
     yield* requireActiveBrandProfileEffect(client, row.org_id, row.brand_profile_id);
     return row;
+  });
+}
+
+/** Validates a tenant Queue's active Brand Profile without loading its slot plan. Missing or differently scoped Queues fail with 404. */
+export function requireQueueEffect(
+  client: EffectTransactionClient,
+  id: string,
+  brandProfileId: string,
+) {
+  return Effect.gen(function* () {
+    const result = yield* client.query<Pick<QueueRow, "org_id" | "brand_profile_id">>(
+      "SELECT org_id, brand_profile_id FROM publishing_queues WHERE id = $1 AND deleted_at IS NULL",
+      [id],
+    );
+    const row = result.rows[0];
+    if (!row || row.brand_profile_id !== brandProfileId)
+      return yield* Effect.fail(
+        new CoreApiError(404, "not_found", "The Queue was not found in this Brand Profile."),
+      );
+    yield* requireActiveBrandProfileEffect(client, row.org_id, row.brand_profile_id);
   });
 }
 

@@ -1,6 +1,9 @@
 import { Context, Effect, Layer } from "effect";
 import { InvalidRequestError, StorageUnavailableError } from "@meltiply/domain";
 
+const base64PaddingPattern = /=+$/;
+const mockEncryptedPrefixPattern = /^mock_encrypted:/;
+
 const legacyPrefix = "meltiply:v1:";
 const currentPrefix = "meltiply:v2:";
 const nonceLength = 12;
@@ -26,7 +29,7 @@ export interface TokenCipherOptions {
  */
 function decodeBase64(value: string): Bytes | undefined {
   try {
-    const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+    const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
     const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
     const binary = atob(padded);
     return Uint8Array.from(binary, (character) => character.charCodeAt(0));
@@ -61,7 +64,7 @@ function decodeKey(value: string): Bytes {
 function encodeBase64Url(value: Bytes): string {
   let binary = "";
   for (const byte of value) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(base64PaddingPattern, "");
 }
 
 /**
@@ -332,7 +335,8 @@ export function createSecretServiceTest(
 ): Layer.Layer<SecretService, never, never> {
   const service: SecretServiceShape = {
     decrypt:
-      impl?.decrypt ?? ((ciphertext) => Effect.succeed(ciphertext.replace(/^mock_encrypted:/, ""))),
+      impl?.decrypt ??
+      ((ciphertext) => Effect.succeed(ciphertext.replace(mockEncryptedPrefixPattern, ""))),
     encrypt: impl?.encrypt ?? ((plaintext) => Effect.succeed(`mock_encrypted:${plaintext}`)),
   };
 

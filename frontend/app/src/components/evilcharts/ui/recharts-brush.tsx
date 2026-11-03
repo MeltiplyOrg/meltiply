@@ -213,7 +213,7 @@ function EvilBrush({
   const containerRef = React.useRef<HTMLDivElement>(null);
   const keys = React.useMemo(() => dataKeys ?? Object.keys(chartConfig), [dataKeys, chartConfig]);
   const totalPoints = data.length;
-  const chartId = React.useId().replace(/:/g, "");
+  const chartId = React.useId().replaceAll(":", "");
 
   // ── Controlled vs uncontrolled ──────────────────────────────────────────
 

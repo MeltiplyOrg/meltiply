@@ -1,3 +1,12 @@
+const requestIdPattern = /^[A-Za-z0-9._:-]{8,128}$/;
+const traceparentPattern = /^00-([\da-f]{32})-([\da-f]{16})-([\da-f]{2})$/i;
+const errorNamePattern = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+const fingerprintPattern = /^[0-9a-f]{16}$/;
+const messageSeparatorsPattern = /_+/g;
+const traceIdPattern = /^[0-9a-f]{32}$/;
+const nonHexPattern = /[^0-9a-f]/g;
+const spanIdPattern = /^[0-9a-f]{16}$/i;
+
 const sensitiveKey = /authorization|cookie|email|password|secret|signed.?url|token|upload.?url/i;
 const signedUrl = /^https?:\/\/[^?\s]+\?(?:[^#\s]*&)?(?:X-Amz-|X-Goog-|sig=)/i;
 // Credential-looking `key=value`/`key: "value"` pairs (bare or JSON-quoted key)
@@ -75,7 +84,7 @@ export interface LogFields extends Record<string, unknown> {
  */
 export function createRequestId(incoming?: string | null): string {
   const normalized = incoming?.trim();
-  if (normalized && /^[A-Za-z0-9._:-]{8,128}$/.test(normalized)) {
+  if (normalized && requestIdPattern.test(normalized)) {
     return normalized;
   }
   return crypto.randomUUID();
@@ -90,7 +99,7 @@ export function createRequestId(incoming?: string | null): string {
  * @returns 32-character lowercase hex trace ID, or a fallback request ID.
  */
 export function createTraceId(traceparent?: string | null, fallback?: string): string {
-  const match = /^00-([\da-f]{32})-([\da-f]{16})-([\da-f]{2})$/i.exec(traceparent?.trim() ?? "");
+  const match = traceparentPattern.exec(traceparent?.trim() ?? "");
   const traceId = match?.[1];
   const parentId = match?.[2];
   if (
@@ -284,7 +293,7 @@ function serializeError(cause: unknown, depth: number, seen: Set<unknown>): Seri
     // only, never the whole serialization.
     let name = "Error";
     try {
-      if (/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(cause.name)) {
+      if (errorNamePattern.test(cause.name)) {
         name = cause.name;
       }
     } catch {
@@ -317,7 +326,7 @@ function serializeError(cause: unknown, depth: number, seen: Set<unknown>): Seri
     if (depth === 0) {
       if (!(cause instanceof Error)) {
         try {
-          if (typeof cause.fingerprint === "string" && /^[0-9a-f]{16}$/.test(cause.fingerprint)) {
+          if (typeof cause.fingerprint === "string" && fingerprintPattern.test(cause.fingerprint)) {
             serialized.fingerprint = cause.fingerprint;
           }
         } catch {
@@ -337,7 +346,7 @@ function serializeError(cause: unknown, depth: number, seen: Set<unknown>): Seri
   if (cause !== null && typeof cause === "object") {
     try {
       const tag = "_tag" in cause ? cause._tag : undefined;
-      if (typeof tag === "string" && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(tag)) {
+      if (typeof tag === "string" && errorNamePattern.test(tag)) {
         name = tag;
       }
     } catch {
@@ -406,7 +415,7 @@ function deriveMessage(fields: LogFields): string {
     return sanitizeErrorText(explicit, maxJsonString);
   }
   const event = typeof fields.event === "string" ? fields.event : "log_event";
-  return event.replace(/_+/g, " ").trim() || "log event";
+  return event.replace(messageSeparatorsPattern, " ").trim() || "log event";
 }
 /**
  * Recursively redacts sensitive keys and signed URLs from objects, arrays, and primitive values.
@@ -569,15 +578,15 @@ export interface OtlpSpanInput {
  * @returns 32-character lowercase hexadecimal string.
  */
 function uuidToHex32(uuid: string): string {
-  const clean = uuid.replace(/-/g, "").toLowerCase();
-  if (/^[0-9a-f]{32}$/.test(clean)) return clean;
+  const clean = uuid.replaceAll("-", "").toLowerCase();
+  if (traceIdPattern.test(clean)) return clean;
   let hash = 0;
   for (let i = 0; i < uuid.length; i++) {
     hash = (hash << 5) - hash + uuid.charCodeAt(i);
     hash |= 0;
   }
   const base = Math.abs(hash).toString(16).padStart(8, "0");
-  return (base + clean + "0".repeat(32)).replace(/[^0-9a-f]/g, "0").slice(0, 32);
+  return (base + clean + "0".repeat(32)).replace(nonHexPattern, "0").slice(0, 32);
 }
 
 /**
@@ -605,7 +614,7 @@ function stringToHex16(value: string): string {
  * @returns 16-character hexadecimal span ID string.
  */
 function toHex16SpanId(value: string): string {
-  if (/^[0-9a-f]{16}$/i.test(value)) {
+  if (spanIdPattern.test(value)) {
     return value.toLowerCase();
   }
   return stringToHex16(value);

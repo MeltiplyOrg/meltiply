@@ -1,3 +1,5 @@
+const htmlMetacharactersPattern = /[&<>"']/g;
+
 const senderAddressPattern =
   /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/;
 const unsafeDisplayNamePunctuation = '",:;<>\\';
@@ -56,5 +58,8 @@ export function isMailSenderName(value) {
  * @returns {string} Text safe to interpolate into HTML mail templates.
  */
 export function escapeMailHtml(value) {
-  return value.replace(/[&<>"']/g, (character) => htmlEscapes[character] ?? character);
+  return value.replace(
+    htmlMetacharactersPattern,
+    (character) => htmlEscapes[character] ?? character,
+  );
 }

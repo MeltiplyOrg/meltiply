@@ -2,6 +2,8 @@ import type { Platform } from "@meltiply/domain";
 
 import { record } from "./meta-common";
 
+const integerHeaderPattern = /^\d{1,12}$/;
+
 /** Meta usage headers are percentages; at the ceiling the caller is throttled. */
 const usageCeiling = 100;
 const usageMetrics = ["call_count", "total_cputime", "total_time"] as const;
@@ -48,7 +50,7 @@ function percentage(value: unknown): number | null {
  */
 function integerHeader(value: string | null, maximum: number): number | null {
   const normalized = value?.trim();
-  if (!normalized || !/^\d{1,12}$/.test(normalized)) return null;
+  if (!normalized || !integerHeaderPattern.test(normalized)) return null;
   const parsed = Number(normalized);
   return parsed <= maximum ? parsed : null;
 }

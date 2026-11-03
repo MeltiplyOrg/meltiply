@@ -17,12 +17,7 @@
       "entry": ["src/app/globals.css", "src/preview/worker.ts", "e2e/support/invitation-db.mjs"]
     },
     "workers/api": {
-      "entry": [
-        "test-support/index.ts",
-        "test-support/requirements-smoke.ts",
-        "bench/run.mjs",
-        "bench/compare.mjs"
-      ],
+      "entry": ["test-support/index.ts", "test-support/requirements-smoke.ts"],
       "vitest": {
         "config": ["vitest*.config.ts"]
       }
@@ -33,8 +28,7 @@
         "test-support/queue-capacity.ts",
         "processor/smoke/check.mjs",
         "processor/smoke/restart-check.mjs",
-        "processor/smoke/fixtures-server.mjs",
-        "processor/smoke/measure.mjs"
+        "processor/smoke/fixtures-server.mjs"
       ],
       "vitest": {
         "config": ["vitest*.config.ts"]

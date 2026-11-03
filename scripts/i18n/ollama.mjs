@@ -1,6 +1,8 @@
 import { assertTranslationArray, expectedTranslationCount, ProviderError } from "./provider.mjs";
 import { isRetryableStatus } from "./retry.mjs";
 
+const trailingSlashesPattern = /\/+$/u;
+
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const DEFAULT_OLLAMA_MODEL = "qwen3:8b";
 
@@ -104,7 +106,7 @@ export function createOllamaProvider({
   if (typeof model !== "string" || model.trim() === "") {
     throw new Error("an Ollama model is required");
   }
-  const endpoint = `${url.replace(/\/+$/u, "")}/api/chat`;
+  const endpoint = `${url.replace(trailingSlashesPattern, "")}/api/chat`;
 
   return {
     name: `ollama:${model}`,

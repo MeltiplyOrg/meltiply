@@ -3,6 +3,8 @@ import { pathToFileURL } from "node:url";
 
 import { readBoundedJsonResponse } from "../release/release-http.mjs";
 
+const errorCodePattern = /^[A-Z0-9_-]+$/i;
+
 const MAXIMUM_API_RESPONSE_BYTES = 1024 * 1024;
 
 const cloudflareId = /^[a-f0-9]{32}$/i;
@@ -97,7 +99,7 @@ function safeApiError(operation, response, envelope) {
   const codes = Array.isArray(envelope?.errors)
     ? envelope.errors
         .map((error) => error?.code)
-        .filter((code) => typeof code === "number" || /^[A-Z0-9_-]+$/i.test(code))
+        .filter((code) => typeof code === "number" || errorCodePattern.test(code))
     : [];
   const codeSuffix = codes.length > 0 ? `; codes: ${codes.join(",")}` : "";
   return new Error(`Cloudflare Hyperdrive ${operation} failed (${response.status})${codeSuffix}`);

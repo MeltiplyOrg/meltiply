@@ -160,21 +160,16 @@
   var onThemeLinkClick = function (event) {
     var anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
     if (anchor === null) return;
-    var url;
-    try {
-      url = new URL(anchor.href);
-    } catch {
-      return;
-    }
-    if (url.protocol !== "http:" && url.protocol !== "https:") return;
-    if (!anchor.hasAttribute("data-theme-link") && siteOrigins[url.origin] !== true) {
+    if (anchor.protocol !== "http:" && anchor.protocol !== "https:") return;
+    if (!anchor.hasAttribute("data-theme-link") && siteOrigins[anchor.origin] !== true) {
       return;
     }
     var current = root.getAttribute(preferenceAttribute);
     if (!isPreference(current)) current = readPersistedPreference();
-    if (current === null) url.searchParams.delete(queryParam);
-    else url.searchParams.set(queryParam, current);
-    anchor.href = url.toString();
+    var parameters = new URLSearchParams(anchor.search);
+    if (current === null) parameters.delete(queryParam);
+    else parameters.set(queryParam, current);
+    anchor.search = parameters.toString();
   };
   // A re-run (e.g. Astro client-side swaps) must not stack listeners:
   // dispatching the reset first lets the outgoing run detach its handler.

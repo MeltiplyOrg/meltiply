@@ -5,6 +5,8 @@ import { sha256, writeEvidence } from "./release-guard.mjs";
 import { validateDatabaseEnvironment } from "./release-lib.mjs";
 import { requireRestorePoint } from "./release-restore.mjs";
 
+const lineBreakPattern = /\r?\n/;
+
 const migrationNamePattern = /^(\d{3})_[a-z0-9_]+\.sql$/;
 const checksumPattern = /^[0-9a-f]{64}$/;
 const expandMarker = "-- meltiply-release-phase: expand";
@@ -145,7 +147,7 @@ export function planMigrations({ appliedRows, migrations, phase, spec }) {
   const pending = migrations.slice(applied.length);
   if (phase === "expand") {
     const incompatible = pending.find(
-      (migration) => migration.source.split(/\r?\n/, 1)[0] !== expandMarker,
+      (migration) => migration.source.split(lineBreakPattern, 1)[0] !== expandMarker,
     );
     if (incompatible) {
       throw new TypeError(

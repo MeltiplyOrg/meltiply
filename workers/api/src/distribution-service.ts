@@ -828,8 +828,10 @@ export function createDistributionMethods() {
                 status: replay.response_status === 204 ? (204 as const) : (202 as const),
               };
             }
-            const current = yield* client.query<DistributionRow>(
-              `SELECT ${distributionColumns},
+            const current = yield* client.query<
+              Pick<DistributionRow, "status" | "publication_snapshot">
+            >(
+              `SELECT status,
                       ${publicationSnapshotColumn}
                FROM distributions WHERE id = $1 FOR UPDATE`,
               [id],

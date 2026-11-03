@@ -5,12 +5,14 @@ import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
 import { useI18n } from "@/lib/i18n";
 
+const nonAlphanumericPattern = /[^a-z0-9]/g;
+
 const TIMEZONES = ["UTC", ...Intl.supportedValuesOf("timeZone")];
 
 /** Ranks normalized IANA names by exact substring, then ordered character gaps. Spaces, slashes and underscores are interchangeable; missing letters are allowed (e.g. "ktm" finds Asia/Katmandu). Returns null for nonmatches, keeping the finite timezone catalog bounded. */
 function timezoneScore(zone: string, query: string): number | null {
-  const text = zone.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const needle = query.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const text = zone.toLowerCase().replace(nonAlphanumericPattern, "");
+  const needle = query.toLowerCase().replace(nonAlphanumericPattern, "");
   if (!needle) return 0;
   const exact = text.indexOf(needle);
   if (exact >= 0) return exact;

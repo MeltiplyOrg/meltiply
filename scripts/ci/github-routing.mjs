@@ -1,33 +1,34 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 
+const zeroCommitPattern = /^0+$/;
+
 /** Runs Git without a shell; unavailable ancestry fails closed to every lane. */
 function git(...args) {
   return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
-/** Loads public CI path rules; invalid or incomplete lane configuration fails the routing job. */
-function routingRules() {
-  const mapping = JSON.parse(readFileSync("scripts/ci/github-paths.json", "utf8"));
-  if (
-    !mapping ||
-    typeof mapping !== "object" ||
-    Array.isArray(mapping) ||
-    Object.keys(mapping).sort().join(",") !== "cloudflare,frontend,selfhost"
-  ) {
-    throw new Error("Expected frontend, cloudflare, and selfhost path rules");
-  }
-  return Object.entries(mapping).flatMap(([lane, patterns]) => {
-    if (
-      !Array.isArray(patterns) ||
-      !patterns.length ||
-      patterns.some((pattern) => typeof pattern !== "string" || !pattern.startsWith("^"))
-    ) {
-      throw new Error(`Invalid ${lane} path rules`);
-    }
-    return patterns.map((pattern) => ({ pattern: new RegExp(pattern), lane }));
-  });
+// Compile the configured patterns once at module initialization; malformed
+// lane configuration fails before any changed-path routing occurs.
+const mapping = JSON.parse(readFileSync("scripts/ci/github-paths.json", "utf8"));
+if (
+  !mapping ||
+  typeof mapping !== "object" ||
+  Array.isArray(mapping) ||
+  Object.keys(mapping).sort().join(",") !== "cloudflare,frontend,selfhost"
+) {
+  throw new Error("Expected frontend, cloudflare, and selfhost path rules");
 }
+const rules = Object.entries(mapping).flatMap(([lane, patterns]) => {
+  if (
+    !Array.isArray(patterns) ||
+    !patterns.length ||
+    patterns.some((pattern) => typeof pattern !== "string" || !pattern.startsWith("^"))
+  ) {
+    throw new Error(`Invalid ${lane} path rules`);
+  }
+  return patterns.map((pattern) => ({ pattern: new RegExp(pattern), lane }));
+});
 
 /** Resolves PR/branch merge bases or the default-branch push range; missing history runs every lane. */
 function changedPaths(event) {
@@ -40,7 +41,7 @@ function changedPaths(event) {
       base = git("merge-base", event.pull_request.base.sha, head);
     } else if (event.ref === `refs/heads/${event.repository.default_branch}`) {
       base = event.before;
-      if (!base || /^0+$/.test(base)) return null;
+      if (!base || zeroCommitPattern.test(base)) return null;
     } else {
       base = git("merge-base", `origin/${event.repository.default_branch}`, head);
     }
@@ -57,7 +58,6 @@ function changedPaths(event) {
 
 const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
 const paths = changedPaths(event);
-const rules = routingRules();
 const lanes = new Set(paths === null ? ["frontend", "cloudflare", "selfhost"] : []);
 for (const path of paths ?? []) {
   for (const rule of rules) if (rule.pattern.test(path)) lanes.add(rule.lane);

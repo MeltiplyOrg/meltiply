@@ -1,5 +1,9 @@
 import { classifyProviderFailure, ProviderAdapterError } from "./failures";
 
+const controlCharactersPattern = /[\u0000-\u001f\u007f]/;
+const providerIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$/;
+const containerOperationPattern = /^(created|submitted):(.+)$/;
+
 /**
  * Asserts that a string parameter is non-empty, within maximum length, and free of control characters.
  * Trims leading/trailing whitespace and rejects ASCII control codes (0x00-0x1F, 0x7F).
@@ -7,7 +11,7 @@ import { classifyProviderFailure, ProviderAdapterError } from "./failures";
  */
 export function required(name: string, value: string, maximum = 4_096): string {
   const normalized = value.trim();
-  if (!normalized || normalized.length > maximum || /[\u0000-\u001f\u007f]/.test(normalized)) {
+  if (!normalized || normalized.length > maximum || controlCharactersPattern.test(normalized)) {
     throw new TypeError(`${name} is invalid`);
   }
   return normalized;
@@ -60,7 +64,7 @@ export function assertHttpsOrLoopbackUrl(value: string, label = "URL"): URL {
 export function providerIdentifier(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim();
-  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$/.test(normalized) ? normalized : undefined;
+  return providerIdentifierPattern.test(normalized) ? normalized : undefined;
 }
 
 /**
@@ -95,7 +99,7 @@ export function boundedText(
  */
 export function boundedCursor(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  return value.length >= 1 && value.length <= 2_048 && !/[\u0000-\u001f\u007f]/.test(value)
+  return value.length >= 1 && value.length <= 2_048 && !controlCharactersPattern.test(value)
     ? value
     : undefined;
 }
@@ -136,16 +140,15 @@ export function timestamp(value: unknown): string | undefined {
 }
 
 /**
- * Validates and normalizes an external media or profile resource URL.
- * Requires https: protocol without credentials or fragment identifiers.
- * Returns canonical URL string, or undefined if parsing fails or constraints are not met.
+ * Parses an external media or profile resource URL once for validation and downstream use.
+ * Requires HTTPS without credentials or fragments; invalid inputs return undefined.
  */
-export function secureUrl(value: unknown): string | undefined {
+export function secureUrl(value: unknown): URL | undefined {
   if (typeof value !== "string") return undefined;
   try {
     const url = new URL(value);
     return url.protocol === "https:" && !url.username && !url.password && !url.hash
-      ? url.toString()
+      ? url
       : undefined;
   } catch {
     return undefined;
@@ -208,7 +211,7 @@ export interface MetaContainerOperation {
  */
 export function parseContainerOperationId(value: unknown): MetaContainerOperation | undefined {
   const normalized = providerIdentifier(value);
-  const match = normalized?.match(/^(created|submitted):(.+)$/);
+  const match = normalized?.match(containerOperationPattern);
   const id = providerIdentifier(match?.[2]);
   return match && id ? { id, phase: match[1] as "created" | "submitted" } : undefined;
 }

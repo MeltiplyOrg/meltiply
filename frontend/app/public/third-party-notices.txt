@@ -40,13 +40,21 @@ PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License along
 with this program. If not, see <https://www.gnu.org/licenses/>.
 
-Section 13 of the license requires that users interacting with Meltiply over a
-network be offered its Corresponding Source. The canonical source is
-<https://github.com/MeltiplyOrg/meltiply>, and self-hosted deployments offer
-their own modified source as section 13 requires.
+The canonical source is <https://github.com/MeltiplyOrg/meltiply>.
 
-A verbatim copy of the license text follows. The same text ships at
-LICENSES/AGPL-3.0-or-later.txt and in every distributed notice bundle.
+Section 13 applies to a modified version that supports remote network
+interaction: it must prominently offer all of that version's users an opportunity
+to receive its Corresponding Source from a network server at no charge. An
+unmodified Meltiply carries no such obligation, and a self-hosted deployment owes
+it only when that deployment runs a modified version. Offer an unmodified
+deployment's users this repository; a modified one must additionally offer its own
+version's Corresponding Source.
+
+A verbatim copy of the license text follows. It also ships at
+LICENSES/AGPL-3.0-or-later.txt and in the generated third-party notice bundles at
+`frontend/app/public/third-party-notices.txt` and
+`frontend/public/public/third-party-notices.txt`; other distributed notice files do
+not reproduce it.
 
 ---
 

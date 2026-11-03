@@ -15,6 +15,8 @@ import pg from "pg";
 
 import { loadMigrations } from "../release/release-migrate.mjs";
 
+const leadingSlashPattern = /^\//;
+
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const seedSqlPath = join(repositoryRoot, "scripts/cloudflare-local/postgres/seed.sql");
 
@@ -74,7 +76,7 @@ function assertLocalTestDatabase(urlString, label) {
     parsed.hostname === "localhost" ||
     parsed.hostname === "::1" ||
     parsed.hostname === "[::1]";
-  const dbName = parsed.pathname.replace(/^\//, "");
+  const dbName = parsed.pathname.replace(leadingSlashPattern, "");
   const isDedicatedTestDb = dbName === "meltiply";
   if (!isLocalHost || !isDedicatedTestDb) {
     fail(

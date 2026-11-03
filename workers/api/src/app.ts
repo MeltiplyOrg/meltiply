@@ -50,6 +50,9 @@ import { CurrentUserService, createCurrentUserServiceLive } from "./effect/servi
 import { runWorkerEffect } from "./effect/runtime";
 import { errorResponse, jsonResponse } from "./responses";
 
+const invitationPathPattern = /^\/api\/v1\/workspace-invitations\/[^/]+$/;
+const oauthCallbackPathPattern = /^\/api\/v1\/platforms\/[^/]+\/callback$/;
+
 type UserProfile = components["schemas"]["UserProfile"];
 
 export interface ApiDependencies extends CoreRouteDependencies, OperatorRouteDependencies {
@@ -528,11 +531,11 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
       c.req.path === "/api/v1/ready" ||
       // The invitation acceptance page inspects a token before the visitor
       // has an account or session. Token possession is the credential.
-      (c.req.method === "GET" && /^\/api\/v1\/workspace-invitations\/[^/]+$/.test(c.req.path)) ||
+      (c.req.method === "GET" && invitationPathPattern.test(c.req.path)) ||
       // Provider-media URLs carry their own HMAC bearer credential; the route
       // verifies it before touching R2, so no user session is required.
       c.req.path.startsWith(providerMediaRoutePrefix) ||
-      /^\/api\/v1\/platforms\/[^/]+\/callback$/.test(c.req.path);
+      oauthCallbackPathPattern.test(c.req.path);
     if (publicPath || c.req.method === "OPTIONS") {
       await next();
       return;

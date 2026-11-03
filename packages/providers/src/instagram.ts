@@ -161,7 +161,7 @@ function attachment(input: PublishInput, index: number): InstagramAttachment {
       }),
     );
   }
-  const url = secureUrl(media.url);
+  const url = secureUrl(media.url)?.href;
   const contentType = media.contentType.split(";", 1)[0]!.toLowerCase();
   const fileSize = media.fileSize;
   const valid =
@@ -570,7 +570,7 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
       const avatarUrl =
         profile?.profile_picture_url === undefined
           ? undefined
-          : secureUrl(profile.profile_picture_url);
+          : secureUrl(profile.profile_picture_url)?.href;
       if (
         !profileScopedId ||
         !profileAccountId ||
@@ -747,7 +747,7 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
           });
           const body = record(response.body);
           const responseId = providerIdentifier(body?.id);
-          const providerUrl = secureUrl(body?.permalink);
+          const providerUrl = secureUrl(body?.permalink)?.href;
           if (responseId !== providerPostId || !providerUrl) throw malformed();
           return {
             result: {
@@ -791,12 +791,10 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
       const account = accountId(credentials);
 
       const createContainer = async (parameters: URLSearchParams): Promise<string> => {
-        const url = new URL(`/${apiVersion}/${encodeURIComponent(account)}/media`, apiOrigin);
-        url.search = parameters.toString();
         const response = await http.request<unknown>(context, {
           headers: bearer(credentials.accessToken),
           method: "POST",
-          url: url.toString(),
+          url: `${apiOrigin}/${apiVersion}/${encodeURIComponent(account)}/media?${parameters}`,
         });
         const containerId = providerIdentifier(record(response.body)?.id);
         if (!containerId) throw malformed();

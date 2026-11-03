@@ -15,6 +15,10 @@ import {
 import { readBoundedJsonResponse } from "../release/release-http.mjs";
 import { loadReleaseInputs, redactError } from "../release/release-lib.mjs";
 
+const lineBreakPattern = /[\r\n]/;
+const uuidPattern = /[0-9a-f-]{36}/gi;
+const signedUrlPattern = /https:\/\/[^\s?]+\?[^\s]+/g;
+
 const MULTIPART_THRESHOLD_BYTES = 25 * 1024 * 1024;
 const MINIMUM_MULTIPART_PART_BYTES = 5 * 1024 * 1024;
 const MAXIMUM_MULTIPART_PART_BYTES = 16 * 1024 * 1024;
@@ -358,7 +362,7 @@ function validateSignedRequest(request, target) {
     if (
       !SAFE_SIGNED_HEADERS.has(name.toLowerCase()) ||
       typeof value !== "string" ||
-      /[\r\n]/.test(value)
+      lineBreakPattern.test(value)
     ) {
       throw new Error("API returned an unsafe signed PUT header");
     }
@@ -579,7 +583,7 @@ function makeApiClient(options, dependencies, evidenceRequestIds, operations) {
     if (!expected.includes(response.status)) {
       const code = await responseErrorCode(response);
       throw new Error(
-        `API ${method} ${path.replaceAll(/[0-9a-f-]{36}/gi, "{id}")} failed (${response.status}, ${code})`,
+        `API ${method} ${path.replaceAll(uuidPattern, "{id}")} failed (${response.status}, ${code})`,
       );
     }
     if (response.status === 204 || response.status === 404) {
@@ -1391,7 +1395,7 @@ function safeError(error, environment) {
     .filter((value) => typeof value === "string" && value.length > 0)
     .sort((left, right) => right.length - left.length);
   for (const secret of secrets) message = message.split(secret).join("[REDACTED]");
-  return message.replace(/https:\/\/[^\s?]+\?[^\s]+/g, "[SIGNED_URL]");
+  return message.replace(signedUrlPattern, "[SIGNED_URL]");
 }
 
 /**

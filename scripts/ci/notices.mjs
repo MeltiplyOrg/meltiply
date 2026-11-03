@@ -4,6 +4,8 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertAllowedLicenses, javascriptCatalog } from "./supply-chain.mjs";
 
+const trailingWhitespacePattern = /[ \t]+$/gm;
+
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const projectLicensePath = join(repositoryRoot, "LICENSE.md");
 
@@ -78,10 +80,7 @@ const COPIED_INTERFACE_NOTICES = [
  * @returns {string} Normalized text without a trailing newline.
  */
 function normalizeText(text) {
-  return text
-    .replace(/\r\n/g, "\n")
-    .replace(/[ \t]+$/gm, "")
-    .trimEnd();
+  return text.replaceAll("\r\n", "\n").replace(trailingWhitespacePattern, "").trimEnd();
 }
 
 /**

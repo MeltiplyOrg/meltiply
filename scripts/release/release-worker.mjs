@@ -4,6 +4,15 @@ import path from "node:path";
 import { readJsonFile, sha256, writeEvidence } from "./release-guard.mjs";
 import { releaseInternals } from "./release-lib.mjs";
 
+const ansiEscapePattern = /\u001b\[[0-9;]*m/g;
+const createdVersionPattern = /Success! Created version ([0-9a-f-]{36}) with ([0-9]+) secrets\./g;
+const currentVersionPattern = /Current Version ID:\s*([0-9a-f-]{36})(?:\s|$)/g;
+const secretLineBreakPattern = /[\u0000\r\n]/;
+const workerSubjectPattern = /worker|script/i;
+const missingWorkerPattern = /not found|does not exist|no deployments/i;
+const gitShaPattern = /^[0-9a-f]{40}$/;
+const jsonExtensionPattern = /\.json$/;
+
 const versionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const workers = {
@@ -167,10 +176,8 @@ export function parseWranglerOutput(source, expectedType, expectedWorker) {
  * @throws {TypeError} If output format mismatches or injected secret count does not match expected
  */
 export function parseSecretVersionOutput(source, expectedCount) {
-  const sanitized = source.replace(/\u001b\[[0-9;]*m/g, "");
-  const matches = [
-    ...sanitized.matchAll(/Success! Created version ([0-9a-f-]{36}) with ([0-9]+) secrets\./g),
-  ];
+  const sanitized = source.replace(ansiEscapePattern, "");
+  const matches = [...sanitized.matchAll(createdVersionPattern)];
   if (matches.length !== 1) {
     throw new TypeError("Wrangler secret output must contain exactly one created version ID");
   }
@@ -190,8 +197,8 @@ export function parseSecretVersionOutput(source, expectedCount) {
  * @throws {TypeError} If output does not contain exactly one current version ID match
  */
 export function parseRollbackVersionOutput(source) {
-  const sanitized = source.replace(/\u001b\[[0-9;]*m/g, "");
-  const matches = [...sanitized.matchAll(/Current Version ID:\s*([0-9a-f-]{36})(?:\s|$)/g)];
+  const sanitized = source.replace(ansiEscapePattern, "");
+  const matches = [...sanitized.matchAll(currentVersionPattern)];
   if (matches.length !== 1) {
     throw new TypeError("Wrangler rollback output must contain exactly one current version ID");
   }
@@ -313,7 +320,7 @@ export function validateSecretBundle(source, spec, worker) {
         value.trim() !== value ||
         value.length < 8 ||
         value.length > 4096 ||
-        /[\u0000\r\n]/.test(value)
+        secretLineBreakPattern.test(value)
       ) {
         throw new TypeError(`release secret bundle.${target}.${name} is invalid`);
       }
@@ -425,7 +432,7 @@ function releaseTag(spec, worker, kind) {
  */
 function isMissingWorker(error) {
   const message = error instanceof Error ? error.message : String(error);
-  return /worker|script/i.test(message) && /not found|does not exist|no deployments/i.test(message);
+  return workerSubjectPattern.test(message) && missingWorkerPattern.test(message);
 }
 
 /**
@@ -542,7 +549,7 @@ function parseVersionBindingSha(source, expected) {
     versionBindings.length !== 1 ||
     versionBindings[0].type !== "plain_text" ||
     typeof versionBindings[0].text !== "string" ||
-    !/^[0-9a-f]{40}$/.test(versionBindings[0].text)
+    !gitShaPattern.test(versionBindings[0].text)
   ) {
     throw new TypeError(`Wrangler ${expected.worker} version has no unique VERSION binding`);
   }
@@ -644,7 +651,7 @@ async function writeBootstrapConfig(configPath, worker) {
   if (worker !== "automation") return configPath;
   const config = await readJsonFile(configPath, "rendered Automation config", 1024 * 1024);
   delete config.triggers;
-  const bootstrapPath = configPath.replace(/\.json$/, "-bootstrap.json");
+  const bootstrapPath = configPath.replace(jsonExtensionPattern, "-bootstrap.json");
   await writeFile(bootstrapPath, releaseInternals.json(config), {
     mode: 0o600,
   });

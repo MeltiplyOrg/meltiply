@@ -2,6 +2,10 @@ import sampleUrl from "./sample.svg?url";
 import type { PreviewObject, PreviewValue } from "./contract-types";
 import type { PreviewOptions } from "./scenarios";
 
+const datePattern = /^\d{4}-\d\d-\d\d(?:T|$)/;
+const httpUrlPattern = /^https?:\/\//;
+const imageFieldPattern = /avatar|image|thumbnail|download|picture|^url$/;
+
 /** Copies validated data into a fresh browser scenario and removes external resource URLs. Catalog dates shift near today by default; a zero dateOffset preserves real seed timestamps and timezone-aware Queue assignments. */
 export function scenarioValue(
   value: PreviewValue,
@@ -48,14 +52,14 @@ export function scenarioValue(
     return result;
   }
   if (typeof value !== "string") return value;
-  if (/^\d{4}-\d\d-\d\d(?:T|$)/.test(value) && Number.isFinite(Date.parse(value))) {
+  if (datePattern.test(value) && Number.isFinite(Date.parse(value))) {
     const shifted = new Date(Date.parse(value) + dateOffset).toISOString();
     return value.length === 10 ? shifted.slice(0, 10) : shifted;
   }
   if (key === "totpURI")
     return "otpauth://totp/UI%20preview?secret=JBSWY3DPEHPK3PXP&issuer=UI%20preview";
-  if (/^https?:\/\//.test(value)) {
-    if (/avatar|image|thumbnail|download|picture|^url$/.test(key)) return sampleUrl;
+  if (httpUrlPattern.test(value)) {
+    if (imageFieldPattern.test(key)) return sampleUrl;
     return null;
   }
   return value;

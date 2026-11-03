@@ -3,6 +3,8 @@ import { withSystemTransactionEffect } from "./database";
 import type { AutomationEnv } from "./env";
 import { isOutboxMessage } from "./messages";
 
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
 /**
  * Resolves a bounded publish batch to authoritative Provider-account partitions.
  * One consumer invocation remains the infrastructure limit; messages for the
@@ -16,8 +18,7 @@ export function partitionPublishBatch(env: AutomationEnv, messages: readonly Mes
     ...new Set(
       messages.flatMap((message) => {
         const body = message.body;
-        return isOutboxMessage(body) &&
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(body.aggregate_id)
+        return isOutboxMessage(body) && uuidPattern.test(body.aggregate_id)
           ? [body.aggregate_id]
           : [];
       }),

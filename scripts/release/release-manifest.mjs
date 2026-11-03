@@ -15,6 +15,17 @@ import {
 } from "./release-lib.mjs";
 import { validateWorkerVersionId } from "./release-worker.mjs";
 
+const httpsUrlPattern = /^https:\/\/[^\s]+$/;
+const rolloutEvidencePattern = /^api-rollout-(?:5|25|50|100)\.json$/;
+const smokeEvidencePattern = /^smoke-live(?:-(?:5|25|50|100))?\.json$/;
+const openapiInfoPattern = /^info:\s*\n((?:[ \t]+[^\n]*\n)+)/m;
+const openapiVersionPattern = /^[ \t]+version:[ \t]*(.+?)[ \t]*$/m;
+const edgeQuotesPattern = /^["']|["']$/g;
+const contractVersionPattern = /^[0-9A-Za-z][0-9A-Za-z.-]{0,127}$/;
+const evidenceLogPattern = /^(?:wrangler-)?[a-z0-9-]+\.jsonl?$/;
+const wranglerLogPattern = /^wrangler-[a-z0-9-]+\.jsonl$/;
+const deploymentPhasePattern = /^(foundation|traffic|queue-resume)$/;
+
 const manifestName = "release-manifest.json";
 const maximumFileBytes = 512 * 1024;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -349,7 +360,7 @@ function validatePhaseOutputs(outputs, phase, spec) {
  */
 function validateSmokeHealth(evidence, url, name, versionPinned, spec) {
   const health = plainObject(evidence.health, `${name} health`);
-  matchedString(health.url, /^https:\/\/[^\s]+$/, `${name} health.url`);
+  matchedString(health.url, httpsUrlPattern, `${name} health.url`);
   if (health.url !== url) {
     throw new TypeError(`${name} health probes the wrong URL`);
   }
@@ -538,7 +549,7 @@ function validateEvidenceDocument({ content, context, name, spec }) {
     return;
   }
 
-  if (/^api-rollout-(?:5|25|50|100)\.json$/.test(name)) {
+  if (rolloutEvidencePattern.test(name)) {
     const percentage = Number(name.slice(12, -5));
     const traffic = validTraffic(evidence.traffic, name);
     const candidateEntry = traffic.find((entry) => entry.version_id === context.secretsVersionId);
@@ -584,7 +595,7 @@ function validateEvidenceDocument({ content, context, name, spec }) {
     return;
   }
 
-  if (/^smoke-live(?:-(?:5|25|50|100))?\.json$/.test(name)) {
+  if (smokeEvidencePattern.test(name)) {
     const suffix = name === "smoke-live.json" ? null : name.slice(11, -5);
     const percentage = suffix === null ? 100 : Number(suffix);
     if (
@@ -673,10 +684,10 @@ async function openapiContract(repoRoot) {
     throw new TypeError("the OpenAPI contract is missing or too large");
   }
   const content = await readFile(filePath, "utf8");
-  const infoBlock = content.match(/^info:\s*\n((?:[ \t]+[^\n]*\n)+)/m);
-  const version = infoBlock?.[1]?.match(/^[ \t]+version:[ \t]*(.+?)[ \t]*$/m);
-  const value = version?.[1]?.replace(/^["']|["']$/g, "");
-  if (typeof value !== "string" || !/^[0-9A-Za-z][0-9A-Za-z.-]{0,127}$/.test(value)) {
+  const infoBlock = content.match(openapiInfoPattern);
+  const version = infoBlock?.[1]?.match(openapiVersionPattern);
+  const value = version?.[1]?.replace(edgeQuotesPattern, "");
+  if (typeof value !== "string" || !contractVersionPattern.test(value)) {
     throw new TypeError("the OpenAPI contract lacks a valid info.version");
   }
   return { path: relativePath, sha256: sha256(content), version: value };
@@ -749,7 +760,7 @@ export async function buildReleaseManifest({
         withFileTypes: true,
       });
       for (const child of children) {
-        if (!child.isFile() || !/^(?:wrangler-)?[a-z0-9-]+\.jsonl?$/.test(child.name)) {
+        if (!child.isFile() || !evidenceLogPattern.test(child.name)) {
           throw new TypeError(`unclassified rendered artifact: wrangler/${child.name}`);
         }
         wranglerEntries.push(child.name);
@@ -758,7 +769,7 @@ export async function buildReleaseManifest({
     }
     if (publishable.has(entry.name)) {
       publishFiles.push(entry.name);
-    } else if (/^wrangler-[a-z0-9-]+\.jsonl$/.test(entry.name)) {
+    } else if (wranglerLogPattern.test(entry.name)) {
       // Wrangler NDJSON output logs are private scratch: scanned for
       // credential material below but never publishable.
       wranglerLogFiles.push(entry.name);
@@ -808,9 +819,7 @@ export async function buildReleaseManifest({
         const approval = validateApprovalMetadata(parsed, spec);
         if (
           approval.approval_job.name !==
-          name
-            .slice(9, -5)
-            .replace(/^(foundation|traffic|queue-resume)$/, (part) => `staging-${part}-approval`)
+          name.slice(9, -5).replace(deploymentPhasePattern, (part) => `staging-${part}-approval`)
         ) {
           throw new TypeError(`${name} holds an unexpected approval job`);
         }

@@ -1,3 +1,6 @@
+const placeholderSegmentsPattern = /(\{[^}]*\})/g;
+const vowelsPattern = /[aeiouAEIOU]/g;
+
 /**
  * Pseudo-localization for the DevBox i18n stresstester.
  *
@@ -37,11 +40,11 @@ const accents: Record<string, string> = {
  */
 export function pseudoLocalize(message: string): string {
   const transformed = message
-    .split(/(\{[^}]*\})/g)
+    .split(placeholderSegmentsPattern)
     .map((segment) =>
       segment.startsWith("{") && segment.endsWith("}")
         ? segment
-        : segment.replace(/[aeiouAEIOU]/g, (char) => accents[char] ?? char),
+        : segment.replace(vowelsPattern, (char) => accents[char] ?? char),
     )
     .join("");
   const padding = "~".repeat(Math.max(1, Math.round(message.length * 0.35)));

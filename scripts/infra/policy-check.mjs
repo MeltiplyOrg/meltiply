@@ -2,6 +2,34 @@ import { readFile, readdir } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+const httpBackendPattern = /backend\s+"http"\s*\{/;
+const disabledCachePattern = /authenticated_cache_disabled[\s\S]*caching\.disabled/;
+const deadLetterConsumerPattern = /cloudflare_queue_consumer[\s\S]*dead_letter_queue/;
+const workloadQueuePattern =
+  /cloudflare_queue"\s+"workload"[\s\S]*delivery_paused\s*=\s*var\.delivery_paused[\s\S]*message_retention_period\s*=\s*1209600/;
+const deadLetterRetentionPattern =
+  /cloudflare_queue"\s+"dead_letter"[\s\S]*message_retention_period\s*=\s*1209600/;
+const consumerLimitsPattern =
+  /cloudflare_queue_consumer"\s+"workload"[\s\S]*batch_size[\s\S]*max_concurrency[\s\S]*max_retries[\s\S]*max_wait_time_ms[\s\S]*retry_delay[\s\S]*visibility_timeout_ms/;
+const deadLetterPullPattern =
+  /cloudflare_queue_consumer"\s+"dead_letter_pull"[\s\S]*type\s*=\s*"http_pull"/;
+const bucketCorsPattern = /cloudflare_r2_bucket_cors[\s\S]*origins\s*=/;
+const operatorBindingsPattern =
+  /ACCESS_POLICY_AUD\s*=\s*var\.enable_operator_access[\s\S]*ACCESS_TEAM_DOMAIN\s*=\s*var\.enable_operator_access[\s\S]*OPERATOR_HOSTNAME\s*=\s*var\.enable_operator_access/;
+const accessCookiePolicyPattern =
+  /cloudflare_zero_trust_access_application[\s\S]*enable_binding_cookie\s*=\s*true[\s\S]*http_only_cookie_attribute\s*=\s*true[\s\S]*same_site_cookie_attribute\s*=\s*"strict"/;
+const unsupportedBudgetPattern = /\b(?:billing_limit_usd|monthly_budget_usd|budget_policy_ids)\b/;
+const managedHyperdrivePattern = /resource\s+"cloudflare_hyperdrive_config"/;
+const managedStorageDomainPattern = /resource\s+"cloudflare_r2_(managed_domain|custom_domain)"/;
+const plaintextSecretPattern = /\b(password|access_client_secret|api_token)\s*=\s*var\./;
+const accessTagsPattern =
+  /resource\s+"cloudflare_zero_trust_access_application"[\s\S]*?tags\s*=\s*var\.tags/;
+const operatorTagsPattern = /module\s+"operator_access"[\s\S]*?tags\s*=\s*var\.common_tags/;
+const broadLifecyclePattern =
+  /prefix\s*=\s*""(?:(?!prefix\s*=\s*").){0,300}?delete_objects_transition/;
+const workerConsumersPattern = /"consumers"\s*:/;
+const localDatabaseBindingPattern = /localConnectionString/;
+
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const infrastructureRoot = join(repositoryRoot, "infra/cloudflare");
 
@@ -103,103 +131,93 @@ export async function checkStaticPolicy() {
   requirePattern(
     failures,
     all,
-    /backend\s+"http"\s*\{/,
+    httpBackendPattern,
     "remote lock-capable HTTP state backend is required",
   );
   requirePattern(
     failures,
     all,
-    /authenticated_cache_disabled[\s\S]*caching\.disabled/,
+    disabledCachePattern,
     "authenticated Hyperdrive caching must be checked as disabled",
   );
   requirePattern(
     failures,
     all,
-    /cloudflare_queue_consumer[\s\S]*dead_letter_queue/,
+    deadLetterConsumerPattern,
     "every workload consumer must name a DLQ",
   );
   requirePattern(
     failures,
     all,
-    /cloudflare_queue"\s+"workload"[\s\S]*delivery_paused\s*=\s*var\.delivery_paused[\s\S]*message_retention_period\s*=\s*1209600/,
+    workloadQueuePattern,
     "workload Queues must retain messages for fourteen days",
   );
   requirePattern(
     failures,
     all,
-    /cloudflare_queue"\s+"dead_letter"[\s\S]*message_retention_period\s*=\s*1209600/,
+    deadLetterRetentionPattern,
     "dead-letter Queues must retain messages for fourteen days",
   );
   requirePattern(
     failures,
     all,
-    /cloudflare_queue_consumer"\s+"workload"[\s\S]*batch_size[\s\S]*max_concurrency[\s\S]*max_retries[\s\S]*max_wait_time_ms[\s\S]*retry_delay[\s\S]*visibility_timeout_ms/,
+    consumerLimitsPattern,
     "workload consumers must configure every delivery/backpressure bound",
   );
   requirePattern(
     failures,
     all,
-    /cloudflare_queue_consumer"\s+"dead_letter_pull"[\s\S]*type\s*=\s*"http_pull"/,
+    deadLetterPullPattern,
     "every DLQ must expose a pull-only operator consumer",
   );
+  requirePattern(failures, all, bucketCorsPattern, "R2 upload CORS must be explicit");
   requirePattern(
     failures,
     all,
-    /cloudflare_r2_bucket_cors[\s\S]*origins\s*=/,
-    "R2 upload CORS must be explicit",
-  );
-  requirePattern(
-    failures,
-    all,
-    /ACCESS_POLICY_AUD\s*=\s*var\.enable_operator_access[\s\S]*ACCESS_TEAM_DOMAIN\s*=\s*var\.enable_operator_access[\s\S]*OPERATOR_HOSTNAME\s*=\s*var\.enable_operator_access/,
+    operatorBindingsPattern,
     "operator Access verifier bindings must be exported together",
   );
   requirePattern(
     failures,
     all,
-    /cloudflare_zero_trust_access_application[\s\S]*enable_binding_cookie\s*=\s*true[\s\S]*http_only_cookie_attribute\s*=\s*true[\s\S]*same_site_cookie_attribute\s*=\s*"strict"/,
+    accessCookiePolicyPattern,
     "operator Access cookies must be bound, HttpOnly, and SameSite strict",
   );
   rejectPattern(
     failures,
     all,
-    /\b(?:billing_limit_usd|monthly_budget_usd|budget_policy_ids)\b/,
+    unsupportedBudgetPattern,
     "product usage notifications must not be represented as account-wide USD budget alerts",
   );
   rejectPattern(
     failures,
     all,
-    /resource\s+"cloudflare_hyperdrive_config"/,
+    managedHyperdrivePattern,
     "secret-bearing Hyperdrive resources must not be stored in OpenTofu state",
   );
+  rejectPattern(failures, all, managedStorageDomainPattern, "asset R2 buckets must remain private");
   rejectPattern(
     failures,
     all,
-    /resource\s+"cloudflare_r2_(managed_domain|custom_domain)"/,
-    "asset R2 buckets must remain private",
-  );
-  rejectPattern(
-    failures,
-    all,
-    /\b(password|access_client_secret|api_token)\s*=\s*var\./,
+    plaintextSecretPattern,
     "secret values must not flow through OpenTofu variables/state",
   );
   requirePattern(
     failures,
     all,
-    /resource\s+"cloudflare_zero_trust_access_application"[\s\S]*?tags\s*=\s*var\.tags/,
+    accessTagsPattern,
     "tag-capable Access application must carry module tags (AUD-045)",
   );
   requirePattern(
     failures,
     all,
-    /module\s+"operator_access"[\s\S]*?tags\s*=\s*var\.common_tags/,
+    operatorTagsPattern,
     "Access module must receive var.common_tags (AUD-045)",
   );
   rejectPattern(
     failures,
     all,
-    /prefix\s*=\s*""(?:(?!prefix\s*=\s*").){0,300}?delete_objects_transition/,
+    broadLifecyclePattern,
     "primary asset paths must never be auto-deleted; only staging/ and incomplete multipart uploads may expire (AUD-045)",
   );
 
@@ -210,13 +228,13 @@ export async function checkStaticPolicy() {
   rejectPattern(
     failures,
     productionWrangler,
-    /"consumers"\s*:/,
+    workerConsumersPattern,
     "staging Queue consumers are OpenTofu-owned, not Wrangler-owned",
   );
   rejectPattern(
     failures,
     productionWrangler,
-    /localConnectionString/,
+    localDatabaseBindingPattern,
     "production Wrangler config must not contain a direct database URL",
   );
 

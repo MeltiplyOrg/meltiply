@@ -31,7 +31,7 @@ credentials, and no deployment secrets are supplied. Never execute contributor c
 through `pull_request_target` or persistent self-hosted runners.
 
 `bun run test:tooling` discovers Node test files in CI helpers, local tooling,
-translations, infrastructure, releases, staging adapters, benchmarks, and self-hosted
+translations, infrastructure, releases, staging adapters, and self-hosted
 jobs. Shell regressions and PostgreSQL suites stay separate; none need deployment
 credentials.
 
@@ -62,15 +62,6 @@ service binding; stored due times are unchanged and no future clock is injected.
 
 Live deployments follow the
 [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
-
-## Backend benchmarks
-
-[`backend-benchmark.yml`](../.github/workflows/backend-benchmark.yml) is a manual
-two-revision job outside `ci-gate`: it checks out `master` as baseline and the
-dispatched commit as candidate, migrates a dedicated PostgreSQL 18.6 database for
-each, and runs the same in-process API workload against both in alternating order.
-Methodology and results are in the
-[backend comparison report](benchmarks/backend-optimization.md).
 
 ## Self-hosted release images
 

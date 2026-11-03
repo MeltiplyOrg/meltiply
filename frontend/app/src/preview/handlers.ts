@@ -12,6 +12,10 @@ import { emptyValue, scenarioValue } from "./values";
 import { createPreviewUploads } from "./uploads";
 import { createPreviewState } from "./state";
 
+const openingBracePattern = /\{/g;
+const pathParameterPattern = /\{([^}]+)\}/g;
+const apiPathPattern = /\/api(?:\/|$)/;
+
 const bootstrapOperations: Record<string, true> = {
   getAuthSession: true,
   getSetupStatus: true,
@@ -100,11 +104,12 @@ export function createPreviewHandlers(options: PreviewOptions = {}) {
   const generated = [...operations]
     .sort(
       (left, right) =>
-        (left.path.match(/\{/g)?.length ?? 0) - (right.path.match(/\{/g)?.length ?? 0),
+        (left.path.match(openingBracePattern)?.length ?? 0) -
+        (right.path.match(openingBracePattern)?.length ?? 0),
     )
     .map((operation) =>
       http[operation.method](
-        operation.path.replace(/\{([^}]+)\}/g, ":$1"),
+        operation.path.replace(pathParameterPattern, ":$1"),
         async ({ request, params }) => {
           const scoped = options.operationId
             ? options.operationId === operation.operationId
@@ -249,7 +254,7 @@ export function createPreviewHandlers(options: PreviewOptions = {}) {
     ...generated,
     uploads.blobHandler,
     http.post("/__frontend-telemetry", () => new HttpResponse(null, { status: 204 })),
-    http.all(/\/api(?:\/|$)/, () =>
+    http.all(apiPathPattern, () =>
       HttpResponse.json(
         {
           error: {

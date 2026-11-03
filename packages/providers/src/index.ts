@@ -396,7 +396,7 @@ export function createProviderRegistryFromEnvironment(
       createFacebookAdapter({
         clientId: facebookClientId!,
         clientSecret: facebookClientSecret!,
-        redirectUri: new URL(oauthCallbackPath("facebook"), publicUrl).toString(),
+        redirectUri: `${publicUrl.origin}${oauthCallbackPath("facebook")}`,
         ...commonOptions,
       }),
     );
@@ -408,7 +408,7 @@ export function createProviderRegistryFromEnvironment(
         clientId: instagramClientId!,
         clientSecret: instagramClientSecret!,
         engagementEnabled: instagramEngagementAccepted,
-        redirectUri: new URL(oauthCallbackPath("instagram"), publicUrl).toString(),
+        redirectUri: `${publicUrl.origin}${oauthCallbackPath("instagram")}`,
         ...commonOptions,
       }),
     );
@@ -420,7 +420,7 @@ export function createProviderRegistryFromEnvironment(
         clientId: threadsClientId!,
         clientSecret: threadsClientSecret!,
         engagementEnabled: threadsEngagementAccepted,
-        redirectUri: new URL(oauthCallbackPath("threads"), publicUrl).toString(),
+        redirectUri: `${publicUrl.origin}${oauthCallbackPath("threads")}`,
         ...commonOptions,
       }),
     );
@@ -431,9 +431,8 @@ export function createProviderRegistryFromEnvironment(
       createTikTokAdapter({
         clientKey: tiktokClientKey!,
         clientSecret: tiktokClientSecret!,
-        mediaUrlPrefix:
-          tiktokMediaUrlPrefix || new URL("/api/v1/provider-media/", publicUrl).toString(),
-        redirectUri: new URL(oauthCallbackPath("tiktok"), publicUrl).toString(),
+        mediaUrlPrefix: tiktokMediaUrlPrefix || `${publicUrl.origin}/api/v1/provider-media/`,
+        redirectUri: `${publicUrl.origin}${oauthCallbackPath("tiktok")}`,
         ...commonOptions,
       }),
     );
@@ -444,7 +443,7 @@ export function createProviderRegistryFromEnvironment(
       createYouTubeAdapter({
         clientId: youtubeClientId!,
         clientSecret: youtubeClientSecret!,
-        redirectUri: new URL(oauthCallbackPath("youtube"), publicUrl).toString(),
+        redirectUri: `${publicUrl.origin}${oauthCallbackPath("youtube")}`,
         ...commonOptions,
       }),
     );

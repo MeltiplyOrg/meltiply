@@ -1,34 +1,17 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
-import { capabilityNavigation } from "../../../frontend/app/e2e/cache-smoke.mjs";
-
-/** Summarizes observed HTTP latency in milliseconds with nearest-rank p95, without extrapolating savings. */
-function latency(samples) {
-  const ordered = [...samples].sort((a, b) => a - b);
-  return {
-    count: ordered.length,
-    mean: samples.reduce((sum, value) => sum + value, 0) / samples.length,
-    p95: ordered[Math.ceil(ordered.length * 0.95) - 1],
-  };
-}
+import { capabilityNavigation } from "../../frontend/app/e2e/cache-smoke.mjs";
 
 /**
  * Exercises built APIs and the real browser query consumers using disposable persisted fixtures.
  * `query` is a privileged, parameterized test-only PostgreSQL connection; authentication remains
  * the deployment's real cookie/token path. Requires pg_stat_statements on the disposable database.
- * `observeMemory` optionally samples the whole runtime, not isolated cache heap; absent observations are null.
- * Never publishes content or logs cookies/tokens. Writes credential-free observations under artifacts.
+ * Never publishes content or logs cookies/tokens. SQL observations assert cache reuse,
+ * not latency or resource measurements.
  */
-export async function cacheSmoke({
-  origin,
-  frontendOrigin = origin,
-  cookie,
-  query,
-  label,
-  observeMemory = async () => null,
-}) {
+export async function cacheSmoke({ origin, frontendOrigin = origin, cookie, query, label }) {
   const minted = await fetch(`${origin}/api/auth/token`, {
     headers: { cookie, origin: frontendOrigin },
   });
@@ -43,7 +26,6 @@ export async function cacheSmoke({
   const requestIds = new Set();
   /** Performs a bounded authenticated call, preserving each response's correlation identity. */
   async function api(path, body) {
-    const started = performance.now();
     const response = await fetch(`${origin}/api/v1${path}`, {
       headers: { ...headers, "idempotency-key": randomUUID() },
       method: body === undefined ? "GET" : "POST",
@@ -56,7 +38,7 @@ export async function cacheSmoke({
     assert.ok(requestId, "Every response needs correlation");
     assert.equal(requestIds.has(requestId), false, "Responses must not reuse request identities");
     requestIds.add(requestId);
-    return { data, ms: performance.now() - started };
+    return { data };
   }
   const { data: profile } = await api("/brand-profiles", {
     name: `Cache smoke ${label}`,
@@ -86,14 +68,13 @@ export async function cacheSmoke({
     /** Reads only aggregate executions, excluding auth/visibility work and fixture preparation. */
     async function aggregateStats() {
       const stats = await query(
-        `SELECT COALESCE(sum(calls), 0)::int AS calls, COALESCE(sum(total_exec_time), 0)::float8 AS database_ms
+        `SELECT COALESCE(sum(calls), 0)::int AS calls
          FROM pg_stat_statements WHERE query LIKE '%WITH candidates AS (%' AND query LIKE '%analytics_snapshots%'`,
       );
       return stats.rows[0];
     }
-    const observations = [];
-    /** Measures fixed-data work, excluding priming, visibility-generation fixture writes and SQL observation from latency. */
-    async function measure(name, paths, concurrent, beforeSample) {
+    /** Asserts persisted summaries for sequential or concurrent reads and returns the aggregate query count. */
+    async function exercise(paths, concurrent, beforeSample) {
       const before = await aggregateStats();
       const samples = [];
       if (concurrent) {
@@ -110,44 +91,24 @@ export async function cacheSmoke({
         assert.equal(sample.data.totals.post_count, 128);
         assert.equal(sample.data.last_synced_at, "2026-01-16T12:00:00.000Z");
       }
-      const observation = {
-        workload: name,
-        api_requests: samples.length,
-        aggregate_executions: after.calls - before.calls,
-        database_ms: after.database_ms - before.database_ms,
-        latency_ms: latency(samples.map((sample) => sample.ms)),
-        response_bytes: Buffer.byteLength(JSON.stringify(samples[0].data)),
-        runtime_memory: await observeMemory(),
-      };
-      observations.push(observation);
-      return observation;
+      return after.calls - before.calls;
     }
     const coldPaths = Array.from(
       { length: 20 },
       (_, index) =>
         `${base}${encodeURIComponent(`2026-02-01T00:00:00.${String(index).padStart(3, "0")}Z`)}`,
     );
-    const cold = await measure("cold-distinct-exact-ranges", coldPaths, false);
-    assert.equal(cold.aggregate_executions, 20);
-    const uncached = await measure(
-      "uncached-identical-forced-generation",
-      Array(20).fill(coldPaths[0]),
-      false,
-      () =>
-        query("UPDATE brand_profiles SET updated_at = clock_timestamp() WHERE id = $1", [
-          profile.id,
-        ]),
+    const cold = await exercise(coldPaths, false);
+    assert.equal(cold, 20);
+    const uncached = await exercise(Array(20).fill(coldPaths[0]), false, () =>
+      query("UPDATE brand_profiles SET updated_at = clock_timestamp() WHERE id = $1", [profile.id]),
     );
-    assert.equal(uncached.aggregate_executions, 20);
+    assert.equal(uncached, 20);
     const warmPath = `${base}2026-02-02T00%3A00%3A00Z`;
     await api(warmPath);
-    const warm = await measure("warm-identical", Array(20).fill(warmPath), false);
-    assert.equal(warm.aggregate_executions, 0);
-    await measure(
-      "concurrent-cold-identical",
-      Array(20).fill(`${base}2026-02-03T00%3A00%3A00Z`),
-      true,
-    );
+    const warm = await exercise(Array(20).fill(warmPath), false);
+    assert.equal(warm, 0);
+    await exercise(Array(20).fill(`${base}2026-02-03T00%3A00%3A00Z`), true);
     // Persisted lifecycle changes bypass any local invalidation: a second DB client writes directly.
     await query(
       "UPDATE brand_profiles SET deleted_at = now(), purge_at = now() + interval '30 days', updated_at = now() WHERE id = $1",
@@ -165,9 +126,9 @@ export async function cacheSmoke({
       (_, index) =>
         `${base}${encodeURIComponent(`2026-03-01T00:00:00.${String(index).padStart(3, "0")}Z`)}`,
     );
-    await measure("capacity-distinct-ranges", overflow, false);
-    const evicted = await measure("evicted-oldest-range", [coldPaths[0]], false);
-    assert.equal(evicted.aggregate_executions, 1);
+    await exercise(overflow, false);
+    const evicted = await exercise([coldPaths[0]], false);
+    assert.equal(evicted, 1);
     const expiryPath = `${base}2026-04-01T00%3A00%3A00Z`;
     assert.equal((await api(expiryPath)).data.totals.views, 1280);
     await query(
@@ -211,25 +172,7 @@ export async function cacheSmoke({
         },
       },
     });
-    const evidence = {
-      runtime: label,
-      dataset: { distributions: 128, snapshots: 128 },
-      observations,
-      lifecycle: "warm explicit profile removed and restored through independent persisted writes",
-      memory: {
-        retained_serialized_payload_upper_bound_bytes: 64 * 16 * 1024,
-        measured_heap_bytes: null,
-        limitation:
-          "Whole-runtime observations are measured separately; the cache-heap bound is contractual, not a heap measurement.",
-      },
-      limitations: [
-        "Synthetic fixed dataset; not production savings.",
-        "Managed local workerd is not a deployed Cloudflare isolate.",
-        "Provider controlled-upstream acceptance runs separately; no live Provider publishing.",
-      ],
-    };
-    await writeFile(`artifacts/cache/${label}.json`, JSON.stringify(evidence, null, 2));
-    console.log(JSON.stringify(evidence));
+    console.log(`Cache lifecycle and browser checks passed: ${label}`);
   } finally {
     await query(
       "DELETE FROM analytics_snapshots WHERE distribution_id IN (SELECT id FROM distributions WHERE post_id = $1)",

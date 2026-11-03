@@ -96,7 +96,7 @@ export interface AssetServiceOptions {
 
 const assetColumns = `
   id, org_id, brand_profile_id, uploaded_by, asset_type, title, duration_sec,
-  file_size, mime_type, width, height, original_filename, status, failure_code,
+  file_size, mime_type, width, height, status, failure_code,
   failure_message, failure_retryable, failure_at, created_at, updated_at
 `;
 
@@ -629,24 +629,18 @@ function organizationUsageEffect(
 /**
  * Retrieves a single asset database record scoped to the active tenant organization via Effect.
  *
- * Enforces tenant isolation via `public.auth_active_org_id()`. Excludes soft-deleted
- * assets unless `includeDeleted` is explicitly true, optionally acquires a row lock,
- * and when `requireActiveProfile` is set also excludes assets whose Brand Profile is
- * soft-deleted so deleted-profile data leaves normal views immediately.
+ * Enforces tenant isolation and excludes deleted Assets. Public reads also
+ * require an active Brand Profile.
  *
- * @param client - Active PostgreSQL EffectTransactionClient scoped to the tenant.
- * @param assetId - Unique identifier of the target asset.
- * @param options - `lock` appends `FOR UPDATE`; `includeDeleted` matches
- *   `status = 'deleted'` rows; `requireActiveProfile` adds the active Brand
- *   Profile predicate for public reads and mutations.
+ * @param client - Active tenant transaction client.
+ * @param assetId - Asset identifier.
+ * @param options - `requireActiveProfile` excludes soft-deleted Brand Profiles.
  * @returns Effect resolving to the asset row or failing with 404 CoreApiError / DatabaseError.
  */
 function getAssetRowEffect(
   client: EffectTransactionClient,
   assetId: string,
   options: {
-    includeDeleted?: boolean;
-    lock?: boolean;
     requireActiveProfile?: boolean;
   } = {},
 ): Effect.Effect<AssetRow, CoreApiError | DatabaseError> {
@@ -656,9 +650,8 @@ function getAssetRowEffect(
        FROM assets
        WHERE id = $1
          AND org_id = public.auth_active_org_id()
-         ${options.includeDeleted ? "" : "AND status != 'deleted'"}
-         ${options.requireActiveProfile ? `AND ${activeBrandProfilePredicate("assets.brand_profile_id")}` : ""}
-      ${options.lock ? "FOR UPDATE" : ""}`,
+         AND status != 'deleted'
+         ${options.requireActiveProfile ? `AND ${activeBrandProfilePredicate("assets.brand_profile_id")}` : ""}`,
       [assetId],
     );
     const row = result.rows[0];
@@ -666,6 +659,28 @@ function getAssetRowEffect(
       return yield* Effect.fail(new CoreApiError(404, "not_found", "The asset was not found."));
     }
     return row;
+  });
+}
+
+/** Locks a tenant Asset without loading its read model; completion also requires an active Brand Profile. Missing/deleted Assets fail with 404. */
+function lockAssetStatusEffect(
+  client: EffectTransactionClient,
+  assetId: string,
+  requireActiveProfile = false,
+): Effect.Effect<AssetRow["status"], CoreApiError | DatabaseError> {
+  return Effect.gen(function* () {
+    const result = yield* client.query<Pick<AssetRow, "status">>(
+      `SELECT status FROM assets
+       WHERE id = $1 AND org_id = public.auth_active_org_id() AND status != 'deleted'
+         ${requireActiveProfile ? `AND ${activeBrandProfilePredicate("assets.brand_profile_id")}` : ""}
+       FOR UPDATE`,
+      [assetId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return yield* Effect.fail(new CoreApiError(404, "not_found", "The asset was not found."));
+    }
+    return row.status;
   });
 }
 
@@ -688,12 +703,28 @@ function getReadyMediaAssetRowEffect(
   session: SessionClaims,
   assetId: string,
   download: boolean,
-): Effect.Effect<AssetRow & { protected_key: string }, CoreApiError | DatabaseError | DomainError> {
+): Effect.Effect<
+  { title: string; original_filename: string | null; protected_key: string },
+  CoreApiError | DatabaseError | DomainError
+> {
   return withTenantTransactionEffect(env, session, (client) =>
     Effect.gen(function* () {
-      const asset = yield* getAssetRowEffect(client, assetId, {
-        requireActiveProfile: true,
-      });
+      const result = yield* client.query<
+        Pick<AssetRow, "title" | "status" | "asset_type" | "mime_type"> & {
+          original_filename: string | null;
+        }
+      >(
+        `SELECT title, original_filename, status, asset_type, mime_type
+         FROM assets
+         WHERE id = $1 AND org_id = public.auth_active_org_id()
+           AND status != 'deleted'
+           AND ${activeBrandProfilePredicate("assets.brand_profile_id")}`,
+        [assetId],
+      );
+      const asset = result.rows[0];
+      if (!asset) {
+        return yield* Effect.fail(new CoreApiError(404, "not_found", "The asset was not found."));
+      }
       const selected = yield* client.query<{ r2_key: string }>(
         `SELECT objects.r2_key
          FROM asset_objects AS objects
@@ -729,7 +760,11 @@ function getReadyMediaAssetRowEffect(
           new CoreApiError(409, "invalid_state", "Only ready media assets can be accessed."),
         );
       }
-      return { ...asset, protected_key: protectedKey };
+      return {
+        title: asset.title,
+        original_filename: asset.original_filename,
+        protected_key: protectedKey,
+      };
     }),
   );
 }
@@ -1760,11 +1795,8 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                 };
               }
               const completionTime = now();
-              const asset = yield* getAssetRowEffect(client, row.asset_id, {
-                lock: true,
-                requireActiveProfile: true,
-              });
-              if (asset.status === "deleting" || asset.status === "deleted") {
+              const assetStatus = yield* lockAssetStatusEffect(client, row.asset_id, true);
+              if (assetStatus === "deleting" || assetStatus === "deleted") {
                 return yield* Effect.fail(
                   new CoreApiError(409, "invalid_state", "The asset is being deleted."),
                 );
@@ -2220,7 +2252,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
               // for a deletion nobody asked for. The lock still serializes
               // against a concurrent completion, which is what decides this
               // session's fate.
-              yield* getAssetRowEffect(client, row.asset_id, { lock: true });
+              yield* lockAssetStatusEffect(client, row.asset_id);
               return { replayed: false as const, row };
             }),
           );

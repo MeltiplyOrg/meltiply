@@ -1,5 +1,7 @@
 import type { ProviderFailure, ProviderFailureClass } from "./types";
 
+const failureCodePattern = /^[a-z0-9][a-z0-9._-]{0,99}$/;
+
 export interface ProviderFailureInput {
   code?: string;
   malformedResponse?: boolean;
@@ -38,7 +40,7 @@ const messages: Readonly<Record<ProviderFailureClass, string>> = {
  */
 function safeCode(value: string | undefined, fallback: string): string {
   const normalized = value?.trim().toLowerCase();
-  return normalized && /^[a-z0-9][a-z0-9._-]{0,99}$/.test(normalized) ? normalized : fallback;
+  return normalized && failureCodePattern.test(normalized) ? normalized : fallback;
 }
 
 /**

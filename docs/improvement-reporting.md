@@ -54,6 +54,13 @@ six earlier days when they carry confirmed publications. An open day is never
 sent, and a repeated invocation or a partial delivery reuses the same frozen
 report identity rather than producing a second measurement.
 
+A confirmed publication belongs to the day its measurement committed, read from
+the database clock under the same lock the daily producer takes before it derives
+a day. A transaction that began before midnight and committed after it therefore
+counts in the day it truly committed, and the producer waits for an in-flight
+measurement instead of freezing a day without it. No confirmed success is ever
+discarded because a day was already reported.
+
 Rules that matter when reading the numbers:
 
 - Missing or unsupported metrics are **omitted**, never reported as `0`, and named

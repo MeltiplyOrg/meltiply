@@ -48,7 +48,6 @@ const env = {
 async function seedDomain(): Promise<void> {
   const database = systemPoolFor(env);
   await database.query("DELETE FROM reporting_publication_daily WHERE TRUE");
-  await database.query("DELETE FROM reporting_publication_daily_finalized WHERE TRUE");
   await database.query("DELETE FROM reporting_distribution_marks WHERE TRUE");
   await database.query("DELETE FROM reporting_post_marks WHERE TRUE");
   await database.query("DELETE FROM reporting_preferences WHERE TRUE");

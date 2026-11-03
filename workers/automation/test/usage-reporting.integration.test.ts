@@ -1,12 +1,13 @@
 import { Effect } from "effect";
 import { ProviderRegistry, type ProviderAdapter } from "@meltiply/providers";
+import { recordPublicationUsage, reportingConfiguration } from "@meltiply/reporting";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import type { AutomationEnv } from "../src/env";
 import type { OutboxMessage } from "../src/messages";
 import { processDistributionMessage } from "../src/distribution";
 import { enqueueDailyUsageReport } from "../src/usage-reporting";
-import { systemPoolFor } from "../src/database";
+import { systemPoolFor, withSystemTransactionEffect } from "../src/database";
 import { runSystemTransaction } from "./system-transaction";
 
 /**
@@ -330,7 +331,6 @@ beforeEach(async () => {
     await client.query("DELETE FROM reporting_pending_reports");
     await client.query("DELETE FROM reporting_preferences");
     await client.query("DELETE FROM reporting_publication_daily");
-    await client.query("DELETE FROM reporting_publication_daily_finalized");
     await client.query("DELETE FROM reporting_distribution_marks");
     await client.query("DELETE FROM reporting_post_marks");
   });
@@ -347,7 +347,6 @@ afterAll(async () => {
     await client.query("DELETE FROM reporting_pending_reports");
     await client.query("DELETE FROM reporting_preferences");
     await client.query("DELETE FROM reporting_publication_daily");
-    await client.query("DELETE FROM reporting_publication_daily_finalized");
     await client.query("DELETE FROM reporting_distribution_marks");
     await client.query("DELETE FROM reporting_post_marks");
   });
@@ -377,6 +376,139 @@ describe("usage publication measurement with PostgreSQL", () => {
     ]);
     // One Post mark, two Distribution marks: the Post was counted once even
     // though two success transitions observed it.
+    expect(await marks()).toEqual({ distributions: 2, posts: 1 });
+  });
+
+  it("counts a new Distribution when a sibling published before measurement existed", async () => {
+    await seedConsent({ intervalStartedAt: new Date(Date.now() - 60_000) });
+    // An upgrade: this Post already has a published Distribution from a release
+    // that predates the measurement, so there is no Post mark for it.
+    await runSystemTransaction(env, async (client) => {
+      await client.query(`UPDATE distributions SET post_id = $2 WHERE id = $1`, [
+        threadsDistributionId,
+        postId,
+      ]);
+      await client.query(
+        `UPDATE distributions SET status = 'published', published_at = now() - INTERVAL '30 days'
+         WHERE id = $1`,
+        [youtubeDistributionId],
+      );
+    });
+
+    // A second Channel of the same Post publishes after the Owner opted in.
+    await publish("threads", "usage-upgrade-sibling", threadsDistributionId);
+
+    // The historical sibling cannot be presented as a new Post, but it must not
+    // suppress the Distribution that actually succeeded inside this interval.
+    const buckets = await dailyBuckets();
+    expect(buckets).toHaveLength(1);
+    expect(buckets[0]).toMatchObject({ distributions: 1, platform: "threads" });
+    const postMark = await runSystemTransaction(env, async (client) => {
+      const result = await client.query<{ counted: boolean }>(
+        "SELECT counted FROM reporting_post_marks WHERE post_id = $1",
+        [postId],
+      );
+      return result.rows[0];
+    });
+    expect(postMark).toEqual({ counted: false });
+  });
+
+  it("never mutates an established Post mark when another Channel succeeds", async () => {
+    await seedConsent({ intervalStartedAt: new Date(Date.now() - 60_000) });
+    await publish("youtube", "usage-mark-first", youtubeDistributionId);
+    await runSystemTransaction(env, (client) =>
+      client.query(`UPDATE distributions SET post_id = $2 WHERE id = $1`, [
+        threadsDistributionId,
+        postId,
+      ]),
+    );
+    await publish("threads", "usage-mark-second", threadsDistributionId);
+
+    const postMark = await runSystemTransaction(env, async (client) => {
+      const result = await client.query<{ counted: boolean }>(
+        "SELECT counted FROM reporting_post_marks WHERE post_id = $1",
+        [postId],
+      );
+      return result.rows[0];
+    });
+    // The first success decided the Post once; the second Channel changes
+    // neither that decision nor its own Distribution counter.
+    expect(postMark).toEqual({ counted: true });
+    const buckets = await dailyBuckets();
+    expect(buckets.map((bucket) => [bucket.platform, bucket.distributions])).toEqual([
+      ["threads", 1],
+      ["youtube", 1],
+    ]);
+  });
+
+  it("counts a confirmation in the day the measurement actually commits", async () => {
+    // A transaction that began before midnight and commits after it must be
+    // counted, in the day it truly committed — never dropped because the earlier
+    // day was already measured.
+    await seedConsent({ intervalStartedAt: new Date(Date.now() - 60_000) });
+    const nextDay = new Date(Date.now() + 24 * 60 * 60 * 1_000);
+    // The measurement seam runs inside a real system transaction so the lock and
+    // the savepoint behave as they do in the publication path.
+    await Effect.runPromise(
+      withSystemTransactionEffect(env, (client) =>
+        recordPublicationUsage(
+          client,
+          { distributionId: youtubeDistributionId, platform: "youtube", postId },
+          reportingConfiguration(env),
+          { now: () => nextDay },
+        ),
+      ),
+    );
+
+    const buckets = await dailyBuckets();
+    expect(buckets).toHaveLength(1);
+    expect(buckets[0]).toMatchObject({
+      distributions: 1,
+      platform: "youtube",
+      report_date: nextDay.toISOString().slice(0, 10),
+    });
+    expect(buckets[0]!.report_date).not.toBe(new Date().toISOString().slice(0, 10));
+  });
+
+  it("includes an in-flight measurement instead of dropping it", async () => {
+    await seedConsent({ intervalStartedAt: new Date(Date.now() - 60_000) });
+    // Two Channel successes race the daily producer. The measurement and the
+    // producer share one lock, so whichever order they run in, both successes
+    // are counted exactly once and the frozen report never omits an increment it
+    // could have waited for.
+    await runSystemTransaction(env, (client) =>
+      client.query(`UPDATE distributions SET post_id = $2 WHERE id = $1`, [
+        threadsDistributionId,
+        postId,
+      ]),
+    );
+
+    const measurements = Promise.all([
+      publish("youtube", "usage-race-youtube", youtubeDistributionId),
+      publish("threads", "usage-race-threads", threadsDistributionId),
+    ]);
+    const producer = Effect.runPromise(
+      enqueueDailyUsageReport(env, {
+        now: () => new Date(Date.now() + 24 * 60 * 60 * 1_000),
+        providerRegistry: registryWithAnalytics(["youtube", "threads"]),
+      }),
+    );
+    await measurements;
+    await producer;
+
+    // A second pass (the next scheduled run) must not add a duplicate: both
+    // successes were already counted exactly once.
+    await Effect.runPromise(
+      enqueueDailyUsageReport(env, {
+        now: () => new Date(Date.now() + 24 * 60 * 60 * 1_000),
+        providerRegistry: registryWithAnalytics(["youtube", "threads"]),
+      }),
+    );
+
+    const buckets = await dailyBuckets();
+    const totals = new Map(buckets.map((bucket) => [bucket.platform, bucket.distributions]));
+    expect(totals.get("youtube")).toBe(1);
+    expect(totals.get("threads")).toBe(1);
     expect(await marks()).toEqual({ distributions: 2, posts: 1 });
   });
 
@@ -647,16 +779,13 @@ describe("daily usage producer with PostgreSQL", () => {
   it("queues one frozen report for a closed UTC day", async () => {
     await seedConsent({ intervalStartedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1_000) });
     await publish("youtube", "usage-producer", youtubeDistributionId);
-    const publishedAt = await runSystemTransaction(env, async (client) => {
-      const result = await client.query<{ published_at: Date }>(
-        "SELECT published_at FROM distributions WHERE id = $1",
-        [youtubeDistributionId],
-      );
-      return result.rows[0]!.published_at;
-    });
+    // The measurement is credited to the day it committed under the measurement
+    // lock, so that is the day the producer must report.
+    const measuredDay = new Date().toISOString().slice(0, 10);
+    expect(await dailyBuckets()).toHaveLength(1);
 
-    // Freeze "now" to the day after publication so that day is closed.
-    const dayAfter = new Date(publishedAt.getTime() + 24 * 60 * 60 * 1_000);
+    // Freeze "now" to the day after measurement so that day is closed.
+    const dayAfter = new Date(Date.now() + 24 * 60 * 60 * 1_000);
     const result = await Effect.runPromise(
       enqueueDailyUsageReport(env, {
         now: () => dayAfter,
@@ -666,11 +795,10 @@ describe("daily usage producer with PostgreSQL", () => {
 
     expect(result.queued).toBeGreaterThanOrEqual(1);
     const reports = await queuedUsageReports();
-    const publishedDay = publishedAt.toISOString().slice(0, 10);
-    const report = reports.find((row) => row.logical_id.endsWith(`:${publishedDay}`));
+    const report = reports.find((row) => row.logical_id.endsWith(`:${measuredDay}`));
     expect(report).toBeDefined();
     expect(report!.payload).toMatchObject({
-      report_date: publishedDay,
+      report_date: measuredDay,
       publications: { distributions: { youtube: 1 }, posts: 1 },
     });
   });

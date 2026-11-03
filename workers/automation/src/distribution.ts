@@ -1306,7 +1306,6 @@ function recordPublishOutcome(
           yield* recordPublicationUsage(
             client,
             {
-              confirmedAt: new Date(updatedRow.published_at ?? new Date()),
               distributionId: row.id,
               platform: row.platform,
               postId: row.post_id,
@@ -1818,7 +1817,6 @@ function recordReconciliationOutcome(
           yield* recordPublicationUsage(
             client,
             {
-              confirmedAt: new Date(updatedRow.published_at ?? new Date()),
               distributionId: row.id,
               platform: row.platform,
               postId: row.post_id,

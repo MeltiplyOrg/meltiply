@@ -255,10 +255,6 @@ export function createOperatorReconciliationService(): OperatorReconciliationSer
               yield* recordPublicationUsage(
                 client,
                 {
-                  confirmedAt:
-                    updatedRow.published_at === null
-                      ? new Date()
-                      : new Date(updatedRow.published_at),
                   distributionId: updatedRow.id,
                   platform: updatedRow.platform,
                   postId: updatedRow.post_id,

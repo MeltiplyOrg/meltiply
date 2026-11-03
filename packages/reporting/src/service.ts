@@ -165,6 +165,34 @@ function lockReportingMutations(
 }
 
 /**
+ * Key of the lock that orders publication measurement against the daily
+ * snapshot.
+ *
+ * Both sides take it before reading the clock or the aggregates, so a
+ * measurement that commits late is included by the next snapshot instead of
+ * being excluded from a day that was already measured — and it is counted in the
+ * day it actually committed, not the day its transaction started.
+ */
+const reportingMeasurementLockKey = 810_000_102;
+
+/**
+ * Takes the publication-measurement lock for the rest of the transaction.
+ *
+ * Exported because the in-transaction measurement and the scheduled producer must
+ * share one lock identity; a second constant would silently stop ordering them.
+ *
+ * @param client - Client bound to the caller's open transaction.
+ * @returns Effect resolving once the lock is held.
+ */
+export function lockReportingMeasurement(
+  client: ReportingClient,
+): Effect.Effect<void, DatabaseError> {
+  return Effect.asVoid(
+    client.query("SELECT pg_advisory_xact_lock($1)", [reportingMeasurementLockKey]),
+  );
+}
+
+/**
  * Deletes terminal rows' payloads and rows themselves once they are old enough
  * to be off any retry path, keeping only the minimal delivery receipt.
  *

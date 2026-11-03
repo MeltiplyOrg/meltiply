@@ -105,25 +105,3 @@ BEGIN
     END IF;
 END;
 $$;
-
--- A UTC day becomes final once the daily producer has measured it. A publication
--- transaction that began before midnight can still commit afterwards holding the
--- previous day; without this fence its increment would change a report that was
--- already frozen and delivered. The row is a fence, not data: the counter itself
--- lives in `reporting_publication_daily`.
-CREATE TABLE reporting_publication_daily_finalized (
-    report_date DATE PRIMARY KEY,
-    finalized_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meltiply_system') THEN
-        EXECUTE 'GRANT SELECT, INSERT, DELETE ON reporting_publication_daily_finalized
-                 TO meltiply_system';
-    END IF;
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meltiply_rls') THEN
-        EXECUTE 'REVOKE ALL ON reporting_publication_daily_finalized FROM meltiply_rls';
-    END IF;
-END;
-$$;

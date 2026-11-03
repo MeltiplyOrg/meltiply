@@ -6,6 +6,7 @@ import {
   createReportingServiceLive,
   isPlatform,
   loadPreferences,
+  lockReportingMeasurement,
   policySnapshot,
   reportingConfiguration,
   ReportingService,
@@ -211,6 +212,13 @@ export function enqueueDailyUsageReport(
   return Effect.gen(function* () {
     const snapshot = yield* withSystemTransactionEffect(env, (client) =>
       Effect.gen(function* () {
+        // The same lock every publication measurement takes, held for the whole
+        // read. A measurement that is in flight therefore commits *before* this
+        // snapshot derives the days, so its increment is included; a measurement
+        // that arrives afterwards waits and lands in a later day. This is what
+        // makes "every eligible confirmed success is counted" true without ever
+        // editing a report that was already frozen.
+        yield* lockReportingMeasurement(client);
         const preferences = yield* loadPreferences(client, false);
         const policy = policySnapshot(preferences, configuration);
         if (!categoryEffective(policy, "usage")) return null;
@@ -293,17 +301,6 @@ export function enqueueDailyUsageReport(
              ) AS latest ON true
            ) AS cohort`,
           [usageEngagementCohortLimit + 1],
-        );
-        // The days this pass measured become final before the transaction ends:
-        // a publication transaction that began before midnight and commits later
-        // then sees the fence and refuses to change an already-measured day,
-        // instead of retroactively editing a report that may already be sent.
-        const finalized = days.map((day) => day.reportDate);
-        yield* client.query(
-          `INSERT INTO reporting_publication_daily_finalized (report_date)
-           SELECT unnest($1::date[])
-           ON CONFLICT (report_date) DO NOTHING`,
-          [finalized],
         );
         return { channels, days, engagement, intervalStartedAt, posts, publications };
       }),

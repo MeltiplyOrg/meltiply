@@ -164,10 +164,8 @@ function ImprovementScreen({
   const usage = choiceOverride?.usage ?? stored?.categories.usage.requested ?? false;
   const diagnostics =
     choiceOverride?.diagnostics ?? stored?.categories.diagnostics.requested ?? false;
-  const setUsage = (value: boolean) =>
-    setChoiceOverride({ diagnostics, usage: value });
-  const setDiagnostics = (value: boolean) =>
-    setChoiceOverride({ diagnostics: value, usage });
+  const setUsage = (value: boolean) => setChoiceOverride({ diagnostics, usage: value });
+  const setDiagnostics = (value: boolean) => setChoiceOverride({ diagnostics: value, usage });
   // The read always resolves to a shape describing the surface, including for an
   // installation that never answered. Only a recorded answer — a stored source or
   // submission instant — may replace the controls, otherwise a fresh screen would

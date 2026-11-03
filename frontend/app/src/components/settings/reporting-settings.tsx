@@ -43,8 +43,7 @@ export function ReportingSettings(): React.ReactElement {
   const diagnostics =
     choiceOverride?.diagnostics ?? stored?.categories.diagnostics.requested ?? false;
   const setUsage = (value: boolean) => setChoiceOverride({ diagnostics, usage: value });
-  const setDiagnostics = (value: boolean) =>
-    setChoiceOverride({ diagnostics: value, usage });
+  const setDiagnostics = (value: boolean) => setChoiceOverride({ diagnostics: value, usage });
   const canChange = isInstallationOwner && stored?.owner_can_change === true;
   const dirty =
     stored !== undefined &&

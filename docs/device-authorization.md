@@ -284,8 +284,8 @@ request: a script using a CLI credential is still attributed to `cli`. There is
 no API-key authentication or `api` classification yet. Raw JWTs, session tokens,
 cookies, and device codes must never appear in these fields.
 
-Apply migration `026_session_client_channel.sql` before deploying the updated
-auth issuer and API Worker.
+The `clientChannel` column ships in migration `026_session_client_channel.sql`; the
+migration ledger applies it before the runtime starts.
 
 ## Browser policy
 

@@ -2,16 +2,16 @@
 
 ## What the repository license means
 
-Original Meltiply material is source-available under the [Sustainable Use License](../LICENSE.md), not OSI-approved open source. Its terms permit personal/non-commercial and internal business use; they do not grant a right to sell hosted Meltiply.
+Original Meltiply material is licensed under the [GNU Affero General Public License version 3 or later](../LICENSE.md). It is OSI-approved open source: anyone may run, modify, and redistribute the software, including commercially, with no separate permission. Section 13 requires that users interacting with a modified version over a network be offered its Corresponding Source.
 
-Third-party material is excluded from that grant and keeps its own terms. Ship [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) and the applicable [`LICENSES`](../LICENSES) files with source distributions. Do not describe the whole checkout or its dependencies as SUL-only, MIT-only, or cleared for unrestricted commercial redistribution.
+Third-party material is excluded from that grant and keeps its own terms. Ship [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) and the applicable [`LICENSES`](../LICENSES) files with source distributions. Do not describe the whole checkout or its dependencies as AGPL-only, MIT-only, or cleared for unrestricted commercial redistribution.
 
 ## Source publication
 
 Before a public release:
 
 1. Identify the actual copyright owner/licensor. Confirm permission to redistribute employee, contractor, external, and AI-assisted contributions under the repository's license. Git author names and organization membership are not assignments or signed contributor agreements.
-2. Keep third-party licenses, attribution, modification notices, and any applicable upstream NOTICE files with copied material. Do not relicense those files under SUL merely by placing them in this repository.
+2. Keep third-party licenses, attribution, modification notices, and any applicable upstream NOTICE files with copied material. Do not relicense those files under the AGPL merely by placing them in this repository.
 3. Install the locked dependencies and run:
 
    ```bash
@@ -39,7 +39,7 @@ A source-only checkout does not include installed `node_modules`. A production b
 
 For each actual release artifact, preserve the copyright/license notices for the dependencies it contains, including bundled transitive code. Include required Apache notices and changes; provide source for modified MPL-covered files when required. Selecting Apache-2.0 for dual-licensed DOMPurify requires preserving its Apache terms and applicable notices, not simply deleting the MPL label. Keep development-only tools out of production artifacts.
 
-Run `bun run notices` to regenerate the checked-in browser and public-site bundles at `frontend/app/public/third-party-notices.txt` and `frontend/public/public/third-party-notices.txt`. The app HTML declares the bundle with `rel="license"`; the public footer links to it. Each bundle reproduces Meltiply's [Sustainable Use License](../LICENSE.md) first, so the permissive dependency notices cannot be mistaken for a grant to Meltiply material. The generator then reads the installed production graph, embeds shipped license files, includes copied interface code (shadcn, sileo, Lucide/Feather, and the permission-only Gr8r adaptation), and supplies canonical LGPL/GPL text for native `libvips`. Regenerate after every dependency change.
+Run `bun run notices` to regenerate the checked-in browser and public-site bundles at `frontend/app/public/third-party-notices.txt` and `frontend/public/public/third-party-notices.txt`. The app HTML declares the bundle with `rel="license"`; the public footer links to it. Each bundle reproduces Meltiply's [GNU Affero General Public License](../LICENSE.md) first, so the permissive dependency notices cannot be mistaken for a grant to Meltiply material. The generator then reads the installed production graph, embeds shipped license files, includes copied interface code (shadcn, sileo, Lucide/Feather, and the permission-only Gr8r adaptation), and supplies canonical LGPL/GPL text for native `libvips`. Regenerate after every dependency change.
 
 The JavaScript gate is a review aid, not artifact-level clearance. The generated bundles cover npm and copied-interface works; they do not certify native binaries, container base images, or FFmpeg codecs. The SBOM alone is not a notice or source-compliance package.
 
@@ -50,19 +50,23 @@ The media-processor Dockerfile installs FFmpeg and libvips through Alpine; JavaS
 For every image/binary release:
 
 - Record the exact image digest, OS, architecture, installed package versions, build configuration, and dependencies from the **built artifact**, not just an Alpine release name.
-- Preserve copyright and license texts for FFmpeg, libvips, codecs, and their transitive native libraries. Alpine's FFmpeg package can contain GPL- and LGPL-covered code; do not label the whole image LGPL or SUL. The canonical [`LGPL-3.0-or-later`](../LICENSES/LGPL-3.0-or-later.txt) and [`GPL-3.0-or-later`](../LICENSES/GPL-3.0-or-later.txt) texts cover the libvips fallback used by the notice generator; they do not replace the corresponding-source obligation.
+- Preserve copyright and license texts for FFmpeg, libvips, codecs, and their transitive native libraries. Alpine's FFmpeg package can contain GPL- and LGPL-covered code; do not label the whole image LGPL or AGPL. The canonical [`LGPL-3.0-or-later`](../LICENSES/LGPL-3.0-or-later.txt) and [`GPL-3.0-or-later`](../LICENSES/GPL-3.0-or-later.txt) texts cover the libvips fallback used by the notice generator; they do not replace the corresponding-source obligation.
 - Provide the exact corresponding source, patches, build/install scripts, and any relinking/install information required by the applicable GPL/LGPL versions using a license-compliant distribution method. A package URL, generic upstream checkout, SBOM, or unsupported promise to supply source is not automatically sufficient.
 - Keep those third-party rights separate from Meltiply's terms. Review the actual subprocess/linking boundaries; invocation of FFmpeg as a separate executable does not by itself determine every combined-work question.
 - Review codec patents and trademark permissions separately from copyright licensing.
 
 Primary references: [Alpine 3.23 FFmpeg package](https://pkgs.alpinelinux.org/package/v3.23/community/x86_64/ffmpeg), [FFmpeg legal guidance](https://ffmpeg.org/legal.html), [libvips license](https://github.com/libvips/libvips/blob/master/COPYING), [GNU GPL FAQ](https://www.gnu.org/licenses/gpl-faq.html), and [MPL 2.0 FAQ](https://www.mozilla.org/en-US/MPL/2.0/FAQ/).
 
-No native image or binary redistribution package was built or certified in this remediation. Do not publish such artifacts until their exact-version notices and source obligations are satisfied.
+No native image or binary redistribution package is certified by this document. Do not
+publish such artifacts until their exact-version notices and source obligations are satisfied.
 
 ## Rights confirmation and future contributions
 
-The repository owner confirmed control of the rights to original Meltiply code and branding, including necessary employer/contractor permissions, and permission to publish under SUL. This is an owner attestation, not an independently verified legal opinion. Third-party material remains under its original terms.
+The repository owner confirmed control of the rights to original Meltiply code and branding, including necessary employer/contractor permissions, and permission to publish under the AGPL. This is an owner attestation, not an independently verified legal opinion. Third-party material remains under its original terms.
 
-Continue retaining third-party notices and obtaining the required rights for new contributions. An incoming SUL contribution is not automatically a grant to relicense it under other terms; obtain any necessary separate written rights. See [contribution licensing](../CONTRIBUTING.md#licensing).
+The Gr8r Studio adaptation recorded in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) is used under written permission that includes sublicensing the adapted material under the GNU Affero General Public License, so AGPL section 5(c) whole-work licensing is satisfied for it. Sublicensing permission is documented in the notice index and reproduced in every distributed notice bundle.
 
-Source publication does not certify binary/image releases or codec patents. Apply the artifact-specific requirements above when distributing those artifacts.
+Continue retaining third-party notices and obtaining the required rights for new contributions. An incoming AGPL contribution is already licensed to downstream recipients under the AGPL; it does not by itself grant the maintainers the right to relicense it under different terms, so obtain any necessary separate written rights. See [contribution licensing](../CONTRIBUTING.md#licensing).
+
+Source publication does not certify binary/image releases or codec patents; apply the
+artifact-specific requirements above when distributing them.

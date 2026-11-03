@@ -1,8 +1,8 @@
 # Meltiply
 
-Meltiply is a multi-platform publishing workspace. Creators compose posts with
-their media, connect accounts on social networks, schedule and monitor
-publishing, review analytics, and reply to audience comments from one workspace.
+Meltiply is a multi-platform publishing workspace. Creators compose posts with their
+media, connect accounts on social networks, schedule and monitor publishing, and review
+analytics from one workspace.
 
 This glossary fixes the words used for those concepts. It is not a spec: it says what
 each term _is_, not how it is implemented.
@@ -58,7 +58,8 @@ that intent needs and whatever became of it.
 _Avoid_: post, publication, job, target
 
 **Reply**:
-A response a creator sends to a Comment on a published Distribution.
+A response to a Comment on a published Distribution. Replies exist in the data model and
+provider API; no creator-facing Inbox surface ships.
 _Avoid_: answer, response, message
 
 **Comment**:
@@ -66,7 +67,8 @@ Audience feedback retrieved from a Platform against a published Distribution.
 _Avoid_: engagement, interaction, mention
 
 **Inbox**:
-The surface where a creator reads Comments and sends Replies.
+The conceptual surface for reading Comments and sending Replies. It is **not** a shipped
+app route; backend comment and reply APIs do not imply one.
 _Avoid_: engagement view, messages, feed
 
 ## Workspace and resource usage
@@ -99,14 +101,12 @@ _Avoid_: owner, superadmin
 
 **Editor**:
 The Workspace role that creates and edits Posts, uploads Assets, schedules and
-publishes, retries or cancels Distributions, and replies to Comments. Editors
-read Channels and Brand Profiles but cannot configure them or manage members,
-settings, or Audit.
+publishes, and retries or cancels Distributions. Editors read Channels and Brand
+Profiles but cannot configure them or manage members, settings, or Audit.
 _Avoid_: member, creator, writer
 
 **Viewer**:
-The Workspace role with read-only access to Posts, Channels, analytics, and
-Inbox.
+The Workspace role with read-only access to Posts, Channels, and analytics.
 _Avoid_: guest, read-only member
 
 **Invitation**:
@@ -132,17 +132,18 @@ snapshot, action, target, before/after state, request id, and timestamp.
 _Avoid_: log line, activity, event
 
 > **Naming seam.** Use Workspace in module names, types, variables, UI copy, and
-> documentation. Below the persistence seam the established internal names are
-> `org_id` / `org_role`; native Workspace membership supplies their values.
-> This seam is intentionally internal rather than an external identity-provider contract.
+> documentation. Below the persistence seam the internal names are `org_id` / `org_role`;
+> native Workspace membership supplies their values. The seam is internal, not an
+> identity-provider contract.
 
 **Brand Profile**:
 A named, color-labelled identity within one Workspace that can carry an optional short
-description and owns its Posts, Assets, Platform accounts, Distributions,
-analytics, and Inbox activity. A Workspace can contain multiple Brand Profiles.
+description and owns its Posts, Assets, Platform accounts, Distributions, and analytics.
+A Workspace can contain multiple Brand Profiles.
 
 **Usage record**:
-A durable measurement of Workspace consumption used for usage reporting and, when a deployment defines quotas, resource enforcement.
+A durable measurement of Workspace consumption for usage reporting and, where a
+deployment defines quotas, resource enforcement.
 _Avoid_: metric, quota row, counter
 
 **Workspace quota**:

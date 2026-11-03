@@ -18,7 +18,6 @@ import { Cause, Effect, Option, Result, type Layer } from "effect";
 import type { Context } from "hono";
 
 import { runBackgroundContinuation } from "./background-continuation";
-import { withSystemTransactionEffect } from "./database";
 import type { ApiWorkerEnv, ApiWorkerEnvironment } from "./env";
 // Type-only, so importing the route's seam never creates a runtime cycle back
 // into the request boundary that calls this module.
@@ -160,7 +159,15 @@ function boundaryReportingLayer(
   const configuration = reportingConfiguration(env);
   const transaction: ReportingTransactionRunner = client
     ? (operation) => operation(client)
-    : (operation) => withSystemTransactionEffect(env, (systemClient) => operation(systemClient));
+    : (operation) =>
+        // Resolved lazily: this module is in the Worker entry point's import graph,
+        // and a static database import would evaluate the Node PostgreSQL client in
+        // workerd unit isolates that never touch a database.
+        Effect.flatMap(
+          Effect.promise(() => import("./database")),
+          (module) =>
+            module.withSystemTransactionEffect(env, (systemClient) => operation(systemClient)),
+        );
   return createReportingServiceLive({
     appVersion: env.VERSION,
     configuration,

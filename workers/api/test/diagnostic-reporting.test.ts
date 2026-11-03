@@ -1,4 +1,5 @@
 import { ProviderAdapterError, classifyProviderFailure } from "@meltiply/providers";
+import { diagnosticProperties, payloadViolation } from "@meltiply/reporting";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -106,12 +107,31 @@ describe("diagnostic boundary classification", () => {
       "/api/v1/posts/00000000-0000-4000-8000-000000000001",
     );
 
-    const serialized = JSON.stringify(report);
-    expect(serialized).not.toContain("Acme launch");
-    expect(serialized).not.toContain("alpha@meltiply.local");
-    expect(serialized).not.toContain("x.test");
-    expect(serialized).not.toContain("00000000-0000-4000-8000-000000000001");
-    expect(report.error).toEqual({ name: "Error" });
+    // The boundary report keeps the thrown value's bounded stack on purpose; the
+    // allowlist that removes the message runs downstream, in the payload the
+    // installation sends. So the privacy claim is proved where it is enforced:
+    // the assembled properties and the same `payloadViolation` gate the service
+    // applies before transport.
+    const properties = diagnosticProperties(report, {
+      appVersion: "1.0.0-target.0",
+      deploymentCategory: "selfhosted",
+    });
+    const sent = JSON.stringify(properties);
+    expect(sent).not.toContain("Acme launch");
+    expect(sent).not.toContain("alpha@meltiply.local");
+    expect(sent).not.toContain("x.test");
+    expect(sent).not.toContain("00000000-0000-4000-8000-000000000001");
+    expect(payloadViolation(properties)).toBeUndefined();
+    // The exception value is the fixed category, not the message the boundary saw.
+    const exception = (properties.$exception_list as Record<string, unknown>[])[0]!;
+    expect(exception.value).toBe("unhandled_exception");
+    // The path is not part of the boundary report at all: only its operation group is.
+    expect(JSON.stringify(report)).not.toContain("/api/v1/posts");
+    // The boundary carries a class name and its bounded stack, nothing more.
+    expect(report.error).toEqual({
+      name: "Error",
+      stack: expect.stringContaining("diagnostic-reporting.test.ts"),
+    });
   });
 });
 

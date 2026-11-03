@@ -63,29 +63,43 @@ describe("retention cleanup", () => {
   it("counts only the failing cleanup and still sweeps the rest", async () => {
     // One unreachable table must neither hide nor cancel the remaining cleanup
     // classes. Route by statement shape so exactly one class fails: idempotency
-    // keys are unreachable, every other class deletes two rows.
+    // keys are unreachable, every other class deletes two rows and reports no
+    // candidate rows, so the Brand Profile purge claims no inventory.
+    const statements: string[] = [];
     withSystemTransactionEffect.mockImplementation(
       (
         _env: AutomationEnv,
         operation: (client: EffectTransactionClient) => Effect.Effect<unknown>,
       ) =>
         operation({
-          query: (statement: string) =>
-            statement.includes("idempotency_keys")
-              ? Effect.fail(new Error("database unavailable"))
-              : Effect.succeed({ rowCount: 2, rows: [] }),
+          query: (statement: string) => {
+            statements.push(statement);
+            if (statement.includes("idempotency_keys")) {
+              return Effect.fail(new Error("database unavailable"));
+            }
+            // A candidate select answers with rows (none are due here); a batch
+            // delete answers with the row count it removed.
+            const deletion = statement.includes("DELETE FROM");
+            return Effect.succeed({ rowCount: deletion ? 2 : 0, rows: [] });
+          },
         } as unknown as EffectTransactionClient),
     );
 
     const result = await Effect.runPromise(runRetention(env, { batchSize: 10 }));
 
-    // The sweep attempted every registered class, reported one error, and kept
-    // the deletions from the classes that succeeded, so a single bad table is
-    // visible without discarding the rest of the run.
-    const attempted = withSystemTransactionEffect.mock.calls.length;
-    expect(attempted).toBeGreaterThan(1);
+    // Assert against the deletions the sweep actually issued, so the case proves
+    // isolation rather than the size of the cleanup registry: exactly one class
+    // failed, and every class that succeeded contributed its own rows.
+    const issued = statements.filter((statement) => statement.includes("DELETE FROM"));
+    const failed = issued.filter((statement) => statement.includes("idempotency_keys"));
+    expect(failed).toHaveLength(1);
     expect(result.errors).toBe(1);
-    expect(result.deleted).toBe((attempted - 1) * 2);
+    expect(result.deleted).toBe((issued.length - failed.length) * 2);
+    // The sweep kept going past the failing class instead of aborting the run:
+    // the Brand Profile purge still ran after the unreachable table.
+    expect(statements.some((statement) => statement.includes("brand_profiles AS profile"))).toBe(
+      true,
+    );
   });
 
   /**

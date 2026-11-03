@@ -31,7 +31,11 @@ if (!connectionString) {
 }
 
 const organizationId = "20000000-0000-4000-8000-000000000001";
-const profileId = "a0000000-0000-4000-8000-000000000001";
+// A Brand Profile this suite owns. The seeded shared Profile already carries a
+// YouTube Channel, and `platform_accounts_brand_profile_platform_unique` allows
+// one Channel per (Brand Profile, Platform) — so reusing it here would both
+// collide and misattribute the measurement.
+const profileId = "a0000000-0000-4000-8000-0000000000c1";
 const youtubeChannelId = "5e000000-0000-4000-8000-000000000001";
 const threadsChannelId = "5e000000-0000-4000-8000-000000000002";
 const installationReportingId = "6f1d3a6c-4b1e-4e2b-9a67-2f5c1d9b8a01";
@@ -171,8 +175,8 @@ async function seedConsent(options: {
 }
 
 /**
- * Creates the two dedicated Channels plus two text-only Posts, one Distribution
- * per Channel, in `queued` state.
+ * Creates this suite's Brand Profile, its two Channels, two text-only Posts, one
+ * Distribution per Channel, in `queued` state.
  *
  * Text-only Posts need no Asset, so these fixtures never touch media. The two
  * Channels use distinct Platforms because
@@ -190,6 +194,12 @@ async function seedPublications(): Promise<void> {
     await client.query("DELETE FROM platform_accounts WHERE id = ANY($1::uuid[])", [
       [youtubeChannelId, threadsChannelId],
     ]);
+    await client.query("DELETE FROM brand_profiles WHERE id = $1", [profileId]);
+    await client.query(
+      `INSERT INTO brand_profiles (id, org_id, name, color)
+       VALUES ($1, $2, 'Usage Brand', '#1d4ed8')`,
+      [profileId, organizationId],
+    );
     await client.query(
       `INSERT INTO platform_accounts
          (id, org_id, brand_profile_id, platform, platform_user_id, display_name,
@@ -206,7 +216,7 @@ async function seedPublications(): Promise<void> {
       `INSERT INTO posts (id, org_id, brand_profile_id, title, default_text, status)
        VALUES ($1, $3, $4, 'Usage one', 'Caption one', 'active'),
               ($2, $3, $4, 'Usage two', 'Caption two', 'active')`,
-      // $1, $2 the Posts; $3, $4 the Workspace and Brand Profile.
+      // $1, $2 the Posts; $3, $4 the Workspace and this suite's Brand Profile.
       [postId, threadsPostId, organizationId, profileId],
     );
     await client.query(
@@ -216,7 +226,7 @@ async function seedPublications(): Promise<void> {
        VALUES ($1, $3, $4, $5, $7, 'youtube', 'queued', ARRAY[]::uuid[]),
               ($2, $3, $4, $6, $8, 'threads', 'queued', ARRAY[]::uuid[])`,
       [
-        // $1, $2 distributions; $3, $4 the shared Workspace and Brand Profile;
+        // $1, $2 distributions; $3, $4 the Workspace and this suite's Profile;
         // $5, $6 the two Posts; $7, $8 the two Channels.
         youtubeDistributionId,
         threadsDistributionId,
@@ -328,11 +338,22 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await runSystemTransaction(env, async (client) => {
+    // Scope the reset to this suite's own Distributions and Posts. The marks and
+    // daily buckets are installation-wide facts another suite may also own, so a
+    // blanket delete here would erase its fixtures rather than this suite's.
+    await client.query(
+      "DELETE FROM reporting_distribution_marks WHERE distribution_id = ANY($1::uuid[])",
+      [distributionIds],
+    );
+    await client.query("DELETE FROM reporting_post_marks WHERE post_id = ANY($1::uuid[])", [
+      postIds,
+    ]);
+    await client.query(
+      `DELETE FROM reporting_publication_daily
+       WHERE report_date <= (now() AT TIME ZONE 'UTC')::date`,
+    );
     await client.query("DELETE FROM reporting_pending_reports");
     await client.query("DELETE FROM reporting_preferences");
-    await client.query("DELETE FROM reporting_publication_daily");
-    await client.query("DELETE FROM reporting_distribution_marks");
-    await client.query("DELETE FROM reporting_post_marks");
   });
   await seedPublications();
 });
@@ -344,11 +365,13 @@ afterAll(async () => {
     ]);
     await client.query("DELETE FROM distributions WHERE id = ANY($1::uuid[])", [distributionIds]);
     await client.query("DELETE FROM posts WHERE id = ANY($1::uuid[])", [postIds]);
+    await client.query("DELETE FROM platform_accounts WHERE id = ANY($1::uuid[])", [
+      [youtubeChannelId, threadsChannelId],
+    ]);
+    await client.query("DELETE FROM brand_profiles WHERE id = $1", [profileId]);
     await client.query("DELETE FROM reporting_pending_reports");
     await client.query("DELETE FROM reporting_preferences");
-    await client.query("DELETE FROM reporting_publication_daily");
-    await client.query("DELETE FROM reporting_distribution_marks");
-    await client.query("DELETE FROM reporting_post_marks");
+    await client.query("DELETE FROM reporting_delivery_receipts WHERE category = 'usage'");
   });
   await systemPoolFor(env).end();
 });

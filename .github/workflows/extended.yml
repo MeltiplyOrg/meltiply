@@ -474,6 +474,9 @@ jobs:
           # Controlled loopback receiver the journey starts itself; the
           # acceptance configs point both Workers at the same origin.
           MELTIPLY_E2E_EGRESS_URL: http://127.0.0.1:9787
+          # Origin of the API Worker, which exposes the acceptance scheduled
+          # trigger the journey uses to drain the real reporting queue.
+          MELTIPLY_E2E_API_BASE_URL: http://127.0.0.1:8787
         run: |
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
           status=0

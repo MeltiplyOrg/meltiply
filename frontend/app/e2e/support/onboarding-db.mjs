@@ -7,9 +7,12 @@ import { Client } from "pg";
  * Usage: onboarding-db.mjs CONNECTION_STRING resume|complete
  *
  * `resume` marks the seeded shared Workspace's Owner as resuming optional
- * onboarding and clears the stored reporting facts, so the wizard renders and
- * both categories start off. `complete` finishes onboarding without touching the
- * Workspace name, restoring the ordinary workspace for later journeys.
+ * onboarding at the first optional screen and clears the stored reporting facts,
+ * so the wizard renders and both categories start off. The saved screen is reset
+ * with the completion flag: a journey that had already advanced to `ready` would
+ * otherwise reopen on the last screen and skip the journey under test.
+ * `complete` finishes onboarding without touching the Workspace name, restoring
+ * the ordinary workspace for later journeys.
  */
 const [connectionString, action] = process.argv.slice(2);
 if (!connectionString || !action) {
@@ -21,10 +24,12 @@ await client.connect();
 try {
   if (action === "resume") {
     await client.query(
-      `INSERT INTO installation_onboarding (org_id, workspace_name, workspace_named)
-       SELECT o.id, o.name, TRUE FROM organizations o WHERE o.is_shared
+      `INSERT INTO installation_onboarding (org_id, workspace_name, workspace_named,
+                                             progress_step)
+       SELECT o.id, o.name, TRUE, 'improvement' FROM organizations o WHERE o.is_shared
        ON CONFLICT (org_id) DO UPDATE
-         SET completed_at = NULL, workspace_named = TRUE, updated_at = now()`,
+         SET completed_at = NULL, workspace_named = TRUE,
+             progress_step = 'improvement', updated_at = now()`,
     );
     await client.query("DELETE FROM reporting_pending_reports");
     await client.query("DELETE FROM reporting_attribution_responses");

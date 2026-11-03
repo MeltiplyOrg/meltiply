@@ -195,6 +195,33 @@ const deleteOldAnalyticsSnapshots: RetentionCleanup = (env, batchSize) =>
     [batchSize, "90 days"],
   );
 
+/**
+ * Prunes the pre-aggregated usage buckets that are no longer reportable.
+ *
+ * Only the daily counters are pruned: they exist to be reported, and the
+ * producer never reads a day older than its bounded catch-up window. The
+ * per-Post and per-Distribution marks are deliberately kept, because a live row
+ * can still be re-observed as `published` and must not then be counted twice.
+ */
+const deleteStaleUsageBuckets: RetentionCleanup = (env, batchSize) =>
+  deleteBatch(
+    env,
+    `WITH candidates AS (
+       SELECT bucket.interval_started_at, bucket.report_date, bucket.platform
+       FROM reporting_publication_daily AS bucket
+       WHERE bucket.report_date < (now() AT TIME ZONE 'UTC')::date - $2::integer
+       ORDER BY bucket.report_date, bucket.interval_started_at, bucket.platform
+       LIMIT $1
+     )
+     DELETE FROM reporting_publication_daily AS bucket
+     USING candidates
+     WHERE bucket.interval_started_at = candidates.interval_started_at
+       AND bucket.report_date = candidates.report_date
+       AND bucket.platform = candidates.platform
+     RETURNING bucket.platform`,
+    [batchSize, 30],
+  );
+
 interface DueBrandProfileRow extends Record<string, unknown> {
   id: string;
 }
@@ -375,6 +402,7 @@ const cleanups: readonly RetentionCleanup[] = [
   deleteCompletedAsyncJobEvents,
   deleteOldUsageCorrections,
   deleteOldAnalyticsSnapshots,
+  deleteStaleUsageBuckets,
   purgeDueBrandProfiles,
 ];
 

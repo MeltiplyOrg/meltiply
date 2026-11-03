@@ -55,6 +55,7 @@ function dependencies(overrides: AutomationDependencies = {}): AutomationDepende
         }),
     }),
     deliverImprovementReports: () => Effect.succeed(zeroDelivery),
+    enqueueDailyUsageReport: () => Effect.succeed({ considered: 0, queued: 0 }),
     enqueueDue: () => Effect.succeed(0),
     enqueueDueReplyReconciliations: () => Effect.succeed(0),
     relay: () => Effect.succeed({ claimed: 0, dead: 0, failed: 0, published: 0 }),

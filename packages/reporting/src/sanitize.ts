@@ -6,6 +6,7 @@ import {
   isOperationCategory,
   isProviderFailureClass,
   REPORTING_SCHEMA_VERSION,
+  USAGE_ENGAGEMENT_METRICS,
   type DeploymentCategory,
   type DiagnosticCategory,
   type DiagnosticReportInput,
@@ -70,6 +71,10 @@ const allowedNestedKeys: Record<string, true> = {
   instagram: true,
   facebook: true,
   threads: true,
+  // Per-gauge freshness and the coverage section's bounded shape.
+  as_of: true,
+  truncated: true,
+  unsupported_metrics: true,
 };
 
 /** Property names permitted on any outbound payload. */
@@ -191,13 +196,18 @@ function engagementProperty(input: UsageReportInput): Record<string, unknown> | 
   for (const platform of PLATFORM_IDS) {
     const gauge: UsageEngagement | undefined = input.engagement[platform];
     if (!gauge || typeof gauge !== "object") continue;
-    const measured: Record<string, number> = {};
+    const measured: Record<string, unknown> = {};
     for (const metric of ["views", "reactions", "comments", "shares"] as const) {
       const count = boundedCount(gauge[metric]);
       if (count !== null) measured[metric] = count;
     }
     const distributions = boundedCount(gauge.distributions);
     if (distributions !== null) measured.distributions = distributions;
+    // Freshness travels with the gauge it describes: one Platform's snapshots
+    // can be hours newer than another's, so a single report-level timestamp
+    // would overstate the older gauge.
+    const asOf = validTimestamp(gauge.asOf ?? null);
+    if (asOf) measured.as_of = asOf;
     if (Object.keys(measured).length > 0) property[platform] = measured;
   }
   return Object.keys(property).length === 0 ? undefined : property;
@@ -242,14 +252,25 @@ export function usageProperties(
   if (coverage) {
     const measured = boundedCount(coverage.measured);
     const missing = boundedCount(coverage.missing);
-    if (measured !== null || missing !== null) {
-      properties.engagement_coverage = {
-        ...(measured === null ? {} : { measured }),
-        ...(missing === null ? {} : { missing }),
-      };
-    }
+    const unsupported = unsupportedMetricNames(coverage.unsupportedMetrics);
+    const property: Record<string, unknown> = {
+      ...(measured === null ? {} : { measured }),
+      ...(missing === null ? {} : { missing }),
+      // Truncation is a producer-stated bound, never inferred from the counts:
+      // a dashboard must see that the cohort stopped early rather than assume
+      // the gauges cover every eligible Distribution.
+      ...(coverage.truncated === true ? { truncated: true } : {}),
+      ...(unsupported.length > 0 ? { unsupported_metrics: unsupported } : {}),
+    };
+    if (Object.keys(property).length > 0) properties.engagement_coverage = property;
   }
   return properties;
+}
+
+/** Keeps only in-vocabulary metric names, in canonical order, from untrusted input. */
+function unsupportedMetricNames(value: readonly unknown[] | undefined): string[] {
+  if (!Array.isArray(value)) return [];
+  return USAGE_ENGAGEMENT_METRICS.filter((metric) => value.includes(metric));
 }
 
 /** One sanitized stack frame in PostHog's documented frame schema. */

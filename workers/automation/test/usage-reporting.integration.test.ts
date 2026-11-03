@@ -415,8 +415,13 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await runSystemTransaction(env, async (client) => {
-    // The schema belongs to this suite alone, so the measurement tables hold only
-    // what the previous case produced.
+    // The schema belongs to this suite alone, so every table holds only what the
+    // previous case produced and can be cleared wholesale. Snapshots matter as
+    // much as the marks: `seedPublications` recreates the same two Distribution
+    // ids each case, so a snapshot left by an earlier case would be read back as
+    // this case's analytics and silently establish metrics this fixture means to
+    // leave absent.
+    await client.query("DELETE FROM analytics_snapshots");
     await client.query("DELETE FROM reporting_distribution_marks");
     await client.query("DELETE FROM reporting_post_marks");
     await client.query("DELETE FROM reporting_publication_daily");
@@ -642,6 +647,10 @@ describe("usage publication measurement with PostgreSQL", () => {
   it("counts an ambiguous outcome only once reconciliation confirms it", async () => {
     await seedConsent({ intervalStartedAt: new Date(Date.now() - 60_000) });
     const ambiguousRegistry = new ProviderRegistry();
+    // An ambiguous publish that returned an async operation id is the case a
+    // reconcile can act on: `executeProviderLookupEffect` refuses the lookup
+    // when neither a retained operation id nor a post id exists, so the
+    // adapter's unknown result must carry the operation it started.
     ambiguousRegistry.register("youtube", {
       capability: {
         accepted_mime_types: [],
@@ -677,26 +686,66 @@ describe("usage publication measurement with PostgreSQL", () => {
           retryable: false,
         },
         outcome: "unknown" as const,
+        providerOperationId: "provider-operation-1",
       }),
       retryPolicy: { baseDelaySeconds: 15, maxAttempts: 5, maxDelaySeconds: 300 },
       transferModes: [],
     } satisfies ProviderAdapter);
 
-    await Effect.runPromise(
+    const published = await Effect.runPromise(
       processDistributionMessage(env, publishMessage("usage-ambiguous", youtubeDistributionId), {
         decryptToken: async (stored) => stored,
         providerRegistry: ambiguousRegistry,
       }),
     );
+    expect(published).toBe("processed");
     // The publish attempt left the row ambiguous: no counting yet.
     expect(await dailyBuckets()).toEqual([]);
 
-    await Effect.runPromise(
+    // The transition, not just the absence of a counter, is what a reconcile
+    // acts on: an unconfirmed attempt must be reconcilable and must retain the
+    // operation identity the lookup needs.
+    const afterPublish = await runSystemTransaction(env, async (client) => {
+      const distribution = await client.query<{
+        provider_operation_id: string | null;
+        status: string;
+      }>("SELECT status, provider_operation_id FROM distributions WHERE id = $1", [
+        youtubeDistributionId,
+      ]);
+      const operations = await client.query<{
+        provider_operation_id: string | null;
+        status: string;
+      }>(
+        `SELECT status, provider_operation_id FROM provider_operations
+         WHERE distribution_id = $1 AND operation = 'publish'
+         ORDER BY created_at DESC, id DESC LIMIT 1`,
+        [youtubeDistributionId],
+      );
+      return { distribution: distribution.rows[0], operation: operations.rows[0] };
+    });
+    expect(afterPublish.distribution).toMatchObject({
+      provider_operation_id: "provider-operation-1",
+      status: "needs_reconciliation",
+    });
+    expect(afterPublish.operation).toMatchObject({ status: "needs_reconciliation" });
+
+    const reconciled = await Effect.runPromise(
       processDistributionMessage(env, reconcileMessage("usage-reconcile", youtubeDistributionId), {
         decryptToken: async (stored) => stored,
         providerRegistry: ambiguousRegistry,
       }),
     );
+    expect(reconciled).toBe("processed");
+
+    // The lookup is what confirms publication, so the row must be `published`
+    // before the counter is read. Asserting the transition separates "the
+    // measurement did not run" from "the reconcile never confirmed".
+    const afterReconcile = await runSystemTransaction(env, (client) =>
+      client.query<{ status: string }>("SELECT status FROM distributions WHERE id = $1", [
+        youtubeDistributionId,
+      ]),
+    );
+    expect(afterReconcile.rows[0]?.status).toBe("published");
 
     const buckets = await dailyBuckets();
     expect(buckets).toHaveLength(1);

@@ -1,6 +1,11 @@
+import { createHyperdrivePool } from "@meltiply/database";
 import { Effect } from "effect";
 import { ProviderRegistry, type ProviderAdapter } from "@meltiply/providers";
-import { recordPublicationUsage, reportingConfiguration } from "@meltiply/reporting";
+import {
+  REPORTING_DISCLOSURE_VERSION,
+  recordPublicationUsage,
+  reportingConfiguration,
+} from "@meltiply/reporting";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import type { AutomationEnv } from "../src/env";
@@ -19,10 +24,10 @@ import { runSystemTransaction } from "./system-transaction";
  * the absence of transmission where consent, interval, or confirmation rules say
  * nothing may be counted.
  *
- * The channels gauge and the engagement gauges are covered by the seeded
- * fixtures; every counting rule below is driven through
- * `processDistributionMessage`, so a regression in either success transition
- * fails here.
+ * The suite owns a private schema, so every total it asserts is produced by its
+ * own fixtures rather than inherited from another suite. Every counting rule is
+ * driven through `processDistributionMessage`, so a regression in either
+ * success transition fails here.
  */
 
 const connectionString = process.env.MELTIPLY_DATABASE_TEST_URL;
@@ -30,11 +35,60 @@ if (!connectionString) {
   throw new Error("MELTIPLY_DATABASE_TEST_URL is required for PostgreSQL integration suites");
 }
 
+/**
+ * This suite runs in its own schema.
+ *
+ * Publication marks are a domain fact written for every confirmed publish
+ * whether or not reporting is enabled, so the other automation suites — which
+ * publish against the shared schema before this one runs — necessarily leave
+ * marks and daily buckets behind. Measuring absolute totals here would count
+ * their work, and clearing those tables would erase their state. A private
+ * schema gives this suite an installation of its own instead.
+ */
+const schema = "usage_reporting_measurement";
+const adminConnectionString =
+  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
+  "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const adminPool = createHyperdrivePool({ connectionString: adminConnectionString });
+const baseSystemConnectionString =
+  "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const isolatedDatabase = new URL(baseSystemConnectionString);
+isolatedDatabase.searchParams.set("options", `-c search_path=${schema},public`);
+const isolatedConnectionString = isolatedDatabase.href;
+
+/** Tables the publish path and the daily producer read or write. */
+const copiedTables = [
+  "organizations",
+  "brand_profiles",
+  "platform_accounts",
+  "posts",
+  "post_attachments",
+  "assets",
+  "asset_objects",
+  "asset_renditions",
+  "distributions",
+  "provider_operations",
+  "provider_operation_media",
+  "outbox_events",
+  "analytics_snapshots",
+  "usage_reconciliation_state",
+  "reporting_preferences",
+  "reporting_pending_reports",
+  "reporting_delivery_receipts",
+  "reporting_post_marks",
+  "reporting_distribution_marks",
+  "reporting_publication_daily",
+  "reporting_attribution_responses",
+  "rate_limit_budgets",
+  "operator_actions",
+  "idempotency_keys",
+  "async_job_events",
+];
+
 const organizationId = "20000000-0000-4000-8000-000000000001";
-// A Brand Profile this suite owns. The seeded shared Profile already carries a
-// YouTube Channel, and `platform_accounts_brand_profile_platform_unique` allows
-// one Channel per (Brand Profile, Platform) — so reusing it here would both
-// collide and misattribute the measurement.
+// This suite's Brand Profile. `platform_accounts_brand_profile_platform_unique`
+// allows one Channel per (Brand Profile, Platform), so the two Platforms below
+// both hang off this single Profile — the model the measurement describes.
 const profileId = "a0000000-0000-4000-8000-0000000000c1";
 const youtubeChannelId = "5e000000-0000-4000-8000-000000000001";
 const threadsChannelId = "5e000000-0000-4000-8000-000000000002";
@@ -49,10 +103,7 @@ const postIds = [postId, threadsPostId];
 
 /** A text-only Post needs no Asset, so these fixtures never touch media. */
 const env: AutomationEnv = {
-  DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
-  } as Hyperdrive,
+  DB_SYSTEM: { connectionString: isolatedConnectionString } as Hyperdrive,
   DEPLOYMENT_CATEGORY: "selfhosted",
   ENVIRONMENT: "test",
   // A valid destination makes the usage category effective; these suites only
@@ -160,16 +211,26 @@ async function seedConsent(options: {
   requested?: boolean;
 }): Promise<void> {
   await runSystemTransaction(env, async (client) => {
+    // A stored request without a supported disclosure decision is not consent:
+    // policy reads it as `preference_unavailable` and measures nothing. The
+    // real consent endpoint always records the current version, so the fixture
+    // must too — the column has no default and would otherwise stay NULL.
     await client.query(
       `INSERT INTO reporting_preferences (
-         id, schema_version, usage_requested, usage_decided_at,
-         usage_interval_started_at, installation_reporting_id
-       ) VALUES (TRUE, 1, $1, now(), $2, $3)
+         id, schema_version, usage_requested, usage_disclosure_version,
+         usage_decided_at, usage_interval_started_at, installation_reporting_id
+       ) VALUES (TRUE, $4, $1, $4, now(), $2, $3)
        ON CONFLICT (id) DO UPDATE SET
          usage_requested = EXCLUDED.usage_requested,
+         usage_disclosure_version = EXCLUDED.usage_disclosure_version,
          usage_interval_started_at = EXCLUDED.usage_interval_started_at,
          installation_reporting_id = EXCLUDED.installation_reporting_id`,
-      [options.requested ?? true, options.intervalStartedAt, installationReportingId],
+      [
+        options.requested ?? true,
+        options.intervalStartedAt,
+        installationReportingId,
+        REPORTING_DISCLOSURE_VERSION,
+      ],
     );
   });
 }
@@ -326,11 +387,25 @@ function platformCounts(value: unknown): Record<string, number> {
 }
 
 beforeAll(async () => {
+  const url = new URL(isolatedConnectionString);
+  if (url.hostname !== "127.0.0.1" || url.pathname !== "/meltiply") {
+    throw new Error("Usage measurement tests require the isolated local database.");
+  }
+  await adminPool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+  await adminPool.query(`CREATE SCHEMA ${schema} AUTHORIZATION meltiply_system`);
+  for (const table of copiedTables) {
+    await adminPool.query(
+      `CREATE TABLE ${schema}."${table}" (LIKE public."${table}" INCLUDING ALL)`,
+    );
+    await adminPool.query(`GRANT ALL ON ${schema}."${table}" TO meltiply_system`);
+  }
+  // The one row the publish path and the producer both resolve: an active
+  // Workspace with an entitled plan. Membership and account rows are not read by
+  // either, so they stay out of this fixture.
   await runSystemTransaction(env, async (client) => {
     await client.query(
-      `UPDATE organizations
-       SET plan = 'creator', billing_status = 'active', updated_at = now()
-       WHERE id = $1`,
+      `INSERT INTO organizations (id, name, slug, is_shared, plan, billing_status)
+       VALUES ($1, 'Usage Workspace', 'usage-workspace', TRUE, 'creator', 'active')`,
       [organizationId],
     );
   });
@@ -338,20 +413,11 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await runSystemTransaction(env, async (client) => {
-    // Scope the reset to this suite's own Distributions and Posts. The marks and
-    // daily buckets are installation-wide facts another suite may also own, so a
-    // blanket delete here would erase its fixtures rather than this suite's.
-    await client.query(
-      "DELETE FROM reporting_distribution_marks WHERE distribution_id = ANY($1::uuid[])",
-      [distributionIds],
-    );
-    await client.query("DELETE FROM reporting_post_marks WHERE post_id = ANY($1::uuid[])", [
-      postIds,
-    ]);
-    await client.query(
-      `DELETE FROM reporting_publication_daily
-       WHERE report_date <= (now() AT TIME ZONE 'UTC')::date`,
-    );
+    // The schema belongs to this suite alone, so the measurement tables hold only
+    // what the previous case produced.
+    await client.query("DELETE FROM reporting_distribution_marks");
+    await client.query("DELETE FROM reporting_post_marks");
+    await client.query("DELETE FROM reporting_publication_daily");
     await client.query("DELETE FROM reporting_pending_reports");
     await client.query("DELETE FROM reporting_preferences");
   });
@@ -359,21 +425,9 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-  await runSystemTransaction(env, async (client) => {
-    await client.query("DELETE FROM provider_operations WHERE distribution_id = ANY($1::uuid[])", [
-      distributionIds,
-    ]);
-    await client.query("DELETE FROM distributions WHERE id = ANY($1::uuid[])", [distributionIds]);
-    await client.query("DELETE FROM posts WHERE id = ANY($1::uuid[])", [postIds]);
-    await client.query("DELETE FROM platform_accounts WHERE id = ANY($1::uuid[])", [
-      [youtubeChannelId, threadsChannelId],
-    ]);
-    await client.query("DELETE FROM brand_profiles WHERE id = $1", [profileId]);
-    await client.query("DELETE FROM reporting_pending_reports");
-    await client.query("DELETE FROM reporting_preferences");
-    await client.query("DELETE FROM reporting_delivery_receipts WHERE category = 'usage'");
-  });
   await systemPoolFor(env).end();
+  await adminPool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+  await adminPool.end();
 });
 
 describe("usage publication measurement with PostgreSQL", () => {
@@ -877,7 +931,7 @@ describe("daily usage producer with PostgreSQL", () => {
     expect(await queuedUsageReports()).toEqual([]);
   });
 
-  it("gauges connected Channels from the canonical state, excluding revoked and expired", async () => {
+  it("gauges connected Channels, excluding revoked and expired ones", async () => {
     await seedConsent({ intervalStartedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1_000) });
     const runProducer = async () => {
       await Effect.runPromise(
@@ -893,9 +947,10 @@ describe("daily usage producer with PostgreSQL", () => {
       return platformCounts(report!.payload.channels);
     };
 
-    // The seeded database owns several Channels per Platform, so this asserts
-    // deltas against the canonical state rather than absolute totals.
+    // The private schema holds only this suite's Channels, so the baseline is
+    // exactly the two seeded here and every move below is an exact count.
     const baseline = await runProducer();
+    expect(baseline).toEqual({ threads: 1, youtube: 1 });
     expect(baseline.youtube).toBeGreaterThanOrEqual(1);
 
     await runSystemTransaction(env, async (client) => {

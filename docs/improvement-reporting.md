@@ -33,33 +33,49 @@ the send rather than leaking.
 
 ### Usage report fields
 
-Event `meltiply_usage_daily`, one per installation per UTC day, with
-`distinct_id` equal to the installation's random reporting identifier.
+Event `meltiply_usage_daily`, one per installation per reporting interval per UTC
+day, with `distinct_id` equal to the installation's random reporting identifier.
 
-| Property                     | Meaning                                                                                                                                |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema_version`             | Payload schema version, currently `1`.                                                                                                 |
-| `report_date`                | UTC day the counters cover, `YYYY-MM-DD`.                                                                                              |
-| `app_version`                | Bounded application version string.                                                                                                    |
-| `deployment_category`        | `managed`, `selfhosted`, or `unknown`.                                                                                                 |
-| `channels`                   | Connected Channels per Platform at report time, keyed by Platform.                                                                     |
-| `publications.posts`         | Confirmed successful Posts. A Post counts once, when its first Distribution is confirmed published.                                    |
-| `publications.distributions` | Confirmed successful Distributions per Platform. One Post delivered to three Channels contributes one Post and three Distributions.    |
-| `engagement`                 | Per Platform `{views, reactions, comments, shares, distributions}` from the latest eligible stored Provider snapshot per Distribution. |
-| `engagement_as_of`           | Capture time of the snapshots behind `engagement`.                                                                                     |
-| `engagement_coverage`        | `{measured, missing}` Distribution counts, so partial snapshots are visible instead of implied complete.                               |
+| Property                     | Meaning                                                                                                                                        |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema_version`             | Payload schema version, currently `1`.                                                                                                         |
+| `report_date`                | UTC day the counters cover, `YYYY-MM-DD`.                                                                                                      |
+| `app_version`                | Bounded application version string.                                                                                                            |
+| `deployment_category`        | `managed`, `selfhosted`, or `unknown`.                                                                                                         |
+| `channels`                   | Connected Channels per Platform at report time, keyed by Platform.                                                                             |
+| `publications.posts`         | Confirmed successful Posts in this UTC day. A Post counts once, on its first Distribution confirmed published.                                  |
+| `publications.distributions` | Confirmed successful Distributions per Platform in this UTC day.                                                                               |
+| `engagement`                 | Per Platform `{views, reactions, comments, shares, distributions, as_of}` from the latest eligible stored Provider snapshot per Distribution.   |
+| `engagement_as_of`           | Newest snapshot capture time across every per-Platform gauge.                                                                                   |
+| `engagement_coverage`        | `{measured, missing, truncated, unsupported_metrics}` Distribution counts and metric omissions, so partial or bounded coverage is visible.      |
+
+Only closed UTC days are reported: the immediate previous day always, and up to
+six earlier days when they carry confirmed publications. An open day is never
+sent, and a repeated invocation or a partial delivery reuses the same frozen
+report identity rather than producing a second measurement.
 
 Rules that matter when reading the numbers:
 
-- Missing or unsupported metrics are **omitted**, never reported as `0`. A
-  Platform that does not expose reactions contributes no `reactions` key; that is
-  unknown, not zero.
+- Missing or unsupported metrics are **omitted**, never reported as `0`, and named
+  in `engagement_coverage.unsupported_metrics`. That includes a Platform whose
+  adapter normalizes an absent insight to zero: an all-zero snapshot there is
+  unknown, not an observed zero.
+- `engagement.<platform>.as_of` is that Platform's newest contributing snapshot;
+  `engagement_as_of` is the newest of them. Compare a gauge against its own
+  Platform timestamp, not the report time.
+- `engagement_coverage.truncated` means the cohort read reached its bound before
+  covering every eligible Distribution. `missing` counts eligible Distributions
+  with no stored snapshot. Neither is zero-filled.
 - `engagement` values are **as-of gauges** taken from stored Provider snapshots.
   They are not daily audience actions, and they must not be summed across days:
   a lifetime view count repeated on consecutive days is the same views, not new
-  views.
-- Publication counters count confirmed successes only. Queued work, Provider
-  attempts, automatic retries, and Ambiguous outcomes never count.
+  views. A downward Provider correction lowers the gauge; it is never accumulated.
+- Publication counters count confirmed successes during enabled reporting
+  intervals only. Queued work, Provider attempts, automatic retries, Ambiguous
+  outcomes, and success from before an interval never count.
+- `channels` counts the canonical connected state: a stored `connected` or
+  `expiring` Channel that is not revoked, whose token is not past its expiry, on
+  an active Brand Profile. Expired and revoked Channels are absent.
 - Counters are durable local measurements. Deleting a Post, Distribution, or
   Channel afterwards does not reduce an already-reported success.
 - A Post's successful Distributions may span Platforms, so summing per-Platform
@@ -238,8 +254,9 @@ logical report before summing:
 
 ### Publishing volume
 
-- **Successful Posts** — latest report per logical key, then sum
-  `properties.publications.posts`. Label it "Posts (confirmed successes)".
+- **Successful Posts** — after de-duplicating deliveries by `uuid`, sum
+  `properties.publications.posts` per installation, reporting interval, and
+  `report_date`. Label it "Posts (confirmed successes)".
 - **Successful Distributions by Platform** — same reduction, then sum
   `properties.publications.distributions.<platform>`. Label it "Distributions".
 - **Posts vs Distributions** — one chart with both series, so a Post published to
@@ -254,12 +271,19 @@ logical report before summing:
   per installation, then sum each `properties.engagement.<platform>.<metric>`.
   Never `SUM` across `report_date`.
 - **Coverage** — sum `properties.engagement_coverage.measured` and
-  `.missing` from the same latest reports; show the ratio next to each gauge.
-- **Freshness** — maximum and median `properties.engagement_as_of` per Platform;
-  a stale timestamp means the snapshot is old, not that engagement stopped.
+  `.missing` from the same latest reports; show the ratio next to each gauge, and
+  flag a report whose `.truncated` is true instead of treating its gauges as
+  complete. Read `.unsupported_metrics` as the reason a metric is absent.
+- **Freshness** — use each `properties.engagement.<platform>.as_of`, falling back
+  to `engagement_as_of`; a stale timestamp means the snapshot is old, not that
+  engagement stopped. One Platform can be hours newer than another.
 - Treat an absent metric key as unknown. A displayed zero must come from an
   observed zero, so break down by `platform` before concluding a Platform reports
   nothing.
+- **Publication counters** are period counters, so reduce duplicate deliveries by
+  PostHog `uuid` and then by the installation's reporting interval and
+  `report_date`; a re-enabled interval has its own counter series and must not be
+  merged with the withdrawn one.
 
 ### Expected failures and diagnostics
 

@@ -157,13 +157,48 @@ export function isPlatform(value: unknown): value is Platform {
   return typeof value === "string" && (PLATFORM_IDS as readonly string[]).includes(value);
 }
 
-/** Per-Platform as-of engagement gauges; `null` means not measured, never zero. */
+/** One audience counter reported from stored Provider analytics. */
+export type UsageEngagementMetric = "comments" | "reactions" | "shares" | "views";
+
+/** Every engagement metric name, so coverage can name an omitted one. */
+export const USAGE_ENGAGEMENT_METRICS: readonly UsageEngagementMetric[] = [
+  "views",
+  "reactions",
+  "comments",
+  "shares",
+] as const;
+
+/**
+ * Per-Platform as-of engagement gauges; `null` means not measured, never zero.
+ *
+ * The figures are the latest eligible stored snapshot of each contributing
+ * Distribution, so they are gauges, not daily deltas: repeating a lifetime
+ * count across days is the same views, not new views.
+ */
 export interface UsageEngagement {
   readonly comments: number | null;
+  /** Distributions whose stored snapshot contributed to these gauges. */
   readonly distributions: number;
   readonly reactions: number | null;
   readonly shares: number | null;
   readonly views: number | null;
+  /** Newest contributing snapshot capture time, so freshness travels with the gauge. */
+  readonly asOf: string | null;
+}
+
+/**
+ * How much of the eligible cohort the engagement gauges actually cover.
+ *
+ * `measured` and `missing` are Distribution counts, and `truncated` says the
+ * bounded cohort stopped before covering every eligible Distribution, so a
+ * dashboard never implies completeness the producer could not establish.
+ */
+export interface UsageEngagementCoverage {
+  readonly measured: number;
+  readonly missing: number;
+  /** Metrics omitted because that Platform could not be shown to expose them. */
+  readonly unsupportedMetrics: readonly UsageEngagementMetric[];
+  readonly truncated: boolean;
 }
 
 /**
@@ -182,10 +217,10 @@ export interface UsageReportInput {
   };
   /** Latest eligible stored analytics snapshot per Distribution, per Platform. */
   readonly engagement: Partial<Record<Platform, UsageEngagement>>;
-  /** Capture time of the oldest snapshot in the engagement gauges. */
+  /** Newest snapshot capture time across every gauge, or null when nothing was measured. */
   readonly engagementAsOf: string | null;
-  /** How many Distributions contributed a snapshot, and how many had none. */
-  readonly engagementCoverage: { readonly measured: number; readonly missing: number } | null;
+  /** Cohort coverage and truncation for the gauges above; null when there is no cohort. */
+  readonly engagementCoverage: UsageEngagementCoverage | null;
 }
 
 /** One allowlisted diagnostic report; the module sanitizes `error` before transport. */

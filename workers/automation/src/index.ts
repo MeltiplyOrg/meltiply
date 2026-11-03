@@ -54,6 +54,7 @@ import type { OutboxRelayResult } from "./outbox";
 import type { ProviderDueResult } from "./provider-sync";
 import type { DeliverySummary } from "@meltiply/reporting";
 import type { RetentionResult } from "./retention";
+import type { UsageReportResult } from "./usage-reporting";
 
 /**
 
@@ -233,6 +234,8 @@ export interface AutomationDependencies {
   runRetention?: (env: AutomationEnv) => Effect.Effect<RetentionResult, unknown>;
   /** Overrides the daily bounded improvement-reporting delivery pass for tests. */
   deliverImprovementReports?: (env: AutomationEnv) => Effect.Effect<DeliverySummary, unknown>;
+  /** Overrides the daily bounded usage-summary producer for tests. */
+  enqueueDailyUsageReport?: (env: AutomationEnv) => Effect.Effect<UsageReportResult, unknown>;
   providerSyncProcessor?: (
     env: AutomationEnv,
     message: ProviderSyncMessage,
@@ -263,6 +266,7 @@ type ScheduledWorkName =
   | "provider-sync-sweep"
   | "reply-reconciliation"
   | "improvement-reporting-delivery"
+  | "usage-reporting"
   | "retention";
 
 interface ScheduledWorkUnit {
@@ -795,6 +799,29 @@ export function createAutomationHandler(
                 try: () => import("./retention"),
               }),
               (module) => module.runRetention(env),
+            ),
+      tier: "daily",
+    },
+    {
+      // The producer runs immediately before the delivery pass it feeds: it only
+      // freezes and queues measurements, and the delivery unit that follows in
+      // array order drains the same queue. A measurement failure therefore cannot
+      // suppress an already-queued report, and vice versa.
+      empty: { considered: 0, queued: 0 },
+      field: "usage",
+      name: "usage-reporting",
+      run: dependencies.enqueueDailyUsageReport
+        ? (env) =>
+            Effect.suspend(() => dependencies.enqueueDailyUsageReport!(env)).pipe(
+              Effect.mapError((cause) => classifyJobError(cause)),
+            )
+        : (env) =>
+            Effect.flatMap(
+              Effect.tryPromise({
+                catch: (cause) => classifyJobError(cause),
+                try: () => import("./usage-reporting"),
+              }),
+              (module) => module.enqueueDailyUsageReport(env),
             ),
       tier: "daily",
     },

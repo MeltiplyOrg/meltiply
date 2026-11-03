@@ -16,6 +16,7 @@ import {
   type PlatformCapability,
 } from "@meltiply/domain";
 import type { EffectTransactionClient } from "@meltiply/database";
+import { recordPublicationUsage, reportingConfiguration } from "@meltiply/reporting";
 
 import { withSystemTransactionEffect } from "./database";
 import { classifyJobError, RetryableJobError, type AutomationJobError } from "./effect/index";
@@ -1232,6 +1233,7 @@ function recordPublishOutcome(
          AND status IN ('processing', 'cancel_requested', 'needs_reconciliation')
        RETURNING analytics_sync_event_id::text AS analytics_event_id,
                  comments_sync_event_id::text AS comments_event_id,
+                 published_at AS published_at,
                  reconciliation_attempt_count, status`,
           [
             row.id,
@@ -1249,6 +1251,22 @@ function recordPublishOutcome(
         analyticsEventId = updated.rows[0]?.analytics_event_id;
         commentsEventId = updated.rows[0]?.comments_event_id;
         const updatedRow = updated.rows[0];
+        // A confirmed publication is measured inside the transaction that
+        // recorded it, so the counter and the domain commit are atomic and a
+        // later deletion cannot reduce what was already counted. The hook is a
+        // savepoint-scoped no-op for any other outcome.
+        if (updatedRow?.status === "published") {
+          yield* recordPublicationUsage(
+            client,
+            {
+              confirmedAt: new Date(updatedRow.published_at ?? new Date()),
+              distributionId: row.id,
+              platform: row.platform,
+              postId: row.post_id,
+            },
+            reportingConfiguration(env),
+          );
+        }
         if (row.platform_user_id !== null) {
           const budget =
             result.metadata?.rateLimitBudget ??
@@ -1681,6 +1699,7 @@ function recordReconciliationOutcome(
         const updated = yield* client.query<{
           analytics_event_id: string | null;
           comments_event_id: string | null;
+          published_at: Date | string | null;
           reconciliation_attempt_count: number;
           status: string;
         }>(
@@ -1726,6 +1745,7 @@ function recordReconciliationOutcome(
            AND status IN ('awaiting_provider', 'needs_reconciliation', 'cancel_requested')
          RETURNING analytics_sync_event_id::text AS analytics_event_id,
                    comments_sync_event_id::text AS comments_event_id,
+                   published_at AS published_at,
                    reconciliation_attempt_count, status`,
           [
             row.id,
@@ -1744,6 +1764,21 @@ function recordReconciliationOutcome(
         analyticsEventId = updated.rows[0]?.analytics_event_id;
         commentsEventId = updated.rows[0]?.comments_event_id;
         const updatedRow = updated.rows[0];
+        // Reconciliation that establishes success is a confirmed publication,
+        // and the durable per-Post/per-Distribution marks make a second
+        // observation of the same `published` row advance nothing.
+        if (updatedRow?.status === "published") {
+          yield* recordPublicationUsage(
+            client,
+            {
+              confirmedAt: new Date(updatedRow.published_at ?? new Date()),
+              distributionId: row.id,
+              platform: row.platform,
+              postId: row.post_id,
+            },
+            reportingConfiguration(env),
+          );
+        }
         if (row.platform_user_id !== null && execution.metadata?.rateLimitBudget) {
           yield* recordRateLimitBudget(
             client,

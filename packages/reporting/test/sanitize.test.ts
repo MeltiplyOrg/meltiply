@@ -22,10 +22,17 @@ const context = { appVersion: "1.0.0-target.0", deploymentCategory: "selfhosted"
 const usageInput = {
   channels: { threads: 2 },
   engagement: {
-    threads: { comments: 4, distributions: 1, reactions: 7, shares: null, views: 120 },
+    threads: {
+      asOf: "2026-01-02T00:00:00.000Z",
+      comments: 4,
+      distributions: 1,
+      reactions: 7,
+      shares: null,
+      views: 120,
+    },
   },
   engagementAsOf: "2026-01-02T00:00:00.000Z",
-  engagementCoverage: { measured: 1, missing: 0 },
+  engagementCoverage: { measured: 1, missing: 0, truncated: false, unsupportedMetrics: [] },
   publications: { distributions: { threads: 1 }, posts: 1 },
   reportDate: "2026-01-02",
 };
@@ -39,7 +46,13 @@ describe("usage payload", () => {
       channels: { threads: 2 },
       deployment_category: "selfhosted",
       engagement: {
-        threads: { comments: 4, distributions: 1, reactions: 7, views: 120 },
+        threads: {
+          as_of: "2026-01-02T00:00:00.000Z",
+          comments: 4,
+          distributions: 1,
+          reactions: 7,
+          views: 120,
+        },
       },
       engagement_as_of: "2026-01-02T00:00:00.000Z",
       engagement_coverage: { measured: 1, missing: 0 },
@@ -55,7 +68,14 @@ describe("usage payload", () => {
       {
         ...usageInput,
         engagement: {
-          threads: { comments: null, distributions: 1, reactions: 0, shares: null, views: null },
+          threads: {
+            asOf: null,
+            comments: null,
+            distributions: 1,
+            reactions: 0,
+            shares: null,
+            views: null,
+          },
         },
       },
       context,
@@ -72,6 +92,49 @@ describe("usage payload", () => {
   it("drops a malformed reporting period instead of forwarding it", () => {
     const properties = usageProperties({ ...usageInput, reportDate: "02/01/2026" }, context);
     expect(properties.report_date).toBeUndefined();
+  });
+
+  it("states cohort truncation and unsupported metrics in the coverage", () => {
+    const properties = usageProperties(
+      {
+        ...usageInput,
+        engagementCoverage: {
+          measured: 1,
+          missing: 4,
+          truncated: true,
+          unsupportedMetrics: ["reactions", "views"],
+        },
+      },
+      context,
+    );
+
+    expect(properties.engagement_coverage).toEqual({
+      measured: 1,
+      missing: 4,
+      truncated: true,
+      // Canonical order, so a dashboard never sees producer ordering.
+      unsupported_metrics: ["views", "reactions"],
+    });
+    expect(payloadViolation(properties)).toBeUndefined();
+  });
+
+  it("drops metric names outside the engagement vocabulary", () => {
+    const properties = usageProperties(
+      {
+        ...usageInput,
+        engagementCoverage: {
+          measured: 1,
+          missing: 0,
+          truncated: false,
+          unsupportedMetrics: ["follower_count"] as never,
+        },
+      },
+      context,
+    );
+
+    // An unrelated value cannot become a coverage claim.
+    expect(properties.engagement_coverage).toEqual({ measured: 1, missing: 0 });
+    expect(payloadViolation(properties)).toBeUndefined();
   });
 
   it("ignores identifiers smuggled into the per-Platform maps", () => {

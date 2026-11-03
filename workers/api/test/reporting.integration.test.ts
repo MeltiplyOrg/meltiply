@@ -246,10 +246,22 @@ function enqueueUsage(reportDate = "2026-01-02"): Promise<"queued" | "skipped"> 
       reporting.enqueueUsageReport({
         channels: { threads: 2 },
         engagement: {
-          threads: { comments: 4, distributions: 1, reactions: 7, shares: null, views: 120 },
+          threads: {
+            asOf: "2026-01-02T00:00:00.000Z",
+            comments: 4,
+            distributions: 1,
+            reactions: 7,
+            shares: null,
+            views: 120,
+          },
         },
         engagementAsOf: "2026-01-02T00:00:00.000Z",
-        engagementCoverage: { measured: 1, missing: 0 },
+        engagementCoverage: {
+          measured: 1,
+          missing: 0,
+          truncated: false,
+          unsupportedMetrics: [],
+        },
         publications: { distributions: { threads: 1 }, posts: 1 },
         reportDate,
       }),
@@ -753,7 +765,15 @@ describe("bounded local delivery", () => {
     expect(properties).toMatchObject({
       channels: { threads: 2 },
       deployment_category: "selfhosted",
-      engagement: { threads: { comments: 4, distributions: 1, reactions: 7, views: 120 } },
+      engagement: {
+        threads: {
+          as_of: "2026-01-02T00:00:00.000Z",
+          comments: 4,
+          distributions: 1,
+          reactions: 7,
+          views: 120,
+        },
+      },
       engagement_as_of: "2026-01-02T00:00:00.000Z",
       engagement_coverage: { measured: 1, missing: 0 },
       publications: { distributions: { threads: 1 }, posts: 1 },

@@ -52,6 +52,9 @@ const topicOperations: readonly (readonly [string, OperationCategory])[] = [
 /** The reporting delivery unit, which must never report its own failure. */
 export const reportingDeliveryUnit = "improvement-reporting-delivery";
 
+/** The usage-summary producer, whose failures belong to the same operation grouping. */
+export const reportingUsageUnit = "usage-reporting";
+
 /**
  * Maps a queue topic to the maintainer's fixed operation grouping.
  *
@@ -75,7 +78,7 @@ export function operationForTopic(topic: string | undefined): OperationCategory 
  * @returns Operation grouping for the diagnostic report.
  */
 export function operationForScheduledUnit(unit: string): OperationCategory {
-  if (unit === reportingDeliveryUnit) return "reporting";
+  if (unit === reportingDeliveryUnit || unit === reportingUsageUnit) return "reporting";
   if (unit.startsWith("provider-sync") || unit === "account-analytics-sweep") return "analytics";
   if (unit === "reply-reconciliation") return "inbox";
   if (unit === "asset-maintenance") return "assets";

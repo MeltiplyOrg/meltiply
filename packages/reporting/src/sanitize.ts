@@ -509,20 +509,15 @@ function splitFrameSuffix(value: string): { line: string; location: string } | u
  * @returns The location text, or undefined when the body has none.
  */
 function frameLocationText(body: string): string | undefined {
-  const location = body.endsWith(")")
-    ? (() => {
-        const open = body.lastIndexOf("(");
-        if (open < 0) return undefined;
-        const inner = body.slice(open + 1, -1);
-        // Only the location lives inside the final parentheses; a nested
-        // parenthesis means this is not a frame tail.
-        return inner.includes("(") || inner.includes(")") ? undefined : inner;
-      })()
-    : body;
-  if (location === undefined) return undefined;
-  // A location is one unbroken token: whitespace belongs to the discarded name,
-  // and a body like `at async Promise.all (index 0)` has no location at all.
-  return /\s/.test(location) ? undefined : location;
+  let location = body;
+  if (body.endsWith(")")) {
+    const open = body.lastIndexOf("(");
+    if (open < 0) return undefined;
+    location = body.slice(open + 1, -1);
+  }
+  // A location is one unbroken token; parentheses and whitespace belong to
+  // discarded names or malformed tails, never to an allowlisted location.
+  return /[()\s]/.test(location) ? undefined : location;
 }
 
 /**
@@ -536,10 +531,8 @@ function frameLocationText(body: string): string | undefined {
  * which is what identifies a defect, and every frame reports `<anonymous>` so the
  * gap is explicit rather than a wrong symbol.
  *
- * Parsing is linear in the line length. The previous single expression paired a
- * lazy wildcard with a whitespace run, and a stack of many spaces could make it
- * retry every split position — quadratic work on attacker-controlled input. Every
- * step here is one forward or backward scan.
+ * Parsing is linear in the line length: each delimiter and digit run is found
+ * with a bounded forward or backward scan.
  *
  * @param line - One trimmed stack line.
  * @returns The sanitized frame, or undefined when the frame is unsafe.

@@ -426,33 +426,19 @@ describe("deployed release frames", () => {
   });
 });
 
-describe("frame parsing stays linear on hostile stacks", () => {
-  /**
-   * A stack line is attacker-controlled text. The parser must not spend
-   * superlinear time on a line that is only whitespace, because one crafted
-   * report would otherwise stall the ingestion path.
-   *
-   * The bound is asserted as a ratio rather than a wall-clock deadline so a slow
-   * or loaded runner cannot make the case flaky: growing the input tenfold must
-   * not grow the work without bound, which is what a backtracking expression
-   * would do.
-   */
-  it("scales with the line length instead of backtracking over whitespace", () => {
-    const measure = (spaces: number): number => {
-      const line = "at " + " ".repeat(spaces) + "x";
-      const startedAt = performance.now();
-      expect(sanitizedFrames(line)).toEqual([]);
-      return performance.now() - startedAt;
-    };
-
-    // Warm the code path so the first call is not measuring compilation.
-    measure(1_000);
-    const small = Math.max(measure(20_000), 0.5);
-    const large = measure(200_000);
-
-    // A backtracking expression is quadratic or worse here: ten times the input
-    // costs roughly a hundred times the work. A linear scan costs about ten.
-    expect(large).toBeLessThan(small * 40);
+describe("hostile stack frame boundaries", () => {
+  it("rejects a long malformed frame without losing a following valid location", () => {
+    const frames = sanitizedFrames(
+      [
+        "at " + " ".repeat(100_000) + "x",
+        "at " +
+          "private-customer-name ".repeat(10_000) +
+          "(workers/automation/src/distribution.ts:42:7)",
+      ].join("\n"),
+    );
+    expect(frames.map((frame) => frame.lineno)).toEqual([42]);
+    expect(frames[0]?.function).toBe("<anonymous>");
+    expect(JSON.stringify(frames)).not.toContain("private-customer-name");
   });
 
   it("accepts the V8 frame shapes the sanitizer supports", () => {

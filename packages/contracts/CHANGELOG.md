@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Add the installation improvement-reporting surface:
+  `GET /installation/reporting` (`getReportingPolicy`) returns the requested and
+  effective status of the independent `usage` and `diagnostics` categories, the
+  disclosure version, whether the deployment can transmit, and the pseudonymous
+  installation identifier; every active member may read it.
+  `PUT /installation/reporting` (`updateReportingPreferences`) is the
+  Owner-only, idempotent consent change. `GET`/`POST
+  /installation/reporting/feedback` (`getReportingFeedback`,
+  `submitReportingFeedback`) record and report the one-time discovery-source
+  answer with its honest delivery status and a separate random identity.
+  `POST /installation/reporting/diagnostics` (`ingestDiagnosticReport`) accepts
+  an authenticated application failure and answers with an ingestion decision,
+  never a delivery claim. All additions are additive; no existing operation,
+  schema or required field changed.
+
 - Separate saved `PostProviderOptions` from complete `ProviderPublishOptions`.
   Post targets retain YouTube visibility with an unanswered audience and TikTok
   privacy/disclosure choices before completion. Scheduling rejects unanswered

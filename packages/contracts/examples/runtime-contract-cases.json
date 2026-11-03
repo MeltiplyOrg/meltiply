@@ -100,6 +100,34 @@
       "path": "/api/v1/inbox",
       "expected_status": 401,
       "expected_content_type": "application/json"
+    },
+    {
+      "name": "reporting policy requires authorization",
+      "method": "GET",
+      "path": "/api/v1/installation/reporting",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "reporting preference update requires authorization",
+      "method": "PUT",
+      "path": "/api/v1/installation/reporting",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "reporting feedback requires authorization",
+      "method": "GET",
+      "path": "/api/v1/installation/reporting/feedback",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "diagnostic ingestion requires authorization",
+      "method": "POST",
+      "path": "/api/v1/installation/reporting/diagnostics",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
     }
   ]
 }

@@ -19,7 +19,8 @@
     "@meltiply/providers": "workspace:*",
     "@meltiply/secrets": "workspace:*",
     "@meltiply/storage": "workspace:*",
-    "effect": "4.0.5"
+    "effect": "4.0.5",
+    "@meltiply/reporting": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "catalog:",

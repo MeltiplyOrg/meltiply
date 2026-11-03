@@ -1142,6 +1142,149 @@ paths:
           $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/RateLimited"
+  /installation/reporting:
+    get:
+      tags: [Installation]
+      operationId: getReportingPolicy
+      summary: Read installation improvement-reporting policy
+      description: |
+        Returns the Owner's requested choices and the effective outbound status
+        of each category, the disclosure version, and whether the deployment can
+        transmit at all. Every active member may read this, so the Owner's
+        choices and the effective policy stay visible to the whole team.
+      responses:
+        "200":
+          description: Member-readable reporting policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingPolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      tags: [Installation]
+      operationId: updateReportingPreferences
+      summary: Change installation improvement-reporting choices
+      description: |
+        Sets the two independent reporting choices. Only the current
+        Installation Owner may change them, and authority follows ownership
+        transfer. Withdrawing a category discards its unsent reports; enabling
+        it again starts a new reporting interval. The response reports the
+        requested and effective status of each category, so a deployment
+        override or a missing destination is never presented as working
+        reporting.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportingPreferencesUpdate"
+      responses:
+        "200":
+          description: Updated policy with effective status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /installation/reporting/feedback:
+    get:
+      tags: [Installation]
+      operationId: getReportingFeedback
+      summary: Read the one-time discovery-source answer
+      description: |
+        Returns the recorded discovery-source answer and its honest delivery
+        state: not shared, locally recorded, queued, or confirmed delivered.
+        Owner only.
+      responses:
+        "200":
+          description: Attribution state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingFeedback"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Installation]
+      operationId: submitReportingFeedback
+      summary: Share the one-time discovery-source answer
+      description: |
+        Shares one answer from the fixed discovery-source enumeration through an
+        explicit action. The answer carries its own random response identity and
+        never enables either reporting category. Skipping, or answering
+        "prefer not to say", shares nothing. A retry reuses the recorded logical
+        identity instead of creating a second response.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackSubmission"
+      responses:
+        "200":
+          description: Attribution state, including delivery status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingFeedback"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /installation/reporting/diagnostics:
+    post:
+      tags: [Installation]
+      operationId: ingestDiagnosticReport
+      summary: Submit a sanitized diagnostic report
+      description: |
+        Accepts an authenticated application failure for diagnostic reporting.
+        The receiving server re-checks persisted diagnostics consent before any
+        third-party transmission, so a browser-provided flag is never authority.
+        The report is saved locally and delivered best-effort; the response says
+        whether it was queued, not that the destination received it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DiagnosticReportSubmission"
+      responses:
+        "202":
+          description: Ingestion decision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiagnosticReportReceipt"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /workspaces/{workspaceId}/audit:
     parameters:
       - $ref: "#/components/parameters/WorkspaceIdPath"
@@ -3618,6 +3761,175 @@ components:
         installation_owner_user_id:
           type: string
           format: uuid
+    ReportingCategoryStatus:
+      type: object
+      additionalProperties: false
+      required: [requested, effective, reason, decision_at, interval_started_at]
+      properties:
+        requested:
+          type: boolean
+          description: The Installation Owner's stored choice.
+        effective:
+          type: boolean
+          description: Whether an outbound report may be sent right now.
+        reason:
+          type: string
+          enum:
+            - enabled
+            - not_requested
+            - destination_unavailable
+            - operator_disabled
+            - preference_unavailable
+          description: Why the category is or is not effective.
+        decision_at:
+          type: [string, "null"]
+          format: date-time
+          description: When the stored choice was last changed.
+        interval_started_at:
+          type: [string, "null"]
+          format: date-time
+          description: Start of the interval this category counts activity over.
+    ReportingPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          disclosure_version,
+          destination_configured,
+          operator_forced_off,
+          owner_can_change,
+          installation_reporting_id,
+          categories,
+        ]
+      properties:
+        disclosure_version:
+          type: integer
+          minimum: 1
+        destination_configured:
+          type: boolean
+          description: Whether this deployment has a usable reporting destination.
+        operator_forced_off:
+          type: boolean
+          description: Whether the deployment override disables reporting outright.
+        owner_can_change:
+          type: boolean
+          description: True only for the current Installation Owner.
+        installation_reporting_id:
+          type: [string, "null"]
+          format: uuid
+          description: |
+            Pseudonymous installation identifier, created on the first opt-in.
+            Reports linked by it are pseudonymous, not completely anonymous.
+        categories:
+          type: object
+          additionalProperties: false
+          required: [usage, diagnostics]
+          properties:
+            usage:
+              $ref: "#/components/schemas/ReportingCategoryStatus"
+            diagnostics:
+              $ref: "#/components/schemas/ReportingCategoryStatus"
+    ReportingPreferencesUpdate:
+      type: object
+      additionalProperties: false
+      required: [usage, diagnostics]
+      properties:
+        usage:
+          type: boolean
+        diagnostics:
+          type: boolean
+    DiscoverySource:
+      type: string
+      enum:
+        - github
+        - search_engine
+        - social_media
+        - video
+        - article_newsletter
+        - friend_word_of_mouth
+        - ai_assistant
+        - other
+        - prefer_not_to_say
+      description: Fixed discovery-source enumeration; there is no free-text answer.
+    FeedbackSubmission:
+      type: object
+      additionalProperties: false
+      required: [discovery_source]
+      properties:
+        discovery_source:
+          $ref: "#/components/schemas/DiscoverySource"
+    ReportingFeedback:
+      type: object
+      additionalProperties: false
+      required: [shared, discovery_source, submitted_at, delivery_status]
+      properties:
+        shared:
+          type: boolean
+        discovery_source:
+          oneOf:
+            - $ref: "#/components/schemas/DiscoverySource"
+            - type: "null"
+        submitted_at:
+          type: [string, "null"]
+          format: date-time
+        delivery_status:
+          type: string
+          enum: [not_shared, not_recorded, pending, delivered]
+          description: |
+            `not_shared` means no answer was ever submitted, `not_recorded`
+            means a local choice was saved without sharing, `pending` means the
+            report is queued, and `delivered` means the destination accepted it.
+    DiagnosticCategory:
+      type: string
+      enum:
+        - unhandled_exception
+        - request_failure
+        - scheduled_job_failure
+        - client_exception
+    OperationCategory:
+      type: string
+      enum:
+        - publish
+        - analytics
+        - inbox
+        - auth
+        - assets
+        - queues
+        - installation
+        - reporting
+        - other
+    DiagnosticReportSubmission:
+      type: object
+      additionalProperties: false
+      required: [category, operation]
+      properties:
+        category:
+          $ref: "#/components/schemas/DiagnosticCategory"
+        operation:
+          $ref: "#/components/schemas/OperationCategory"
+        platform:
+          $ref: "#/components/schemas/Platform"
+        error_name:
+          type: string
+          maxLength: 80
+          description: Error type name; sanitized to a plain identifier.
+        error_stack:
+          type: string
+          maxLength: 8192
+          description: |
+            Raw stack text. Only allowlisted application frames survive
+            sanitization; messages, URLs, query strings and identifiers are
+            dropped before transport.
+    DiagnosticReportReceipt:
+      type: object
+      additionalProperties: false
+      required: [accepted, reason]
+      properties:
+        accepted:
+          type: boolean
+        reason:
+          type: string
+          enum: [queued, category_disabled]
     AuditEntry:
       type: object
       additionalProperties: false

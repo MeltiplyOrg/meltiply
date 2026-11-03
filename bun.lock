@@ -234,6 +234,20 @@
         "vitest": "catalog:",
       },
     },
+    "packages/reporting": {
+      "name": "@meltiply/reporting",
+      "version": "1.0.0-target.0",
+      "dependencies": {
+        "@meltiply/domain": "workspace:*",
+        "effect": "4.0.5",
+      },
+      "devDependencies": {
+        "@vitest/coverage-v8": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/secrets": {
       "name": "@meltiply/secrets",
       "version": "1.0.0-target.0",
@@ -272,6 +286,7 @@
         "@meltiply/domain": "workspace:*",
         "@meltiply/observability": "workspace:*",
         "@meltiply/providers": "workspace:*",
+        "@meltiply/reporting": "workspace:*",
         "@meltiply/secrets": "workspace:*",
         "@meltiply/storage": "workspace:*",
         "effect": "4.0.5",
@@ -297,6 +312,7 @@
         "@meltiply/domain": "workspace:*",
         "@meltiply/observability": "workspace:*",
         "@meltiply/providers": "workspace:*",
+        "@meltiply/reporting": "workspace:*",
         "@meltiply/secrets": "workspace:*",
         "@meltiply/storage": "workspace:*",
         "effect": "4.0.5",
@@ -830,6 +846,8 @@
     "@meltiply/observability": ["@meltiply/observability@workspace:packages/observability"],
 
     "@meltiply/providers": ["@meltiply/providers@workspace:packages/providers"],
+
+    "@meltiply/reporting": ["@meltiply/reporting@workspace:packages/reporting"],
 
     "@meltiply/secrets": ["@meltiply/secrets@workspace:packages/secrets"],
 

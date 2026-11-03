@@ -11,15 +11,20 @@ import { fileURLToPath } from "node:url";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import YAML from "yaml";
 
-const { registerInstallationRoutes, registerWorkspaceLifecycleRoutes } = vi.hoisted(() => ({
-  registerInstallationRoutes: vi.fn(),
-  registerWorkspaceLifecycleRoutes: vi.fn(),
-}));
+const { registerInstallationRoutes, registerReportingRoutes, registerWorkspaceLifecycleRoutes } =
+  vi.hoisted(() => ({
+    registerInstallationRoutes: vi.fn(),
+    registerReportingRoutes: vi.fn(),
+    registerWorkspaceLifecycleRoutes: vi.fn(),
+  }));
 vi.mock("../src/workspace-lifecycle", () => ({
   registerWorkspaceLifecycleRoutes,
 }));
 vi.mock("../src/installation-routes", () => ({
   registerInstallationRoutes,
+}));
+vi.mock("../src/reporting-routes", () => ({
+  registerReportingRoutes,
 }));
 
 import { createApiApp } from "../src/app";
@@ -45,7 +50,7 @@ interface OperationCatalog {
 }
 
 interface ConformanceCase {
-  method: "DELETE" | "GET" | "PATCH" | "POST";
+  method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
   operationId: string;
   path: string;
 }
@@ -54,7 +59,7 @@ interface RuntimeContractCase {
   expected_content_type: string;
   expected_status: number;
   json_subset?: Record<string, unknown>;
-  method: "DELETE" | "GET" | "PATCH" | "POST";
+  method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
   name: string;
   path: string;
 }
@@ -439,6 +444,27 @@ const cases: ConformanceCase[] = [
     method: "DELETE",
     operationId: "removePostFromQueue",
     path: "/api/v1/queues/00000000-0000-4000-8000-000000000801/posts/00000000-0000-4000-8000-000000000701",
+  },
+  { method: "GET", operationId: "getReportingPolicy", path: "/api/v1/installation/reporting" },
+  {
+    method: "PUT",
+    operationId: "updateReportingPreferences",
+    path: "/api/v1/installation/reporting",
+  },
+  {
+    method: "GET",
+    operationId: "getReportingFeedback",
+    path: "/api/v1/installation/reporting/feedback",
+  },
+  {
+    method: "POST",
+    operationId: "submitReportingFeedback",
+    path: "/api/v1/installation/reporting/feedback",
+  },
+  {
+    method: "POST",
+    operationId: "ingestDiagnosticReport",
+    path: "/api/v1/installation/reporting/diagnostics",
   },
 ];
 
@@ -877,8 +903,37 @@ function registerInstallationContractRoutes(installationApp: Hono<ApiWorkerEnvir
   );
 }
 
+/**
+ * Registers reporting conformance doubles at the production paths.
+ *
+ * The reporting routes own consent, authorization, idempotency and Audit
+ * behavior, exercised by reporting.integration.test.ts against real PostgreSQL
+ * and a controlled capture receiver. This double isolates response-schema
+ * verification from that fixture.
+ *
+ * @param reportingApp - API app receiving reporting route registrations.
+ */
+function registerReportingContractRoutes(reportingApp: Hono<ApiWorkerEnvironment>): void {
+  reportingApp.get("/api/v1/installation/reporting", () =>
+    workspaceContractResponse("getReportingPolicy"),
+  );
+  reportingApp.put("/api/v1/installation/reporting", () =>
+    workspaceContractResponse("updateReportingPreferences"),
+  );
+  reportingApp.get("/api/v1/installation/reporting/feedback", () =>
+    workspaceContractResponse("getReportingFeedback"),
+  );
+  reportingApp.post("/api/v1/installation/reporting/feedback", () =>
+    workspaceContractResponse("submitReportingFeedback"),
+  );
+  reportingApp.post("/api/v1/installation/reporting/diagnostics", () =>
+    workspaceContractResponse("ingestDiagnosticReport"),
+  );
+}
+
 registerWorkspaceLifecycleRoutes.mockImplementation(registerWorkspaceContractRoutes);
 registerInstallationRoutes.mockImplementation(registerInstallationContractRoutes);
+registerReportingRoutes.mockImplementation(registerReportingContractRoutes);
 
 const app = createApiApp({
   assetService,

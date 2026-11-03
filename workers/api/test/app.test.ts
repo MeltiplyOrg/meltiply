@@ -1,4 +1,5 @@
 import type { JwtIdentity } from "@meltiply/auth";
+import { CONTRACT_VERSION } from "@meltiply/contracts";
 import type { components } from "@meltiply/contracts/schema";
 import { createExecutionContext } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -134,6 +135,7 @@ describe("API Worker foundation", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("X-Request-ID")).toBe("request-health-1");
     await expect(response.json()).resolves.toEqual({
+      contract_version: CONTRACT_VERSION,
       environment: "local",
       status: "ok",
       version: "1.0.0-target.0",

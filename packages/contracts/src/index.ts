@@ -2,6 +2,7 @@ import type { components } from "./generated/schema";
 
 export { apiVersionPath, createMeltiplyClient, type MeltiplyClient } from "./client";
 export type { components, operations, paths } from "./generated/schema";
+export { CONTRACT_VERSION } from "./generated/version";
 
 /** Public capability contract shared by API, provider, and frontend callers. */
 export type PlatformCapability = components["schemas"]["PlatformCapability"];

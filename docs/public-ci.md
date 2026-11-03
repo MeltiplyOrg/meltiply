@@ -33,6 +33,12 @@ fixture-only credentials. Tokens have read-only repository access, checkouts ret
 credentials, and no deployment secrets are supplied. Never execute contributor code
 through `pull_request_target` or persistent self-hosted runners.
 
+The Cloudflare lane's `bun run contract:check` compares PRs with their merge base
+and, when available, the latest reachable contract release. Breaking spans need a
+fresh exact-change review token in one changelog bullet; missing initial-release
+baselines are reported explicitly. See the
+[contract upgrade procedure](../packages/contracts/README.md).
+
 `bun run test:tooling` discovers Node test files in CI helpers, local tooling,
 translations, infrastructure, releases, staging adapters, benchmarks, and self-hosted
 jobs. Shell regressions and PostgreSQL suites stay separate; none need deployment
@@ -49,7 +55,8 @@ capability expiry must not let it outlive the persisted write hold.
 `frontend-full`, `frontend-ui`, `cloudflare-full`, `cloudflare-integration`,
 `cloudflare-extended`, `publishing-flow`, `publishing-browser`, `publishing-queues`,
 `device-authorization`, `object-storage`, `portable-caching`, `portable-caching-smoke`,
-`performance-focused`, `performance-backend`, and `performance-media`. They run on
+`performance-focused`, `performance-backend`, `performance-media`, and
+`versioned-contract`. They run on
 GitHub-hosted machines without deployment secrets. A passing `ci-gate` does not imply
 a manual lane ran.
 
@@ -62,6 +69,13 @@ screenshots are retained in the lane artifact before the next journey.
 Wrangler fires no cron triggers locally, so the acceptance API exposes a fixture-only
 route that invokes the Automation Worker's scheduled dispatcher through its existing
 service binding; stored due times are unchanged and no future clock is injected.
+
+`versioned-contract` runs the full application gate plus contract artifact and
+production-entry HTTP health smoke. The
+[contract release workflow](../.github/workflows/contract-release.yml) prepares
+branch preview artifacts without publishing; protected `contract-v*` tag pushes
+on default-branch history alone can publish. See the
+[release procedure](../packages/contracts/README.md#prepare-and-publish).
 
 Live deployments follow the
 [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).

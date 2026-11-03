@@ -338,22 +338,38 @@ function validatePhaseOutputs(outputs, phase, spec) {
 }
 
 /**
- * Validates the health sub-record embedded in smoke evidence.
+ * Validates deployment and contract identities in the health sub-record embedded in smoke evidence.
  *
+ * A null contract version denotes legacy health only for a matching proven previous
+ * Worker in a partial live rollout; missing metadata and all pinned probes remain invalid.
  * @param {object} evidence - Parsed smoke evidence record
  * @param {string} url - Expected probe URL (version URL or live hostname + path)
  * @param {string} name - Contextual label for error reporting
  * @param {boolean} versionPinned - Whether the served version must equal the release SHA
  * @param {object} spec - Validated release specification
+ * @param {string} [previousVersionId] - Previous Worker ID from the candidate/rollout evidence
  * @throws {TypeError} If the health record fails URL, status, or version checks
  */
-function validateSmokeHealth(evidence, url, name, versionPinned, spec) {
+function validateSmokeHealth(evidence, url, name, versionPinned, spec, previousVersionId) {
   const health = plainObject(evidence.health, `${name} health`);
   matchedString(health.url, /^https:\/\/[^\s]+$/, `${name} health.url`);
   if (health.url !== url) {
     throw new TypeError(`${name} health probes the wrong URL`);
   }
+  const previous = evidence.previous_version;
+  const legacy =
+    !versionPinned &&
+    spec.deployment_mode === "update" &&
+    health.contract_version === null &&
+    previousVersionId !== undefined &&
+    previous?.version_id === previousVersionId &&
+    typeof previous.git_sha === "string" &&
+    gitShaPattern.test(previous.git_sha) &&
+    previous.git_sha !== spec.git_sha &&
+    health.version === previous.git_sha;
   if (
+    (!legacy &&
+      (typeof health.contract_version !== "string" || health.contract_version.length === 0)) ||
     health.environment !== "staging" ||
     health.status !== "ok" ||
     !gitShaPattern.test(health.version)
@@ -603,7 +619,14 @@ function validateEvidenceDocument({ content, context, name, spec }) {
     // The live hostname legitimately serves the previous version during a
     // partial rollout; only a full (or bootstrap) deployment must serve the
     // release SHA deterministically.
-    validateSmokeHealth(evidence, `${spec.app_url}/api/v1/health`, name, percentage === 100, spec);
+    validateSmokeHealth(
+      evidence,
+      `${spec.app_url}/api/v1/health`,
+      name,
+      percentage === 100,
+      spec,
+      percentage !== 100 ? context.candidate.api_previous : undefined,
+    );
     return;
   }
 

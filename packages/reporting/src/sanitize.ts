@@ -447,6 +447,85 @@ function releaseFramePath(location: string): string | undefined {
 }
 
 /**
+ * Reports whether a character at an index is an ASCII digit.
+ *
+ * @param value - Text being scanned.
+ * @param index - Character index.
+ * @returns True for `0`-`9`.
+ */
+function isDigitAt(value: string, index: number): boolean {
+  const code = value.charCodeAt(index);
+  return code >= 48 && code <= 57;
+}
+
+/**
+ * Finds the first index of the digit run ending at `endExclusive`.
+ *
+ * Scans right to left and stops at the first non-digit, so the cost is bounded
+ * by the run length rather than by the text.
+ *
+ * @param value - Text being scanned.
+ * @param endExclusive - Index just past the run.
+ * @returns Start index of the run, or `endExclusive` when it is empty.
+ */
+function digitRunStart(value: string, endExclusive: number): number {
+  let index = endExclusive - 1;
+  while (index >= 0 && isDigitAt(value, index)) index -= 1;
+  return index + 1;
+}
+
+/**
+ * Splits `location:line:column` into its three parts.
+ *
+ * Delimiter parsing runs from the right, and each digit run is scanned once, so
+ * no input can make the scan revisit a character. The numeric values are bounded
+ * where they are used (`boundedCount`), so an unusable line number costs the
+ * line number rather than the whole frame.
+ *
+ * @param value - Candidate suffix text.
+ * @returns The parts, or undefined when the suffix is malformed.
+ */
+function splitFrameSuffix(value: string): { line: string; location: string } | undefined {
+  const columnStart = digitRunStart(value, value.length);
+  if (columnStart === value.length) return undefined;
+  if (value.charCodeAt(columnStart - 1) !== 58) return undefined;
+  const lineEnd = columnStart - 1;
+  const lineStart = digitRunStart(value, lineEnd);
+  if (lineStart === lineEnd) return undefined;
+  if (value.charCodeAt(lineStart - 1) !== 58) return undefined;
+  const line = value.slice(lineStart, lineEnd);
+  return { line, location: value.slice(0, lineStart - 1) };
+}
+
+/**
+ * Extracts the location text from one V8 frame body.
+ *
+ * V8 writes a named frame as `at name (LOCATION)` and a bare one as
+ * `at LOCATION`. The location is the parenthesised tail when the body ends with
+ * `)`, which is found with a single backward search; the name is never parsed
+ * because it is discarded. A body whose tail is not location-shaped fails closed.
+ *
+ * @param body - Frame text after the leading `at `.
+ * @returns The location text, or undefined when the body has none.
+ */
+function frameLocationText(body: string): string | undefined {
+  const location = body.endsWith(")")
+    ? (() => {
+        const open = body.lastIndexOf("(");
+        if (open < 0) return undefined;
+        const inner = body.slice(open + 1, -1);
+        // Only the location lives inside the final parentheses; a nested
+        // parenthesis means this is not a frame tail.
+        return inner.includes("(") || inner.includes(")") ? undefined : inner;
+      })()
+    : body;
+  if (location === undefined) return undefined;
+  // A location is one unbroken token: whitespace belongs to the discarded name,
+  // and a body like `at async Promise.all (index 0)` has no location at all.
+  return /\s/.test(location) ? undefined : location;
+}
+
+/**
  * Sanitizes one stack line into an allowlisted frame.
  *
  * The retained facts are the release location and line number — both build
@@ -457,14 +536,21 @@ function releaseFramePath(location: string): string | undefined {
  * which is what identifies a defect, and every frame reports `<anonymous>` so the
  * gap is explicit rather than a wrong symbol.
  *
+ * Parsing is linear in the line length. The previous single expression paired a
+ * lazy wildcard with a whitespace run, and a stack of many spaces could make it
+ * retry every split position — quadratic work on attacker-controlled input. Every
+ * step here is one forward or backward scan.
+ *
  * @param line - One trimmed stack line.
  * @returns The sanitized frame, or undefined when the frame is unsafe.
  */
 function sanitizeFrame(line: string): SanitizedFrame | undefined {
-  const match = /^at\s+(?:(.+?)\s+\()?([^()\s]+):(\d+):(\d+)\)?$/.exec(line);
-  if (!match) return undefined;
-  const [, , rawLocation, rawLine] = match;
-  const filename = releaseFramePath(rawLocation ?? "");
+  if (!line.startsWith("at ")) return undefined;
+  const location = frameLocationText(line.slice(3));
+  if (location === undefined) return undefined;
+  const suffix = splitFrameSuffix(location);
+  if (suffix === undefined) return undefined;
+  const filename = releaseFramePath(suffix.location);
   if (filename === undefined) return undefined;
   const frame: {
     filename: string;
@@ -482,7 +568,7 @@ function sanitizeFrame(line: string): SanitizedFrame | undefined {
     lang: "javascript",
     platform: "custom",
   };
-  const lineno = boundedCount(Number(rawLine));
+  const lineno = boundedCount(Number(suffix.line));
   if (lineno !== null) frame.lineno = lineno;
   return frame;
 }

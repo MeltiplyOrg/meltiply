@@ -426,6 +426,97 @@ describe("deployed release frames", () => {
   });
 });
 
+describe("frame parsing stays linear on hostile stacks", () => {
+  /**
+   * A stack line is attacker-controlled text. The parser must not spend
+   * superlinear time on a line that is only whitespace, because one crafted
+   * report would otherwise stall the ingestion path.
+   *
+   * The bound is asserted as a ratio rather than a wall-clock deadline so a slow
+   * or loaded runner cannot make the case flaky: growing the input tenfold must
+   * not grow the work without bound, which is what a backtracking expression
+   * would do.
+   */
+  it("scales with the line length instead of backtracking over whitespace", () => {
+    const measure = (spaces: number): number => {
+      const line = "at " + " ".repeat(spaces) + "x";
+      const startedAt = performance.now();
+      expect(sanitizedFrames(line)).toEqual([]);
+      return performance.now() - startedAt;
+    };
+
+    // Warm the code path so the first call is not measuring compilation.
+    measure(1_000);
+    const small = Math.max(measure(20_000), 0.5);
+    const large = measure(200_000);
+
+    // A backtracking expression is quadratic or worse here: ten times the input
+    // costs roughly a hundred times the work. A linear scan costs about ten.
+    expect(large).toBeLessThan(small * 40);
+  });
+
+  it("accepts the V8 frame shapes the sanitizer supports", () => {
+    const frames = sanitizedFrames(
+      [
+        // A named frame, an async frame, and a bare frame all carry a location.
+        "    at publishDistribution (workers/automation/src/distribution.ts:42:7)",
+        "    at async publishDistribution (workers/automation/src/distribution.ts:42:7)",
+        "    at workers/automation/src/distribution.ts:42:7",
+      ].join("\n"),
+    );
+
+    expect(frames).toHaveLength(3);
+    for (const frame of frames) {
+      expect(frame.filename).toBe("workers/automation/source");
+      expect(frame.function).toBe("<anonymous>");
+      expect(frame.lineno).toBe(42);
+    }
+  });
+
+  it("fails closed on malformed frames instead of guessing a location", () => {
+    expect(
+      sanitizedFrames(
+        [
+          // No numeric suffix, a name-only body, a whitespace body, and an
+          // eval wrapper whose tail is not a location all yield nothing.
+          "    at publishDistribution (workers/automation/src/distribution.ts)",
+          "    at publishDistribution",
+          "    at    ",
+          "    at eval (eval at <anonymous> (src/worker.ts:1:1), <anonymous>:1:1)",
+          "    at async Promise.all (index 0)",
+        ].join("\n"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps an unusable line number off a frame whose location is valid", () => {
+    // The location is still provable release output, so the frame survives and
+    // only the line number is dropped rather than the whole frame.
+    const [frame] = sanitizedFrames(
+      "    at boot (workers/automation/src/distribution.ts:99999999999999999999:1)",
+    );
+
+    expect(frame?.filename).toBe("workers/automation/source");
+    expect(frame).not.toHaveProperty("lineno");
+  });
+
+  it("never forwards a hostile location or a whitespace run from a stack", () => {
+    const frames = sanitizedFrames(
+      [
+        "    at " + "customer-name ".repeat(20) + "(workers/automation/src/distribution.ts:1:1)",
+        "    at leak (https://cdn.provider.test/bundle.js:1:1)",
+      ].join("\n"),
+    );
+
+    // The crafted name is discarded rather than forwarded, and a dependency
+    // bundle is not this application's release output.
+    const serialized = JSON.stringify(frames);
+    expect(serialized).not.toContain("customer-name");
+    expect(serialized).not.toContain("cdn.provider.test");
+    expect(frames).toHaveLength(1);
+  });
+});
+
 describe("exception type and frame value allowlist", () => {
   it("normalizes an identifier-shaped but unapproved error name to Error", () => {
     const properties = diagnosticProperties(

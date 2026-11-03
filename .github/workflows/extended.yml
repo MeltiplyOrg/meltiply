@@ -478,14 +478,13 @@ jobs:
           MELTIPLY_E2E_EGRESS_URL: http://127.0.0.1:9787
         run: |
           status=0
-          # No trace or video: the journey types the deployment setup secret, a
-          # password, and a verification link, and a trace records DOM input
-          # values. Assertions, not captured forms, are this journey's evidence.
+          # The spec disables screenshots and traces itself because it types a
+          # setup secret, a password, and a verification link; assertions are
+          # its evidence, and this step must not add capture flags back.
           bun run --cwd frontend/app test:e2e e2e/onboarding-reporting.spec.ts \
-            --project onboarding --trace off --video off --retries 0 || status=1
-          # Failure screenshots are not uploaded either; the failure message and
-          # the backend log identify the step without exposing form contents.
-          # Playwright names each case's output directory after the spec file.
+            --project onboarding --trace off --retries 0 || status=1
+          # Nothing from this journey is published: no screenshot, trace, or
+          # captured report body may leave the runner.
           rm -rf frontend/app/test-results/onboarding-reporting*
           exit "$status"
       - uses: actions/setup-go@v6

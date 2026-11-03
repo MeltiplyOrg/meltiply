@@ -73,8 +73,11 @@ serialization: `$exception_list` with `type`, `value`, `mechanism` and
 `stacktrace.frames`, plus `$exception_level: "error"`. `value` is the fixed
 failure category rather than the runtime message, so grouping keys on the
 sanitized type and application frame locations. Rejected or truncated frames are
-dropped instead of guessed. Expected, recoverable Provider conditions are
-categorized and marked handled rather than mixed into unexpected exceptions.
+dropped instead of guessed. Expected, recoverable Provider conditions use the
+`provider_failure` category with a fixed `provider_failure_class` (`auth`,
+`quota`, `rate_limit`, `timeout`, `transient`, `deterministic`, `ambiguous`) and
+are marked handled, so they stay out of unexpected-exception tracking; no Provider
+message, status code, or response body is ever sent.
 
 ### Discovery-source feedback
 

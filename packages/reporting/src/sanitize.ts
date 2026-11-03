@@ -85,6 +85,7 @@ const allowedPropertyNames: Record<string, true> = {
   $process_person_profile: true,
   app_version: true,
   channels: true,
+  consent_interval_started_at: true,
   comments: true,
   deployment_category: true,
   diagnostic_category: true,
@@ -240,6 +241,10 @@ export function usageProperties(
   };
   const reportDate = validReportDate(input.reportDate);
   if (reportDate) properties.report_date = reportDate;
+  // The consent interval is what makes two same-day reports distinct measurements
+  // rather than duplicate deliveries, so it travels with the counters it bounds.
+  const interval = validTimestamp(input.expectedIntervalStartedAt);
+  if (interval) properties.consent_interval_started_at = interval;
   const channels = channelsProperty(input);
   if (channels) properties.channels = channels;
   const publications = publicationsProperty(input);
@@ -284,12 +289,173 @@ interface SanitizedFrame {
 }
 
 /**
+ * Exception types that may reach the destination as a group name.
+ *
+ * The authenticated diagnostic endpoint forwards an error class name it observed,
+ * so an unrecognized name is untrusted text: `SensitiveCustomerName` is exactly
+ * as valid an identifier as `TypeError`, and forwarding it would publish a
+ * caller-chosen value. Only these reviewed classes travel; the rest group as
+ * `Error`, which is still useful because grouping also keys on release location.
+ */
+const approvedExceptionTypes: Record<string, true> = {
+  AggregateError: true,
+  DOMException: true,
+  DatabaseError: true,
+  Error: true,
+  EvalError: true,
+  MailSubmissionError: true,
+  ProviderAdapterError: true,
+  ProviderError: true,
+  RangeError: true,
+  ReferenceError: true,
+  ReportingInputError: true,
+  StorageUnavailableError: true,
+  SyntaxError: true,
+  TypeError: true,
+  URIError: true,
+  ValidationError: true,
+};
+
+/**
+ * Fixed release bundle names that identify this application's own build.
+ *
+ * A Worker's deployed stack refers to the bundle, not to a source file, and the
+ * name is produced by the build rather than by any caller. Only these fixed
+ * basenames are accepted from a bare path, so a forwarded stack cannot introduce
+ * a free-form file name.
+ */
+const releaseBundleNames: Record<string, true> = {
+  "index.js": true,
+  "index.mjs": true,
+  "worker.js": true,
+};
+
+/**
+ * Content-hashed frontend asset path, e.g. `/assets/index-DiwrgTda.js`.
+ *
+ * Vite emits `assets/<chunk>-<content hash>.js`. Only the hash is retained: the
+ * chunk name is build output too, but keeping it would mean forwarding a name a
+ * caller could have chosen, so the emitted location is the hash alone.
+ */
+const hashedAssetPath = /(?:^|\/)assets\/[A-Za-z0-9_-]*-([A-Za-z0-9_-]{8,64})\.(?:js|mjs)$/;
+
+/**
+ * Reviewed module areas, keyed by source-tree prefix.
+ *
+ * A repository-relative frame names a file inside a module, and the module's file
+ * name is not reviewed data. Only the area is emitted, so a stack line carrying
+ * `packages/SensitiveCustomerName.ts` cannot publish that identifier: the frame
+ * becomes `<prefix><area>/source` from this closed roster instead.
+ */
+const sourceModuleAreas: Readonly<Record<string, Readonly<Record<string, true>>>> = {
+  "packages/": {
+    auth: true,
+    contracts: true,
+    database: true,
+    domain: true,
+    observability: true,
+    providers: true,
+    reporting: true,
+    secrets: true,
+    storage: true,
+    ui: true,
+  },
+  "src/": {
+    app: true,
+    components: true,
+    hooks: true,
+    lib: true,
+    locales: true,
+    types: true,
+    worker: true,
+  },
+  "workers/": { api: true, automation: true },
+};
+
+/** Fixed token replacing every untrusted file name. */
+const sourceToken = "source";
+
+/** The emitted location families, matched against an already-normalized path. */
+const normalizedAssetPath = /^assets\/[A-Za-z0-9_-]{8,64}\.js$/;
+
+/**
+ * Reports whether a stored frame location is one this module could have emitted.
+ *
+ * The emitted location is a normalized form — an asset hash, a fixed bundle name,
+ * or `<prefix><area>/source` from the reviewed roster — so validity is a regex
+ * over the output vocabulary rather than a re-normalization of an arbitrary input.
+ * A row written by an older build or edited at rest cannot smuggle a file name
+ * through this check.
+ *
+ * @param filename - Stored frame location.
+ * @returns True when the location is in the emitted vocabulary.
+ */
+function isNormalizedFramePath(filename: string): boolean {
+  if (normalizedAssetPath.test(filename)) return true;
+  if (releaseBundleNames[filename] === true) return true;
+  for (const [prefix, areas] of Object.entries(sourceModuleAreas)) {
+    for (const area of Object.keys(areas)) {
+      if (filename === `${prefix}${area}/${sourceToken}`) return true;
+    }
+  }
+  return false;
+}
+
+/** Source file remainder: a path under a reviewed area ending in a source extension. */
+const sourceRemainder = /^\/[A-Za-z0-9_.\/-]{1,200}\.(?:ts|tsx|js|mjs|cjs)$/;
+
+/**
+ * Reduces a stack location to provable application release metadata.
+ *
+ * Three location families identify this application's own code, and nothing else
+ * survives:
+ *
+ * - a deployed frontend asset, reduced to `assets/<content hash>.js`, so the
+ *   origin, chunk name, credentials and query string are all removed;
+ * - one of the fixed release bundle names a Worker deploys as;
+ * - a repository-relative path under a fixed prefix and a reviewed module area,
+ *   reduced to `<prefix><area>/source`, which is what a source-map-backed stack
+ *   reports.
+ *
+ * Every retained character is therefore either build output or a member of a
+ * closed roster. Dependency paths, `node_modules`, `eval` frames, absolute paths
+ * and arbitrary file names are dropped rather than sanitized: a location is only
+ * useful when it can be shown to name this application's own code.
+ *
+ * @param location - Raw location text from one stack line.
+ * @returns The constrained application path, or undefined when nothing safe remains.
+ */
+function releaseFramePath(location: string): string | undefined {
+  // Fragment and query first: a frame can carry a cache-busting suffix or a
+  // credential-bearing query, and neither may reach the payload.
+  const withoutSuffix = (location.split(/[?#]/, 1)[0] ?? "").trim();
+  if (withoutSuffix.length === 0 || withoutSuffix.length > 400) return undefined;
+  const asset = hashedAssetPath.exec(withoutSuffix);
+  if (asset?.[1]) return `assets/${asset[1]}.js`;
+  const basename = withoutSuffix.slice(withoutSuffix.lastIndexOf("/") + 1);
+  if (releaseBundleNames[basename] === true) return basename;
+  for (const [prefix, areas] of Object.entries(sourceModuleAreas)) {
+    if (!withoutSuffix.startsWith(prefix)) continue;
+    const area = withoutSuffix.slice(prefix.length).split("/", 1)[0] ?? "";
+    if (areas[area] !== true) return undefined;
+    // The remainder proves this is a source file, but its name is never copied.
+    const remainder = withoutSuffix.slice(prefix.length + area.length);
+    if (!sourceRemainder.test(remainder)) return undefined;
+    return `${prefix}${area}/${sourceToken}`;
+  }
+  return undefined;
+}
+
+/**
  * Sanitizes one stack line into an allowlisted frame.
  *
- * A frame survives only when its function name is a plain identifier and its
- * location is a repository-relative application path. Node-internal frames,
- * `eval` frames, bundled third-party paths, URLs and anything carrying a query
- * string are dropped; the raw stack never leaves this function.
+ * The retained facts are the release location and line number — both build
+ * output — plus the constants PostHog requires. The runtime function name is
+ * deliberately not forwarded: it is free-form text taken from the stack, so it is
+ * indistinguishable from a caller-supplied identifier and could carry a customer
+ * or Channel name. Grouping keys on the exception type and the release location,
+ * which is what identifies a defect, and every frame reports `<anonymous>` so the
+ * gap is explicit rather than a wrong symbol.
  *
  * @param line - One trimmed stack line.
  * @returns The sanitized frame, or undefined when the frame is unsafe.
@@ -297,16 +463,9 @@ interface SanitizedFrame {
 function sanitizeFrame(line: string): SanitizedFrame | undefined {
   const match = /^at\s+(?:(.+?)\s+\()?([^()\s]+):(\d+):(\d+)\)?$/.exec(line);
   if (!match) return undefined;
-  const [, rawFunction, rawLocation, rawLine] = match;
-  const location = rawLocation ?? "";
-  if (
-    !location.startsWith("src/") &&
-    !location.startsWith("workers/") &&
-    !location.startsWith("packages/")
-  ) {
-    return undefined;
-  }
-  if (containsForbiddenValue(location)) return undefined;
+  const [, , rawLocation, rawLine] = match;
+  const filename = releaseFramePath(rawLocation ?? "");
+  if (filename === undefined) return undefined;
   const frame: {
     filename: string;
     function: string;
@@ -315,18 +474,14 @@ function sanitizeFrame(line: string): SanitizedFrame | undefined {
     lineno?: number;
     platform: "custom";
   } = {
-    filename: location,
-    // PostHog requires a function name on custom frames. `<anonymous>` keeps
-    // anonymous frames grouped instead of forcing a wrong symbol.
+    filename,
+    // PostHog requires a function name on custom frames; see the note above for
+    // why the stack's own symbol is not forwarded.
     function: "<anonymous>",
     in_app: true,
     lang: "javascript",
     platform: "custom",
   };
-  const name = rawFunction?.replace(/^async\s+/, "").trim();
-  // `<anonymous>`, `new Foo`, `Object.<anonymous>` and generator markers still
-  // group usefully, but only when they stay plain identifiers.
-  if (name && /^[A-Za-z_$][\w$.<> ]{0,120}$/.test(name)) frame.function = name;
   const lineno = boundedCount(Number(rawLine));
   if (lineno !== null) frame.lineno = lineno;
   return frame;
@@ -345,12 +500,22 @@ export function sanitizedFrames(stack: string | undefined): SanitizedFrame[] {
   return frames;
 }
 
-/** Sanitizes an error type name to a plain identifier, falling back to `Error`. */
+/**
+ * Sanitizes an error type name to a reviewed exception class.
+ *
+ * The name arrives from an authenticated caller's stack, so it is untrusted text:
+ * an identifier-shaped string is not evidence that it names an exception class.
+ * Anything outside the reviewed set becomes `Error`. Grouping stays useful because
+ * it also keys on the release location, and the constant `Error` is a truthful
+ * statement rather than a value the caller chose.
+ *
+ * @param name - Raw error name or constructor name from the boundary.
+ * @returns An approved class name.
+ */
 function sanitizeErrorType(name: unknown): string {
   if (typeof name !== "string") return "Error";
   const trimmed = name.trim();
-  if (!/^[A-Za-z_$][\w$.]{0,79}$/.test(trimmed) || containsForbiddenValue(trimmed)) return "Error";
-  return trimmed;
+  return approvedExceptionTypes[trimmed] === true ? trimmed : "Error";
 }
 
 /** Rejects an out-of-vocabulary class rather than forwarding a raw category. */
@@ -484,6 +649,50 @@ function collectPayloadStrings(
 }
 
 /**
+ * Validates the exception list's value-bearing fields against their allowlist.
+ *
+ * The key allowlist stops an extra property, but a stored row could still carry a
+ * free-form `type` or an arbitrary `filename`, and the authenticated ingestion
+ * endpoint accepts both from callers. Re-deriving the constraint at send time is
+ * what makes the promise hold for rows written by an older build or edited at
+ * rest: an unapproved exception type or a location that is not provably this
+ * application's release output fails the send instead of leaving the
+ * installation.
+ *
+ * @param exceptions - Value under `$exception_list`.
+ * @returns The first violation, or undefined when every entry is safe.
+ */
+function exceptionViolation(exceptions: unknown): string | undefined {
+  if (!Array.isArray(exceptions)) return "exception_list_not_list";
+  for (const entry of exceptions) {
+    if (entry === null || typeof entry !== "object") return "exception_entry_invalid";
+    const record = entry as Record<string, unknown>;
+    if (typeof record.type === "string" && approvedExceptionTypes[record.type] !== true) {
+      return "unapproved_exception_type";
+    }
+    const stacktrace = record.stacktrace;
+    if (stacktrace === null || typeof stacktrace !== "object") continue;
+    const frames = (stacktrace as Record<string, unknown>).frames;
+    if (frames === undefined) continue;
+    if (!Array.isArray(frames)) return "frames_not_list";
+    for (const frame of frames) {
+      if (frame === null || typeof frame !== "object") return "frame_invalid";
+      const frameRecord = frame as Record<string, unknown>;
+      const filename = frameRecord.filename;
+      if (typeof filename === "string" && !isNormalizedFramePath(filename)) {
+        return "unapproved_frame_location";
+      }
+      // The sanitizer never retains a stack symbol; a row carrying one came from
+      // somewhere other than this module and cannot be shown to be safe.
+      if (frameRecord.function !== undefined && frameRecord.function !== "<anonymous>") {
+        return "unapproved_frame_symbol";
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
  * Validates an assembled payload against the property and value allowlist.
  *
  * Runs immediately before transport, so the transport can only ever submit a
@@ -500,6 +709,10 @@ export function payloadViolation(properties: Record<string, unknown>): string | 
   for (const text of collected) {
     if (text.length > 200) return "oversized_value";
     if (containsForbiddenValue(text)) return "forbidden_value";
+  }
+  if ("$exception_list" in properties) {
+    const exception = exceptionViolation(properties.$exception_list);
+    if (exception) return exception;
   }
   return undefined;
 }

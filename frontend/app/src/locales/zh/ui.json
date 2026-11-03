@@ -1056,5 +1056,7 @@
   "Your choices could not be saved. Try again.": "无法保存你的选择。请重试。",
   "{name}'s workspace": "{name} 的工作区",
   "Discovery source": "你是如何得知 Meltiply 的",
-  "Your earlier visit did not save a Workspace name yet. Confirm it to settle the shared Workspace.": "你上次访问尚未保存工作区名称。确认后即可确定共享工作区。"
+  "Your earlier visit did not save a Workspace name yet. Confirm it to settle the shared Workspace.": "你上次访问尚未保存工作区名称。确认后即可确定共享工作区。",
+  "Unexpected application failures with the operation category, app version, and sanitized release locations. Expected Provider conditions — expired authorization, rate limits, quotas, timeouts, and unconfirmed outcomes — are reported separately with their class, so they never mix with application defects. No message text, content, name, or identifier is included.": "意外应用故障，包含操作类别、应用版本和经过清理的发布路径。预期内的平台服务商状况——授权过期、速率限制、配额、超时和未确认结果——会连同其分类单独上报，因此绝不会与应用缺陷混在一起。不包含任何消息文本、内容、名称或标识符。",
+  "Unexpected application failures with the operation category and sanitized release locations, plus expected Provider conditions such as expired authorization and rate limits reported separately with their class. No message text, content, name, or identifier is included.": "意外应用故障，包含操作类别和经过清理的发布路径，以及诸如授权过期和速率限制等预期内的平台服务商状况；这些状况会连同其分类单独上报。不包含任何消息文本、内容、名称或标识符。"
 }

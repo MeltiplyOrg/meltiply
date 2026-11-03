@@ -270,14 +270,17 @@ overwrite them. It is an API-only bootstrap credential, never a browser build
 variable. Setup status reveals only whether the installation has an Owner.
 
 The first sign-up may carry the shared Workspace name as `workspace_name`. It is
-stored with the bootstrap record and applied once, when that sign-up's first
-authenticated request creates the Workspace, so it survives email verification;
-omitting it keeps the derived `<display name>'s workspace` default. The Owner's
-`/api/v1/onboarding` read, save, and complete operations carry that journey's
-progress and are Installation-Owner-only. An installation that already has an
-Owner and Workspace without onboarding progress reports `not_applicable`: its
-Owner signs in normally and is never pushed back through setup. Completion never
-renames the Workspace, so a later Settings rename stands.
+recorded before the account is created and promoted to the bootstrap record when
+the account exists, so a failed verification mail or an interrupted invocation
+cannot lose the choice; the name is applied once, when that sign-up's first
+authenticated request creates the Workspace. Omitting it keeps the derived
+`<display name>'s workspace` default. The Owner's `/api/v1/onboarding` read, save,
+and complete operations carry that journey's progress and are
+Installation-Owner-only; the reached optional screen is stored with it, so a
+restart resumes there rather than restarting the step. An installation that
+already has an Owner and Workspace without a bootstrap record reports
+`not_applicable`: its Owner signs in normally and is never pushed back through
+setup. Completion never renames the Workspace, so a later Settings rename stands.
 
 An installation that upgrades to a release with improvement reporting keeps both
 categories off until its Owner decides in Settings; nothing is enrolled silently.

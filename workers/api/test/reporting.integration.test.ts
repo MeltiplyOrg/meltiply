@@ -921,7 +921,299 @@ describe("sensitive canaries never reach the destination", () => {
     ]) {
       expect(serialized, canary).not.toContain(canary);
     }
-    // The allowlisted application frame still arrives, so the report is useful.
-    expect(serialized).toContain("workers/automation/src/distribution.ts");
+    // The reviewed application frame still arrives so the report is useful, but
+    // the source file name it came from is never copied.
+    expect(serialized).toContain("workers/automation/source");
+    expect(serialized).not.toContain("distribution.ts");
+  });
+});
+
+describe("consent-interval fencing over real HTTP", () => {
+  /**
+   * Proves the withdrawn interval's rows can never reach egress after the Owner
+   * re-enables: a detached batch claimed before the withdrawal is not
+   * authorized by the new interval.
+   */
+  it("never sends a row claimed before a withdrawal after re-enabling", async () => {
+    await setPreferences(false, true);
+    await request("/installation/reporting/diagnostics", "owner", {
+      body: {
+        category: "request_failure",
+        error_name: "TypeError",
+        operation: "publish",
+      },
+    });
+    const firstIntervalRow = (await pendingRows())[0]!;
+    expect(firstIntervalRow.state).toBe("pending");
+
+    // Claim the row without sending it: this is the detached batch state a
+    // delivery pass holds while the Owner changes their mind.
+    await systemPoolFor(env).query(
+      `UPDATE reporting_pending_reports
+       SET state = 'leased', attempts = attempts + 1,
+           lease_token = gen_random_uuid(),
+           lease_expires_at = now() + INTERVAL '120 seconds'`,
+    );
+
+    const withdrawn = await setPreferences(false, false);
+    expect(withdrawn.status).toBe(200);
+    const reenabled = await setPreferences(false, true);
+    expect(reenabled.status).toBe(200);
+
+    // Make the claimed row due again and run a real pass.
+    await systemPoolFor(env).query(
+      `UPDATE reporting_pending_reports
+       SET state = 'pending', lease_token = NULL, lease_expires_at = NULL,
+           available_at = now() - INTERVAL '1 second'`,
+    );
+    const summary = await runDelivery();
+    expect(summary.delivered).toBe(0);
+    expect(receiver.requests).toHaveLength(0);
+    const [row] = await pendingRows();
+    expect(row!.state).toBe("discarded");
+    expect(row!.last_error_code).toBe("stale_interval");
+
+    // A newly consented failure in the new interval still transmits exactly once.
+    await request("/installation/reporting/diagnostics", "owner", {
+      body: {
+        category: "request_failure",
+        error_name: "TypeError",
+        operation: "publish",
+      },
+    });
+    const captured = await nextCapture();
+    expect(captured.body.event).toBe("$exception");
+    expect(receiver.requests).toHaveLength(1);
+  });
+
+  /**
+   * A withdrawn row is discarded rather than transmitted when the live policy no
+   * longer authorizes its category at all.
+   */
+  it("discards a claimed row whose category was withdrawn", async () => {
+    await setPreferences(false, true);
+    await request("/installation/reporting/diagnostics", "owner", {
+      body: { category: "request_failure", error_name: "TypeError", operation: "publish" },
+    });
+    await systemPoolFor(env).query(
+      `UPDATE reporting_pending_reports
+       SET state = 'leased', attempts = attempts + 1,
+           lease_token = gen_random_uuid(),
+           lease_expires_at = now() + INTERVAL '120 seconds'`,
+    );
+    await setPreferences(false, false);
+    await systemPoolFor(env).query(
+      `UPDATE reporting_pending_reports
+       SET state = 'pending', lease_token = NULL, lease_expires_at = NULL,
+           available_at = now() - INTERVAL '1 second'`,
+    );
+
+    const summary = await runDelivery();
+
+    expect(summary.delivered).toBe(0);
+    expect(receiver.requests).toHaveLength(0);
+    expect((await pendingRows())[0]!.state).toBe("discarded");
+  });
+
+  /**
+   * A failure repeated in the same hour after a withdrawal and re-enable belongs
+   * to the new interval, so it must not be absorbed by the old discarded row.
+   */
+  it("admits a same-hour failure from the re-enabled interval", async () => {
+    await setPreferences(false, true);
+    await request("/installation/reporting/diagnostics", "owner", {
+      body: { category: "request_failure", error_name: "TypeError", operation: "publish" },
+    });
+    await setPreferences(false, false);
+    await setPreferences(false, true);
+
+    const repeated = await request("/installation/reporting/diagnostics", "owner", {
+      body: { category: "request_failure", error_name: "TypeError", operation: "publish" },
+    });
+    expect(await repeated.json()).toEqual({ accepted: true, reason: "queued" });
+
+    const captured = await nextCapture();
+    expect(captured.body.event).toBe("$exception");
+    const rows = await pendingRows();
+    // One discarded row from the withdrawn interval, one sendable from the new.
+    expect(rows.map((row) => row.state).sort()).toEqual(["discarded", "sent"]);
+  });
+});
+
+describe("delivery-lease recovery over real HTTP", () => {
+  /**
+   * An invocation that claimed a row and then died leaves an expired lease. A
+   * later real pass must resume the same frozen row rather than waiting for the
+   * seven-day discard.
+   */
+  it("reclaims an expired lease with the frozen event identity", async () => {
+    await setPreferences(true, false);
+    await enqueueUsage();
+    const [claimed] = await pendingRows();
+    await systemPoolFor(env).query(
+      `UPDATE reporting_pending_reports
+       SET state = 'leased', attempts = 1, lease_token = gen_random_uuid(),
+           lease_expires_at = now() - INTERVAL '1 second'`,
+    );
+
+    const summary = await runDelivery();
+
+    expect(summary.delivered).toBe(1);
+    const captured = receiver.requests.at(-1)!;
+    expect(captured.body.uuid).toBe(claimed!.event_uuid);
+    const [after] = await pendingRows();
+    expect(after!.state).toBe("sent");
+    // The retry repeated the original identity rather than minting a new one.
+    expect(after!.event_uuid).toBe(claimed!.event_uuid);
+    expect(after!.event_timestamp).toEqual(claimed!.event_timestamp);
+  });
+});
+
+describe("terminal payload retention over real HTTP", () => {
+  /**
+   * A delivered report's payload must not outlive its window. Only the minimal
+   * receipt stays, and it keeps the logical identity from being replayed.
+   */
+  it("prunes the delivered payload and keeps the identity from being replayed", async () => {
+    await setPreferences(true, false);
+    await enqueueUsage();
+    const [before] = await pendingRows();
+    await runDelivery();
+    expect(receiver.requests).toHaveLength(1);
+
+    // Age the terminal row past the prune window and run the pass that prunes.
+    await systemPoolFor(env).query(
+      `UPDATE reporting_pending_reports SET updated_at = now() - INTERVAL '2 hours'`,
+    );
+    await runDelivery();
+
+    const remaining = await systemPoolFor(env).query(
+      "SELECT id, payload FROM reporting_pending_reports",
+    );
+    expect(remaining.rows).toHaveLength(0);
+    const receipts = await systemPoolFor(env).query<{ state: string }>(
+      "SELECT state FROM reporting_delivery_receipts WHERE logical_id LIKE $1",
+      [`%:2026-01-02`],
+    );
+    expect(receipts.rows).toEqual([{ state: "sent" }]);
+
+    // The same logical report cannot be re-created and re-sent.
+    expect(await enqueueUsage()).toBe("skipped");
+    expect(receiver.requests).toHaveLength(1);
+    expect(before!.event_uuid).toBeDefined();
+  });
+
+  /**
+   * Pruning a feedback receipt must not make the surface forget it was
+   * delivered: the receipt is the honest second source of truth.
+   */
+  it("keeps the feedback delivery state after its payload is pruned", async () => {
+    await request("/installation/reporting/feedback", "owner", {
+      body: { discovery_source: "github" },
+    });
+    await runDelivery();
+    await systemPoolFor(env).query(
+      `UPDATE reporting_pending_reports SET updated_at = now() - INTERVAL '2 hours'`,
+    );
+    await runDelivery();
+
+    const read = await request("/installation/reporting/feedback", "owner");
+    expect((await read.json<FeedbackBody>()).delivery_status).toBe("delivered");
+  });
+});
+
+describe("concurrent first attribution submission over real HTTP", () => {
+  /**
+   * Two first submissions with different idempotency keys must converge on one
+   * recorded answer and one outbound event, not race the singleton insert.
+   */
+  it("converges on one answer and one outbound event", async () => {
+    const [first, second] = await Promise.all([
+      request("/installation/reporting/feedback", "owner", {
+        body: { discovery_source: "github" },
+      }),
+      request("/installation/reporting/feedback", "owner", {
+        body: { discovery_source: "search_engine" },
+      }),
+    ]);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    const firstBody = await first.json<FeedbackBody>();
+    const secondBody = await second.json<FeedbackBody>();
+    expect(firstBody.submitted_at).toBe(secondBody.submitted_at);
+    expect(firstBody.discovery_source).toBe(secondBody.discovery_source);
+    expect(firstBody.delivery_status).toBe("pending");
+
+    await runDelivery();
+    expect(receiver.requests).toHaveLength(1);
+    const attribution = await systemPoolFor(env).query(
+      "SELECT id FROM reporting_attribution_responses",
+    );
+    expect(attribution.rows).toHaveLength(1);
+  });
+});
+
+describe("disclosure-version enforcement over real HTTP", () => {
+  /**
+   * A requested category whose stored disclosure version is missing or unknown
+   * must not transmit, and the retained metadata must stay truthful.
+   */
+  it("fails closed on a null, stale, or unknown category disclosure version", async () => {
+    await setPreferences(false, true);
+    for (const version of [null, 7]) {
+      await systemPoolFor(env).query(
+        "UPDATE reporting_preferences SET diagnostics_disclosure_version = $1",
+        [version],
+      );
+
+      const policy = await readPolicy();
+      expect(policy.categories.diagnostics).toMatchObject({
+        effective: false,
+        reason: "preference_unavailable",
+        requested: true,
+      });
+
+      const response = await request("/installation/reporting/diagnostics", "owner", {
+        body: { category: "request_failure", error_name: "TypeError", operation: "publish" },
+      });
+      expect(await response.json()).toEqual({ accepted: false, reason: "category_disabled" });
+      expect(receiver.requests).toHaveLength(0);
+      expect(await pendingRows()).toHaveLength(0);
+    }
+
+    // A current decision restores transmission.
+    await setPreferences(false, true);
+    expect((await readPolicy()).categories.diagnostics.effective).toBe(true);
+  });
+
+  /**
+   * Changing one category must not silently upgrade the other's recorded
+   * decision to the current disclosure version.
+   */
+  it("preserves the unchanged category's decision metadata", async () => {
+    await setPreferences(true, false);
+    await systemPoolFor(env).query(
+      "UPDATE reporting_preferences SET usage_disclosure_version = 3, usage_decided_at = $1",
+      ["2026-01-01T00:00:00.000Z"],
+    );
+
+    // Change only diagnostics.
+    await setPreferences(true, true);
+
+    const stored = await systemPoolFor(env).query<{
+      usage_decided_at: Date;
+      usage_disclosure_version: number;
+    }>(
+      "SELECT usage_disclosure_version, usage_decided_at FROM reporting_preferences WHERE id",
+    );
+    expect(stored.rows[0]!.usage_disclosure_version).toBe(3);
+    expect(new Date(stored.rows[0]!.usage_decided_at).toISOString()).toBe(
+      "2026-01-01T00:00:00.000Z",
+    );
+    // Usage is not effective under a stale disclosure version, so nothing sends.
+    const policy = await readPolicy();
+    expect(policy.categories.usage.effective).toBe(false);
+    expect(policy.categories.diagnostics.effective).toBe(true);
   });
 });

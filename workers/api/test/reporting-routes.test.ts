@@ -44,6 +44,7 @@ const policy: ReportingPolicySnapshot = {
   categories: {
     diagnostics: {
       decidedAt: null,
+      disclosureVersion: null,
       effective: false,
       intervalStartedAt: null,
       reason: "not_requested",
@@ -51,6 +52,7 @@ const policy: ReportingPolicySnapshot = {
     },
     usage: {
       decidedAt: "2026-01-02T03:04:05.000Z",
+      disclosureVersion: 1,
       effective: false,
       intervalStartedAt: "2026-01-02T03:04:05.000Z",
       reason: "operator_disabled",
@@ -87,6 +89,7 @@ function appFor(role: "admin" | "viewer") {
               delivered: 0,
               discarded: 0,
               failed: 0,
+              released: 0,
               skipped: 0,
             }),
           enqueueDiagnostic: () => Effect.succeed("skipped"),

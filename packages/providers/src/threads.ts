@@ -538,6 +538,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       comments: engagementEnabled,
       reply: engagementEnabled,
     },
+    ambiguousZeroMetrics: ["views", "reactions", "comments", "shares"] as const,
 
     /**
      * Exchanges the authorization code for a short-lived token, upgrades it via

@@ -49,6 +49,7 @@ import {
   queueDiagnosticReport,
   registerDiagnostic,
   scheduledDiagnosticReport,
+  workflowDiagnosticReport,
 } from "./diagnostic-reporting";
 import type { OutboxRelayResult } from "./outbox";
 import type { ProviderDueResult } from "./provider-sync";
@@ -184,6 +185,20 @@ export class ReplyWorkflow extends WorkflowEntrypoint<AutomationEnv, ReplyWorkfl
           );
           return { outcome: "rejected" as const };
         }
+        // The step body executes after the queue producer already returned, so
+        // this is where a later reply failure actually happens. Reporting here
+        // is additive: the same cause is rethrown below, so the workflow's own
+        // retry backoff and DLQ handling are unchanged.
+        registerDiagnostic(
+          this.ctx,
+          env,
+          workflowDiagnosticReport(cause, { outcome: "retry" }),
+          context(this.env, traceId, {
+            jobId: event.payload.event_id,
+            requestId: event.payload.request_id ?? undefined,
+            workflowId: event.instanceId,
+          }),
+        );
         log(
           "error",
           context(this.env, traceId, {
@@ -981,7 +996,7 @@ export function createAutomationHandler(
           processorFor: () => (assetProcessor ??= Promise.resolve(processorFor(env))),
         });
         const exit = await runJobProgram(Effect.provide(program, scope.runtimeLayer));
-        const { diagnostic, outcome } = exitToJobOutcome(exit);
+        const { diagnostic, failure, outcome } = exitToJobOutcome(exit);
         const latencyMs = elapsedMilliseconds(startedAt);
         if (outcome === "processed") {
           message.ack();
@@ -1025,7 +1040,7 @@ export function createAutomationHandler(
           registerDiagnostic(
             executionCtx,
             env,
-            queueDiagnosticReport(recoverJobErrorCause(exit.cause), {
+            queueDiagnosticReport(failure, {
               outcome: "rejected",
               ...(provider ? { provider } : {}),
               ...(isOutboxMessage(body) ? { topic: body.topic } : {}),
@@ -1055,7 +1070,7 @@ export function createAutomationHandler(
           registerDiagnostic(
             executionCtx,
             env,
-            queueDiagnosticReport(recoverJobErrorCause(exit.cause), {
+            queueDiagnosticReport(failure, {
               outcome: "ambiguous",
               ...(provider ? { provider } : {}),
               ...(isOutboxMessage(body) ? { topic: body.topic } : {}),
@@ -1088,7 +1103,7 @@ export function createAutomationHandler(
         registerDiagnostic(
           executionCtx,
           env,
-          queueDiagnosticReport(recoverJobErrorCause(exit.cause), {
+          queueDiagnosticReport(failure, {
             outcome: "retry",
             ...(provider ? { provider } : {}),
             ...(isOutboxMessage(body) ? { topic: body.topic } : {}),

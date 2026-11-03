@@ -1744,7 +1744,10 @@ export function getOnboarding(options?: ApiRequestOptions) {
  * @param options Request options with optional idempotency key.
  * @returns Effect resolving to the updated onboarding progress.
  */
-export function saveOnboarding(input: { workspace_name: string }, options?: ApiRequestOptions) {
+export function saveOnboarding(
+  input: { step?: "improvement" | "ready"; workspace_name?: string },
+  options?: ApiRequestOptions,
+) {
   return unwrap<OnboardingProgress>(
     (signal) =>
       client().PATCH("/onboarding", {

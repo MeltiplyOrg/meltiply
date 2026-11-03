@@ -2337,6 +2337,13 @@ export interface components {
              */
             status: "not_applicable" | "in_progress" | "completed";
             /**
+             * @description Optional screen the Owner reached. Persisted independently of
+             *     consent, attribution and completion, so a browser restart after
+             *     either skipping or opting in resumes at the same screen.
+             * @enum {string}
+             */
+            step: "improvement" | "ready";
+            /**
              * @description Canonical shared Workspace name, or null when no Workspace exists
              *     yet. Reflects a rename performed in Settings.
              */
@@ -2346,8 +2353,18 @@ export interface components {
             /** Format: date-time */
             completed_at: string | null;
         };
+        /**
+         * @description Saves the setup form's Workspace name, the optional screen the Owner
+         *     reached, or both in one idempotent write.
+         */
         OnboardingSaveRequest: {
-            workspace_name: string;
+            workspace_name?: string;
+            /**
+             * @description Optional screen to record. The step only advances, so a late write
+             *     from an older tab never moves the journey backwards.
+             * @enum {string}
+             */
+            step?: "improvement" | "ready";
         };
         SuspendMemberRequest: {
             reason?: string;

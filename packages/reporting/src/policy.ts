@@ -11,11 +11,13 @@ import {
 /** The persisted preference row as the database returns it. */
 export interface PreferencesRow extends Record<string, unknown> {
   diagnostics_decided_at: Date | string | null;
+  diagnostics_disclosure_version: number | null;
   diagnostics_interval_started_at: Date | string | null;
   diagnostics_requested: boolean;
   installation_reporting_id: string | null;
   schema_version: number;
   usage_decided_at: Date | string | null;
+  usage_disclosure_version: number | null;
   usage_interval_started_at: Date | string | null;
   usage_requested: boolean;
 }
@@ -32,11 +34,13 @@ function categoryColumns(row: PreferencesRow, category: ReportingCategory) {
   return category === "usage"
     ? {
         decidedAt: row.usage_decided_at,
+        disclosureVersion: row.usage_disclosure_version ?? null,
         intervalStartedAt: row.usage_interval_started_at,
         requested: row.usage_requested === true,
       }
     : {
         decidedAt: row.diagnostics_decided_at,
+        disclosureVersion: row.diagnostics_disclosure_version ?? null,
         intervalStartedAt: row.diagnostics_interval_started_at,
         requested: row.diagnostics_requested === true,
       };
@@ -49,6 +53,12 @@ function categoryColumns(row: PreferencesRow, category: ReportingCategory) {
  * never asked sees `not_requested`; an Owner who asked but cannot transmit sees
  * why. Unreadable preference state outranks everything because the stored choice
  * itself is untrustworthy.
+ *
+ * Consent is granted against a specific disclosure text, so a category whose
+ * stored disclosure version is missing or no longer the supported one fails
+ * closed as `preference_unavailable`: the persisted choice cannot authorize a
+ * payload the Owner never saw described. Retrieval is unaffected — the Owner can
+ * still read the state and record a fresh decision.
  *
  * @param row - Persisted preference row, or null when no choice was ever saved.
  * @param category - Category to evaluate.
@@ -64,11 +74,22 @@ export function categoryStatus(
   const requested = stored?.requested ?? false;
   const base = {
     decidedAt: stored ? isoOrNull(stored.decidedAt) : null,
+    disclosureVersion: stored?.disclosureVersion ?? null,
     intervalStartedAt: stored ? isoOrNull(stored.intervalStartedAt) : null,
     requested,
   };
   const reason: ReportingCategoryReason = ((): ReportingCategoryReason => {
     if (row && row.schema_version !== REPORTING_SCHEMA_VERSION) return "preference_unavailable";
+    // A stored request without a supported disclosure decision is not consent:
+    // it is an unreadable choice, and sending under it would report activity no
+    // disclosure covered.
+    if (
+      row &&
+      requested &&
+      (base.disclosureVersion === null || base.disclosureVersion !== REPORTING_DISCLOSURE_VERSION)
+    ) {
+      return "preference_unavailable";
+    }
     if (!requested) return "not_requested";
     if (configuration.forcedOff) return "operator_disabled";
     if (!configuration.destination) return "destination_unavailable";

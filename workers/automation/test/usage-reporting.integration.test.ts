@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { ProviderRegistry, type ProviderAdapter } from "@meltiply/providers";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import type { AutomationEnv } from "../src/env";
 import type { OutboxMessage } from "../src/messages";
@@ -205,15 +205,18 @@ async function seedPublications(): Promise<void> {
       `INSERT INTO posts (id, org_id, brand_profile_id, title, default_text, status)
        VALUES ($1, $3, $4, 'Usage one', 'Caption one', 'active'),
               ($2, $3, $4, 'Usage two', 'Caption two', 'active')`,
+      // $1, $2 the Posts; $3, $4 the Workspace and Brand Profile.
       [postId, threadsPostId, organizationId, profileId],
     );
     await client.query(
       `INSERT INTO distributions
          (id, org_id, brand_profile_id, post_id, platform_account_id, platform,
           status, attachment_ids)
-       VALUES ($1, $5, $6, $7, $9, 'youtube', 'queued', ARRAY[]::uuid[]),
-              ($2, $5, $6, $8, $10, 'threads', 'queued', ARRAY[]::uuid[])`,
+       VALUES ($1, $3, $4, $5, $7, 'youtube', 'queued', ARRAY[]::uuid[]),
+              ($2, $3, $4, $6, $8, 'threads', 'queued', ARRAY[]::uuid[])`,
       [
+        // $1, $2 distributions; $3, $4 the shared Workspace and Brand Profile;
+        // $5, $6 the two Posts; $7, $8 the two Channels.
         youtubeDistributionId,
         threadsDistributionId,
         organizationId,
@@ -327,6 +330,7 @@ beforeEach(async () => {
     await client.query("DELETE FROM reporting_pending_reports");
     await client.query("DELETE FROM reporting_preferences");
     await client.query("DELETE FROM reporting_publication_daily");
+    await client.query("DELETE FROM reporting_publication_daily_finalized");
     await client.query("DELETE FROM reporting_distribution_marks");
     await client.query("DELETE FROM reporting_post_marks");
   });
@@ -343,6 +347,7 @@ afterAll(async () => {
     await client.query("DELETE FROM reporting_pending_reports");
     await client.query("DELETE FROM reporting_preferences");
     await client.query("DELETE FROM reporting_publication_daily");
+    await client.query("DELETE FROM reporting_publication_daily_finalized");
     await client.query("DELETE FROM reporting_distribution_marks");
     await client.query("DELETE FROM reporting_post_marks");
   });
@@ -868,6 +873,56 @@ describe("daily usage producer with PostgreSQL", () => {
     );
   });
 
+  it("omits a metric one mixed-cohort contributor could not establish", async () => {
+    await seedConsent({ intervalStartedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1_000) });
+    const secondDistributionId = "7e000000-0000-4000-8000-00000000000b";
+    // Two published Threads Distributions form one Platform cohort. One carries a
+    // decisive snapshot; the other carries the adapter's ambiguous all-zero shape,
+    // which cannot be told apart from an absent insight.
+    await runSystemTransaction(env, async (client) => {
+      await client.query(
+        `INSERT INTO distributions
+           (id, org_id, brand_profile_id, post_id, platform_account_id, platform,
+            status, published_at, attachment_ids)
+         VALUES ($1, $2, $3, $4, $5, 'threads', 'published', now(), ARRAY[]::uuid[])`,
+        [secondDistributionId, organizationId, profileId, postId, threadsChannelId],
+      );
+      await client.query(
+        `INSERT INTO analytics_snapshots
+           (distribution_id, org_id, views, likes, comments, shares, snapshot_at)
+         VALUES ($1, $2, 120, 7, 4, 1, now() - INTERVAL '3 hours'),
+                ($3, $2, 0, 0, 0, 0, now() - INTERVAL '1 hour')`,
+        [threadsDistributionId, organizationId, secondDistributionId],
+      );
+    });
+
+    try {
+      await Effect.runPromise(
+        enqueueDailyUsageReport(env, {
+          now: () => new Date(Date.now() + 24 * 60 * 60 * 1_000),
+          providerRegistry: registryWithAnalytics(["threads"]),
+        }),
+      );
+
+      const [report] = await queuedUsageReports();
+      const gauge = payloadSection(payloadSection(report!.payload.engagement).threads);
+      // One contributor established views and the other could not, so any sum
+      // would understate the Platform: the metric is omitted, not narrowed.
+      expect(gauge.views).toBeUndefined();
+      expect(gauge.distributions).toBe(2);
+      const coverage = payloadSection(report!.payload.engagement_coverage);
+      expect(coverage.unsupported_metrics).toEqual(expect.arrayContaining(["views"]));
+      expect(coverage.missing).toBeGreaterThan(0);
+    } finally {
+      await runSystemTransaction(env, async (client) => {
+        await client.query("DELETE FROM analytics_snapshots WHERE distribution_id = $1", [
+          secondDistributionId,
+        ]);
+        await client.query("DELETE FROM distributions WHERE id = $1", [secondDistributionId]);
+      });
+    }
+  });
+
   it("reports a Platform with no analytics capability as unsupported, not zero", async () => {
     await seedConsent({ intervalStartedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1_000) });
     await publish("youtube", "usage-no-capability", youtubeDistributionId);
@@ -880,12 +935,14 @@ describe("daily usage producer with PostgreSQL", () => {
       );
     });
 
-    // A registry with no YouTube adapter: the Platform cannot establish any
-    // metric, so the gauge omits them instead of trusting stored columns.
+    // A configured registry without a YouTube adapter: capabilities() reports
+    // analytics false for YouTube only because some adapter exists, so this
+    // exercises the genuinely unsupported Platform rather than the local fixture
+    // fallback that keeps every Platform readable when nothing is configured.
     await Effect.runPromise(
       enqueueDailyUsageReport(env, {
         now: () => new Date(Date.now() + 24 * 60 * 60 * 1_000),
-        providerRegistry: new ProviderRegistry(),
+        providerRegistry: registryWithAnalytics(["threads"]),
       }),
     );
 

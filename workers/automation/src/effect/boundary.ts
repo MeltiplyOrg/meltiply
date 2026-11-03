@@ -30,8 +30,19 @@ export type JobOutcome = "processed" | "retry" | "rejected" | "ambiguous";
  */
 export function exitToJobOutcome<A, E>(
   exit: Exit.Exit<A, E>,
-): { diagnostic?: Record<string, unknown>; outcome: JobOutcome } {
+): {
+  diagnostic?: Record<string, unknown>;
+  /**
+   * Original thrown value of a failed program, recovered the same way the
+   * pre-migration handler threw it. Present exactly when the outcome is not
+   * `processed`, so a caller never has to reach into an Exit the mapper already
+   * narrowed.
+   */
+  failure?: unknown;
+  outcome: JobOutcome;
+} {
   if (Exit.isSuccess(exit)) return { outcome: "processed" };
+  const failure = recoverJobErrorCause(exit.cause);
   if (Cause.hasDies(exit.cause)) {
     const defect = Cause.squash(exit.cause);
     return {
@@ -39,6 +50,7 @@ export function exitToJobOutcome<A, E>(
         error_code: "queue_job_failed",
         ...errorDiagnostic(defect),
       },
+      failure,
       outcome: "retry",
     };
   }
@@ -48,6 +60,7 @@ export function exitToJobOutcome<A, E>(
         error_code: "queue_job_interrupted",
         ...errorDiagnostic(Cause.squash(exit.cause)),
       },
+      failure,
       outcome: "retry",
     };
   }
@@ -60,12 +73,14 @@ export function exitToJobOutcome<A, E>(
   if (typed instanceof TerminalJobError) {
     return {
       diagnostic: { error_code: typed.code, ...errorDiagnostic(typed) },
+      failure,
       outcome: "rejected",
     };
   }
   if (typed instanceof AmbiguousJobError) {
     return {
       diagnostic: { error_code: typed.code, ...errorDiagnostic(typed) },
+      failure,
       outcome: "ambiguous",
     };
   }
@@ -77,6 +92,7 @@ export function exitToJobOutcome<A, E>(
       error_code: "queue_job_failed",
       ...errorDiagnostic(unwrapJobError(typed)),
     },
+    failure,
     outcome: "retry",
   };
 }

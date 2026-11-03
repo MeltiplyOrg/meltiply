@@ -75,6 +75,7 @@ describe("unavailable reporting layer", () => {
       delivered: 0,
       discarded: 0,
       failed: 0,
+      released: 0,
       skipped: 0,
     });
     expect(result.diagnostic).toBe("skipped");

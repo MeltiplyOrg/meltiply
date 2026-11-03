@@ -163,6 +163,35 @@ export function scheduledDiagnosticReport(cause: unknown, unit: string): Diagnos
 }
 
 /**
+ * Builds the approved report for one failed durable workflow step.
+ *
+ * The workflow's step boundary is the only place a later reply execution can
+ * fail: enqueueing the workflow is covered by the queue producer, but the step
+ * body runs afterwards in its own retry loop. Reporting here observes that
+ * execution without touching its retry decision — the step still throws the same
+ * cause, so the workflow's own backoff and DLQ path are unchanged.
+ *
+ * @param cause - Original thrown value recovered from the step's Exit.
+ * @param context - Provider the reply belonged to and the step's boundary outcome.
+ * @returns Report ready for `enqueueDiagnostic`.
+ */
+export function workflowDiagnosticReport(
+  cause: unknown,
+  context: { readonly outcome: "ambiguous" | "rejected" | "retry"; readonly provider?: string },
+): DiagnosticReportInput {
+  const failureClass =
+    context.outcome === "ambiguous" ? "ambiguous" : providerFailureClass(cause);
+  return diagnosticReportInput(cause, {
+    ...(failureClass ? { category: "provider_failure" as const, failureClass } : {}),
+    handled: true,
+    operation: "inbox",
+    ...(context.provider === undefined
+      ? {}
+      : { platform: context.provider as DiagnosticReportInput["platform"] }),
+  });
+}
+
+/**
  * Records one approved diagnostic and drains the bounded pending queue.
  *
  * The Effect never fails: a typed failure and a defect both collapse to "nothing

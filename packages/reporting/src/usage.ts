@@ -1,10 +1,10 @@
 import { Effect } from "effect";
 
-import type { DatabaseError, Platform } from "@meltiply/domain";
+import type { Platform } from "@meltiply/domain";
 
 import type { ReportingConfiguration } from "./configuration";
-import { categoryStatus, type PreferencesRow } from "./policy";
-import type { ReportingClient } from "./service";
+import { categoryStatus } from "./policy";
+import { loadPreferences, type ReportingClient } from "./service";
 
 /**
  * Transactional publication measurement for the opt-in daily usage summary.
@@ -96,16 +96,7 @@ export function recordPublicationUsage(
   const confirmedAt = confirmation.confirmedAt.toISOString();
   return Effect.gen(function* () {
     yield* client.query(`SAVEPOINT ${measurementSavepoint}`);
-    const preferences = yield* Effect.map(
-      client.query<PreferencesRow>(
-        `SELECT diagnostics_decided_at, diagnostics_interval_started_at, diagnostics_requested,
-                installation_reporting_id, schema_version, usage_decided_at,
-                usage_interval_started_at, usage_requested
-         FROM reporting_preferences
-         WHERE id`,
-      ),
-      (result) => result.rows[0] ?? null,
-    );
+    const preferences = yield* loadPreferences(client, false);
     // The interval and the marks are written regardless of consent: the marks
     // are the durable evidence that this Distribution and this Post have been
     // observed, which is exactly what a later observation must not double-count.
@@ -119,6 +110,28 @@ export function recordPublicationUsage(
     if ((distributionMark.rowCount ?? distributionMark.rows.length) === 0) {
       yield* client.query(`RELEASE SAVEPOINT ${measurementSavepoint}`);
       return "already_counted" as const;
+    }
+    // A Distribution that reached `published` before this module existed has no
+    // mark. Its Post's first success is still a historical fact: recording it as a
+    // fresh first success here would present a pre-consent publication as a new
+    // Post the moment a later Distribution of the same Post succeeds. The
+    // Distribution's own state is the local provenance — no Provider is queried,
+    // and nothing is backfilled.
+    const priorSuccess = yield* client.query<{ id: string }>(
+      `SELECT id FROM distributions
+       WHERE post_id = $1 AND status = 'published' AND id <> $2
+       LIMIT 1`,
+      [confirmation.postId, confirmation.distributionId],
+    );
+    if (priorSuccess.rows.length > 0) {
+      yield* client.query(
+        `INSERT INTO reporting_post_marks (post_id, first_confirmed_at, counted)
+         VALUES ($1, $2, FALSE)
+         ON CONFLICT (post_id) DO NOTHING`,
+        [confirmation.postId, confirmedAt],
+      );
+      yield* client.query(`RELEASE SAVEPOINT ${measurementSavepoint}`);
+      return "not_counted" as const;
     }
     const policy = categoryStatus(preferences, "usage", configuration);
     const intervalStartedAt = policy.intervalStartedAt;
@@ -140,6 +153,21 @@ export function recordPublicationUsage(
       [confirmation.postId, confirmedAt, insideEnabledInterval],
     );
     if (!insideEnabledInterval) {
+      yield* client.query(`RELEASE SAVEPOINT ${measurementSavepoint}`);
+      return "not_counted" as const;
+    }
+    // A transaction that began before midnight still reads the previous day, and
+    // its commit can land after the daily pass already froze that day. Advancing
+    // the bucket afterwards would change a report that was already measured, so
+    // the increment is refused once the day is final; the publication itself is
+    // still committed, only this counter is not re-attributed.
+    const frozen = yield* client.query<{ report_date: string }>(
+      `SELECT report_date::text AS report_date
+       FROM reporting_publication_daily_finalized
+       WHERE report_date = $1::date`,
+      [confirmedAt.slice(0, 10)],
+    );
+    if (frozen.rows.length > 0) {
       yield* client.query(`RELEASE SAVEPOINT ${measurementSavepoint}`);
       return "not_counted" as const;
     }
@@ -165,7 +193,7 @@ export function recordPublicationUsage(
     // A reporting write must never fail the transaction that recorded a real
     // publication. The savepoint makes recovery exact: only this measurement's
     // statements are undone.
-    Effect.catch((cause: DatabaseError) =>
+    Effect.catch(() =>
       Effect.as(
         Effect.catch(
           client.query(`ROLLBACK TO SAVEPOINT ${measurementSavepoint}`),

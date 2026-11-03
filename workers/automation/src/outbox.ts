@@ -153,6 +153,31 @@ function safePayload(row: OutboxRow): Record<string, unknown> {
       };
     case "comment.reply.requested":
       return { comment_id: row.aggregate_id };
+    case "notification.delivery.requested":
+      return {
+        ...(typeof row.payload.delivery_key === "string"
+          ? { delivery_key: row.payload.delivery_key }
+          : {}),
+        ...(typeof row.payload.kind === "string" ? { kind: row.payload.kind } : {}),
+        ...(typeof row.payload.aggregate_id === "string"
+          ? { aggregate_id: row.payload.aggregate_id }
+          : {}),
+        ...(typeof row.payload.brand_profile_id === "string"
+          ? { brand_profile_id: row.payload.brand_profile_id }
+          : {}),
+        ...(typeof row.payload.channel_name === "string" || row.payload.channel_name === null
+          ? { channel_name: row.payload.channel_name }
+          : {}),
+        ...(typeof row.payload.connection_status === "string"
+          ? { connection_status: row.payload.connection_status }
+          : {}),
+        ...(typeof row.payload.distribution_id === "string"
+          ? { distribution_id: row.payload.distribution_id }
+          : {}),
+        ...(typeof row.payload.platform === "string" ? { platform: row.payload.platform } : {}),
+        ...(typeof row.payload.post_id === "string" ? { post_id: row.payload.post_id } : {}),
+        version: 1,
+      };
     case "distribution.publish.requested":
     case "distribution.cancel.requested":
     case "distribution.reconcile.requested":
@@ -200,6 +225,12 @@ function queueFor(
         return yield* Effect.fail(new Error("channel-revocation Queue binding is unavailable"));
       }
       return env.CHANNEL_REVOCATION_QUEUE;
+    }
+    if (row.topic === "notification.delivery.requested") {
+      if (!env.NOTIFICATIONS_QUEUE) {
+        return yield* Effect.fail(new Error("notifications Queue binding is unavailable"));
+      }
+      return env.NOTIFICATIONS_QUEUE;
     }
     if (row.topic.startsWith("distribution.")) {
       if (!row.platform) {

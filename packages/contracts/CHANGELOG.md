@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Add method-specific Facebook Page, Threads, Instagram content, TikTok inbox,
+  and YouTube Live options. Incomplete Post options remain saveable; scheduling
+  refines them into publication options without dropping the selected method.
+- Add terminal `DistributionStatus.delivered` for native drafts, inbox handoffs,
+  experiments, and prepared broadcasts, plus opaque `provider_reference` and
+  `provider_warnings` for successful Threads publications with a failed secondary
+  Instagram Story share. These never fabricate a public Post ID.
+- Add writer-only, no-store `GET /distributions/{distribution_id}/broadcast`
+  and idempotent `POST /distributions/{distribution_id}/broadcast/end`.
+  Encoder secrets are never part of the general Distribution or Post projection.
+- Accept Instagram carousels up to 20 items and ordinary YouTube videos, not
+  only Shorts-shaped uploads. Keep the existing app Asset upload ceiling.
+
 - Separate saved `PostProviderOptions` from complete `ProviderPublishOptions`.
   Post targets retain YouTube visibility with an unanswered audience and TikTok
   privacy/disclosure choices before completion. Scheduling rejects unanswered

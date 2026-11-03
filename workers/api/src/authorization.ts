@@ -84,6 +84,18 @@ export async function enforceWorkspaceCapabilities(
     return next();
   }
 
+  if (path.startsWith("/api/v1/publishing-preferences")) {
+    if (!can(actor.role, actor.isInstallationOwner, "preferences:manage")) {
+      return errorResponse(
+        c.get("requestId"),
+        403,
+        "workspace_admin_required",
+        "The workspace admin role is required.",
+      );
+    }
+    return next();
+  }
+
   if (path.startsWith(BRAND_PROFILE_PREFIX)) {
     if (!can(actor.role, actor.isInstallationOwner, "brand-profile:manage")) {
       return errorResponse(

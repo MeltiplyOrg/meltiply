@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { createHmac } from "node:crypto";
 
 import {
@@ -45,8 +46,10 @@ if (!authenticatedConnectionString) {
 }
 
 /** Privileged local role retained for Better Auth tables and fixture setup. */
-const systemConnectionString =
-  "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const systemConnectionString = integrationDatabaseUrl(
+  process.env.MELTIPLY_DATABASE_TEST_URL,
+  "system",
+);
 
 /** Canonical installation origin used for auth requests and verification links. */
 const authOrigin = "https://auth.test";

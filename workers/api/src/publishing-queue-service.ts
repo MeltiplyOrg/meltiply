@@ -161,7 +161,7 @@ export function createPublishingQueueApiService(): PublishingQueueApiService {
                  WHERE m.queue_id = $1 AND m.released_at IS NULL
                    AND (NOT EXISTS (SELECT 1 FROM distributions d WHERE d.post_id = m.post_id)
                      OR EXISTS (SELECT 1 FROM distributions d WHERE d.post_id = m.post_id
-                       AND d.status NOT IN ('published', 'failed', 'cancelled')))
+                       AND d.status NOT IN ('delivered', 'published', 'failed', 'cancelled')))
               ) AS exists`,
                   [id],
                 );

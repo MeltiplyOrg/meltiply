@@ -63,6 +63,7 @@ function iacOutput(overrides = {}) {
     "asset-processing": "meltiply-asset-processing-staging",
     "channel-revocation": "meltiply-channel-revocation-staging",
     comments: "meltiply-comments-staging",
+    notifications: "meltiply-notifications-staging",
     "publish-facebook": "meltiply-publish-facebook-staging",
     "publish-instagram": "meltiply-publish-instagram-staging",
     "publish-threads": "meltiply-publish-threads-staging",

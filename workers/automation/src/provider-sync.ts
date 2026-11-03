@@ -57,6 +57,7 @@ interface DistributionSyncRow extends Record<string, unknown> {
   platform: Platform;
   platform_user_id: string | null;
   platform_post_id: string;
+  provider_operation_id: string | null;
   published_at: Date | string;
   token_expires_at: Date | string | null;
 }
@@ -423,6 +424,7 @@ function loadDistributionTarget(
       const result = yield* client.query<DistributionSyncRow>(
         `SELECT distribution.id, distribution.org_id, distribution.platform,
               distribution.platform_post_id,
+              distribution.provider_operation_id,
               COALESCE(distribution.published_at, distribution.created_at) AS published_at,
               distribution.${prefix}_cursor AS cursor,
               distribution.${prefix}_attempt_count AS attempt_count,
@@ -1006,6 +1008,7 @@ function processDistributionSync<T>(
           platform: row.platform,
           providerAccountId: row.platform_user_id ?? undefined,
           providerPostId: row.platform_post_id,
+          providerOperationId: row.provider_operation_id ?? undefined,
           storedAccessToken: row.access_token ?? "",
           tokenExpiresAt: row.token_expires_at === null ? null : new Date(row.token_expires_at),
         },

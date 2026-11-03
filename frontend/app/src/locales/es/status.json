@@ -1,4 +1,5 @@
 {
+  "delivered": "Entregado",
   "awaiting_provider": "Esperando al proveedor",
   "cancelled": "Cancelada",
   "cancel_requested": "Cancelación solicitada",

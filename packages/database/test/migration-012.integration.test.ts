@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -5,9 +6,11 @@ import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { afterAll, describe, expect, it } from "vite-plus/test";
 
-const adminUrl =
-  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
-  "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const adminUrl = integrationDatabaseUrl(
+  process.env.MELTIPLY_DATABASE_TEST_URL,
+  "admin",
+  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL,
+);
 const migrationsDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../migrations");
 const databaseName = `meltiply_migration_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
 

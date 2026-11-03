@@ -14,6 +14,9 @@ dispatch on ephemeral `ubuntu-24.04` runners. Actions use version tags, not comm
   and builds, strict lint, dead code, formatting, PostgreSQL integration.
 - `cloudflare-tooling`: Node tooling suites, shell lifecycle and release regressions,
   supply-chain/SBOM policy, costs.
+- `frontend-performance`: production publishing journey budgets and a browser check
+  that saves and reloads publishing preferences, including multiple email recipients.
+  Traces and JSON reports are retained.
 - `selfhost-images`: when image inputs change, build all three images for amd64 and
   ARM64 on native runners and smoke the exact artifacts. Nothing is published.
 - `ci-gate`: requires baseline and every selected lane; rejects failures or cancellations.

@@ -44,18 +44,22 @@ function localDay(key: string): Date | undefined {
  * calendar navigation, and time editing. Clicking field padding starts at hours;
  * clicking a segment edits that segment, while the clock opens exact hour/minute
  * selects. Chooser selections commit immediately; Done or Escape closes it.
- * Accepts/emits minute-precision `YYYY-MM-DDTHH:mm`; the composer retains ISO
- * conversion and validation. Date changes preserve time, complete time edits
- * preserve the date (or use today when unset), and browsing never commits.
- * Choosing a date closes the popover and restores its trigger. Hydration updates
- * the visible month without stealing focus. The browser's time zone stays visible.
+ * Accepts/emits minute-precision `YYYY-MM-DDTHH:mm`; the composer retains the
+ * selected publishing timezone and converts to an ISO instant. Date changes
+ * preserve time, complete time edits preserve the date (or use today when
+ * unset), and browsing never commits. Choosing a date closes the popover and
+ * restores its trigger. Hydration updates the visible month without stealing
+ * focus. The publishing timezone stays visible.
  */
 export function ScheduleDateTime({
   value,
   onChange,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
 }: {
   value: string;
   onChange: (value: string) => void;
+  /** Publishing timezone the wall-clock value is interpreted in. */
+  timeZone?: string;
 }) {
   const { t, language } = useI18n();
   const id = useId();
@@ -71,7 +75,6 @@ export function ScheduleDateTime({
   const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(value.slice(11, 16))
     ? value.slice(11, 16)
     : "10:00";
-  const timeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const dates = useMemo(
     () => ({
       full: new Intl.DateTimeFormat(language, { dateStyle: "full" }),

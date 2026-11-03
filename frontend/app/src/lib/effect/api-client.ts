@@ -33,6 +33,8 @@ import type {
   PostListResponse,
   PostQueryParams,
   PublishingRequirements,
+  PublishingPreferences,
+  PublishingPreferencesUpdate,
   SchedulePostInput,
   PublishingQueue,
   QueueListResponse,
@@ -56,6 +58,9 @@ import {
   abortUploadSession,
   acceptWorkspaceInvitation,
   ApiError,
+  getBroadcast,
+  endBroadcast,
+  type BroadcastInfo,
   cancelOAuthSelection,
   confirmOAuthSelection,
   cancelDistribution,
@@ -87,6 +92,8 @@ import {
   getDistributionAnalytics,
   getPlatformPublishingRequirements,
   getPost,
+  getPublishingPreferences,
+  updatePublishingPreferences,
   getUploadSession,
   listBrandProfiles,
   listPlatformCapabilities,
@@ -154,6 +161,14 @@ function inWorkspace<T>(
  * metadata, and idempotency-key behavior.
  */
 export interface ApiClientServiceShape {
+  readonly getBroadcast: (
+    id: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<BroadcastInfo>;
+  readonly endBroadcast: (
+    id: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<{ ended: true }>;
   readonly getCurrentUser: () => ApiClientEffect<UserProfile>;
   readonly listBrandProfiles: (
     options?: ApiRequestOptions,
@@ -275,6 +290,13 @@ export interface ApiClientServiceShape {
     id: string,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<PublishingRequirements>;
+  readonly getPublishingPreferences: (
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<PublishingPreferences>;
+  readonly updatePublishingPreferences: (
+    input: PublishingPreferencesUpdate,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<PublishingPreferences>;
   readonly disconnectPlatform: (id: string, options?: ApiRequestOptions) => ApiClientEffect<void>;
   readonly getDistribution: (
     id: string,
@@ -421,6 +443,8 @@ export function createApiClientServiceTest(
     Effect.die(new Error(`ApiClientService.${name} is not stubbed in this test`));
 
   const service: ApiClientServiceShape = {
+    getBroadcast: unstubbed("getBroadcast"),
+    endBroadcast: unstubbed("endBroadcast"),
     listQueues: unstubbed("listQueues"),
     createQueue: unstubbed("createQueue"),
     updateQueue: unstubbed("updateQueue"),
@@ -450,6 +474,8 @@ export function createApiClientServiceTest(
     getInstallation: unstubbed("getInstallation"),
     getInvitationPreview: unstubbed("getInvitationPreview"),
     getPlatformPublishingRequirements: unstubbed("getPlatformPublishingRequirements"),
+    getPublishingPreferences: unstubbed("getPublishingPreferences"),
+    updatePublishingPreferences: unstubbed("updatePublishingPreferences"),
     getPost: unstubbed("getPost"),
     getUploadSession: unstubbed("getUploadSession"),
     listBrandProfiles: unstubbed("listBrandProfiles"),
@@ -541,6 +567,10 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
     getAnalyticsPosts: (params, options) =>
       inWorkspace((workspaceId) => getAnalyticsPosts(workspaceId, params, options)),
     getCurrentUser: () => inWorkspace((workspaceId) => getCurrentUser(workspaceId)),
+    getBroadcast: (id, options) =>
+      inWorkspace((workspaceId) => getBroadcast(workspaceId, id, options)),
+    endBroadcast: (id, options) =>
+      inWorkspace((workspaceId) => endBroadcast(workspaceId, id, options)),
     getDistribution: (id, options) =>
       inWorkspace((workspaceId) => getDistribution(workspaceId, id, options)),
     getDistributionAnalytics: (id, options) =>
@@ -549,6 +579,10 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
     getInvitationPreview: (token, options) => getInvitationPreview(token, options),
     getPlatformPublishingRequirements: (id, options) =>
       inWorkspace((workspaceId) => getPlatformPublishingRequirements(workspaceId, id, options)),
+    getPublishingPreferences: (options) =>
+      inWorkspace((workspaceId) => getPublishingPreferences(workspaceId, options)),
+    updatePublishingPreferences: (input, options) =>
+      inWorkspace((workspaceId) => updatePublishingPreferences(workspaceId, input, options)),
     getPost: (id, options) => inWorkspace((workspaceId) => getPost(workspaceId, id, options)),
     getUploadSession: (sessionId, options) =>
       inWorkspace((workspaceId) => getUploadSession(workspaceId, sessionId, options)),

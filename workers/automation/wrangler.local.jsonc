@@ -23,10 +23,18 @@
   },
   "vars": {
     "ENVIRONMENT": "local",
+    "MAIL_FROM_ADDRESS": "no-reply@meltiply.local",
+    "MAIL_FROM_NAME": "Meltiply Local",
     "RECURRING_COMMENTS_ENABLED": "false",
     "PUBLISH_BATCH_CONCURRENCY": "1",
     "VERSION": "1.0.0-target.0",
   },
+  "send_email": [
+    {
+      "name": "MAIL",
+      "allowed_sender_addresses": ["no-reply@meltiply.local"],
+    },
+  ],
   "r2_buckets": [
     {
       "binding": "ASSETS",
@@ -110,6 +118,10 @@
         "queue": "meltiply-comments-local",
       },
       {
+        "binding": "NOTIFICATIONS_QUEUE",
+        "queue": "meltiply-notifications-local",
+      },
+      {
         "binding": "FACEBOOK_PUBLISH_QUEUE",
         "queue": "meltiply-publish-facebook-local",
       },
@@ -159,6 +171,13 @@
         "max_batch_size": 10,
         "max_batch_timeout": 5,
         "max_retries": 3,
+      },
+      {
+        "queue": "meltiply-notifications-local",
+        "dead_letter_queue": "meltiply-notifications-local-dlq",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
       },
       {
         "queue": "meltiply-asset-processing-local",

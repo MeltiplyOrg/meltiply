@@ -29,6 +29,7 @@ import {
   secureUrl,
   validatePageInput,
 } from "./meta-common";
+import { youtubeLive } from "./youtube-live";
 import type {
   OAuthConnection,
   ProviderAdapter,
@@ -47,9 +48,13 @@ const apiOrigin = "https://www.googleapis.com";
 const analyticsOrigin = "https://youtubeanalytics.googleapis.com";
 const tokenOrigin = "https://oauth2.googleapis.com";
 const authorizationOrigin = "https://accounts.google.com";
-const videoOrigin = "https://www.youtube.com";
+const videoOrigin = "https://youtu.be";
 const videoMaximumBytes = 500 * 1024 * 1024;
 const tokenLifetimeMaximumSeconds = 24 * 60 * 60;
+/** Leave room for both byte offsets within the Worker's 512-character operation identity limit. */
+const maximumOperationIdLength = 512;
+const maximumSessionUriLength =
+  maximumOperationIdLength - `submitted:${videoMaximumBytes}:${videoMaximumBytes}:`.length;
 
 /** Upload and channel identity are required; Analytics access is optional. */
 const publishingScopes = [
@@ -57,7 +62,11 @@ const publishingScopes = [
   "https://www.googleapis.com/auth/youtube.readonly",
 ] as const;
 const analyticsScopes = ["https://www.googleapis.com/auth/yt-analytics.readonly"] as const;
-const configuredScopes = [...publishingScopes, ...analyticsScopes] as const;
+const configuredScopes = [
+  ...publishingScopes,
+  ...analyticsScopes,
+  "https://www.googleapis.com/auth/youtube.force-ssl",
+] as const;
 
 /** YouTube's description ceiling remains known even before live publishing is configured. */
 export const YOUTUBE_MAX_CAPTION_LENGTH = 5_000;
@@ -72,14 +81,16 @@ const capability: PlatformCapability = {
   max_file_size: videoMaximumBytes,
   max_hashtags: 15,
   max_media_count: 1,
-  max_video_duration_sec: 180,
+  max_video_duration_sec: 12 * 60 * 60,
   min_media_count: 1,
   multi_asset_types: [],
   notes: [
-    "Square or vertical videos up to three minutes are uploaded as YouTube Shorts candidates.",
-    "One video publishes one upload; playlists and multi-video posts are not supported.",
-    "MP4 or MOV media uses YouTube's resumable upload protocol without Worker buffering.",
+    "Standard videos and Shorts share YouTube's resumable video-upload API; YouTube determines Shorts eligibility.",
+    "One video publishes one upload, with a maximum duration of 12 hours; unverified channels may have lower account limits.",
+    "MP4 or MOV media uses YouTube's resumable upload protocol without Worker buffering; Meltiply's Asset upload ceiling is 500 MiB.",
     "Meltiply uses the first non-empty caption line as the title and category 22 by default.",
+    "Live uses a separate stream/broadcast/bind workflow with an external RTMPS encoder; it never uploads a queued Asset as a live stream.",
+    "Live controls require renewed youtube.force-ssl consent and an eligible channel; encoder credentials are writer-only, on-demand, and never persisted.",
     "Analytics reads lifetime views, likes, comments, and shares from the YouTube Analytics API for the uploaded video.",
     "Existing connections must reconnect to grant the yt-analytics.readonly scope.",
     "Comments, replies, and deletion are not claimed.",
@@ -202,11 +213,9 @@ function tokenBody(
 }
 
 /**
- * Formats a composite YouTube operation identifier reflecting upload phase, file size,
- * acknowledged byte offset (for submitted sessions), and session/video ID.
- * Produces strings such as 'video:dQw4w9WgXcQ', 'session:10485760:upload_id_123',
- * or 'submitted:10485760:524288:upload_id_123'.
- * Returns formatted operation identifier string.
+ * Formats a durable upload identity with its phase, byte size/offset and
+ * Google's complete session URI, or the final video ID. The URI is opaque:
+ * changing its query can invalidate an otherwise recoverable upload.
  */
 function operationId(operation: YouTubeOperation): string {
   return operation.phase === "video"
@@ -217,43 +226,42 @@ function operationId(operation: YouTubeOperation): string {
 }
 
 /**
- * Parses a composite YouTube operation identifier string into its structured YouTubeOperation representation.
- * Validates phase discriminator ('video', 'session', 'submitted'), byte size, acknowledged offset
- * (bounded by file size), and identifier characters.
- * Returns structured YouTubeOperation descriptor, or undefined if malformed.
+ * Parses a durable upload identity, validating byte bounds and the retained
+ * Google session URI before any recovery request. Video IDs retain their
+ * ordinary identifier contract; session URIs are bounded separately.
  */
 function parseOperationId(value: unknown): YouTubeOperation | undefined {
-  const normalized = providerIdentifier(value);
-  if (!normalized) return undefined;
+  const normalized = boundedString(value, maximumOperationIdLength);
+  if (!normalized || /[\u0000-\u001f\u007f\s]/.test(normalized)) return undefined;
   const video = normalized.match(/^video:(.+)$/);
   const videoId = providerIdentifier(video?.[1]);
   if (videoId) return { id: videoId, phase: "video" };
-  const session = normalized.match(/^session:([1-9]\d*):(.+)$/);
-  if (session) {
-    const fileSize = Number(session[1]);
-    const id = providerIdentifier(session[2]);
-    return Number.isSafeInteger(fileSize) && fileSize <= videoMaximumBytes && id
+  const session = normalized.match(/^(session|submitted):([1-9]\d*):(?:(\d+):)?(https:\/\/.+)$/);
+  if (!session || (session[1] === "submitted") !== (session[3] !== undefined)) return undefined;
+  const fileSize = Number(session[2]);
+  const acknowledged = Number(session[3] ?? 0);
+  if (
+    !Number.isSafeInteger(fileSize) ||
+    fileSize > videoMaximumBytes ||
+    !Number.isSafeInteger(acknowledged) ||
+    acknowledged > fileSize
+  )
+    return undefined;
+  try {
+    const { id } = sessionLocation(session[4]!);
+    return session[1] === "session"
       ? { fileSize, id, phase: "session" }
-      : undefined;
+      : { acknowledged, fileSize, id, phase: "submitted" };
+  } catch {
+    return undefined;
   }
-  const submitted = normalized.match(/^submitted:([1-9]\d*):(\d+):(.+)$/);
-  const fileSize = Number(submitted?.[1]);
-  const acknowledged = Number(submitted?.[2]);
-  const id = providerIdentifier(submitted?.[3]);
-  return submitted &&
-    Number.isSafeInteger(fileSize) &&
-    fileSize <= videoMaximumBytes &&
-    Number.isSafeInteger(acknowledged) &&
-    acknowledged <= fileSize &&
-    id
-    ? { acknowledged, fileSize, id, phase: "submitted" }
-    : undefined;
 }
 
 /**
- * Parses and validates the resumable upload session Location header returned by YouTube video insert initiation.
- * Verifies exact Googleapis origin, `/upload/youtube/v3/videos` path, and expected query parameters.
- * Returns `{ id, url }` with canonical resumable upload URL. Throws ProviderAdapterError if malformed.
+ * Validates Google's opaque resumable Location without reconstructing its query.
+ * Only the existing HTTPS origin/path and one nonempty upload ID are accepted;
+ * the bound ensures every retained offset fits the Worker's operation identity.
+ * Returns the URI as both the durable session identity and upload destination.
  */
 function sessionLocation(value: string | null): {
   id: string;
@@ -262,24 +270,17 @@ function sessionLocation(value: string | null): {
   const normalized = secureUrl(value);
   if (!normalized) throw malformed();
   const url = new URL(normalized);
-  const keys = [...url.searchParams.keys()].sort();
-  const id = providerIdentifier(url.searchParams.get("upload_id"));
+  const ids = url.searchParams.getAll("upload_id");
   if (
+    normalized.length > maximumSessionUriLength ||
     url.origin !== apiOrigin ||
     url.pathname !== "/upload/youtube/v3/videos" ||
-    keys.join(",") !== "part,uploadType,upload_id" ||
-    url.searchParams.get("uploadType") !== "resumable" ||
-    url.searchParams.get("part") !== "snippet,status" ||
-    !id ||
-    id.length > 180
+    ids.length !== 1 ||
+    !ids[0]
   ) {
     throw malformed();
   }
-  const canonical = new URL("/upload/youtube/v3/videos", apiOrigin);
-  canonical.searchParams.set("uploadType", "resumable");
-  canonical.searchParams.set("upload_id", id);
-  canonical.searchParams.set("part", "snippet,status");
-  return { id, url: canonical.toString() };
+  return { id: normalized, url: normalized };
 }
 
 /**
@@ -293,25 +294,10 @@ function youtubeHandle(customUrl: unknown): string | undefined {
 }
 
 /**
- * Generates the canonical resumable upload session URL on www.googleapis.com for an upload ID.
- * Appends uploadType=resumable and part=snippet,status query parameters.
- * Returns full URL string.
- */
-function sessionUrl(id: string): string {
-  const url = new URL("/upload/youtube/v3/videos", apiOrigin);
-  url.searchParams.set("uploadType", "resumable");
-  url.searchParams.set("upload_id", id);
-  url.searchParams.set("part", "snippet,status");
-  return url.toString();
-}
-
-/**
- * Validates publication input for a YouTube Shorts candidate video upload.
- * YouTube uploads exactly one video per post, so a post carrying zero or
- * multiple attachments fails closed rather than silently uploading only the
- * first. Enforces vertical/square aspect ratio (width <= height), duration
- * <= 180s, description <= 5000 bytes, title <= 100 characters (free of HTML
- * `<>`), hashtag count <= 15, and valid MP4/MOV MIME types.
+ * Validates one standard YouTube video or Shorts-candidate upload.
+ * YouTube classifies Shorts itself; landscape and longer videos are valid.
+ * Enforces the 12-hour video ceiling, description <= 5000 bytes, title <= 100
+ * characters (free of HTML `<>`), hashtag count <= 15, and MP4/MOV MIME types.
  * When `providerOptions.youtube` is present, `madeForKids` must be a boolean and
  * `privacyStatus` must be one of "private", "public", or "unlisted"; an omitted
  * `privacyStatus` defaults to "public".
@@ -342,16 +328,15 @@ function uploadInput(input: PublishInput): UploadInput {
     !metadata ||
     !Number.isFinite(metadata.durationSeconds) ||
     metadata.durationSeconds! <= 0 ||
-    metadata.durationSeconds! > 180 ||
+    metadata.durationSeconds! > 12 * 60 * 60 ||
     !Number.isSafeInteger(metadata.width) ||
     metadata.width! < 1 ||
     !Number.isSafeInteger(metadata.height) ||
-    metadata.height! < 1 ||
-    metadata.width! > metadata.height!
+    metadata.height! < 1
   ) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
-        code: "youtube_short_invalid",
+        code: "youtube_video_invalid",
         status: 400,
       }),
     );
@@ -508,6 +493,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
       ...request,
       classifyErrorBody: googleErrorDiagnosis,
     });
+  const live = youtubeLive(googleRequest, now);
 
   /**
    * Queries a resumable upload session for Google's acknowledged byte offset.
@@ -530,7 +516,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
       },
       method: "PUT",
       responseType: "json_or_empty",
-      url: sessionUrl(session.id),
+      url: session.id,
     });
     return response.status === 308
       ? {
@@ -805,7 +791,9 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
    * A 404 or empty items list is `not_found`; a channel mismatch or a failed
    * upload/processing status is a confirmed failure; a processed video with a
    * valid privacy status is `published` carrying the retained operation
-   * identity and the canonical Shorts URL; anything else stays `processing`.
+   * identity and a video URL valid for standard videos and Shorts; anything else stays `processing`.
+   * `terminated` means old processing metadata expired, not that processing
+   * failed: it is successful only when the independent upload status is processed.
    * Returns the ProviderPublicationStatus. Throws ProviderAdapterError on
    * malformed responses or transport failures.
    */
@@ -818,7 +806,6 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
     const url = new URL("/youtube/v3/videos", apiOrigin);
     url.searchParams.set("part", "id,snippet,status,processingDetails");
     url.searchParams.set("id", id);
-    url.searchParams.set("maxResults", "1");
     let response;
     try {
       response = await googleRequest<unknown>(context, {
@@ -853,16 +840,13 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
         state: "failed",
       };
     }
-    if (
-      ["deleted", "failed", "rejected"].includes(uploadStatus) ||
-      ["failed", "terminated"].includes(processingStatus)
-    ) {
+    if (["deleted", "failed", "rejected"].includes(uploadStatus) || processingStatus === "failed") {
       return {
         result: confirmedFailure("youtube_video_processing_failed", 422, retainedOperationId),
         state: "failed",
       };
     }
-    if (uploadStatus === "processed" && processingStatus === "succeeded") {
+    if (uploadStatus === "processed" && ["succeeded", "terminated"].includes(processingStatus)) {
       if (!["private", "public", "unlisted"].includes(privacyStatus)) {
         throw malformed();
       }
@@ -871,7 +855,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
           outcome: "confirmed_success",
           providerOperationId: retainedOperationId,
           providerPostId: id,
-          providerUrl: `${videoOrigin}/shorts/${encodeURIComponent(id)}`,
+          providerUrl: `${videoOrigin}/${encodeURIComponent(id)}`,
         },
         state: "published",
       };
@@ -938,7 +922,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
       {
         fileSize: operation.fileSize,
         id: operation.id,
-        url: sessionUrl(operation.id),
+        url: operation.id,
       },
       { contentType, media },
       probe.acknowledged,
@@ -1006,7 +990,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
         },
         method: "PUT",
         responseType: "json_or_empty",
-        url: sessionUrl(operation.id),
+        url: operation.id,
       });
     } catch (cause) {
       if (isHttp404(cause)) return { state: "not_found" };
@@ -1267,6 +1251,9 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
       };
     },
 
+    getBroadcastInfo: live.info,
+    endBroadcast: live.end,
+
     /**
      * Declares the continuation seam for this adapter: true only when the
      * retained operation identity parses to an open resumable upload session
@@ -1294,6 +1281,27 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
      */
     async lookupPublication(context, credentials, lookup) {
       accountId(credentials);
+      if (lookup.providerOperationId?.startsWith("live:")) {
+        const info = await live.info(context, credentials, lookup);
+        return info.providerPostId
+          ? {
+              state: "published",
+              result: {
+                outcome: "confirmed_success",
+                providerOperationId: lookup.providerOperationId,
+                providerPostId: info.providerPostId,
+                ...(info.providerUrl ? { providerUrl: info.providerUrl } : {}),
+              },
+            }
+          : {
+              state: "delivered",
+              result: {
+                outcome: "confirmed_success",
+                delivery: "broadcast",
+                providerOperationId: lookup.providerOperationId,
+              },
+            };
+      }
       const providerPostId = providerIdentifier(lookup.providerPostId);
       if (lookup.providerPostId && !providerPostId) throw malformed();
       const operation = parseOperationId(lookup.providerOperationId);
@@ -1316,7 +1324,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
     },
 
     /**
-     * Publishes a validated Shorts candidate through YouTube's resumable upload
+     * Publishes a validated video or Shorts candidate through YouTube's resumable upload
      * protocol. One initiation POST creates the upload session (snippet, status,
      * declared length/type); `uploadBytes` then streams bounded chunks. A
      * completed upload returns `confirmed_success` with the `video:` identity;
@@ -1329,6 +1337,10 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
      */
     async publish(context, credentials, input) {
       accountId(credentials);
+      if (input.providerOptions?.youtube?.postType === "live") {
+        required("idempotencyKey", input.idempotencyKey, 255);
+        return live.publish(context, credentials, input);
+      }
       const upload = uploadInput(input);
       const initiationUrl = new URL("/upload/youtube/v3/videos", apiOrigin);
       initiationUrl.searchParams.set("uploadType", "resumable");

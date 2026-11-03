@@ -51,3 +51,42 @@ export function formatUsername(raw: string | null | undefined): string | null {
   if (!trimmed) return null;
   return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
 }
+
+/** Month/day and clock formatters for one publishing timezone. */
+export interface PostDateFormatters {
+  day: Intl.DateTimeFormat;
+  time: Intl.DateTimeFormat;
+}
+
+/** Constructing `Intl.DateTimeFormat` is the expensive part; zones change rarely. */
+const postDateFormatterCache = new Map<string, PostDateFormatters>();
+const maximumCachedPostTimeZones = 4;
+
+/**
+ * Returns the shared month/day and clock formatters for one publishing
+ * timezone. Post rows and cards format the same two shapes, so the formatter is
+ * built once per zone instead of once per rendered record. The cache is bounded
+ * because only a deliberate preference change introduces a new zone.
+ *
+ * @param timeZone - IANA publishing timezone (or the browser's resolved zone).
+ * @returns Formatters fixed to that zone.
+ */
+export function postDateFormatters(timeZone: string): PostDateFormatters {
+  const cached = postDateFormatterCache.get(timeZone);
+  if (cached) return cached;
+  const created: PostDateFormatters = {
+    day: new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short", timeZone }),
+    time: new Intl.DateTimeFormat("en-US", {
+      hour: "2-digit",
+      hour12: true,
+      minute: "2-digit",
+      timeZone,
+    }),
+  };
+  if (postDateFormatterCache.size >= maximumCachedPostTimeZones) {
+    const oldest = postDateFormatterCache.keys().next().value;
+    if (oldest !== undefined) postDateFormatterCache.delete(oldest);
+  }
+  postDateFormatterCache.set(timeZone, created);
+  return created;
+}

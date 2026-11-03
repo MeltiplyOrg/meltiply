@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { Effect } from "effect";
 import { afterAll, describe, expect, it, vi } from "vite-plus/test";
 
@@ -25,8 +26,7 @@ const seededAlphaProfileId = "a0000000-0000-4000-8000-000000000001";
 
 const env = {
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   ENVIRONMENT: "test",
   VERSION: "test",

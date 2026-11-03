@@ -135,12 +135,14 @@ Members-style directory composition. Collection rows use a 40px baseline; Calend
 Month/Week keeps real date geometry and nested day overflow rather than a second card
 language.
 
-Settings keeps its bounded 672px form column for Appearance, Language, Account, and
-Security. Administration is a directory surface with a centered 1200px ceiling,
-height-locked to the content pane: grid tables for Members and invitations, a compact
-seat summary, and a filtered Audit log whose 100-entry pages scroll under a pinned
-header. A crown marks the Installation Owner and the lifecycle action is a toggle. Do
-not apply Settings' form width to collection tables.
+Settings keeps its bounded 672px form column for Appearance, Language, Publishing,
+Account, and Security. Navigation groups them under General and Account, with
+Administration under Workspace; empty groups disappear. Administration is a directory
+surface with a centered 1200px ceiling, height-locked to the content pane: grid tables
+for Members and invitations, a compact seat summary, and a filtered Audit log whose
+100-entry pages scroll under a pinned header. A crown marks the Installation Owner
+and the lifecycle action is a toggle. Do not apply Settings' form width to collection
+tables.
 
 The side dialog is a 620px right-edge drawer that fills the phone viewport. Its 46px
 record toolbar stays separate from the native scrolling body. The same drawer hosts

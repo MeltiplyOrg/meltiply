@@ -24,6 +24,8 @@ export interface ProviderHttpRequest {
   headers?: HeadersInit;
   method: ProviderHttpMethod;
   responseType?: "empty" | "json" | "json_or_empty";
+  /** Converts unsafe JSON integer literals to their exact decimal strings before precision can be lost. */
+  preserveLargeIntegers?: boolean;
   sideEffectPossible?: boolean;
   url: string;
 }
@@ -403,7 +405,19 @@ export class ProviderHttpClient {
           throw new TypeError("provider response is not JSON");
         }
         return {
-          body: JSON.parse(new TextDecoder().decode(bytes)) as T,
+          body: JSON.parse(
+            new TextDecoder().decode(bytes),
+            request.preserveLargeIntegers
+              ? (_key, value: unknown, source?: { source?: string }) =>
+                  typeof value === "number" &&
+                  Number.isInteger(value) &&
+                  !Number.isSafeInteger(value) &&
+                  source?.source &&
+                  /^-?\d+$/.test(source.source)
+                    ? source.source
+                    : value
+              : undefined,
+          ) as T,
           headers: response.headers,
           status: response.status,
         };

@@ -26,6 +26,8 @@
   "vars": {
     "ENVIRONMENT": "staging",
     "LOG_SAMPLE_RATE": "0.1",
+    "MAIL_FROM_ADDRESS": "replace-with-mail-from-address",
+    "MAIL_FROM_NAME": "Meltiply",
     "RECURRING_COMMENTS_ENABLED": "false",
     "PUBLISH_BATCH_CONCURRENCY": "1",
     "FACEBOOK_LIVE_ACCEPTED": "false",
@@ -82,6 +84,14 @@
       "id": "replace-with-system-hyperdrive-id",
     },
   ],
+  // Owner notification mail is submitted by the Automation consumer so it
+  // rides the durable queue instead of a detached API request.
+  "send_email": [
+    {
+      "name": "MAIL",
+      "allowed_sender_addresses": ["replace-with-mail-from-address"],
+    },
+  ],
   "triggers": {
     "crons": ["0 * * * *", "0 0 * * *"],
   },
@@ -114,6 +124,10 @@
       {
         "binding": "COMMENTS_QUEUE",
         "queue": "meltiply-comments-staging",
+      },
+      {
+        "binding": "NOTIFICATIONS_QUEUE",
+        "queue": "meltiply-notifications-staging",
       },
       {
         "binding": "FACEBOOK_PUBLISH_QUEUE",

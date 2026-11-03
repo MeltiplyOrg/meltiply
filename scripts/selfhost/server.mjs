@@ -9,10 +9,13 @@ import nodemailer from "nodemailer";
 import { z } from "zod";
 import { JobStore } from "./jobs.mjs";
 import { startControl } from "./control.mjs";
+import { reportingBindings } from "./reporting.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const dist = resolve(root, "dist/selfhost");
 const metadata = JSON.parse(await readFile(resolve(dist, "metadata.json"), "utf8"));
+/** Maintainer improvement-reporting destination baked into this image; empty when none is provisioned. */
+const imageReporting = JSON.parse(await readFile(resolve(dist, "reporting.json"), "utf8"));
 // The provider decides which storage settings are required, so it is resolved
 // before the settings that depend on it are validated.
 const objectStorageProvider = z
@@ -196,9 +199,19 @@ for (const name of [
   "LOG_SAMPLE_RATE",
   "RECURRING_COMMENTS_ENABLED",
   "PUBLISH_BATCH_CONCURRENCY",
+  "REPORTING_FORCED_OFF",
 ]) {
   if (process.env[name]) bindings[name] = process.env[name];
 }
+// Improvement reporting destination: the released image ships the maintainer's
+// publishable project token and matching ingestion origin so an operator needs
+// no PostHog account. An explicit value in `.env.selfhost` wins, and an empty
+// value with no image default keeps reporting off; either way nothing is
+// transmitted until the Installation Owner opts in and the destination validates.
+Object.assign(bindings, reportingBindings(imageReporting, process.env));
+// The Compose deployment is the self-hosted target; the label never identifies
+// the operator, host, or installation.
+bindings.DEPLOYMENT_CATEGORY = "selfhosted";
 
 // Object storage defaults to the bundled local R2 binding. An operator who
 // runs against an external S3-compatible service sets OBJECT_STORAGE_PROVIDER=s3

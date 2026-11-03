@@ -451,6 +451,41 @@ jobs:
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
           bun run --cwd frontend/app test:e2e e2e/workspace-design.spec.ts --project workspace \
             --grep "keeps navigation focus and reconnect assignment correct" --trace on
+      - name: Prepare first-run reporting acceptance
+        if: inputs.lane == 'cloudflare-full'
+        # The journey exercises the real first-run setup form, which closes as
+        # soon as any account exists. Migrations without fixtures leave the
+        # installation uninitialized, which is the only state where that form
+        # is reachable; acceptance still runs the production Worker entries
+        # against the same PostgreSQL, SMTP capture, and controlled Provider.
+        run: |
+          bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+          bash scripts/cloudflare-local/database.sh stop
+          bash scripts/cloudflare-local/database.sh start
+      - name: Exercise first-run setup and opt-in reporting
+        if: inputs.lane == 'cloudflare-full'
+        env:
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+          MELTIPLY_E2E_ACCEPTANCE: "1"
+          # Controlled loopback receiver the journey starts itself; the
+          # acceptance configs point both Workers at the same origin.
+          MELTIPLY_E2E_EGRESS_URL: http://127.0.0.1:9787
+        run: |
+          status=0
+          bun run --cwd frontend/app test:e2e e2e/onboarding-reporting.spec.ts \
+            --project onboarding --trace on --retries 0 || status=1
+          # Setup secrets, passwords, verification links, and captured report
+          # bodies must never leave the runner as artifacts.
+          mkdir -p artifacts/onboarding-reporting
+          node --input-type=module -e '
+            import { cp, readdir } from "node:fs/promises";
+            const forbidden = /(setup|secret|password|verification|token|cookie)/i;
+            for (const entry of await readdir("frontend/app/test-results", { withFileTypes: true })) {
+              if (forbidden.test(entry.name)) continue;
+              await cp(`frontend/app/test-results/${entry.name}`, `artifacts/onboarding-reporting/${entry.name}`, { recursive: true });
+            }
+          ' || true
+          exit "$status"
       - uses: actions/setup-go@v6
         if: inputs.lane == 'object-storage'
         with:

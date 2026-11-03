@@ -35,12 +35,14 @@ The local preferences do not have a fixed expiry; withdrawing functional consent
 
 ## Visitor analytics and advertising
 
-No visitor-analytics or advertising trackers are installed on the landing site, documentation, or app. Because no such integration exists, the notice does not request consent for one: offering that category would imply tracking that is not present. Adding such a tracker later requires its own explicit choice before anything loads.
+No visitor-analytics or advertising trackers are installed on the landing site, documentation, or app, and no browser analytics SDK is loaded. Because no such integration exists, the notice does not request consent for one: offering that category would imply tracking that is not present. Adding such a tracker later requires its own explicit choice before anything loads.
+
+Optional improvement reporting is different: it is a server-side feature the Installation Owner controls, not a cookie preference. When the Owner enables usage statistics or diagnostics, the app's server sends the aggregates and sanitized exceptions described in the [Privacy Policy](/docs/privacy) to the configured analytics destination. It sets no analytics cookie, adds no browser identifier, and produces nothing while it is off or unconfigured. Cookie choices cannot enable or disable it, and disabling it does not require a cookie change.
 
 Performance analytics and comments are backend capabilities based on reports from social platforms connected to your workspace. The app exposes a read-only **Analytics** page over stored platform metrics; it does not expose an Inbox page. These capabilities are not measurement of visits to Meltiply's public sites, and no cookie choice turns off the provider synchronization behind them.
 
 ## Cookies and equivalent technologies
 
-Cookie choices also govern equivalent optional browser storage used for the same purpose; a technology is not exempt merely because it is not a cookie. Meltiply does not add visitor-analytics or advertising integrations, so optional browser storage remains off unless functional preferences are explicitly allowed. Hosting infrastructure may separately process standard technical request records as described in the [Privacy Policy](/docs/privacy).
+Cookie choices also govern equivalent optional browser storage used for the same purpose; a technology is not exempt merely because it is not a cookie. Meltiply does not add visitor-analytics or advertising integrations, so optional browser storage remains off unless functional preferences are explicitly allowed. Hosting infrastructure and the analytics destination of optional improvement reporting separately observe the technical details of a request — including the network address it arrives from — as described in the [Privacy Policy](/docs/privacy).
 
 For the current privacy disclosures, see the [Privacy Policy](/docs/privacy).

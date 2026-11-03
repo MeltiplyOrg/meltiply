@@ -248,3 +248,58 @@ describe("payload validation", () => {
     expect(payloadViolation({ platform: "threads", schema_version: 1 })).toBeUndefined();
   });
 });
+
+describe("provider failure payload", () => {
+  it("carries the canonical class as its own documented property", () => {
+    const properties = diagnosticProperties(
+      {
+        category: "provider_failure",
+        error: { name: "ProviderAdapterError" },
+        failureClass: "rate_limit",
+        handled: true,
+        occurredAt: "2026-01-02T03:04:05.000Z",
+        operation: "publish",
+        platform: "threads",
+      },
+      context,
+    );
+
+    expect(properties).toMatchObject({
+      diagnostic_category: "provider_failure",
+      diagnostic_handled: true,
+      provider_failure_class: "rate_limit",
+    });
+    const [exception] = properties.$exception_list as Record<string, unknown>[];
+    expect(exception).toMatchObject({ value: "provider_failure" });
+    expect(payloadViolation(properties)).toBeUndefined();
+  });
+
+  it("drops an out-of-vocabulary class and a class outside the Provider category", () => {
+    const rawClass = diagnosticProperties(
+      {
+        category: "provider_failure",
+        error: { name: "ProviderAdapterError" },
+        failureClass: "provider said no" as never,
+        handled: true,
+        occurredAt: "2026-01-02T03:04:05.000Z",
+        operation: "publish",
+      },
+      context,
+    );
+    expect(rawClass).not.toHaveProperty("provider_failure_class");
+
+    const wrongCategory = diagnosticProperties(
+      {
+        category: "unhandled_exception",
+        error: { name: "TypeError" },
+        failureClass: "rate_limit",
+        handled: false,
+        occurredAt: "2026-01-02T03:04:05.000Z",
+        operation: "publish",
+      },
+      context,
+    );
+    expect(wrongCategory).not.toHaveProperty("provider_failure_class");
+    expect(payloadViolation(wrongCategory)).toBeUndefined();
+  });
+});

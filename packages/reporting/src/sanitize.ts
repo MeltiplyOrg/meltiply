@@ -4,6 +4,7 @@ import type { Platform } from "@meltiply/domain";
 import {
   isDiagnosticCategory,
   isOperationCategory,
+  isProviderFailureClass,
   REPORTING_SCHEMA_VERSION,
   type DeploymentCategory,
   type DiagnosticCategory,
@@ -94,6 +95,7 @@ const allowedPropertyNames: Record<string, true> = {
   operation_category: true,
   platform: true,
   posts: true,
+  provider_failure_class: true,
   publications: true,
   reactions: true,
   report_date: true,
@@ -381,6 +383,16 @@ export function diagnosticProperties(
     operation_category: sanitizeOperationCategory(input.operation),
     schema_version: REPORTING_SCHEMA_VERSION,
   };
+  // The canonical class is the countable fact behind an expected Provider
+  // condition: "auth expired" versus "rate limited" without any Provider message,
+  // status text or response body. An out-of-vocabulary value is dropped rather
+  // than forwarded, and it is meaningless outside the Provider category.
+  if (
+    properties.diagnostic_category === "provider_failure" &&
+    isProviderFailureClass(input.failureClass)
+  ) {
+    properties.provider_failure_class = input.failureClass;
+  }
   if (
     typeof input.platform === "string" &&
     (PLATFORM_IDS as readonly string[]).includes(input.platform)

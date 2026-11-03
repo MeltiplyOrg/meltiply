@@ -213,10 +213,10 @@ describe("diagnostic ingestion route", () => {
     expect(await response.json()).toEqual({ accepted: false, reason: "category_disabled" });
   });
 
-  it("rejects an out-of-vocabulary category, operation or platform", async () => {
+  it("rejects an out-of-vocabulary category, operation, platform or Provider class", async () => {
     const app = appFor("admin");
     const badCategory = await request(app, "/installation/reporting/diagnostics", {
-      body: { category: "provider_failure", operation: "publish" },
+      body: { category: "quiet_failure", operation: "publish" },
     });
     expect(badCategory.status).toBe(400);
 
@@ -229,5 +229,31 @@ describe("diagnostic ingestion route", () => {
       body: { category: "request_failure", operation: "publish", platform: "myspace" },
     });
     expect(badPlatform.status).toBe(400);
+
+    // The Provider class is a fixed roster, not free text: a raw adapter message
+    // or an invented class must never become a countable category.
+    const badProviderClass = await request(app, "/installation/reporting/diagnostics", {
+      body: {
+        category: "provider_failure",
+        operation: "publish",
+        provider_failure_class: "provider said no",
+      },
+    });
+    expect(badProviderClass.status).toBe(400);
+  });
+
+  it("accepts an expected Provider condition as its own category", async () => {
+    const response = await request(appFor("admin"), "/installation/reporting/diagnostics", {
+      body: {
+        category: "provider_failure",
+        operation: "publish",
+        platform: "threads",
+        provider_failure_class: "rate_limit",
+      },
+    });
+    // Accepted means the request was well-formed and policy decided the
+    // transmission; the injected layer reports the category as disabled here.
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ accepted: false, reason: "category_disabled" });
   });
 });

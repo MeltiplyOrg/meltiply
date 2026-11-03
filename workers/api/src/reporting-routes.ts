@@ -7,6 +7,7 @@ import {
   isDiscoverySource,
   isOperationCategory,
   isPlatform,
+  isProviderFailureClass,
   reportingConfiguration,
   REPORTING_MAX_DELIVERY_BATCH,
   ReportingService,
@@ -371,7 +372,14 @@ export function registerReportingRoutes(
         c.get("actor");
         const body = yield* fromPromise(() => jsonBody(c, true));
         yield* fromPromise(() =>
-          onlyKeys(body, ["category", "error_name", "error_stack", "operation", "platform"]),
+          onlyKeys(body, [
+            "category",
+            "error_name",
+            "error_stack",
+            "operation",
+            "platform",
+            "provider_failure_class",
+          ]),
         );
         const input = yield* fromPromise(() => {
           const category = body.category;
@@ -398,8 +406,20 @@ export function registerReportingRoutes(
               "platform must be a supported Platform.",
             );
           }
+          // The Provider class is the countable fact an expected condition
+          // carries; an out-of-vocabulary value is a client bug, not something to
+          // silently coerce into a real class.
+          const rawFailureClass = body.provider_failure_class;
+          if (rawFailureClass !== undefined && !isProviderFailureClass(rawFailureClass)) {
+            throw new CoreApiError(
+              400,
+              "validation_error",
+              "provider_failure_class must be one of the documented Provider classes.",
+            );
+          }
           return {
             category,
+            ...(rawFailureClass === undefined ? {} : { failureClass: rawFailureClass }),
             error: {
               name: typeof body.error_name === "string" ? body.error_name : "Error",
               stack: typeof body.error_stack === "string" ? body.error_stack : undefined,

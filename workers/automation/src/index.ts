@@ -45,6 +45,11 @@ import {
   type ProviderSyncMessage,
 } from "./messages";
 import { flowDatabaseAvailable, flowExplorerEnabled, flowRecorderFor } from "./flow-observability";
+import {
+  queueDiagnosticReport,
+  registerDiagnostic,
+  scheduledDiagnosticReport,
+} from "./diagnostic-reporting";
 import type { OutboxRelayResult } from "./outbox";
 import type { ProviderDueResult } from "./provider-sync";
 import type { DeliverySummary } from "@meltiply/reporting";
@@ -895,7 +900,7 @@ export function createAutomationHandler(
      * @param batch - Batch of incoming queue messages with delivery attempt metadata and queue name.
      * @param bindings - Automation worker bindings, copied into this invocation's ownership scope.
      */
-    async queue(batch, bindings) {
+    async queue(batch, bindings, executionCtx) {
       const env = { ...bindings };
       configureJobLogging(env);
       // One asset processor per batch: construction builds the configured
@@ -990,6 +995,16 @@ export function createAutomationHandler(
             queue: batch.queue,
             retry_class: "none",
           });
+          registerDiagnostic(
+            executionCtx,
+            env,
+            queueDiagnosticReport(recoverJobErrorCause(exit.cause), {
+              outcome: "rejected",
+              ...(provider ? { provider } : {}),
+              ...(isOutboxMessage(body) ? { topic: body.topic } : {}),
+            }),
+            context(env, correlation.traceId, correlation),
+          );
           return;
         }
         if (outcome === "ambiguous") {
@@ -1010,6 +1025,16 @@ export function createAutomationHandler(
             queue: batch.queue,
             retry_class: "reconciliation",
           });
+          registerDiagnostic(
+            executionCtx,
+            env,
+            queueDiagnosticReport(recoverJobErrorCause(exit.cause), {
+              outcome: "ambiguous",
+              ...(provider ? { provider } : {}),
+              ...(isOutboxMessage(body) ? { topic: body.topic } : {}),
+            }),
+            context(env, correlation.traceId, correlation),
+          );
           return;
         }
         await flow?.finish("failed");
@@ -1033,6 +1058,16 @@ export function createAutomationHandler(
           queue: batch.queue,
           retry_class: "queue_backoff",
         });
+        registerDiagnostic(
+          executionCtx,
+          env,
+          queueDiagnosticReport(recoverJobErrorCause(exit.cause), {
+            outcome: "retry",
+            ...(provider ? { provider } : {}),
+            ...(isOutboxMessage(body) ? { topic: body.topic } : {}),
+          }),
+          context(env, correlation.traceId, correlation),
+        );
       };
       if (provider && env.PUBLISH_BATCH_CONCURRENCY === "2") {
         const { consumePublishPartitions, partitionPublishBatch } = await import("./publish-batch");
@@ -1054,7 +1089,7 @@ export function createAutomationHandler(
      * @param bindings - Automation worker bindings, copied into this invocation's ownership scope.
      * @throws Rethrows the first encountered scheduled task failure after all due units have finished.
      */
-    async scheduled(_controller, bindings) {
+    async scheduled(_controller, bindings, executionCtx) {
       const env = { ...bindings };
       configureJobLogging(env);
       const startedAt = performance.now();
@@ -1117,6 +1152,15 @@ export function createAutomationHandler(
             ...errorDiagnostic(failure.cause),
             retry_class: "platform_retry",
           });
+          // Additive and lifecycle-registered: the local log above and the
+          // rethrow below are unchanged, and the reporting unit never reports
+          // its own failure.
+          registerDiagnostic(
+            executionCtx,
+            env,
+            scheduledDiagnosticReport(failure.cause, failure.unit),
+            scheduledContext,
+          );
         }
         throw firstFailure.cause;
       }

@@ -125,7 +125,9 @@ const env: AutomationEnv = {
  *
  * @returns The metric names the canonical adapter cannot distinguish from zero.
  */
-function canonicalThreadsAmbiguousZeroMetrics(): NonNullable<ProviderAdapter["ambiguousZeroMetrics"]> {
+function canonicalThreadsAmbiguousZeroMetrics(): NonNullable<
+  ProviderAdapter["ambiguousZeroMetrics"]
+> {
   return (
     createThreadsAdapter({
       clientId: "usage-reporting-test-client",

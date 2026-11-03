@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import {
+  Eye,
   LogOut,
   Languages,
   Monitor,
@@ -20,9 +21,10 @@ import { useWorkspace } from "@/context/workspace.context";
 import { useTheme } from "@/lib/theme";
 import { supportedLanguages, useI18n } from "@/lib/i18n";
 import { AccountSecurity } from "@/components/auth/account-security";
+import { ReportingSettings } from "@/components/settings/reporting-settings";
 import SettingsPage from "@/app/(dashboard)/settings/page";
 
-const SECTION_IDS = ["appearance", "language", "account", "security"] as const;
+const SECTION_IDS = ["appearance", "language", "account", "privacy", "security"] as const;
 type SettingsSection = (typeof SECTION_IDS)[number] | "administration";
 const LANGUAGE_CODES = supportedLanguages.map(({ code }) => code);
 
@@ -84,6 +86,14 @@ export default function WorkspaceSettings() {
       navLabel: t("Account"),
       description: t("Your installation identity. These details are read-only."),
       icon: UserRound,
+    },
+    privacy: {
+      label: t("Privacy"),
+      navLabel: t("Privacy"),
+      description: t(
+        "Review what this installation shares with the Meltiply maintainer and who decides it.",
+      ),
+      icon: Eye,
     },
     security: {
       label: t("Account security"),
@@ -328,6 +338,7 @@ export default function WorkspaceSettings() {
             </section>
           )}
           {section === "security" && <AccountSecurity />}
+          {section === "privacy" && <ReportingSettings />}
           {section === "administration" && <SettingsPage embedded />}
         </div>
       </div>

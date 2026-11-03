@@ -9,6 +9,7 @@ import { authClient } from "@/lib/auth-client";
 import { localDevOwnerSignIn } from "@/lib/dev-sign-in";
 import { isDevMode } from "@/lib/env";
 import { useI18n } from "@/lib/i18n";
+import { clearSetupDraft, readSetupDraft, writeSetupDraft } from "@/components/onboarding/setup-draft";
 
 export interface SignInFormProps {
   onSuccess?: () => void;
@@ -33,10 +34,16 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
   const [resetToken] = useState(() => params.get("token"));
   const [linkError] = useState(() => params.has("error"));
   const [mode, setMode] = useState<Mode>("loading");
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
+  const [draft] = useState(readSetupDraft);
+  const [email, setEmail] = useState(() => draft?.email ?? "");
+  const [name, setName] = useState(() => draft?.name ?? "");
   const [password, setPassword] = useState("");
   const [setupSecret, setSetupSecret] = useState("");
+  const [workspaceName, setWorkspaceName] = useState(() => draft?.workspaceName ?? "");
+  // The chosen name is editable, but the default follows the typed display name
+  // until the owner changes it themselves, so finishing quickly needs no typing
+  // and a deliberate name is never overwritten.
+  const workspaceNameTouched = useRef(draft?.workspaceName ? true : false);
   const [code, setCode] = useState("");
   const [backup, setBackup] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,10 +91,26 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
     if (params.has("token")) setParams({}, { replace: true });
   }, [params, setParams]);
 
+  // Remember only non-secret progress. The password and setup secret are never
+  // written, so a reload cannot recover a credential from browser storage.
+  useEffect(() => {
+    if (mode !== "setup") return;
+    writeSetupDraft({ email, name, workspaceName: workspaceNameTouched.current ? workspaceName : "" });
+  }, [email, mode, name, workspaceName]);
+
   const complete = () => {
     if (onSuccess) onSuccess();
     else navigate(redirectTo, { replace: true });
   };
+
+  // The input shows the server's derived default while untouched; sending that
+  // default back would freeze a guess, so an untouched field stays omitted and
+  // the API derives the same name from the real account. The displayed default
+  // is translated for the reader; only a name the owner actually edits is sent.
+  const derivedLabel = (name.trim() || email.trim().split("@")[0] || "Meltiply").slice(0, 180);
+  const derivedWorkspaceName = t("{name}'s workspace", { name: derivedLabel });
+  const chosenWorkspaceName = workspaceNameTouched.current ? workspaceName.trim() : "";
+  const workspaceNameValue = workspaceNameTouched.current ? workspaceName : derivedWorkspaceName;
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -101,9 +124,11 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
           email: email.trim(),
           password,
           setupSecret,
+          ...(chosenWorkspaceName ? { workspaceName: chosenWorkspaceName } : {}),
         });
         setSetupSecret("");
         setPassword("");
+        clearSetupDraft();
         if (result.token) complete();
         else {
           setMode("signin");
@@ -194,6 +219,12 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
     setPassword,
     setupSecret,
     setSetupSecret,
+    workspaceName,
+    setWorkspaceName: (value: string) => {
+      workspaceNameTouched.current = true;
+      setWorkspaceName(value);
+    },
+    workspaceNameValue,
     code,
     setCode,
     backup,
@@ -228,6 +259,8 @@ export function SignInForm(props: SignInFormProps): React.ReactElement {
     setPassword,
     setupSecret,
     setSetupSecret,
+    setWorkspaceName,
+    workspaceNameValue,
     code,
     setCode,
     backup,
@@ -377,6 +410,28 @@ export function SignInForm(props: SignInFormProps): React.ReactElement {
                     {t("8–128 characters. Passphrases and password managers welcome.")}
                   </p>
                 )}
+              </div>
+            )}
+            {mode === "setup" && (
+              <div className="space-y-2">
+                <label htmlFor="auth-workspace" className="text-sm font-medium text-ink">
+                  {t("Workspace name")}
+                </label>
+                <Input
+                  id="auth-workspace"
+                  autoComplete="organization"
+                  required
+                  maxLength={200}
+                  value={workspaceNameValue}
+                  onChange={(event) => setWorkspaceName(event.target.value)}
+                  disabled={busy}
+                  aria-describedby="workspace-help"
+                />
+                <p id="workspace-help" className="text-xs leading-relaxed text-ink-3">
+                  {t(
+                    "Every member shares this Workspace, and you can rename it later in Settings.",
+                  )}
+                </p>
               </div>
             )}
             {mode === "setup" && (

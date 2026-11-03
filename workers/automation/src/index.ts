@@ -844,7 +844,7 @@ export function createAutomationHandler(
       // Best-effort maintainer reporting drains its own bounded queue. It never
       // computes measurements and never touches publishing, so a PostHog outage
       // or a disabled category leaves domain retry/DLQ behavior untouched.
-      empty: { claimed: 0, delivered: 0, discarded: 0, failed: 0, skipped: 0 },
+      empty: { claimed: 0, delivered: 0, discarded: 0, failed: 0, released: 0, skipped: 0 },
       field: "reporting",
       name: "improvement-reporting-delivery",
       run: dependencies.deliverImprovementReports

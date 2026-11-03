@@ -45,22 +45,6 @@ function feedbackStatus(t: (message: string) => string, feedback: ReportingFeedb
 }
 
 /**
- * Offers an explicit Channel-connection route without making it a condition of
- * finishing setup. A Provider outage therefore cannot block installation.
- *
- * @returns React element with the optional connection action.
- */
-function ConnectChannelAction({ disabled }: { disabled: boolean }): React.ReactElement {
-  const { t } = useI18n();
-  return (
-    <span className="flex items-center gap-1 text-xs text-ink-3">
-      <Share2 className="size-3.5" aria-hidden="true" />
-      {disabled ? t("Finishing setup…") : t("Connect a Channel")}
-    </span>
-  );
-}
-
-/**
  * Final first-run screen: each action completes onboarding and then hands the
  * Owner to the existing flow, so setup never reimplements Channel connection or
  * teammate invitation.
@@ -86,7 +70,10 @@ function ReadyScreen({
         disabled={pending}
         onClick={() => onDone("/channels")}
       >
-        <ConnectChannelAction disabled={pending} />
+        <span className="flex items-center gap-1">
+          <Share2 className="size-3.5" aria-hidden="true" />
+          {pending ? t("Finishing setup…") : t("Connect a Channel")}
+        </span>
         <ArrowRight className="size-4" aria-hidden="true" />
       </Button>
       <Button
@@ -97,7 +84,7 @@ function ReadyScreen({
         disabled={pending}
         onClick={() => onDone("/settings?section=administration")}
       >
-        <span className="flex items-center gap-1 text-xs text-ink-3">
+        <span className="flex items-center gap-1">
           <UserRoundPlus className="size-3.5" aria-hidden="true" />
           {t("Invite a teammate")}
         </span>

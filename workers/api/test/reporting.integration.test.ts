@@ -610,7 +610,7 @@ describe("diagnostic ingestion", () => {
 
   it("rejects a category or operation outside the fixed enums", async () => {
     const rejectedCategory = await request("/installation/reporting/diagnostics", "owner", {
-      body: { category: "provider_failure", operation: "publish" },
+      body: { category: "quiet_failure", operation: "publish" },
     });
     expect(rejectedCategory.status).toBe(400);
 
@@ -618,6 +618,38 @@ describe("diagnostic ingestion", () => {
       body: { category: "request_failure", operation: "do everything" },
     });
     expect(rejectedOperation.status).toBe(400);
+  });
+
+  it("keeps an expected Provider condition separate from an unexpected exception", async () => {
+    await setPreferences(false, true);
+    const response = await request("/installation/reporting/diagnostics", "owner", {
+      body: {
+        category: "provider_failure",
+        error_name: "ProviderAdapterError",
+        operation: "publish",
+        platform: "threads",
+        provider_failure_class: "rate_limit",
+      },
+    });
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ accepted: true, reason: "queued" });
+
+    const captured = await nextCapture();
+    const properties = captured.body.properties as Record<string, unknown>;
+    expect(properties).toMatchObject({
+      diagnostic_category: "provider_failure",
+      operation_category: "publish",
+      platform: "threads",
+      provider_failure_class: "rate_limit",
+    });
+    const [exception] = properties.$exception_list as Record<string, unknown>[];
+    // The expected condition stays countable and handled, and its group value is
+    // the fixed category rather than any Provider message.
+    expect(exception).toMatchObject({
+      mechanism: { handled: true },
+      type: "ProviderAdapterError",
+      value: "provider_failure",
+    });
   });
 
   it("keeps a repeated failure within one hour as a single report", async () => {

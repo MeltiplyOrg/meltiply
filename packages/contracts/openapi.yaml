@@ -3881,11 +3881,33 @@ components:
             report is queued, and `delivered` means the destination accepted it.
     DiagnosticCategory:
       type: string
+      description: |
+        Fixed diagnostic class. `provider_failure` marks an expected Provider
+        condition the adapter already classified — a normal recoverable outcome
+        such as an expired authorization or a rate limit — and is kept separate
+        from unexpected application exceptions so expected conditions cannot hide
+        defects in Error Tracking. Every other value is an unexpected failure.
       enum:
         - unhandled_exception
+        - provider_failure
         - request_failure
         - scheduled_job_failure
         - client_exception
+    ProviderFailureClass:
+      type: string
+      description: |
+        Canonical Provider failure classification, as the adapter records it.
+        Only meaningful with `category: provider_failure`, where it is the
+        countable fact behind the condition; no Provider message, status text or
+        response body is ever reported.
+      enum:
+        - ambiguous
+        - auth
+        - deterministic
+        - quota
+        - rate_limit
+        - timeout
+        - transient
     OperationCategory:
       type: string
       enum:
@@ -3909,6 +3931,8 @@ components:
           $ref: "#/components/schemas/OperationCategory"
         platform:
           $ref: "#/components/schemas/Platform"
+        provider_failure_class:
+          $ref: "#/components/schemas/ProviderFailureClass"
         error_name:
           type: string
           maxLength: 80

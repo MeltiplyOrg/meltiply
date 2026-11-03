@@ -1,4 +1,4 @@
-import type { Context as HonoContext } from "hono";
+import type { Context } from "hono";
 import { Cause, Effect, Exit, Layer, Option, Result } from "effect";
 import {
   DomainError,
@@ -19,6 +19,8 @@ import { ProviderAdapterError } from "@meltiply/providers";
 import type { components } from "@meltiply/contracts/schema";
 
 import { CoreApiError } from "../core-types";
+import { scheduleInvocationFailureDiagnostic } from "../diagnostic-reporting";
+import type { ApiWorkerEnvironment } from "../env";
 import { errorResponse, jsonResponse } from "../responses";
 type Schemas = components["schemas"];
 
@@ -196,7 +198,7 @@ function normalizeErrorDetails(error: TaggedErrorShape): readonly Schemas["Error
  * @param c - Hono context instance.
  * @returns ExecutionContext with waitUntil if present on the context, otherwise undefined.
  */
-function getExecutionCtx(c: HonoContext):
+function getExecutionCtx(c: Context<ApiWorkerEnvironment>):
   | {
       waitUntil?: (promise: Promise<unknown>) => void;
     }
@@ -231,7 +233,7 @@ interface RequestScope {
  * @param c - Active Hono context for the current HTTP request.
  * @returns Isolated request scope with layers and logging context.
  */
-function requestScope(c: HonoContext): RequestScope {
+function requestScope(c: Context<ApiWorkerEnvironment>): RequestScope {
   const requestId =
     (c.get?.("requestId") as string | undefined) ??
     c.req?.header?.("X-Request-ID") ??
@@ -453,7 +455,7 @@ function failureToResponse(
  * @returns Promise resolving to a Fetch API Response conforming to OpenAPI contracts.
  */
 export async function runWorkerEffect<A, E>(
-  c: HonoContext,
+  c: Context<ApiWorkerEnvironment>,
   effect: Effect.Effect<A, E, RequestContext>,
   options?: RunWorkerEffectOptions,
 ): Promise<Response> {
@@ -464,13 +466,17 @@ export async function runWorkerEffect<A, E>(
     return jsonResponse(exit.value, options?.status ?? 200, scope.requestId, options?.headers);
   }
 
-  return failureToResponse(
+  const response = failureToResponse(
     exit.cause,
     scope.requestId,
     scope.logContext,
     options?.headers,
     scope.signal,
   );
+  // The response is already fixed: this only decides whether the already-logged
+  // unexpected failure also becomes an opt-in diagnostic report.
+  scheduleInvocationFailureDiagnostic(c, exit.cause, response.status);
+  return response;
 }
 
 /**
@@ -486,7 +492,7 @@ export async function runWorkerEffect<A, E>(
  * @returns Program Response on success, canonical error envelope on failure.
  */
 export async function runRouteEffect<E>(
-  c: HonoContext,
+  c: Context<ApiWorkerEnvironment>,
   effect: Effect.Effect<Response, E, RequestContext>,
 ): Promise<Response> {
   const scope = requestScope(c);
@@ -496,5 +502,13 @@ export async function runRouteEffect<E>(
     return exit.value;
   }
 
-  return failureToResponse(exit.cause, scope.requestId, scope.logContext, undefined, scope.signal);
+  const response = failureToResponse(
+    exit.cause,
+    scope.requestId,
+    scope.logContext,
+    undefined,
+    scope.signal,
+  );
+  scheduleInvocationFailureDiagnostic(c, exit.cause, response.status);
+  return response;
 }

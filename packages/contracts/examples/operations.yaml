@@ -895,10 +895,11 @@ operations:
   ingestDiagnosticReport:
     headers: *bearer_authorization
     request:
-      category: request_failure
+      category: provider_failure
       operation: publish
       platform: threads
-      error_name: TypeError
+      provider_failure_class: rate_limit
+      error_name: ProviderAdapterError
       error_stack: |
         at publishDistributions (workers/automation/src/distribution.ts:42:7)
     success:

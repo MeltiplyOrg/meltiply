@@ -2343,14 +2343,30 @@ export interface components {
              */
             delivery_status: "not_shared" | "not_recorded" | "pending" | "delivered";
         };
-        /** @enum {string} */
-        DiagnosticCategory: "unhandled_exception" | "request_failure" | "scheduled_job_failure" | "client_exception";
+        /**
+         * @description Fixed diagnostic class. `provider_failure` marks an expected Provider
+         *     condition the adapter already classified — a normal recoverable outcome
+         *     such as an expired authorization or a rate limit — and is kept separate
+         *     from unexpected application exceptions so expected conditions cannot hide
+         *     defects in Error Tracking. Every other value is an unexpected failure.
+         * @enum {string}
+         */
+        DiagnosticCategory: "unhandled_exception" | "provider_failure" | "request_failure" | "scheduled_job_failure" | "client_exception";
+        /**
+         * @description Canonical Provider failure classification, as the adapter records it.
+         *     Only meaningful with `category: provider_failure`, where it is the
+         *     countable fact behind the condition; no Provider message, status text or
+         *     response body is ever reported.
+         * @enum {string}
+         */
+        ProviderFailureClass: "ambiguous" | "auth" | "deterministic" | "quota" | "rate_limit" | "timeout" | "transient";
         /** @enum {string} */
         OperationCategory: "publish" | "analytics" | "inbox" | "auth" | "assets" | "queues" | "installation" | "reporting" | "other";
         DiagnosticReportSubmission: {
             category: components["schemas"]["DiagnosticCategory"];
             operation: components["schemas"]["OperationCategory"];
             platform?: components["schemas"]["Platform"];
+            provider_failure_class?: components["schemas"]["ProviderFailureClass"];
             /** @description Error type name; sanitized to a plain identifier. */
             error_name?: string;
             /**

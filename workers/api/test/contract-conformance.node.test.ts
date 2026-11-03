@@ -11,17 +11,25 @@ import { fileURLToPath } from "node:url";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import YAML from "yaml";
 
-const { registerInstallationRoutes, registerReportingRoutes, registerWorkspaceLifecycleRoutes } =
-  vi.hoisted(() => ({
-    registerInstallationRoutes: vi.fn(),
-    registerReportingRoutes: vi.fn(),
-    registerWorkspaceLifecycleRoutes: vi.fn(),
-  }));
+const {
+  registerInstallationRoutes,
+  registerOnboardingRoutes,
+  registerReportingRoutes,
+  registerWorkspaceLifecycleRoutes,
+} = vi.hoisted(() => ({
+  registerInstallationRoutes: vi.fn(),
+  registerOnboardingRoutes: vi.fn(),
+  registerReportingRoutes: vi.fn(),
+  registerWorkspaceLifecycleRoutes: vi.fn(),
+}));
 vi.mock("../src/workspace-lifecycle", () => ({
   registerWorkspaceLifecycleRoutes,
 }));
 vi.mock("../src/installation-routes", () => ({
   registerInstallationRoutes,
+}));
+vi.mock("../src/onboarding", () => ({
+  registerOnboardingRoutes,
 }));
 vi.mock("../src/reporting-routes", () => ({
   registerReportingRoutes,
@@ -211,6 +219,9 @@ const cases: ConformanceCase[] = [
     operationId: "transferInstallationOwnership",
     path: "/api/v1/installation/ownership-transfer",
   },
+  { method: "GET", operationId: "getOnboarding", path: "/api/v1/onboarding" },
+  { method: "PATCH", operationId: "saveOnboarding", path: "/api/v1/onboarding" },
+  { method: "POST", operationId: "completeOnboarding", path: "/api/v1/onboarding/complete" },
   {
     method: "GET",
     operationId: "listWorkspaceAudit",
@@ -931,8 +942,26 @@ function registerReportingContractRoutes(reportingApp: Hono<ApiWorkerEnvironment
   );
 }
 
+/**
+ * Registers onboarding conformance doubles at the production paths.
+ *
+ * Production onboarding owns its transaction, Owner authorization, and
+ * idempotency; those are exercised by the bootstrap integration suite. This
+ * double isolates response-schema verification from a PostgreSQL fixture.
+ *
+ * @param onboardingApp - API app receiving onboarding route registrations.
+ */
+function registerOnboardingContractRoutes(onboardingApp: Hono<ApiWorkerEnvironment>): void {
+  onboardingApp.get("/api/v1/onboarding", () => workspaceContractResponse("getOnboarding"));
+  onboardingApp.patch("/api/v1/onboarding", () => workspaceContractResponse("saveOnboarding"));
+  onboardingApp.post("/api/v1/onboarding/complete", () =>
+    workspaceContractResponse("completeOnboarding"),
+  );
+}
+
 registerWorkspaceLifecycleRoutes.mockImplementation(registerWorkspaceContractRoutes);
 registerInstallationRoutes.mockImplementation(registerInstallationContractRoutes);
+registerOnboardingRoutes.mockImplementation(registerOnboardingContractRoutes);
 registerReportingRoutes.mockImplementation(registerReportingContractRoutes);
 
 const app = createApiApp({

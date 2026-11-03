@@ -690,6 +690,33 @@ export function brandProfileColorField(
 }
 
 /**
+ * Validates a Workspace display name supplied at the HTTP boundary.
+ *
+ * Shared by Workspace settings, the setup form's `workspace_name`, and the
+ * onboarding save so one rule governs the stored name: trimmed, 1–200
+ * characters, no control characters.
+ *
+ * @param value - Candidate name as received on the wire.
+ * @param field - Field name used in the validation message.
+ * @returns The trimmed name.
+ * @throws {CoreApiError} 400 when the value is blank, overlong, or carries control characters.
+ */
+export function workspaceNameValue(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new CoreApiError(400, "validation_error", `${field} must be a string.`);
+  }
+  const trimmed = value.trim();
+  if (trimmed.length < 1 || trimmed.length > 200 || /[\x00-\x1F\x7F]/.test(trimmed)) {
+    throw new CoreApiError(
+      400,
+      "validation_error",
+      `${field} must contain 1 to 200 characters without control characters.`,
+    );
+  }
+  return trimmed;
+}
+
+/**
  * Extracts an optional string field, permitting string, null, or undefined.
  *
  * @param body - Parsed JSON body.

@@ -39,6 +39,12 @@ tags:
       Installation-level settings: Seat usage, account suspension,
       reactivation, hard deletion, and ownership transfer. Mutating operations
       require the Installation Owner.
+  - name: Onboarding
+    description: |
+      First-run setup progress for the Installation Owner: the chosen shared
+      Workspace name and completion of the optional wizard. The public setup
+      status exposes only the initialized bit; nothing here is readable
+      without an authenticated Owner session.
   - name: Brand Profiles
     description: |
       Named, color-labelled ownership scopes inside a workspace. Every Asset,
@@ -404,6 +410,10 @@ paths:
         database-backed fixed-window authentication rate limit keyed by
         action and normalized email/IP.
         This installation accepts exactly one owner; subsequent signup is forbidden.
+        The optional `workspace_name` is the setup form's chosen name for the
+        shared Workspace. It is not an account field: it is stored with the
+        bootstrap record and applied once when the canonical Workspace is
+        created, so it survives email verification. Ignored for invited sign-ups.
       parameters:
         - name: X-Setup-Secret
           in: header
@@ -1140,6 +1150,95 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /onboarding:
+    get:
+      tags: [Onboarding]
+      operationId: getOnboarding
+      summary: Read first-run setup progress
+      description: |
+        Returns the resumable onboarding progress of the current Installation
+        Owner. `not_applicable` marks an installation whose Owner predates
+        onboarding (an upgrade): those Owners keep normal sign-in and are never
+        forced through setup. `in_progress` is the resumable state after the
+        first-run account exists and before the final screen is completed.
+        `completed` is terminal; the Workspace name is thereafter changed
+        through Workspace settings. Installation Owner only — the address is
+        resolved from the live session, so authority follows ownership transfer.
+      responses:
+        "200":
+          description: Current onboarding progress.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingProgress"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    patch:
+      tags: [Onboarding]
+      operationId: saveOnboarding
+      summary: Save the chosen Workspace name
+      description: |
+        Persists the setup screen's Workspace name and applies it to the
+        canonical shared Workspace, auditing the rename with the same action
+        Settings uses. Repeating the same name is a no-op. Once onboarding is
+        complete this returns `409 onboarding_complete`: rename the Workspace
+        through Workspace settings instead, so finalization can never overwrite
+        a later change. Installation Owner only.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OnboardingSaveRequest"
+      responses:
+        "200":
+          description: Updated onboarding progress.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingProgress"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /onboarding/complete:
+    post:
+      tags: [Onboarding]
+      operationId: completeOnboarding
+      summary: Finish first-run setup
+      description: |
+        Marks onboarding complete once the Owner enters the Workspace. Optional
+        screens, Channel connection, and teammate invitations are independent,
+        so a skipped improvement screen or a failed connection cannot block
+        completion. Completion never renames the Workspace and is idempotent:
+        retries replay the stored response. Installation Owner only.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Completed onboarding progress.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingProgress"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/RateLimited"
   /installation/reporting:
@@ -3406,6 +3505,15 @@ components:
         callbackURL:
           type: string
           format: uri
+        workspace_name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: |
+            Initial shared Workspace name from the setup form. Trimmed; applied
+            once when the canonical Workspace is created so it survives email
+            verification. Omitted keeps the derived default. Ignored for
+            invited sign-ups.
     RequestPasswordResetRequest:
       type: object
       additionalProperties: false
@@ -3724,6 +3832,37 @@ components:
           format: date-time
         suspension_reason:
           type: [string, "null"]
+    OnboardingProgress:
+      type: object
+      additionalProperties: false
+      required: [status, workspace_name, workspace_named, completed_at]
+      properties:
+        status:
+          type: string
+          enum: [not_applicable, in_progress, completed]
+          description: |
+            `not_applicable` marks an installation whose Owner predates
+            onboarding and is never forced through setup.
+        workspace_name:
+          type: [string, "null"]
+          description: |
+            Canonical shared Workspace name, or null when no Workspace exists
+            yet. Reflects a rename performed in Settings.
+        workspace_named:
+          type: boolean
+          description: True once the chosen setup name was applied to the Workspace.
+        completed_at:
+          type: [string, "null"]
+          format: date-time
+    OnboardingSaveRequest:
+      type: object
+      additionalProperties: false
+      required: [workspace_name]
+      properties:
+        workspace_name:
+          type: string
+          minLength: 1
+          maxLength: 200
     SuspendMemberRequest:
       type: object
       additionalProperties: false

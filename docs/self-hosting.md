@@ -242,6 +242,16 @@ characters. Existing environment files must add it; the generator does not
 overwrite them. It is an API-only bootstrap credential, never a browser build
 variable. Setup status reveals only whether the installation has an Owner.
 
+The first sign-up may carry the shared Workspace name as `workspace_name`. It is
+stored with the bootstrap record and applied once, when that sign-up's first
+authenticated request creates the Workspace, so it survives email verification;
+omitting it keeps the derived `<display name>'s workspace` default. The Owner's
+`/api/v1/onboarding` read, save, and complete operations carry that journey's
+progress and are Installation-Owner-only. An installation that already has an
+Owner and Workspace without onboarding progress reports `not_applicable`: its
+Owner signs in normally and is never pushed back through setup. Completion never
+renames the Workspace, so a later Settings rename stands.
+
 JWT issuer and audience use `APP_URL`. By default the API retrieves signing keys
 from that origin's `/api/auth/jwks`. If browser-only ingress authentication protects the public host,
 set `BETTER_AUTH_JWKS_URL` to a trusted internal endpoint for the same installation;

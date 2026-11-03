@@ -134,6 +134,18 @@
       "state": "specified",
       "evidenceAndGate": "Reauthenticated ownership transfer; hosted database and browser acceptance required."
     },
+    "getOnboarding": {
+      "state": "specified",
+      "evidenceAndGate": "Resumable Owner onboarding read; real PostgreSQL bootstrap coverage plus hosted browser acceptance required."
+    },
+    "saveOnboarding": {
+      "state": "specified",
+      "evidenceAndGate": "Chosen Workspace-name persistence and audit; real PostgreSQL bootstrap coverage plus hosted browser acceptance required."
+    },
+    "completeOnboarding": {
+      "state": "specified",
+      "evidenceAndGate": "Idempotent onboarding completion; real PostgreSQL bootstrap coverage plus hosted browser acceptance required."
+    },
     "listWorkspaceAudit": {
       "state": "specified",
       "evidenceAndGate": "Workspace Audit read; hosted database acceptance required."

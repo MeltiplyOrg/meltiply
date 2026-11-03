@@ -34,6 +34,7 @@ import {
   optionalStringField,
   stringField,
   uuidParam,
+  workspaceNameValue,
 } from "./validation";
 
 /**
@@ -669,17 +670,7 @@ export function registerWorkspaceLifecycleRoutes(
         const nextName =
           name === undefined
             ? undefined
-            : yield* fromPromise(() => {
-                const value = stringField(body, "name");
-                if (value.length > 200) {
-                  throw new CoreApiError(
-                    400,
-                    "validation_error",
-                    "name must be at most 200 characters.",
-                  );
-                }
-                return value;
-              });
+            : yield* fromPromise(() => workspaceNameValue(stringField(body, "name"), "name"));
         const nextSlug =
           slug === undefined
             ? undefined

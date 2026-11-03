@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { ProviderRegistry, type ProviderAdapter } from "@meltiply/providers";
 import {
   REPORTING_DISCLOSURE_VERSION,
+  REPORTING_SCHEMA_VERSION,
   recordPublicationUsage,
   reportingConfiguration,
 } from "@meltiply/reporting";
@@ -219,7 +220,7 @@ async function seedConsent(options: {
       `INSERT INTO reporting_preferences (
          id, schema_version, usage_requested, usage_disclosure_version,
          usage_decided_at, usage_interval_started_at, installation_reporting_id
-       ) VALUES (TRUE, $4, $1, $4, now(), $2, $3)
+       ) VALUES (TRUE, $5, $1, $4, now(), $2, $3)
        ON CONFLICT (id) DO UPDATE SET
          usage_requested = EXCLUDED.usage_requested,
          usage_disclosure_version = EXCLUDED.usage_disclosure_version,
@@ -230,6 +231,7 @@ async function seedConsent(options: {
         options.intervalStartedAt,
         installationReportingId,
         REPORTING_DISCLOSURE_VERSION,
+        REPORTING_SCHEMA_VERSION,
       ],
     );
   });

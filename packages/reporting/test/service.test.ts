@@ -8,6 +8,7 @@ import {
   isDiscoverySource,
   isOperationCategory,
   isPlatform,
+  isProviderFailureClass,
 } from "../src/contracts";
 
 /**
@@ -108,11 +109,14 @@ describe("fixed enumerations", () => {
     expect(isDiscoverySource(undefined)).toBe(false);
   });
 
-  it("narrows only documented diagnostic and operation categories", () => {
+  it("narrows only documented diagnostic, operation and Provider classes", () => {
     expect(isDiagnosticCategory("unhandled_exception")).toBe(true);
-    expect(isDiagnosticCategory("provider_failure")).toBe(false);
+    expect(isDiagnosticCategory("provider_failure")).toBe(true);
+    expect(isDiagnosticCategory("quiet_failure")).toBe(false);
     expect(isOperationCategory("publish")).toBe(true);
     expect(isOperationCategory("everything")).toBe(false);
+    expect(isProviderFailureClass("rate_limit")).toBe(true);
+    expect(isProviderFailureClass("provider said no")).toBe(false);
   });
 
   it("narrows only supported Platforms", () => {

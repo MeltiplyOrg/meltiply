@@ -9,10 +9,13 @@
  *
  * Canonical operational observability (`@meltiply/observability`) stays separate:
  * local logs, traces and the browser diagnostic producer remain installation-local
- * and are never an implicit PostHog feed.
+ * and are never an implicit PostHog feed. `diagnostics.ts` translates a boundary's
+ * thrown value into the approved report shape, so a route, queue or scheduled unit
+ * never hands this module a raw error, message, request or domain record.
  */
 export * from "./configuration";
 export * from "./contracts";
+export * from "./diagnostics";
 export * from "./policy";
 export * from "./sanitize";
 export * from "./service";

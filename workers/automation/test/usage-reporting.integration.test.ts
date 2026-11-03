@@ -125,7 +125,7 @@ const env: AutomationEnv = {
  *
  * @returns The metric names the canonical adapter cannot distinguish from zero.
  */
-function canonicalThreadsAmbiguousZeroMetrics(): readonly string[] {
+function canonicalThreadsAmbiguousZeroMetrics(): NonNullable<ProviderAdapter["ambiguousZeroMetrics"]> {
   return (
     createThreadsAdapter({
       clientId: "usage-reporting-test-client",
@@ -135,6 +135,7 @@ function canonicalThreadsAmbiguousZeroMetrics(): readonly string[] {
   );
 }
 
+/** Declares stored-analytics semantics without permitting reporting to call a Provider. */
 function registryWithAnalytics(platforms: Array<"threads" | "youtube">): ProviderRegistry {
   const registry = new ProviderRegistry();
   for (const platform of platforms) {

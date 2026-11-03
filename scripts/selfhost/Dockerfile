@@ -49,7 +49,7 @@ RUN node scripts/selfhost/build.mjs && node scripts/selfhost/notices.mjs
 
 FROM runtime-dependencies AS runtime
 COPY --from=build /source/dist/selfhost ./dist/selfhost
-COPY scripts/selfhost/server.mjs scripts/selfhost/control.mjs scripts/selfhost/admin.mjs scripts/selfhost/jobs.mjs scripts/selfhost/configure.mjs ./scripts/selfhost/
+COPY scripts/selfhost/server.mjs scripts/selfhost/control.mjs scripts/selfhost/admin.mjs scripts/selfhost/jobs.mjs scripts/selfhost/configure.mjs scripts/selfhost/reporting.mjs ./scripts/selfhost/
 COPY LICENSE* THIRD_PARTY_NOTICES.md ./
 RUN mkdir /data && chown node:node /data
 USER node

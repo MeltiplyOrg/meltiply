@@ -138,3 +138,23 @@ describe("frontend telemetry boundary", () => {
     vi.stubGlobal("window", originalWindow);
   });
 });
+
+describe("frontend diagnostic producer", () => {
+  it("sends only frame lines and the in-memory session credential", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null)));
+    const error = new Error("Post 'Acme launch' failed for alpha@meltiply.local");
+    error.stack = [
+      "Error: Post 'Acme launch' failed for alpha@meltiply.local",
+      "    at Composer (src/components/composer/composer.tsx:42:7)",
+      "    at node:internal/process/task_queues:95:5",
+    ].join("\n");
+
+    reportFrontendError(error, "react-render");
+
+    const body = String(vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.body);
+    expect(body).toContain("src/components/composer/composer.tsx");
+    expect(body).not.toContain("Acme launch");
+    expect(body).not.toContain("alpha@meltiply.local");
+    expect(body).not.toContain("Error: Post");
+  });
+});

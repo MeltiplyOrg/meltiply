@@ -405,7 +405,9 @@ describe("reporting policy over real HTTP", () => {
 
     const denied = await setPreferences(true, true, "viewer");
     expect(denied.status).toBe(403);
-    expect((await denied.json()).error.code).toBe("installation_owner_required");
+    expect(await denied.json()).toMatchObject({
+      error: { code: "installation_owner_required" },
+    });
   });
 
   it("follows ownership transfer rather than the original setup identity", async () => {

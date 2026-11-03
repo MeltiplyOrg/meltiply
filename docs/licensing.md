@@ -64,7 +64,7 @@ publish such artifacts until their exact-version notices and source obligations 
 
 The repository owner confirmed control of the rights to original Meltiply code and branding, including necessary employer/contractor permissions, and permission to publish under the AGPL. This is an owner attestation, not an independently verified legal opinion. Third-party material remains under its original terms.
 
-AGPL section 5(c) requires a modified version to be licensed as a whole under the AGPL. The Gr8r Studio adaptation recorded in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) is used under a written permission limited to Meltiply that grants no rights to third parties, so Meltiply cannot license that material to downstream recipients. Publishing an AGPL source release therefore requires either Gr8r's permission to sublicense the adapted components or original replacements for them. This attestation covers original Meltiply material only.
+The Gr8r Studio adaptation recorded in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) is used under written permission that includes sublicensing the adapted material under the GNU Affero General Public License, so AGPL section 5(c) whole-work licensing is satisfied for it. Sublicensing permission is documented in the notice index and reproduced in every distributed notice bundle.
 
 Continue retaining third-party notices and obtaining the required rights for new contributions. An incoming AGPL contribution is already licensed to downstream recipients under the AGPL; it does not by itself grant the maintainers the right to relicense it under different terms, so obtain any necessary separate written rights. See [contribution licensing](../CONTRIBUTING.md#licensing).
 

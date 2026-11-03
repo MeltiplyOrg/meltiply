@@ -40,8 +40,8 @@ const LICENSE_FILE_PATTERNS = [
 /**
  * Copied or adapted interface code that is not represented by an installed npm
  * package. The generated dependency section already covers lucide-react; this
- * list keeps the copied geometry and the permission-only Gr8r adaptation visible
- * in every distributed notice bundle.
+ * list keeps the copied geometry and the Gr8r-derived adaptation visible in every
+ * distributed notice bundle.
  */
 const COPIED_INTERFACE_NOTICES = [
   {
@@ -64,8 +64,8 @@ const COPIED_INTERFACE_NOTICES = [
   },
   {
     name: "Gr8r Studio",
-    license: "Used with written permission",
-    note: "The workspace layout and component styling adapt Gr8r Studio revision 904205c626918ee96054eb35495c394a60c0c601. The upstream repository publishes no general license; Meltiply's repository owner obtained permission for this reuse. That permission is limited to Meltiply and does not grant rights to third parties.",
+    license: "Used with written permission; redistributable under this project's license",
+    note: "The workspace layout and component styling adapt Gr8r Studio revision 904205c626918ee96054eb35495c394a60c0c601. The upstream repository publishes no general license. Meltiply's repository owner obtained Gr8r Studio's written permission to reuse that source and to sublicense the adapted material under the GNU Affero General Public License, so redistributors receive it under the same terms as the rest of this project.",
     licenseFile: null,
   },
 ];

@@ -132,7 +132,13 @@ requested:
 gh pr create --base <base> --head <branch> --title '<type>(<scope>): <change>' --body-file /tmp/pr.md
 ```
 
-Check `gh pr list --head <branch>` first; update an existing PR with
-`gh pr edit --body-file /tmp/pr.md` rather than creating a duplicate. Agents use the
-[pr skill](.agents/skills/pr/SKILL.md). Address review feedback and request
-maintainer approval; do not merge your own PR.
+Check `gh pr list --head <branch>` first; update an existing PR through the REST API
+rather than creating a duplicate. `gh pr edit` exits non-zero here on a
+Projects-classic deprecation warning even after it writes, so it cannot gate CI:
+
+```bash
+gh api -X PATCH repos/<owner>/<repo>/pulls/<number> -F body=@/tmp/pr.md
+```
+
+Agents use the [pr skill](.agents/skills/pr/SKILL.md). Address review feedback and
+request maintainer approval; do not merge your own PR.

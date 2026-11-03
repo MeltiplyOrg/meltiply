@@ -1,9 +1,9 @@
 # Shared UI ownership and reuse
 
 The interface adapts [Gr8r Studio](https://github.com/gr8rstudio/gr8r-studio) at
-`904205c626918ee96054eb35495c394a60c0c601`. Source reuse was authorized for this
-redesign; upstream publishes no general license, so its availability is not a grant
-to third parties.
+`904205c626918ee96054eb35495c394a60c0c601`. Gr8r Studio publishes no general license;
+its written permission covers this reuse and sublicenses the adapted material under the
+project's license. See [third-party notices](../THIRD_PARTY_NOTICES.md).
 
 Use [product UI intent](../PRODUCT.md#modular-consistent-surfaces) for behavior, the
 [visual system](../DESIGN.md) for reusable design rules, [layout](frontend-layout.md)

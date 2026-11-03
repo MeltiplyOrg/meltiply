@@ -158,10 +158,10 @@ const emptySummary: DeliverySummary = {
 const reportingMutationLockKey = 810_000_101;
 
 /** Takes the reporting mutation lock for the rest of the transaction. */
-function lockReportingMutations(
-  client: ReportingClient,
-): Effect.Effect<void, DatabaseError> {
-  return Effect.asVoid(client.query("SELECT pg_advisory_xact_lock($1)", [reportingMutationLockKey]));
+function lockReportingMutations(client: ReportingClient): Effect.Effect<void, DatabaseError> {
+  return Effect.asVoid(
+    client.query("SELECT pg_advisory_xact_lock($1)", [reportingMutationLockKey]),
+  );
 }
 
 /**
@@ -482,9 +482,7 @@ export function createReportingServiceLive(
           }
 
           const changed =
-            current === null ||
-            wasUsage !== nextUsage ||
-            wasDiagnostics !== nextDiagnostics;
+            current === null || wasUsage !== nextUsage || wasDiagnostics !== nextDiagnostics;
           const stored: PreferencesRow = {
             diagnostics_decided_at: diagnosticsDecidedAt,
             diagnostics_disclosure_version: diagnosticsDisclosureVersion,
@@ -796,7 +794,11 @@ export function createReportingServiceLive(
                 [row.id],
               );
               const current = live.rows[0];
-              if (!current || current.state !== "leased" || current.lease_token !== row.lease_token) {
+              if (
+                !current ||
+                current.state !== "leased" ||
+                current.lease_token !== row.lease_token
+              ) {
                 return "lost" as const;
               }
               const preferences = yield* loadPreferences(client, false);

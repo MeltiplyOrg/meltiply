@@ -226,11 +226,16 @@ function ImprovementScreen({
       )}
       {!workspaceNamed && (
         <div className="space-y-2 rounded-control border border-line p-3">
-          <label htmlFor="wizard-workspace-name" className="text-(length:--font-size-control) font-medium text-ink">
+          <label
+            htmlFor="wizard-workspace-name"
+            className="text-(length:--font-size-control) font-medium text-ink"
+          >
             {t("Workspace name")}
           </label>
           <p className="text-xs leading-relaxed text-ink-2">
-            {t("Your earlier visit did not save a Workspace name yet. Confirm it to settle the shared Workspace.")}
+            {t(
+              "Your earlier visit did not save a Workspace name yet. Confirm it to settle the shared Workspace.",
+            )}
           </p>
           <div className="flex flex-col gap-2 sm:flex-row">
             <Input
@@ -295,10 +300,7 @@ function ImprovementScreen({
               >
                 {category.label}
               </label>
-              <p
-                id={`${category.id}-help`}
-                className="text-xs leading-relaxed text-ink-2"
-              >
+              <p id={`${category.id}-help`} className="text-xs leading-relaxed text-ink-2">
                 {category.description}
               </p>
               {category.status?.requested && !category.status.effective && (
@@ -310,7 +312,10 @@ function ImprovementScreen({
       </fieldset>
       <ReportingDisclosure policy={stored ?? null} />
 
-      <section aria-labelledby="wizard-feedback-heading" className="space-y-3 border-t border-line pt-5">
+      <section
+        aria-labelledby="wizard-feedback-heading"
+        className="space-y-3 border-t border-line pt-5"
+      >
         <div className="space-y-1">
           <h2
             id="wizard-feedback-heading"
@@ -369,12 +374,7 @@ function ImprovementScreen({
       </section>
 
       <div className="flex flex-col-reverse gap-2 border-t border-line pt-5 sm:flex-row sm:justify-between">
-        <Button
-          type="button"
-          variant="ghost"
-          disabled={pending}
-          onClick={() => void finish(false)}
-        >
+        <Button type="button" variant="ghost" disabled={pending} onClick={() => void finish(false)}>
           {t("Skip")}
         </Button>
         <Button type="button" disabled={pending} onClick={() => void finish(true)}>
@@ -488,7 +488,10 @@ export function OnboardingWizard({
             workspaceNamed={progress.workspace_named}
           />
         ) : (
-          <ReadyScreen onDone={(destination) => void finish(destination)} pending={complete.isPending} />
+          <ReadyScreen
+            onDone={(destination) => void finish(destination)}
+            pending={complete.isPending}
+          />
         )}
       </section>
     </main>

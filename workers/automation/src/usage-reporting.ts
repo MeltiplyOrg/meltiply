@@ -205,8 +205,7 @@ export function enqueueDailyUsageReport(
   // today's start.
   const closedDays = Array.from({ length: usageReportLookbackDays }, (_, index) => {
     const dayEnd =
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) -
-      index * dayMilliseconds;
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - index * dayMilliseconds;
     return { dayEnd, reportDate: new Date(dayEnd - dayMilliseconds).toISOString().slice(0, 10) };
   });
   return Effect.gen(function* () {

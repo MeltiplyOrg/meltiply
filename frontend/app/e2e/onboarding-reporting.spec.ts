@@ -179,12 +179,8 @@ test("resumes optional onboarding, keeps reporting off unless chosen, and withdr
     // Opt into usage only, then finish into the Workspace.
     await page.getByRole("switch", { name: "Usage statistics" }).click();
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await expect(
-      page.getByRole("heading", { name: "You're ready", exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "You're ready", exact: true }),
-    ).toBeFocused();
+    await expect(page.getByRole("heading", { name: "You're ready", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "You're ready", exact: true })).toBeFocused();
     await page.getByRole("button", { name: "Enter the Workspace", exact: true }).click();
     await page.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
     await expect(page.getByRole("heading", { name: "Posts", exact: true })).toBeVisible();
@@ -276,14 +272,10 @@ test("skips the improvement screen without opting in or transmitting", async ({ 
     await page.getByRole("combobox", { name: "Discovery source" }).click();
     await page.getByRole("option", { name: "Prefer not to say", exact: true }).click();
     await page.getByRole("button", { name: "Share feedback", exact: true }).click();
-    await expect(
-      page.getByRole("status").filter({ hasText: "Nothing was sent" }),
-    ).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Nothing was sent" })).toBeVisible();
 
     await page.getByRole("button", { name: "Skip", exact: true }).click();
-    await expect(
-      page.getByRole("heading", { name: "You're ready", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "You're ready", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Enter the Workspace", exact: true }).click();
     await page.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
 
@@ -323,9 +315,7 @@ test("resumes an interrupted journey without keeping secrets", async ({ browser 
       page.getByRole("combobox", { name: "Discovery source" }),
       "a fresh installation keeps the discovery-source control actionable",
     ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Share feedback", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Share feedback", exact: true })).toBeVisible();
     expect(
       await page.getByRole("status").filter({ hasText: "Shared" }).count(),
       "no answer was submitted, so the screen must not claim one was shared",
@@ -347,9 +337,7 @@ test("resumes an interrupted journey without keeping secrets", async ({ browser 
     // session must resume at "You're ready" rather than restarting the optional
     // improvement step.
     await page.getByRole("button", { name: "Skip", exact: true }).click();
-    await expect(
-      page.getByRole("heading", { name: "You're ready", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "You're ready", exact: true })).toBeVisible();
     await context.close();
 
     const restarted = await browser.newContext({ reducedMotion: "reduce" });
@@ -384,9 +372,7 @@ test("keeps closed registration and never forces a completed installation back i
       timeout: 30_000,
     });
     await page.goto("/settings");
-    await expect(
-      page.getByRole("heading", { name: "Help improve Meltiply" }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Help improve Meltiply" })).toHaveCount(0);
 
     // Registration is closed and the setup form never renders again.
     await context.clearCookies();

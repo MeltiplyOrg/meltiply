@@ -1731,7 +1731,10 @@ export function acceptWorkspaceInvitation(token: string, options?: ApiRequestOpt
  * @returns Effect resolving to the onboarding progress.
  */
 export function getOnboarding(options?: ApiRequestOptions) {
-  return unwrap<OnboardingProgress>((signal) => client().GET("/onboarding", { signal }), options?.signal);
+  return unwrap<OnboardingProgress>(
+    (signal) => client().GET("/onboarding", { signal }),
+    options?.signal,
+  );
 }
 
 /**
@@ -1846,7 +1849,10 @@ export function getReportingFeedback(options?: ApiRequestOptions) {
  * @param options Request options with optional idempotency key.
  * @returns Effect resolving to the attribution state, including delivery status.
  */
-export function submitReportingFeedback(input: { discovery_source: DiscoverySource }, options?: ApiRequestOptions) {
+export function submitReportingFeedback(
+  input: { discovery_source: DiscoverySource },
+  options?: ApiRequestOptions,
+) {
   return unwrap<ReportingFeedback>(
     (signal) =>
       client().POST("/installation/reporting/feedback", {

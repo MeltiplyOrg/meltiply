@@ -18,17 +18,14 @@ import { OnboardingWizard } from "./onboarding-wizard";
  * @param props.children The authenticated workspace layout.
  * @returns The wizard while onboarding is in progress, otherwise the children.
  */
-export function OnboardingGate({
-  children,
-}: {
-  children: React.ReactNode;
-}): React.ReactElement {
+export function OnboardingGate({ children }: { children: React.ReactNode }): React.ReactElement {
   const { isInstallationOwner } = useWorkspace();
   const scope = useSessionScope();
   const onboarding = useOnboarding(scope, isInstallationOwner);
 
   if (!isInstallationOwner) return <>{children}</>;
   if (onboarding.isPending) return <WorkspaceLoadingSkeleton />;
-  if (onboarding.data?.status === "in_progress") return <OnboardingWizard progress={onboarding.data} />;
+  if (onboarding.data?.status === "in_progress")
+    return <OnboardingWizard progress={onboarding.data} />;
   return <>{children}</>;
 }

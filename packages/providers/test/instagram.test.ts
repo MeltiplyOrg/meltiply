@@ -679,11 +679,6 @@ describe("ambiguous provider metrics", () => {
     // Instagram writes `metrics.get(name) ?? 0`, so a stored zero cannot be told
     // apart from an absent insight. The declaration is what lets a consumer treat
     // those zeros as unknown instead of as observed counts.
-    expect(declaration.ambiguousZeroMetrics).toEqual([
-      "views",
-      "reactions",
-      "comments",
-      "shares",
-    ]);
+    expect(declaration.ambiguousZeroMetrics).toEqual(["views", "reactions", "comments", "shares"]);
   });
 });

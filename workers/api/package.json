@@ -19,12 +19,12 @@
     "@meltiply/domain": "workspace:*",
     "@meltiply/observability": "workspace:*",
     "@meltiply/providers": "workspace:*",
+    "@meltiply/reporting": "workspace:*",
     "@meltiply/secrets": "workspace:*",
     "@meltiply/storage": "workspace:*",
     "effect": "4.0.5",
     "hono": "4.13.11",
-    "zod": "4.6.6",
-    "@meltiply/reporting": "workspace:*"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "catalog:",

@@ -9,7 +9,11 @@ import { authClient } from "@/lib/auth-client";
 import { localDevOwnerSignIn } from "@/lib/dev-sign-in";
 import { isDevMode } from "@/lib/env";
 import { useI18n } from "@/lib/i18n";
-import { clearSetupDraft, readSetupDraft, writeSetupDraft } from "@/components/onboarding/setup-draft";
+import {
+  clearSetupDraft,
+  readSetupDraft,
+  writeSetupDraft,
+} from "@/components/onboarding/setup-draft";
 
 export interface SignInFormProps {
   onSuccess?: () => void;
@@ -95,7 +99,11 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
   // written, so a reload cannot recover a credential from browser storage.
   useEffect(() => {
     if (mode !== "setup") return;
-    writeSetupDraft({ email, name, workspaceName: workspaceNameTouched.current ? workspaceName : "" });
+    writeSetupDraft({
+      email,
+      name,
+      workspaceName: workspaceNameTouched.current ? workspaceName : "",
+    });
   }, [email, mode, name, workspaceName]);
 
   const complete = () => {

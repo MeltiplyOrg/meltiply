@@ -179,8 +179,7 @@ export function workflowDiagnosticReport(
   cause: unknown,
   context: { readonly outcome: "ambiguous" | "rejected" | "retry"; readonly provider?: string },
 ): DiagnosticReportInput {
-  const failureClass =
-    context.outcome === "ambiguous" ? "ambiguous" : providerFailureClass(cause);
+  const failureClass = context.outcome === "ambiguous" ? "ambiguous" : providerFailureClass(cause);
   return diagnosticReportInput(cause, {
     ...(failureClass ? { category: "provider_failure" as const, failureClass } : {}),
     handled: true,
@@ -228,7 +227,10 @@ export function recordDiagnostic(
       yield* service.deliverPending({ limit: REPORTING_MAX_DELIVERY_BATCH });
       return true;
     }),
-  ).pipe(Effect.provide(layer), Effect.catchCause(() => Effect.succeed(false)));
+  ).pipe(
+    Effect.provide(layer),
+    Effect.catchCause(() => Effect.succeed(false)),
+  );
 }
 
 /**

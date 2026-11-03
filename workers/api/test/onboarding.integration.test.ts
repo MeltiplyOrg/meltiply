@@ -1059,9 +1059,7 @@ describe("onboarding completion and save ordering", () => {
     // commits second is refused. Either way completion is terminal.
     expect([200, 409]).toContain(saved.status);
     expect(completed.status).toBe(200);
-    const progress = await progressOf(
-      await onboardingRequest(app, token, "", { method: "GET" }),
-    );
+    const progress = await progressOf(await onboardingRequest(app, token, "", { method: "GET" }));
     expect(progress.status).toBe("completed");
     expect(progress.completed_at).not.toBeNull();
   });

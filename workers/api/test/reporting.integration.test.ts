@@ -1204,9 +1204,7 @@ describe("disclosure-version enforcement over real HTTP", () => {
     const stored = await systemPoolFor(env).query<{
       usage_decided_at: Date;
       usage_disclosure_version: number;
-    }>(
-      "SELECT usage_disclosure_version, usage_decided_at FROM reporting_preferences WHERE id",
-    );
+    }>("SELECT usage_disclosure_version, usage_decided_at FROM reporting_preferences WHERE id");
     expect(stored.rows[0]!.usage_disclosure_version).toBe(3);
     expect(new Date(stored.rows[0]!.usage_decided_at).toISOString()).toBe(
       "2026-01-01T00:00:00.000Z",

@@ -639,8 +639,7 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
     saveOnboarding: (input, options) => saveOnboarding(input, options),
     completeOnboarding: (options) => completeOnboarding(options),
     getReportingPolicy: (options) => getReportingPolicy(options),
-    updateReportingPreferences: (input, options) =>
-      updateReportingPreferences(input, options),
+    updateReportingPreferences: (input, options) => updateReportingPreferences(input, options),
     getReportingFeedback: (options) => getReportingFeedback(options),
     submitReportingFeedback: (input, options) => submitReportingFeedback(input, options),
   },

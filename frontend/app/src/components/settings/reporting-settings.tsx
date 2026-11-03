@@ -68,9 +68,7 @@ export function ReportingSettings(): React.ReactElement {
         </Alert>
       )}
       <div className="space-y-1">
-        <h2 className="text-(length:--font-size-ui) font-semibold">
-          {t("Improvement reporting")}
-        </h2>
+        <h2 className="text-(length:--font-size-ui) font-semibold">{t("Improvement reporting")}</h2>
         <p className="text-xs leading-relaxed text-ink-2">
           {isInstallationOwner
             ? t(
@@ -120,10 +118,7 @@ export function ReportingSettings(): React.ReactElement {
               >
                 {category.label}
               </label>
-              <p
-                id={`${category.id}-help`}
-                className="text-xs leading-relaxed text-ink-2"
-              >
+              <p id={`${category.id}-help`} className="text-xs leading-relaxed text-ink-2">
                 {category.description}
               </p>
             </div>

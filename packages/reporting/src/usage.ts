@@ -113,9 +113,7 @@ export function recordPublicationUsage(
     const observedAt = options.now
       ? options.now()
       : yield* Effect.map(
-          client.query<{ observed_at: Date | string }>(
-            "SELECT clock_timestamp() AS observed_at",
-          ),
+          client.query<{ observed_at: Date | string }>("SELECT clock_timestamp() AS observed_at"),
           (result) => new Date(result.rows[0]?.observed_at ?? Date.now()),
         );
     // An unrepresentable instant is not a measurement; the caller still commits.
@@ -139,11 +137,7 @@ export function recordPublicationUsage(
       yield* client.query(`RELEASE SAVEPOINT ${measurementSavepoint}`);
       return "already_counted" as const;
     }
-    const policy = categoryStatus(
-      yield* loadPreferences(client, false),
-      "usage",
-      configuration,
-    );
+    const policy = categoryStatus(yield* loadPreferences(client, false), "usage", configuration);
     const intervalStartedAt = policy.intervalStartedAt;
     const insideEnabledInterval =
       policy.effective &&
@@ -214,9 +208,8 @@ export function recordPublicationUsage(
     // statements are undone.
     Effect.catch(() =>
       Effect.as(
-        Effect.catch(
-          client.query(`ROLLBACK TO SAVEPOINT ${measurementSavepoint}`),
-          () => Effect.succeed(undefined),
+        Effect.catch(client.query(`ROLLBACK TO SAVEPOINT ${measurementSavepoint}`), () =>
+          Effect.succeed(undefined),
         ),
         "unavailable" as const,
       ),

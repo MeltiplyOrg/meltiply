@@ -160,7 +160,9 @@ export function isOperationCategory(value: unknown): value is OperationCategory 
 
 /** Narrows untrusted input to one of the canonical Provider failure classes. */
 export function isProviderFailureClass(value: unknown): value is ProviderFailureClass {
-  return typeof value === "string" && (PROVIDER_FAILURE_CLASSES as readonly string[]).includes(value);
+  return (
+    typeof value === "string" && (PROVIDER_FAILURE_CLASSES as readonly string[]).includes(value)
+  );
 }
 
 /** Narrows untrusted input to a supported Platform identifier. */

@@ -17,10 +17,10 @@
     "@meltiply/domain": "workspace:*",
     "@meltiply/observability": "workspace:*",
     "@meltiply/providers": "workspace:*",
+    "@meltiply/reporting": "workspace:*",
     "@meltiply/secrets": "workspace:*",
     "@meltiply/storage": "workspace:*",
-    "effect": "4.0.5",
-    "@meltiply/reporting": "workspace:*"
+    "effect": "4.0.5"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "catalog:",

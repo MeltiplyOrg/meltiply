@@ -164,9 +164,9 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     // The reached screen is durable: a reload resumes "You're ready" rather than
     // restarting the optional improvement step.
     await page.reload();
-    await expect(
-      page.getByRole("heading", { name: "You're ready", exact: true }),
-    ).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "You're ready", exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
     await page.getByRole("button", { name: "Enter the Workspace", exact: true }).click();
     await page.waitForURL(/\/posts/);
     await expect(page.getByRole("heading", { name: "Posts", exact: true })).toBeVisible();

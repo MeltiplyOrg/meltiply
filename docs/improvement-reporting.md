@@ -36,18 +36,18 @@ the send rather than leaking.
 Event `meltiply_usage_daily`, one per installation per reporting interval per UTC
 day, with `distinct_id` equal to the installation's random reporting identifier.
 
-| Property                     | Meaning                                                                                                                                        |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema_version`             | Payload schema version, currently `1`.                                                                                                         |
-| `report_date`                | UTC day the counters cover, `YYYY-MM-DD`.                                                                                                      |
-| `app_version`                | Bounded application version string.                                                                                                            |
-| `deployment_category`        | `managed`, `selfhosted`, or `unknown`.                                                                                                         |
-| `channels`                   | Connected Channels per Platform at report time, keyed by Platform.                                                                             |
-| `publications.posts`         | Confirmed successful Posts in this UTC day. A Post counts once, on its first Distribution confirmed published.                                  |
-| `publications.distributions` | Confirmed successful Distributions per Platform in this UTC day.                                                                               |
-| `engagement`                 | Per Platform `{views, reactions, comments, shares, distributions, as_of}` from the latest eligible stored Provider snapshot per Distribution.   |
-| `engagement_as_of`           | Newest snapshot capture time across every per-Platform gauge.                                                                                   |
-| `engagement_coverage`        | `{measured, missing, truncated, unsupported_metrics}` Distribution counts and metric omissions, so partial or bounded coverage is visible.      |
+| Property                     | Meaning                                                                                                                                       |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema_version`             | Payload schema version, currently `1`.                                                                                                        |
+| `report_date`                | UTC day the counters cover, `YYYY-MM-DD`.                                                                                                     |
+| `app_version`                | Bounded application version string.                                                                                                           |
+| `deployment_category`        | `managed`, `selfhosted`, or `unknown`.                                                                                                        |
+| `channels`                   | Connected Channels per Platform at report time, keyed by Platform.                                                                            |
+| `publications.posts`         | Confirmed successful Posts in this UTC day. A Post counts once, on its first Distribution confirmed published.                                |
+| `publications.distributions` | Confirmed successful Distributions per Platform in this UTC day.                                                                              |
+| `engagement`                 | Per Platform `{views, reactions, comments, shares, distributions, as_of}` from the latest eligible stored Provider snapshot per Distribution. |
+| `engagement_as_of`           | Newest snapshot capture time across every per-Platform gauge.                                                                                 |
+| `engagement_coverage`        | `{measured, missing, truncated, unsupported_metrics}` Distribution counts and metric omissions, so partial or bounded coverage is visible.    |
 
 Only closed UTC days are reported: the immediate previous day always, and up to
 six earlier days when they carry confirmed publications. An open day is never

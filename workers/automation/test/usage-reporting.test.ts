@@ -117,7 +117,10 @@ describe("usage reporting scheduled wiring", () => {
     );
 
     await expect(
-      runScheduled(dependencies({ deliverImprovementReports, enqueueDailyUsageReport }), "0 0 * * *"),
+      runScheduled(
+        dependencies({ deliverImprovementReports, enqueueDailyUsageReport }),
+        "0 0 * * *",
+      ),
     ).rejects.toThrow();
     expect(deliverImprovementReports).toHaveBeenCalled();
     error.mockRestore();

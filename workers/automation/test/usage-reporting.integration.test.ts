@@ -702,7 +702,9 @@ describe("usage publication measurement with PostgreSQL", () => {
     );
     const reports = await queuedUsageReports();
     const threadReport = reports.find(
-      (row) => Object.keys(payloadSection(payloadSection(row.payload.publications).distributions)).length > 0,
+      (row) =>
+        Object.keys(payloadSection(payloadSection(row.payload.publications).distributions)).length >
+        0,
     );
     const posts = payloadSection(threadReport!.payload.publications).posts;
     expect(posts).toBe(0);
@@ -755,10 +757,14 @@ describe("usage publication measurement with PostgreSQL", () => {
     const forcedOff: AutomationEnv = { ...env, REPORTING_FORCED_OFF: "true" };
 
     await Effect.runPromise(
-      processDistributionMessage(forcedOff, publishMessage("usage-forceoff", youtubeDistributionId), {
-        decryptToken: async (stored) => stored,
-        providerRegistry: publishRegistry("youtube"),
-      }),
+      processDistributionMessage(
+        forcedOff,
+        publishMessage("usage-forceoff", youtubeDistributionId),
+        {
+          decryptToken: async (stored) => stored,
+          providerRegistry: publishRegistry("youtube"),
+        },
+      ),
     );
 
     // Operator policy outranks the saved choice, so no aggregate advanced.

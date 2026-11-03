@@ -373,11 +373,7 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
           : null;
         if (name === null && step === null) {
           return yield* Effect.fail(
-            new CoreApiError(
-              400,
-              "validation_error",
-              "Provide `workspace_name`, `step`, or both.",
-            ),
+            new CoreApiError(400, "validation_error", "Provide `workspace_name`, `step`, or both."),
           );
         }
         const key = yield* fromPromise(() => idempotencyKey(c));

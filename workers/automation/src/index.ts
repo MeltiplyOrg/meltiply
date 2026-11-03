@@ -47,6 +47,7 @@ import {
 import { flowDatabaseAvailable, flowExplorerEnabled, flowRecorderFor } from "./flow-observability";
 import type { OutboxRelayResult } from "./outbox";
 import type { ProviderDueResult } from "./provider-sync";
+import type { DeliverySummary } from "@meltiply/reporting";
 import type { RetentionResult } from "./retention";
 
 /**
@@ -225,6 +226,8 @@ export interface AutomationDependencies {
   sweepProviderDue?: (env: AutomationEnv) => Effect.Effect<ProviderDueResult, unknown>;
   enqueueDueReplyReconciliations?: (env: AutomationEnv) => Effect.Effect<number, unknown>;
   runRetention?: (env: AutomationEnv) => Effect.Effect<RetentionResult, unknown>;
+  /** Overrides the daily bounded improvement-reporting delivery pass for tests. */
+  deliverImprovementReports?: (env: AutomationEnv) => Effect.Effect<DeliverySummary, unknown>;
   providerSyncProcessor?: (
     env: AutomationEnv,
     message: ProviderSyncMessage,
@@ -254,6 +257,7 @@ type ScheduledWorkName =
   | "outbox-relay"
   | "provider-sync-sweep"
   | "reply-reconciliation"
+  | "improvement-reporting-delivery"
   | "retention";
 
 interface ScheduledWorkUnit {
@@ -786,6 +790,28 @@ export function createAutomationHandler(
                 try: () => import("./retention"),
               }),
               (module) => module.runRetention(env),
+            ),
+      tier: "daily",
+    },
+    {
+      // Best-effort maintainer reporting drains its own bounded queue. It never
+      // computes measurements and never touches publishing, so a PostHog outage
+      // or a disabled category leaves domain retry/DLQ behavior untouched.
+      empty: { claimed: 0, delivered: 0, discarded: 0, failed: 0, skipped: 0 },
+      field: "reporting",
+      name: "improvement-reporting-delivery",
+      run: dependencies.deliverImprovementReports
+        ? (env) =>
+            Effect.suspend(() => dependencies.deliverImprovementReports!(env)).pipe(
+              Effect.mapError((cause) => classifyJobError(cause)),
+            )
+        : (env) =>
+            Effect.flatMap(
+              Effect.tryPromise({
+                catch: (cause) => classifyJobError(cause),
+                try: () => import("./improvement-reporting"),
+              }),
+              (module) => module.deliverImprovementReports(env),
             ),
       tier: "daily",
     },

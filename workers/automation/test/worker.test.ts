@@ -461,6 +461,10 @@ describe("Automation Worker foundation", () => {
           calls.push("retention");
           return { deleted: 0, errors: 0 };
         }),
+      // Improvement reporting is delivered best-effort and must not reach a
+      // transport from these unit cases; the dedicated suite covers it.
+      deliverImprovementReports: () =>
+        Effect.succeed({ claimed: 0, delivered: 0, discarded: 0, failed: 0, skipped: 0 }),
     });
 
     await expect(
@@ -539,6 +543,10 @@ describe("Automation Worker foundation", () => {
         }),
       ),
       runRetention,
+      // Improvement reporting is delivered best-effort and must not reach a
+      // transport from these unit cases; the dedicated suite covers it.
+      deliverImprovementReports: () =>
+        Effect.succeed({ claimed: 0, delivered: 0, discarded: 0, failed: 0, skipped: 0 }),
     });
     await expect(
       handler.scheduled?.(

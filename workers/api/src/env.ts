@@ -36,6 +36,8 @@ export interface ApiWorkerEnv {
   BETTER_AUTH_JWKS_URL?: string;
   /** Standalone workerd owns sockets per request; omitted keeps managed pool reuse. */
   DATABASE_POOL_MODE?: "request";
+  /** Coarse deployment category reported with opt-in improvement events. */
+  DEPLOYMENT_CATEGORY?: string;
   DB_AUTHENTICATED?: Hyperdrive;
   DB_SYSTEM?: Hyperdrive;
   ENVIRONMENT: "local" | "preview" | "staging" | "test";
@@ -48,6 +50,12 @@ export interface ApiWorkerEnv {
   MAIL_FROM_NAME?: string;
   /** `"false"` allows the owner to sign in before email verification; omitted keeps the deployed default. */
   REQUIRE_EMAIL_VERIFICATION?: string;
+  /** Operator force-off for optional improvement reporting; `"true"` outranks a saved choice. */
+  REPORTING_FORCED_OFF?: string;
+  /** Maintainer PostHog ingestion origin; absent or unusable disables optional reporting. */
+  REPORTING_POSTHOG_HOST?: string;
+  /** Maintainer PostHog publishable project token; ingestion needs no personal API key. */
+  REPORTING_POSTHOG_PROJECT_TOKEN?: string;
   INSTAGRAM_CLIENT_ID?: string;
   INSTAGRAM_CLIENT_SECRET?: string;
   INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED?: string;

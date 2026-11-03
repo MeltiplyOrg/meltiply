@@ -125,6 +125,26 @@ fixtures:
     members_active: 3
     invitations_pending: 1
     workspace: *workspace
+  reporting_category_off: &reporting_category_off
+    requested: false
+    effective: false
+    reason: not_requested
+    decision_at: null
+    interval_started_at: null
+  reporting_policy: &reporting_policy
+    disclosure_version: 1
+    destination_configured: true
+    operator_forced_off: false
+    owner_can_change: true
+    installation_reporting_id: 00000000-0000-4000-8000-000000000041
+    categories:
+      usage: *reporting_category_off
+      diagnostics: *reporting_category_off
+  reporting_feedback: &reporting_feedback
+    shared: true
+    discovery_source: github
+    submitted_at: "2026-01-02T03:04:05.000Z"
+    delivery_status: pending
   audit_entry: &audit_entry
     id: 00000000-0000-4000-8000-000000000701
     actor:
@@ -805,6 +825,94 @@ operations:
         body: *forbidden_error
       - status: 409
         body: *invalid_state_error
+  getReportingPolicy:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: *reporting_policy
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+  updateReportingPreferences:
+    headers: *bearer_authorization
+    request:
+      usage: true
+      diagnostics: false
+    success:
+      status: 200
+      body:
+        <<: *reporting_policy
+        categories:
+          usage:
+            requested: true
+            effective: true
+            reason: enabled
+            decision_at: "2026-01-02T03:04:05.000Z"
+            interval_started_at: "2026-01-02T03:04:05.000Z"
+          diagnostics:
+            <<: *reporting_category_off
+    errors:
+      - status: 400
+        body: *invalid_request_error
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 409
+        body: *invalid_state_error
+      - status: 429
+        body: *rate_limited_error
+  getReportingFeedback:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: *reporting_feedback
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+  submitReportingFeedback:
+    headers: *bearer_authorization
+    request:
+      discovery_source: github
+    success:
+      status: 200
+      body: *reporting_feedback
+    errors:
+      - status: 400
+        body: *invalid_request_error
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 409
+        body: *invalid_state_error
+      - status: 429
+        body: *rate_limited_error
+  ingestDiagnosticReport:
+    headers: *bearer_authorization
+    request:
+      category: request_failure
+      operation: publish
+      platform: threads
+      error_name: TypeError
+      error_stack: |
+        at publishDistributions (workers/automation/src/distribution.ts:42:7)
+    success:
+      status: 202
+      body:
+        accepted: true
+        reason: queued
+    errors:
+      - status: 400
+        body: *invalid_request_error
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
   listWorkspaceAudit:
     headers: *bearer_authorization
     success:

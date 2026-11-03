@@ -42,6 +42,7 @@ import {
   registerFlowRoutes,
 } from "./flow-observability";
 import { registerInstallationRoutes } from "./installation-routes";
+import { registerReportingRoutes, type ReportingRouteDependencies } from "./reporting-routes";
 import { registerOperatorRoutes, type OperatorRouteDependencies } from "./operator-routes";
 import { scheduleEagerOutboxRelay } from "./outbox-relay";
 import { Effect, type Layer } from "effect";
@@ -60,6 +61,8 @@ export interface ApiDependencies extends CoreRouteDependencies, OperatorRouteDep
   ) => Promise<AuthRateLimitResult>;
   betterAuth?: BetterAuthInstance | ((env: ApiWorkerEnv) => BetterAuthInstance);
   currentUserServiceLayer?: Layer.Layer<CurrentUserService, never, never>;
+  /** Overrides the live improvement-reporting layer (tests, alternate transports). */
+  reportingServiceLayer?: ReportingRouteDependencies["reportingServiceLayer"];
   loadCurrentUser?: (env: ApiWorkerEnv, claims: SessionClaims) => Promise<UserProfile | null>;
   resolveActor?: (
     env: ApiWorkerEnv,
@@ -405,7 +408,9 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
           "Access-Control-Allow-Headers",
           "Authorization, Content-Type, X-Request-ID, X-Workspace-ID, X-Setup-Secret, X-Invitation-Token, Idempotency-Key, If-None-Match",
         );
-        c.header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
+        // PUT is the reporting-preference verb; omitting it would fail a
+        // cross-origin preflight for the only PUT operation in the contract.
+        c.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
         c.header("Access-Control-Max-Age", "600");
         return c.body(null, 204);
       }
@@ -799,6 +804,9 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
 
   registerCoreRoutes(app, dependencies);
   registerInstallationRoutes(app);
+  registerReportingRoutes(app, {
+    reportingServiceLayer: dependencies.reportingServiceLayer,
+  });
   registerOperatorRoutes(app, dependencies);
   registerFlowRoutes(app);
 

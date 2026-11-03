@@ -48,7 +48,10 @@ const installationReportingId = "3a5b7c1d-0e22-4f4b-8f11-2a5b7c1d0e33";
 
 const env = {
   DB_AUTHENTICATED: { connectionString } as Hyperdrive,
-  DB_SYSTEM: { connectionString } as Hyperdrive,
+  DB_SYSTEM: {
+    connectionString:
+      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+  } as Hyperdrive,
   DEPLOYMENT_CATEGORY: "selfhosted",
   ENVIRONMENT: "test",
   REPORTING_FORCED_OFF: undefined,
@@ -203,8 +206,8 @@ describe("operator-confirmed publication measurement", () => {
 
   it("keeps the domain resolution committed when reporting is unavailable", async () => {
     await enableUsage(new Date(Date.now() - 60 * 60 * 1_000));
-    // Drop the aggregate table so the measurement's savepoint rolls back.
-    await systemPoolFor(env).query(
+    // Hide the aggregate table so the measurement's savepoint rolls back.
+    await adminPool.query(
       "ALTER TABLE reporting_publication_daily RENAME TO reporting_publication_daily_hidden",
     );
     try {
@@ -217,7 +220,7 @@ describe("operator-confirmed publication measurement", () => {
       );
       expect(distribution.rows[0]!.status).toBe("published");
     } finally {
-      await systemPoolFor(env).query(
+      await adminPool.query(
         "ALTER TABLE reporting_publication_daily_hidden RENAME TO reporting_publication_daily",
       );
     }

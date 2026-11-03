@@ -134,11 +134,11 @@ jobs:
           bun build scripts/selfhost/requirements-cache-check.ts --target=node --external miniflare --external pg --outfile=scripts/selfhost/.requirements-cache-check.mjs
       - name: Exercise application, email, storage, jobs, workflows, and crash recovery
         run: node scripts/selfhost/smoke.mjs
-      - name: Preserve credential-free browser and cache observations
+      - name: Preserve credential-free browser observations and cache measurements
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: owner-login-${{ matrix.platform.arch }}
+          name: selfhost-optional-surfaces-${{ matrix.platform.arch }}
           path: |
             artifacts/selfhost/*.png
             artifacts/cache/

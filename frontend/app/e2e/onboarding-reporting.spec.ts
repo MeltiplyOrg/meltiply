@@ -55,13 +55,17 @@ async function startEgressReceiver(): Promise<{
     });
   });
   const listening = Promise.withResolvers<void>();
-  server.once("error", listening.reject);
+  // The listener reports a Node error, whose message is what a rejection needs;
+  // passing the error object directly does not satisfy the promise reject type.
+  server.once("error", (cause) => listening.reject(cause));
   server.listen(Number(new URL(egressUrl).port), new URL(egressUrl).hostname, listening.resolve);
   await listening.promise;
   return {
     close: () => {
       const closed = Promise.withResolvers<void>();
-      server.close(closed.resolve);
+      // `close` invokes its callback with an optional error, which must be
+      // discarded so the resolver keeps the promise's void shape.
+      server.close(() => closed.resolve());
       return closed.promise;
     },
     events,
@@ -312,22 +316,53 @@ test("resumes an interrupted journey without keeping secrets", async ({ browser 
       "no password or setup secret may be stored",
     ).not.toMatch(new RegExp(password));
 
+    // Reading the improvement screen must not hide the acquisition controls: the
+    // feedback read always resolves to a shape, so only a recorded answer may
+    // replace the selector.
+    await expect(
+      page.getByRole("combobox", { name: "Discovery source" }),
+      "a fresh installation keeps the discovery-source control actionable",
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Share feedback", exact: true }),
+    ).toBeVisible();
+    expect(
+      await page.getByRole("status").filter({ hasText: "Shared" }).count(),
+      "no answer was submitted, so the screen must not claim one was shared",
+    ).toBe(0);
+
     await page.reload();
     await expect(
       page.getByRole("heading", { name: "Help improve Meltiply", exact: true }),
     ).toBeVisible({ timeout: 30_000 });
+    await expect(
+      page.getByRole("combobox", { name: "Discovery source" }),
+      "a reload must still offer the unanswered question",
+    ).toBeVisible();
 
     await page.getByRole("button", { name: "Account menu", exact: true }).count();
+
+    // Advance to the final screen without completing, then close the browser
+    // entirely: the reached screen is durable installation state, so the new
+    // session must resume at "You're ready" rather than restarting the optional
+    // improvement step.
+    await page.getByRole("button", { name: "Skip", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "You're ready", exact: true }),
+    ).toBeVisible();
     await context.close();
 
-    // A new browser context is a full restart: the journey is still resumable
-    // because progress lives in the installation, not the browser.
     const restarted = await browser.newContext({ reducedMotion: "reduce" });
     const restartedPage = await restarted.newPage();
     await signIn(restartedPage);
     await expect(
-      restartedPage.getByRole("heading", { name: "Help improve Meltiply", exact: true }),
+      restartedPage.getByRole("heading", { name: "You're ready", exact: true }),
     ).toBeVisible({ timeout: 30_000 });
+    // The improvement screen must not reappear, and neither category was enabled
+    // by the skip.
+    await expect(
+      restartedPage.getByRole("heading", { name: "Help improve Meltiply", exact: true }),
+    ).toHaveCount(0);
     await restarted.close();
   } finally {
     runInstallationFixture("complete");

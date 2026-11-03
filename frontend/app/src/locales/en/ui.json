@@ -1025,7 +1025,6 @@
   "Reports go to PostHog Cloud, operated by the Meltiply maintainer. Participating installations share one random installation identifier, so reports can be linked over time: they are pseudonymous, not completely anonymous.": "Reports go to PostHog Cloud, operated by the Meltiply maintainer. Participating installations share one random installation identifier, so reports can be linked over time: they are pseudonymous, not completely anonymous.",
   "Requested": "Requested",
   "Review what this installation shares with the Meltiply maintainer and who decides it.": "Review what this installation shares with the Meltiply maintainer and who decides it.",
-  "Sanitized unexpected application failures, grouped so the maintainer can fix them.": "Sanitized unexpected application failures, grouped so the maintainer can fix them.",
   "Save reporting choices": "Save reporting choices",
   "Saved on this installation, but no report was queued.": "Saved on this installation, but no report was queued.",
   "Saved on this installation. Nothing was sent.": "Saved on this installation. Nothing was sent.",
@@ -1047,7 +1046,6 @@
   "The saved choice could not be read, so nothing is sent.": "The saved choice could not be read, so nothing is sent.",
   "This deployment has no reporting destination configured, so nothing can be sent yet. Your choices are saved and take effect if a destination is configured.": "This deployment has no reporting destination configured, so nothing can be sent yet. Your choices are saved and take effect if a destination is configured.",
   "This deployment has no reporting destination configured.": "This deployment has no reporting destination configured.",
-  "Unexpected application failures with the operation category, app version, and sanitized stack frames. Expected Provider conditions such as expired authorization and rate limits are excluded.": "Unexpected application failures with the operation category, app version, and sanitized stack frames. Expected Provider conditions such as expired authorization and rate limits are excluded.",
   "Usage statistics": "Usage statistics",
   "Usage statistics and diagnostic reports": "Usage statistics and diagnostic reports",
   "You are the Installation Owner, so you decide what this installation shares. Both reports start off.": "You are the Installation Owner, so you decide what this installation shares. Both reports start off.",
@@ -1056,5 +1054,7 @@
   "Your choices could not be saved. Try again.": "Your choices could not be saved. Try again.",
   "{name}'s workspace": "{name}'s workspace",
   "Discovery source": "Discovery source",
-  "Your earlier visit did not save a Workspace name yet. Confirm it to settle the shared Workspace.": "Your earlier visit did not save a Workspace name yet. Confirm it to settle the shared Workspace."
+  "Your earlier visit did not save a Workspace name yet. Confirm it to settle the shared Workspace.": "Your earlier visit did not save a Workspace name yet. Confirm it to settle the shared Workspace.",
+  "Unexpected application failures with the operation category, app version, and sanitized release locations. Expected Provider conditions — expired authorization, rate limits, quotas, timeouts, and unconfirmed outcomes — are reported separately with their class, so they never mix with application defects. No message text, content, name, or identifier is included.": "Unexpected application failures with the operation category, app version, and sanitized release locations. Expected Provider conditions — expired authorization, rate limits, quotas, timeouts, and unconfirmed outcomes — are reported separately with their class, so they never mix with application defects. No message text, content, name, or identifier is included.",
+  "Unexpected application failures with the operation category and sanitized release locations, plus expected Provider conditions such as expired authorization and rate limits reported separately with their class. No message text, content, name, or identifier is included.": "Unexpected application failures with the operation category and sanitized release locations, plus expected Provider conditions such as expired authorization and rate limits reported separately with their class. No message text, content, name, or identifier is included."
 }

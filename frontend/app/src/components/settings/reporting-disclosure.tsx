@@ -103,7 +103,7 @@ export function ReportingDisclosure({
             },
             {
               description: t(
-                "Unexpected application failures with the operation category, app version, and sanitized stack frames. Expected Provider conditions such as expired authorization and rate limits are excluded.",
+                "Unexpected application failures with the operation category, app version, and sanitized release locations. Expected Provider conditions — expired authorization, rate limits, quotas, timeouts, and unconfirmed outcomes — are reported separately with their class, so they never mix with application defects. No message text, content, name, or identifier is included.",
               ),
               label: t("Diagnostic reports"),
               status: policy?.categories.diagnostics ?? null,

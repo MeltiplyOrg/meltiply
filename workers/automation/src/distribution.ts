@@ -16,9 +16,15 @@ import {
   type PlatformCapability,
 } from "@meltiply/domain";
 import type { EffectTransactionClient } from "@meltiply/database";
-import { recordPublicationUsage, reportingConfiguration } from "@meltiply/reporting";
+import {
+  isPlatform,
+  isProviderFailureClass,
+  recordPublicationUsage,
+  reportingConfiguration,
+} from "@meltiply/reporting";
 
 import { withSystemTransactionEffect } from "./database";
+import { recordDiagnostic } from "./diagnostic-reporting";
 import { classifyJobError, RetryableJobError, type AutomationJobError } from "./effect/index";
 import {
   executeProviderCancelEffect,
@@ -1087,6 +1093,46 @@ async function dispatchInitialEngagementTriggers(
 }
 
 /**
+ * Reports one normalized Provider failure that was actually committed.
+ *
+ * The publish executor catches adapter errors into `confirmed_failure`/`unknown`
+ * result values, so the queue boundary sees a successful Effect and its
+ * rejected/retry reporting branches never run for these ordinary conditions.
+ * Reading the committed result here — after the outcome transaction, once per
+ * message rather than once per Provider attempt — is what makes "expired
+ * authorization" and "rate limited" countable without counting failed Posts.
+ *
+ * Confirmed successes and skipped work produce nothing. The call is
+ * fire-and-forget on the job's own lifecycle: it never fails the program it
+ * instruments, and it cannot change the retry/DLQ decision already recorded.
+ *
+ * @param env - Automation worker environment bindings.
+ * @param row - Distribution the attempt belonged to; supplies the Platform.
+ * @param execution - Normalized Provider outcome that was just persisted.
+ * @returns Effect that never fails.
+ */
+function reportCommittedProviderFailure(
+  env: AutomationEnv,
+  row: { platform: string },
+  execution: DistributionPublishExecution,
+): Effect.Effect<void> {
+  const { result } = execution;
+  if (result.outcome === "confirmed_success") return Effect.void;
+  const classification = result.failure.classification;
+  if (!isProviderFailureClass(classification)) return Effect.void;
+  const platform = isPlatform(row.platform) ? row.platform : undefined;
+  return recordDiagnostic(env, {
+    category: "provider_failure",
+    failureClass: classification,
+    error: { name: "ProviderAdapterError" },
+    handled: true,
+    occurredAt: new Date().toISOString(),
+    operation: "publish",
+    ...(platform === undefined ? {} : { platform }),
+  }).pipe(Effect.asVoid);
+}
+
+/**
  * Records the results of a publication attempt in provider operations and distributions tables.
  *
  * Updates distribution status (published, awaiting_provider, failed, or needs_reconciliation),
@@ -1164,12 +1210,13 @@ function recordPublishOutcome(
         const updated = yield* client.query<{
           analytics_event_id: string | null;
           comments_event_id: string | null;
+          published_at: Date | string | null;
           reconciliation_attempt_count: number;
           status: string;
         }>(
           `UPDATE distributions
        SET status = CASE
-             WHEN $2 = 'published' THEN 'published'
+             WHEN  = 'published' THEN 'published'
              WHEN status = 'processing' THEN $2
              ELSE status
            END,
@@ -1259,7 +1306,6 @@ function recordPublishOutcome(
           yield* recordPublicationUsage(
             client,
             {
-              confirmedAt: new Date(updatedRow.published_at ?? new Date()),
               distributionId: row.id,
               platform: row.platform,
               postId: row.post_id,
@@ -1771,7 +1817,6 @@ function recordReconciliationOutcome(
           yield* recordPublicationUsage(
             client,
             {
-              confirmedAt: new Date(updatedRow.published_at ?? new Date()),
               distributionId: row.id,
               platform: row.platform,
               postId: row.post_id,
@@ -2073,6 +2118,13 @@ export function processDistributionMessage(
       dependencies.random ?? Math.random,
       transaction,
     ).pipe(Effect.mapError(classifyJobError));
+    // The publish executor normalizes Provider failures into result *values*:
+    // `executeProviderPublishEffect` never fails, so the queue boundary's Exit is
+    // a success and its rejected/retry reporting branches are never reached for
+    // an ordinary expired authorization or rate limit. This is the canonical
+    // outcome seam, so that is where a categorized fact is produced — once per
+    // committed outcome, not once per Provider attempt.
+    yield* reportCommittedProviderFailure(env, row, execution);
     return "processed" as const;
   });
 }

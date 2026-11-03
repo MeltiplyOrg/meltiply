@@ -1025,7 +1025,6 @@
   "Reports go to PostHog Cloud, operated by the Meltiply maintainer. Participating installations share one random installation identifier, so reports can be linked over time: they are pseudonymous, not completely anonymous.": "I rapporti vanno a PostHog Cloud, gestito dal maintainer di Meltiply. Le installazioni partecipanti condividono un identificatore casuale dell’installazione, quindi i rapporti possono essere collegati nel tempo: sono pseudonimi, non del tutto anonimi.",
   "Requested": "Richiesto",
   "Review what this installation shares with the Meltiply maintainer and who decides it.": "Controlla cosa condivide questa installazione con il maintainer di Meltiply e chi lo decide.",
-  "Sanitized unexpected application failures, grouped so the maintainer can fix them.": "Errori imprevisti dell’applicazione, ripuliti e raggruppati perché il maintainer possa correggerli.",
   "Save reporting choices": "Salva le scelte dei rapporti",
   "Saved on this installation, but no report was queued.": "Salvato su questa installazione, ma nessun rapporto è stato messo in coda.",
   "Saved on this installation. Nothing was sent.": "Salvato su questa installazione. Non è stato inviato nulla.",
@@ -1047,7 +1046,6 @@
   "The saved choice could not be read, so nothing is sent.": "Non è stato possibile leggere la scelta salvata, quindi non viene inviato nulla.",
   "This deployment has no reporting destination configured, so nothing can be sent yet. Your choices are saved and take effect if a destination is configured.": "Questo deployment non ha una destinazione dei rapporti configurata, quindi non è ancora possibile inviare nulla. Le tue scelte vengono salvate e avranno effetto se viene configurata una destinazione.",
   "This deployment has no reporting destination configured.": "Questo deployment non ha una destinazione dei rapporti configurata.",
-  "Unexpected application failures with the operation category, app version, and sanitized stack frames. Expected Provider conditions such as expired authorization and rate limits are excluded.": "Errori imprevisti dell’applicazione con categoria dell’operazione, versione dell’app e frame dello stack ripuliti. Sono esclusi i casi attesi del provider, come autorizzazione scaduta e limiti di frequenza.",
   "Usage statistics": "Statistiche di utilizzo",
   "Usage statistics and diagnostic reports": "Statistiche di utilizzo e rapporti di diagnostica",
   "You are the Installation Owner, so you decide what this installation shares. Both reports start off.": "Sei il proprietario dell’installazione, quindi decidi cosa condivide. Entrambi i rapporti partono disattivati.",
@@ -1056,5 +1054,7 @@
   "Your choices could not be saved. Try again.": "Non è stato possibile salvare le tue scelte. Riprova.",
   "{name}'s workspace": "Spazio di lavoro di {name}",
   "Discovery source": "Come hai conosciuto Meltiply",
-  "Your earlier visit did not save a Workspace name yet. Confirm it to settle the shared Workspace.": "La visita precedente non ha ancora salvato un nome dello spazio di lavoro. Confermalo per definire lo spazio condiviso."
+  "Your earlier visit did not save a Workspace name yet. Confirm it to settle the shared Workspace.": "La visita precedente non ha ancora salvato un nome dello spazio di lavoro. Confermalo per definire lo spazio condiviso.",
+  "Unexpected application failures with the operation category, app version, and sanitized release locations. Expected Provider conditions — expired authorization, rate limits, quotas, timeouts, and unconfirmed outcomes — are reported separately with their class, so they never mix with application defects. No message text, content, name, or identifier is included.": "Errori imprevisti dell’applicazione con categoria dell’operazione, versione dell’app e percorsi di release ripuliti. I casi attesi del provider — autorizzazione scaduta, limiti di frequenza, quote, timeout e esiti non confermati — sono segnalati separatamente con la loro classe, quindi non si mescolano mai ai difetti dell’applicazione. Non sono inclusi testo dei messaggi, contenuti, nomi o identificatori.",
+  "Unexpected application failures with the operation category and sanitized release locations, plus expected Provider conditions such as expired authorization and rate limits reported separately with their class. No message text, content, name, or identifier is included.": "Errori imprevisti dell’applicazione con categoria dell’operazione e percorsi di release ripuliti, più i casi attesi del provider come autorizzazione scaduta e limiti di frequenza segnalati separatamente con la loro classe. Non sono inclusi testo dei messaggi, contenuti, nomi o identificatori."
 }

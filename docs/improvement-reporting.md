@@ -54,6 +54,13 @@ six earlier days when they carry confirmed publications. An open day is never
 sent, and a repeated invocation or a partial delivery reuses the same frozen
 report identity rather than producing a second measurement.
 
+A confirmed publication belongs to the day its measurement committed, read from
+the database clock under the same lock the daily producer takes before it derives
+a day. A transaction that began before midnight and committed after it therefore
+counts in the day it truly committed, and the producer waits for an in-flight
+measurement instead of freezing a day without it. No confirmed success is ever
+discarded because a day was already reported.
+
 Rules that matter when reading the numbers:
 
 - Missing or unsupported metrics are **omitted**, never reported as `0`, and named
@@ -232,14 +239,32 @@ Build these as insights over `meltiply_usage_daily`, `$exception`, and
 **participating installations**; opt-in data is not a census of Meltiply usage,
 and a change in a chart may be a change in who opted in rather than in usage.
 
-Because retries and duplicate scheduled invocations reuse one logical report
-identity, and vendor de-duplication is eventual, every usage chart aggregates per
-logical report before summing:
+Delivered rows are not measurements. Transport retries repeat one frozen identity,
+and vendor de-duplication is eventual, so every usage chart reduces in two
+independent steps:
 
-- logical report key: `distinct_id` + `report_date` + `schema_version`;
-- keep the newest row per key (highest `timestamp`, then highest `uuid`) before
-  any `SUM`;
-- never `SUM` raw delivered rows, and never `SUM` a gauge across days.
+1. **Deduplicate deliveries by frozen event identity** — one row per
+   `properties.$insert_id` (equivalently `uuid` + `event` + `timestamp` +
+   `distinct_id`). This removes retry copies and nothing else.
+2. **Then group by the measurement's own logical key** —
+   `distinct_id` + `properties.consent_interval_started_at` + `report_date` +
+   `schema_version` — and count each group **once**.
+
+The consent interval is part of that key on purpose. Withdrawing and re-enabling
+reporting inside one UTC day legitimately produces two reports for the same day,
+each counting activity from its own interval. A key without the interval would
+treat them as duplicates and silently drop one interval's publishing.
+
+Counters and gauges then reduce differently:
+
+- **Counters** (`publications.posts`, `publications.distributions.*`) are summed
+  **across intervals** after step 2, because each interval counted its own
+  successes.
+- **Gauges** (`channels`, `engagement.*`, `engagement_coverage`) are not summed.
+  Take the newest report per installation (highest `timestamp`, then highest
+  `uuid`) and read its values, because a repeated lifetime figure is the same
+  figure, not an addition.
+- Never `SUM` raw delivered rows, and never `SUM` a gauge across days.
 
 ### Adoption
 
@@ -305,6 +330,15 @@ installation submits at most one, and skip or **Prefer not to say** produces no
 event at all, so the denominator is "installations that chose to share", never
 "installations surveyed".
 
+## Consent metadata
+
+Each category stores the disclosure version its decision was recorded against,
+alongside the decision time and the interval it enabled. Reporting fails closed
+when a requested category's stored version is missing or no longer the
+supported one, so a decision cannot authorize a payload its disclosure never
+described. Re-saving an unchanged choice leaves that metadata alone rather than
+silently upgrading it; only an actual change records a new decision.
+
 ## Costs, retention, and deletion
 
 - Volume is deliberately small: at most one usage event per installation per
@@ -320,7 +354,13 @@ event at all, so the denominator is "installations that chose to share", never
   data above the cap is discarded permanently, so a cap can silently truncate
   reporting. Alerts fire at 80% and 100% of the limit and of the free allotment.
   Review each product's limits rather than assuming one cap covers the project.
-- Withdrawal stops future sending and discards unsent local reports. It does not
+- Local retention is bounded on the bytes, not just the row state: a report that
+  was sent or discarded has its payload deleted once it is off any retry path,
+  leaving only a minimal receipt that keeps the logical identity from being
+  replayed. Unsent optional data expires after at most seven days.
+- Withdrawal stops future sending and discards unsent local reports, including a
+  batch already claimed for delivery: a row is only transmitted while its own
+  consent interval is still the live one. It does not
   delete data already received. Deleting a PostHog person does not remove
   no-profile events, so deletion of received installation-scoped data must use a
   vendor-supported procedure — a project deletion removes all of its data, while

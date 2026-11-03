@@ -210,6 +210,83 @@ async function signUpWorkspaceName(request: Request): Promise<string | undefined
 }
 
 /**
+ * Persists the setup form's chosen Workspace name before the account exists.
+ *
+ * The sign-up response is not the only way an account becomes real: the
+ * verification mail can fail after Better Auth committed the account, and the
+ * invocation can end between the account write and any follow-up. Writing the
+ * name against the normalized sign-up email first makes the choice recoverable
+ * from durable state in all of those cases, without touching the account row and
+ * without giving an unauthenticated request any authority. Registration remains
+ * gated on account existence, so a recoverable intent never reopens sign-up.
+ *
+ * @param env - Worker environment bindings.
+ * @param email - Normalized sign-up email.
+ * @param workspaceName - Chosen name, or undefined when the form omitted it.
+ * @returns Effect resolving void.
+ */
+async function recordBootstrapIntent(
+  env: ApiWorkerEnv,
+  email: string,
+  workspaceName: string | undefined,
+): Promise<void> {
+  if (!email) return;
+  // Exception: pg cannot be loaded in workerd unit-test isolates.
+  const { systemPoolFor } = await import("./database");
+  await systemPoolFor(env).query(
+    `INSERT INTO installation_bootstrap_intent (email, workspace_name)
+     VALUES ($1, $2)
+     ON CONFLICT (email) DO UPDATE
+       SET workspace_name = COALESCE(EXCLUDED.workspace_name, installation_bootstrap_intent.workspace_name)`,
+    [email.toLowerCase(), workspaceName ?? null],
+  );
+}
+
+/**
+ * Discards an intent whose sign-up definitively created no account.
+ *
+ * A 4xx response from Better Auth (rejected password, duplicate address, failed
+ * profile validation) proves nothing was written, so the row must not become a
+ * permanent name for an address that never signed up. A 5xx or a thrown handler
+ * proves nothing either way, so the intent is kept for recovery.
+ *
+ * @param env - Worker environment bindings.
+ * @param email - Normalized sign-up email.
+ * @returns Effect resolving void.
+ */
+async function discardBootstrapIntent(env: ApiWorkerEnv, email: string): Promise<void> {
+  if (!email) return;
+  // Exception: pg cannot be loaded in workerd unit-test isolates.
+  const { systemPoolFor } = await import("./database");
+  await systemPoolFor(env).query(
+    "DELETE FROM installation_bootstrap_intent WHERE email = $1 AND auth_user_id IS NULL",
+    [email.toLowerCase()],
+  );
+}
+
+/**
+ * Binds a recorded intent to the account Better Auth created.
+ *
+ * @param env - Worker environment bindings.
+ * @param email - Normalized sign-up email.
+ * @param authUserId - Created subject.
+ * @returns Effect resolving void.
+ */
+async function bindBootstrapIntent(
+  env: ApiWorkerEnv,
+  email: string,
+  authUserId: string,
+): Promise<void> {
+  if (!email) return;
+  // Exception: pg cannot be loaded in workerd unit-test isolates.
+  const { systemPoolFor } = await import("./database");
+  await systemPoolFor(env).query(
+    "UPDATE installation_bootstrap_intent SET auth_user_id = $2 WHERE email = $1",
+    [email.toLowerCase(), authUserId],
+  );
+}
+
+/**
  * Persists the chosen Workspace name against the account Better Auth created.
  *
  * Called inside the bootstrap lock after a successful sign-up, so the name is
@@ -358,12 +435,25 @@ export function authPolicyHandler(env: ApiWorkerEnv, auth: BetterAuthInstance): 
             if (workspaceName instanceof Response) return workspaceName;
             const invalidProfile = await profileValidationResponse(request);
             if (invalidProfile) return invalidProfile;
+            const email = await requestEmail(request);
+            // The name is durable before the account exists, so a failed
+            // verification mail or an invocation ending after account creation
+            // cannot lose what the Owner already typed. This adds no authority:
+            // public sign-up is still closed by account existence alone.
+            if (email) await recordBootstrapIntent(env, email, workspaceName);
+            // A thrown handler proves nothing about the account write, so the
+            // intent above stays for recovery rather than being discarded here.
             const response = await auth.handler(await withoutWorkspaceName(request));
-            // Recording the chosen name inside the lock keeps it ordered with
-            // account creation, so a retry cannot pair a name with a different
-            // account and a failure here never reopens registration.
             if (response.ok) {
-              await recordBootstrap(env, await signedUpSubject(response), workspaceName);
+              const subject = await signedUpSubject(response);
+              // Recorded under the lock, so the name is ordered with account
+              // creation and a retry cannot pair it with a different account.
+              await recordBootstrap(env, subject, workspaceName);
+              if (subject && email) await bindBootstrapIntent(env, email, subject);
+            } else if (response.status < 500 && email) {
+              // A 4xx rejection proves nothing was written, so the intent must
+              // not become a permanent name for an address that never signed up.
+              await discardBootstrapIntent(env, email);
             }
             return response;
           });

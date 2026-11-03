@@ -207,6 +207,9 @@ export interface ProviderPage<T> {
   nextCursor?: string;
 }
 
+/** Engagement metrics a distribution's stored snapshot can carry. */
+export type ProviderAnalyticsMetric = "comments" | "reactions" | "shares" | "views";
+
 export interface ProviderAnalyticsRecord {
   /** Nullable counters are Provider metrics that may be unavailable, never zero by default. */
   clicks?: number | null;
@@ -351,6 +354,16 @@ export interface ProviderAdapter {
     credentials: ProviderCredentials,
     input: ProviderReplyInput,
   ): Promise<ProviderOperationResult>;
+  /**
+   * Metrics whose stored zero cannot be told apart from "the Provider did not
+   * return it".
+   *
+   * An adapter that normalizes a missing insight to `0` names those metrics here,
+   * so consumers read a zero as unknown instead of as an observed count. Adapters
+   * that reject an incomplete response omit the field: their zeros are
+   * observations. This is the only place the distinction is stated.
+   */
+  ambiguousZeroMetrics?: readonly ProviderAnalyticsMetric[];
   retryPolicy?: ProviderRetryPolicy;
   revoke?(accessToken: string, context?: ProviderRequestContext): Promise<void>;
   transferModes: readonly ProviderTransferMode[];

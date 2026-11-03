@@ -1800,18 +1800,24 @@ export function useOnboarding(scope: SessionScope, enabled = true) {
 }
 
 /**
- * Applies a Workspace name chosen in a resumed journey. Repeating the same name
- * is a no-op, and after completion the API refuses the write so Settings owns
- * later renames.
+ * Records first-run progress: the setup form's Workspace name, the optional
+ * screen the Owner reached, or both. Repeating a saved value is a no-op, and after
+ * completion the API refuses the name write so Settings owns later renames.
  *
  * @param scope Session scope gating execution.
- * @returns Mutation accepting the chosen name.
+ * @returns Mutation accepting the name and/or the reached screen.
  */
 export function useSaveOnboarding(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
-    (api, input: { workspaceName: string }, idempotencyKey) =>
-      api.saveOnboarding({ workspace_name: input.workspaceName }, { idempotencyKey }),
+    (api, input: { step?: "improvement" | "ready"; workspaceName?: string }, idempotencyKey) =>
+      api.saveOnboarding(
+        {
+          ...(input.step === undefined ? {} : { step: input.step }),
+          ...(input.workspaceName === undefined ? {} : { workspace_name: input.workspaceName }),
+        },
+        { idempotencyKey },
+      ),
     () => [queryKeys.onboarding(), queryKeys.currentUser(), queryKeys.installation()],
   );
 }

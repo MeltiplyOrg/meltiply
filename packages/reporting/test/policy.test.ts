@@ -21,11 +21,13 @@ const enabledConfiguration = reportingConfiguration({
 
 const row: PreferencesRow = {
   diagnostics_decided_at: "2026-01-02T03:04:05.000Z",
+  diagnostics_disclosure_version: 1,
   diagnostics_interval_started_at: "2026-01-02T03:04:05.000Z",
   diagnostics_requested: true,
   installation_reporting_id: "4f1d0f6e-6a1f-4a3f-9d1e-2c1f0f6e6a1f",
   schema_version: 1,
   usage_decided_at: "2026-01-02T03:04:05.000Z",
+  usage_disclosure_version: 1,
   usage_interval_started_at: "2026-01-02T03:04:05.000Z",
   usage_requested: true,
 };
@@ -36,6 +38,7 @@ describe("category status", () => {
 
     expect(status).toEqual({
       decidedAt: null,
+      disclosureVersion: null,
       effective: false,
       intervalStartedAt: null,
       reason: "not_requested",
@@ -76,6 +79,53 @@ describe("category status", () => {
 
     expect(status.effective).toBe(false);
     expect(status.reason).toBe("preference_unavailable");
+  });
+
+  it("fails closed when a requested category has no recorded disclosure version", () => {
+    const status = categoryStatus(
+      { ...row, usage_disclosure_version: null },
+      "usage",
+      enabledConfiguration,
+    );
+
+    // A stored request without a disclosure decision is not consent: the Owner
+    // never saw a text that authorized this payload.
+    expect(status.requested).toBe(true);
+    expect(status.effective).toBe(false);
+    expect(status.reason).toBe("preference_unavailable");
+    expect(status.disclosureVersion).toBeNull();
+  });
+
+  it("fails closed when a requested category agreed to a different disclosure version", () => {
+    const status = categoryStatus(
+      { ...row, diagnostics_disclosure_version: 7 },
+      "diagnostics",
+      enabledConfiguration,
+    );
+
+    expect(status.effective).toBe(false);
+    expect(status.reason).toBe("preference_unavailable");
+    // The retained metadata stays truthful rather than being upgraded to today's
+    // version.
+    expect(status.disclosureVersion).toBe(7);
+  });
+
+  it("keeps a declined category readable even with no disclosure version", () => {
+    const status = categoryStatus(
+      {
+        ...row,
+        usage_disclosure_version: null,
+        usage_interval_started_at: null,
+        usage_requested: false,
+      },
+      "usage",
+      enabledConfiguration,
+    );
+
+    // Nothing is requested, so there is nothing to withhold: the surface still
+    // explains that the Owner never asked.
+    expect(status.effective).toBe(false);
+    expect(status.reason).toBe("not_requested");
   });
 
   it("keeps the two categories independent", () => {

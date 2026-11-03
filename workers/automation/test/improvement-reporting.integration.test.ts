@@ -79,14 +79,17 @@ async function seedPendingReport(input: {
   await runSystemTransaction(env, async (client) => {
     await client.query(
       `INSERT INTO reporting_preferences (
-         id, schema_version, usage_requested, usage_decided_at, usage_interval_started_at,
-         diagnostics_requested, diagnostics_decided_at, diagnostics_interval_started_at,
-         installation_reporting_id
-       ) VALUES (TRUE, 1, $1, now(), now(), $2, now(), now(), $3)
+         id, schema_version,
+         usage_requested, usage_disclosure_version, usage_decided_at, usage_interval_started_at,
+         diagnostics_requested, diagnostics_disclosure_version, diagnostics_decided_at,
+         diagnostics_interval_started_at, installation_reporting_id
+       ) VALUES (TRUE, 1, $1, 1, now(), now(), $2, 1, now(), now(), $3)
        ON CONFLICT (id) DO UPDATE SET
          usage_requested = EXCLUDED.usage_requested,
+         usage_disclosure_version = EXCLUDED.usage_disclosure_version,
          usage_interval_started_at = EXCLUDED.usage_interval_started_at,
          diagnostics_requested = EXCLUDED.diagnostics_requested,
+         diagnostics_disclosure_version = EXCLUDED.diagnostics_disclosure_version,
          diagnostics_interval_started_at = EXCLUDED.diagnostics_interval_started_at,
          installation_reporting_id = EXCLUDED.installation_reporting_id`,
       [input.category === "usage", input.category === "diagnostics", installationReportingId],
@@ -94,8 +97,8 @@ async function seedPendingReport(input: {
     await client.query(
       `INSERT INTO reporting_pending_reports (
          category, logical_id, event_name, schema_version, event_uuid, event_timestamp,
-         distinct_id, payload, state, expires_at
-       ) VALUES ($1, $2, $3, 1, $4, now(), $5, $6::jsonb, $7,
+         distinct_id, payload, state, interval_started_at, expires_at
+       ) VALUES ($1, $2, $3, 1, $4, now(), $5, $6::jsonb, $7, now(),
                  now() + ($8 * INTERVAL '1 day'))`,
       [
         input.category,

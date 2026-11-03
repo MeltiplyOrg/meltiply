@@ -85,6 +85,9 @@ assert.equal(typeof setupSecret, "string");
 // The chosen Workspace name is real installation data: it must survive the
 // verification handoff and land on the canonical shared Workspace.
 const workspaceName = `Selfhost Studio ${randomUUID().slice(0, 8)}`;
+// Acceptance launch pointer: the owner journey opens with this command and the
+// credential-free captures land in artifacts/selfhost/. See
+// docs/self-hosting.md#verifying-an-installation.
 const cookie = await ownerBrowserSession({ origin, email, password, setupSecret, workspaceName });
 const minted = await fetch(`${origin}/api/auth/token`, { headers: { cookie, origin } });
 assert.equal(minted.status, 200);

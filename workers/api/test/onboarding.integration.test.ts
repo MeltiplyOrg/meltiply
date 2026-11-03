@@ -45,7 +45,12 @@ const copiedTables = [
   "idempotency_keys",
   "usage_reconciliation_state",
   "installation_bootstrap",
+  "installation_bootstrap_intent",
   "installation_onboarding",
+  "reporting_preferences",
+  "reporting_attribution_responses",
+  "reporting_pending_reports",
+  "reporting_delivery_receipts",
 ];
 
 /** Truncated before each case so every test starts from an uninitialized installation. */
@@ -59,7 +64,12 @@ const truncatedTables = [
   "idempotency_keys",
   "workspace_invitations",
   "installation_bootstrap",
+  "installation_bootstrap_intent",
   "installation_onboarding",
+  "reporting_preferences",
+  "reporting_attribution_responses",
+  "reporting_pending_reports",
+  "reporting_delivery_receipts",
   "usage_reconciliation_state",
   "org_members",
   "organizations",
@@ -239,12 +249,14 @@ function onboardingRequest(
 async function progressOf(response: Response): Promise<{
   completed_at: string | null;
   status: string;
+  step: string;
   workspace_name: string | null;
   workspace_named: boolean;
 }> {
   return (await response.json()) as {
     completed_at: string | null;
     status: string;
+    step: string;
     workspace_name: string | null;
     workspace_named: boolean;
   };
@@ -740,5 +752,317 @@ describe("onboarding save and completion", () => {
       );
       expect(response.status, `${method} ${path}`).toBe(401);
     }
+  });
+});
+
+describe("durable setup progress", () => {
+  /**
+   * The optional screen the Owner reached is its own fact. A restart after
+   * skipping or after opting in must resume at the same screen, and neither
+   * consent nor attribution may stand in for it.
+   */
+  it("remembers the reached optional screen across a restart after a skip", async () => {
+    const { app, token } = await bootstrapOwner();
+    const read = async () => progressOf(await onboardingRequest(app, token, "", { method: "GET" }));
+
+    expect((await read()).step).toBe("improvement");
+
+    const advanced = await onboardingRequest(app, token, "", {
+      body: JSON.stringify({ step: "ready" }),
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      method: "PATCH",
+    });
+    expect(advanced.status).toBe(200);
+    expect(await progressOf(advanced)).toMatchObject({
+      step: "ready",
+      workspace_name: owner.workspaceName,
+    });
+
+    // A later authenticated read — the shape a browser restart performs — still
+    // reports the reached screen, with both categories untouched.
+    expect((await read()).step).toBe("ready");
+    const reporting = await app.request(
+      "/api/v1/installation/reporting",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env(),
+    );
+    const policy = (await reporting.json()) as {
+      categories: { diagnostics: { requested: boolean }; usage: { requested: boolean } };
+    };
+    expect(policy.categories.usage.requested).toBe(false);
+    expect(policy.categories.diagnostics.requested).toBe(false);
+  });
+
+  it("never moves the recorded screen backwards", async () => {
+    const { app, token } = await bootstrapOwner();
+    const save = (step: string) =>
+      onboardingRequest(app, token, "", {
+        body: JSON.stringify({ step }),
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        method: "PATCH",
+      });
+
+    expect(await progressOf(await save("ready"))).toMatchObject({ step: "ready" });
+    // A late write from an older tab cannot rewind the journey.
+    expect(await progressOf(await save("improvement"))).toMatchObject({ step: "ready" });
+  });
+
+  it("saves a name and a screen together in one write", async () => {
+    const { app, token } = await bootstrapOwner();
+    const saved = await onboardingRequest(app, token, "", {
+      body: JSON.stringify({ step: "ready", workspace_name: "Renamed Studio" }),
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      method: "PATCH",
+    });
+
+    expect(saved.status).toBe(200);
+    expect(await progressOf(saved)).toMatchObject({
+      step: "ready",
+      workspace_name: "Renamed Studio",
+    });
+    expect((await sharedWorkspace())?.name).toBe("Renamed Studio");
+  });
+
+  it("refuses an unknown field, an invalid step, and an empty body", async () => {
+    const { app, token } = await bootstrapOwner();
+    const patch = (body: unknown) =>
+      onboardingRequest(app, token, "", {
+        body: JSON.stringify(body),
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        method: "PATCH",
+      });
+
+    expect((await patch({ step: "finish" })).status).toBe(400);
+    expect((await patch({ tracker: true })).status).toBe(400);
+    expect((await patch({})).status).toBe(400);
+  });
+
+  it("refuses screen progress on an upgraded installation", async () => {
+    const subject = "legacy-owner-step-subject";
+    const legacyEmail = "legacy-step@onboarding.test";
+    await systemPoolFor(env()).query(
+      `INSERT INTO "user" (id, name, email, "emailVerified") VALUES ($1, 'Legacy', $2, TRUE)`,
+      [subject, legacyEmail],
+    );
+    await systemPoolFor(env()).query(
+      `INSERT INTO users (id, auth_user_id, email, display_name, installation_owner)
+       VALUES ($1, $2, $3, 'Legacy', TRUE)`,
+      ["10000000-0000-4000-8000-000000009911", subject, legacyEmail],
+    );
+    await systemPoolFor(env()).query(
+      `INSERT INTO organizations (id, name, slug, is_shared)
+       VALUES ($1, 'Legacy Workspace', 'legacy-workspace-step', TRUE)`,
+      ["20000000-0000-4000-8000-000000009911"],
+    );
+    await systemPoolFor(env()).query(
+      "INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, 'admin')",
+      ["20000000-0000-4000-8000-000000009911", "10000000-0000-4000-8000-000000009911"],
+    );
+
+    const app = appWith({ [subject]: { email: legacyEmail, name: "Legacy", subject } });
+    const saved = await onboardingRequest(app, subject, "", {
+      body: JSON.stringify({ step: "ready" }),
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      method: "PATCH",
+    });
+    expect(saved.status).toBe(409);
+    await expect(saved.json()).resolves.toMatchObject({
+      error: { code: "onboarding_not_applicable" },
+    });
+  });
+});
+
+describe("recoverable setup-name handoff", () => {
+  /**
+   * A sign-up whose chosen name never reached the bootstrap row — the account was
+   * created but the follow-up write never ran — must still apply the name from
+   * durable pre-account intent. Registration stays closed throughout.
+   */
+  it("applies a name recorded only as pre-account intent", async () => {
+    const app = appWith({});
+    const signUpResponse = await signUp(app, {
+      email: owner.email,
+      name: owner.name,
+      password: owner.password,
+      workspace_name: owner.workspaceName,
+    });
+    expect(signUpResponse.status).toBe(200);
+    const subject = await signedUpSubject(signUpResponse);
+
+    // Simulate the lost follow-up: the account exists, the bootstrap row does
+    // not, and only the intent the sign-up wrote before creating the account
+    // remains.
+    await systemPoolFor(env()).query("DELETE FROM installation_bootstrap");
+    const intent = await systemPoolFor(env()).query<{ workspace_name: string | null }>(
+      "SELECT workspace_name FROM installation_bootstrap_intent WHERE lower(email) = lower($1)",
+      [owner.email],
+    );
+    expect(intent.rows[0]?.workspace_name).toBe(owner.workspaceName);
+
+    const ownerApp = appWith({
+      [subject]: { email: owner.email, name: owner.name, subject },
+    });
+    const progress = await onboardingRequest(ownerApp, subject, "", { method: "GET" });
+    expect(progress.status).toBe(200);
+    expect(await progressOf(progress)).toMatchObject({
+      status: "in_progress",
+      workspace_name: owner.workspaceName,
+      workspace_named: true,
+    });
+    expect((await sharedWorkspace())?.name).toBe(owner.workspaceName);
+
+    // Recovery promoted the intent into the durable bootstrap row rather than
+    // leaving the name only in the handoff table.
+    const bootstrap = await systemPoolFor(env()).query<{ workspace_name: string | null }>(
+      "SELECT workspace_name FROM installation_bootstrap WHERE auth_user_id = $1",
+      [subject],
+    );
+    expect(bootstrap.rows[0]?.workspace_name).toBe(owner.workspaceName);
+
+    // Registration is still closed: the recovery never reopened sign-up.
+    const closed = await signUp(app, {
+      email: "another-owner@onboarding.test",
+      name: "Another",
+      password: owner.password,
+      workspace_name: "Another Studio",
+    });
+    expect(closed.status).toBe(403);
+  });
+
+  /**
+   * A rejected sign-up proves nothing was written, so its intent must not become
+   * a permanent name for an address that never signed up.
+   */
+  it("discards the intent when the account was definitively not created", async () => {
+    const app = appWith({});
+    const rejected = await signUp(app, {
+      email: "rejected@onboarding.test",
+      name: "Rejected",
+      password: "x",
+      workspace_name: "Never Created",
+    });
+    expect(rejected.status).toBeGreaterThanOrEqual(400);
+    expect(rejected.status).toBeLessThan(500);
+
+    const intent = await systemPoolFor(env()).query(
+      "SELECT 1 FROM installation_bootstrap_intent WHERE lower(email) = lower($1)",
+      ["rejected@onboarding.test"],
+    );
+    expect(intent.rows).toHaveLength(0);
+  });
+
+  /**
+   * An installation that never entered the setup form must not be handed an
+   * `in_progress` journey when an Owner reaches the slow provisioning path with a
+   * changed profile — the bootstrap record is the durable provenance.
+   */
+  it("never manufactures onboarding for a slow-path upgraded Owner", async () => {
+    const subject = "upgraded-slow-path-subject";
+    const email = "upgraded-slow@onboarding.test";
+    await systemPoolFor(env()).query(
+      `INSERT INTO "user" (id, name, email, "emailVerified") VALUES ($1, 'Old Name', $2, TRUE)`,
+      [subject, email],
+    );
+    await systemPoolFor(env()).query(
+      `INSERT INTO users (id, auth_user_id, email, display_name, installation_owner)
+       VALUES ($1, $2, $3, 'Stale Name', TRUE)`,
+      ["10000000-0000-4000-8000-000000009921", subject, email],
+    );
+    await systemPoolFor(env()).query(
+      `INSERT INTO organizations (id, name, slug, is_shared)
+       VALUES ($1, 'Upgraded Workspace', 'upgraded-slow-path', TRUE)`,
+      ["20000000-0000-4000-8000-000000009921"],
+    );
+    await systemPoolFor(env()).query(
+      "INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, 'admin')",
+      ["20000000-0000-4000-8000-000000009921", "10000000-0000-4000-8000-000000009921"],
+    );
+
+    // The profile differs from the stored display name, so actor resolution
+    // misses the fast path and runs provisioning.
+    const app = appWith({ [subject]: { email, name: "Changed Name", subject } });
+    const progress = await onboardingRequest(app, subject, "", { method: "GET" });
+
+    expect(progress.status).toBe(200);
+    expect(await progressOf(progress)).toMatchObject({
+      status: "not_applicable",
+      workspace_name: "Upgraded Workspace",
+    });
+    const rows = await systemPoolFor(env()).query(
+      "SELECT 1 FROM installation_onboarding WHERE org_id = $1",
+      ["20000000-0000-4000-8000-000000009921"],
+    );
+    expect(rows.rows).toHaveLength(0);
+  });
+});
+
+describe("onboarding completion and save ordering", () => {
+  /**
+   * A save ordered after completion must refuse, so a Settings rename committed
+   * between the stale read and the write can never be overwritten.
+   */
+  it("refuses a save that is ordered after completion", async () => {
+    const { app, token } = await bootstrapOwner();
+    const workspace = await sharedWorkspace();
+    const rename = (name: string) =>
+      app.request(
+        `/api/v1/workspaces/${workspace!.id}`,
+        {
+          body: JSON.stringify({ name }),
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          method: "PATCH",
+        },
+        env(),
+      );
+
+    // Completion first, then a Settings rename, then a late onboarding save —
+    // the interleaving that previously depended on transaction timing.
+    const completed = await onboardingRequest(app, token, "/complete", {
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      method: "POST",
+    });
+    expect(completed.status).toBe(200);
+    expect((await rename("Settings Canonical")).status).toBe(200);
+
+    const late = await onboardingRequest(app, token, "", {
+      body: JSON.stringify({ step: "ready", workspace_name: "Stale Onboarding Name" }),
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      method: "PATCH",
+    });
+    expect(late.status).toBe(409);
+    expect((await sharedWorkspace())?.name).toBe("Settings Canonical");
+  });
+
+  /**
+   * Completion must not be lost to a concurrent save: both take the onboarding
+   * row lock, so the terminal state always lands and the name stays canonical.
+   */
+  it("serializes a concurrent save against completion", async () => {
+    const { app, token } = await bootstrapOwner();
+    const [saved, completed] = await Promise.all([
+      onboardingRequest(app, token, "", {
+        body: JSON.stringify({ step: "ready", workspace_name: "Concurrent Name" }),
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        method: "PATCH",
+      }),
+      onboardingRequest(app, token, "/complete", {
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        method: "POST",
+      }),
+    ]);
+
+    // Both orders are legal: a save that commits first is accepted, and one that
+    // commits second is refused. Either way completion is terminal.
+    expect([200, 409]).toContain(saved.status);
+    expect(completed.status).toBe(200);
+    const progress = await progressOf(
+      await onboardingRequest(app, token, "", { method: "GET" }),
+    );
+    expect(progress.status).toBe("completed");
+    expect(progress.completed_at).not.toBeNull();
   });
 });

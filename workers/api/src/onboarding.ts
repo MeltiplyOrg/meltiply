@@ -28,6 +28,12 @@ import { idempotentMutation } from "./workspace-lifecycle";
  */
 export interface OnboardingProgress {
   completed_at: string | null;
+  /**
+   * Optional screen the current Owner reached. A restart resumes here, and it is
+   * stored independently of consent, attribution and terminal completion because
+   * skipping or declining must still resume at the same place.
+   */
+  step: "improvement" | "ready";
   status: "completed" | "in_progress" | "not_applicable";
   workspace_name: string | null;
   workspace_named: boolean;
@@ -35,6 +41,7 @@ export interface OnboardingProgress {
 
 interface OnboardingRow extends Record<string, unknown> {
   completed_at: Date | string | null;
+  progress_step: "improvement" | "ready";
   workspace_name: string;
   workspace_named: boolean | null;
 }
@@ -58,7 +65,8 @@ function onboardingProgressEffect(
 ): Effect.Effect<OnboardingProgress, DatabaseError> {
   return client
     .query<OnboardingRow>(
-      `SELECT o.name AS workspace_name, ob.workspace_named, ob.completed_at
+      `SELECT o.name AS workspace_name, ob.workspace_named, ob.completed_at,
+              ob.progress_step
        FROM organizations o
        LEFT JOIN installation_onboarding ob ON ob.org_id = o.id
        WHERE o.id = $1`,
@@ -70,6 +78,7 @@ function onboardingProgressEffect(
         if (!row) {
           return {
             completed_at: null,
+            step: "improvement",
             status: "not_applicable",
             workspace_name: null,
             workspace_named: false,
@@ -78,6 +87,7 @@ function onboardingProgressEffect(
         if (row.completed_at !== null) {
           return {
             completed_at: isoDateTime(row.completed_at),
+            step: row.progress_step,
             status: "completed",
             workspace_name: row.workspace_name,
             workspace_named: row.workspace_named === true,
@@ -85,6 +95,7 @@ function onboardingProgressEffect(
         }
         return {
           completed_at: null,
+          step: row.progress_step,
           // A missing onboarding row is an upgraded installation, not a
           // journey someone may resume.
           status: row.workspace_named === null ? "not_applicable" : "in_progress",
@@ -119,14 +130,20 @@ function requireCurrentOwner(actor: ResolvedActor): Effect.Effect<void, CoreApiE
 }
 
 /**
- * Loads the caller's onboarding row, refusing installations that never began it.
+ * Locks the caller's onboarding row and returns it.
+ *
+ * Save and completion both mutate the same progress record, and completion is
+ * terminal: a save that read the row before a concurrent completion committed
+ * would otherwise rename the Workspace afterwards, silently overwriting a name
+ * the Owner set in Settings. Taking the row lock here is what orders the two, so
+ * whichever runs second observes the other's committed state.
  *
  * @param client - Active system transaction client.
  * @param actor - Resolved Installation Owner.
- * @returns Effect resolving the row.
+ * @returns Effect resolving the locked onboarding row.
  * @throws {CoreApiError} 409 `onboarding_not_applicable` for an upgraded installation.
  */
-function openOnboardingRowEffect(
+function lockOnboardingRow(
   client: EffectTransactionClient,
   actor: ResolvedActor,
 ): Effect.Effect<
@@ -135,7 +152,8 @@ function openOnboardingRowEffect(
 > {
   return client
     .query<{ completed_at: Date | string | null; workspace_named: boolean }>(
-      `SELECT completed_at, workspace_named FROM installation_onboarding WHERE org_id = $1`,
+      `SELECT completed_at, workspace_named FROM installation_onboarding
+       WHERE org_id = $1 FOR UPDATE`,
       [actor.workspace.id],
     )
     .pipe(
@@ -155,12 +173,45 @@ function openOnboardingRowEffect(
 }
 
 /**
+ * Persists the optional screen the Owner reached.
+ *
+ * Progress is its own fact: it is not inferred from consent, attribution or
+ * completion, because skipping and declining are both supported paths that must
+ * still resume at the same screen after a restart. The step only ever advances,
+ * so a late write from an older tab cannot move the journey backwards.
+ *
+ * @param client - Active system transaction client.
+ * @param actor - Resolved Installation Owner.
+ * @param step - Screen the Owner is on.
+ * @returns Effect resolving the updated progress.
+ * @throws {CoreApiError} 409 `onboarding_not_applicable` for an upgraded installation.
+ */
+function saveOnboardingStepEffect(
+  client: EffectTransactionClient,
+  actor: ResolvedActor,
+  step: "improvement" | "ready",
+): Effect.Effect<OnboardingProgress, CoreApiError | DatabaseError> {
+  return Effect.gen(function* () {
+    yield* lockOnboardingRow(client, actor);
+    yield* client.query(
+      `UPDATE installation_onboarding
+       SET progress_step = $2, updated_at = now()
+       WHERE org_id = $1
+         AND progress_step IS DISTINCT FROM $2
+         AND ($2 = 'ready' OR progress_step = 'improvement')`,
+      [actor.workspace.id, step],
+    );
+    return yield* onboardingProgressEffect(client, actor);
+  });
+}
+
+/**
  * Applies the chosen Workspace name to the canonical shared Workspace.
  *
- * Runs inside the caller's transaction: the Workspace row is locked so two
- * concurrent saves serialize, the name is written only when it differs, and the
- * rename is audited with the action Settings uses. Completion is terminal, so
- * this refuses to rewrite a name the Owner later changed through Settings.
+ * Runs inside the caller's transaction and takes the onboarding row lock first,
+ * so a save ordered after completion observes `completed_at` and refuses instead
+ * of renaming the Workspace behind Settings. The Workspace row is locked as well,
+ * so two concurrent saves serialize on the name they write.
  *
  * @param client - Active system transaction client.
  * @param actor - Resolved Installation Owner.
@@ -175,7 +226,7 @@ function saveWorkspaceNameEffect(
   name: string,
 ): Effect.Effect<OnboardingProgress, CoreApiError | DatabaseError> {
   return Effect.gen(function* () {
-    const onboarding = yield* openOnboardingRowEffect(client, actor);
+    const onboarding = yield* lockOnboardingRow(client, actor);
     if (onboarding.completed_at !== null) {
       return yield* Effect.fail(
         new CoreApiError(
@@ -242,7 +293,10 @@ function completeOnboardingEffect(
   actor: ResolvedActor,
 ): Effect.Effect<OnboardingProgress, CoreApiError | DatabaseError> {
   return Effect.gen(function* () {
-    yield* openOnboardingRowEffect(client, actor);
+    // The row lock orders completion against a concurrent save: the save either
+    // commits its rename first (and completion keeps it) or sees the completion
+    // and refuses. Two completions serialize rather than racing the update.
+    yield* lockOnboardingRow(client, actor);
     yield* client.query(
       `UPDATE installation_onboarding
        SET completed_at = COALESCE(completed_at, now()), updated_at = now()
@@ -296,12 +350,38 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
         const actor = c.get("actor");
         yield* requireCurrentOwner(actor);
         const body = yield* fromPromise(() => jsonBody(c));
-        yield* fromPromise(() => onlyKeys(body, ["workspace_name"]));
-        const name = yield* fromPromise(() =>
-          workspaceNameValue(stringField(body, "workspace_name"), "workspace_name"),
-        );
+        yield* fromPromise(() => onlyKeys(body, ["step", "workspace_name"]));
+        const hasName = body.workspace_name !== undefined;
+        const hasStep = body.step !== undefined;
+        const name = hasName
+          ? yield* fromPromise(() =>
+              workspaceNameValue(stringField(body, "workspace_name"), "workspace_name"),
+            )
+          : null;
+        const step = hasStep
+          ? yield* fromPromise(() => {
+              const value = body.step;
+              if (value !== "improvement" && value !== "ready") {
+                throw new CoreApiError(
+                  400,
+                  "validation_error",
+                  "step must be `improvement` or `ready`.",
+                );
+              }
+              return value;
+            })
+          : null;
+        if (name === null && step === null) {
+          return yield* Effect.fail(
+            new CoreApiError(
+              400,
+              "validation_error",
+              "Provide `workspace_name`, `step`, or both.",
+            ),
+          );
+        }
         const key = yield* fromPromise(() => idempotencyKey(c));
-        const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ name }));
+        const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ name, step }));
         const result = yield* idempotentMutation(
           c.env,
           actor.workspace.id,
@@ -309,11 +389,21 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
           key,
           requestHash,
           (client) =>
-            Effect.map(saveWorkspaceNameEffect(client, actor, requestId(c), name), (body) => ({
-              body,
-              replayed: false,
-              status: 200,
-            })),
+            Effect.gen(function* () {
+              // The name and the screen commit together: a restart resumes at the
+              // screen whose save it acknowledges, never one ahead of it.
+              if (name !== null) {
+                yield* saveWorkspaceNameEffect(client, actor, requestId(c), name);
+              } else {
+                // The step-only path still refuses an upgraded installation.
+                yield* lockOnboardingRow(client, actor);
+              }
+              const updated =
+                step !== null
+                  ? yield* saveOnboardingStepEffect(client, actor, step)
+                  : yield* onboardingProgressEffect(client, actor);
+              return { body: updated, replayed: false, status: 200 };
+            }),
         );
         return jsonResponse(result.body, result.status, requestId(c), {
           ...idempotencyHeaders(result.replayed),

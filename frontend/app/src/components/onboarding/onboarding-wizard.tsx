@@ -129,10 +129,12 @@ function ReadyScreen({
  * @returns React element with the improvement choices.
  */
 function ImprovementScreen({
+  advancing,
   onContinue,
   workspaceName,
   workspaceNamed,
 }: {
+  advancing: boolean;
   onContinue: () => void;
   workspaceNamed: boolean;
   workspaceName: string | null;
@@ -161,8 +163,16 @@ function ImprovementScreen({
   }, [initialised, policy.data]);
 
   const stored = policy.data;
-  const feedback = feedbackQuery.data ?? null;
-  const pending = savePreferences.isPending;
+  // The read always resolves to a shape describing the surface, including for an
+  // installation that never answered. Only a recorded answer — a stored source or
+  // submission instant — may replace the controls, otherwise a fresh screen would
+  // hide the selector and claim the question was already shared.
+  const answered = feedbackQuery.data;
+  const feedback =
+    answered && (answered.submitted_at !== null || answered.discovery_source !== null)
+      ? answered
+      : null;
+  const pending = savePreferences.isPending || advancing;
 
   const finish = async (save: boolean) => {
     setError(null);
@@ -258,7 +268,7 @@ function ImprovementScreen({
             {
               checked: diagnostics,
               description: t(
-                "Sanitized unexpected application failures, grouped so the maintainer can fix them.",
+                "Unexpected application failures with the operation category and sanitized release locations, plus expected Provider conditions such as expired authorization and rate limits reported separately with their class. No message text, content, name, or identifier is included.",
               ),
               id: "wizard-diagnostics",
               label: t("Diagnostic reports"),
@@ -320,7 +330,11 @@ function ImprovementScreen({
               tone={feedback.delivery_status === "delivered" ? "green" : "neutral"}
               dot={false}
             >
-              {feedback.delivery_status === "delivered" ? t("Confirmed") : t("Shared")}
+              {feedback.delivery_status === "delivered"
+                ? t("Confirmed")
+                : feedback.shared
+                  ? t("Shared")
+                  : t("Not sent")}
             </StatusPill>
             {feedbackStatus(t, feedback)}
           </p>
@@ -393,13 +407,32 @@ export function OnboardingWizard({
   const navigate = useNavigate();
   const scope = useSessionScope();
   const complete = useCompleteOnboarding(scope);
-  const [step, setStep] = useState<WizardStep>("improvement");
+  const saveProgress = useSaveOnboarding(scope);
+  // The reached screen is durable installation state, so a browser restart or a
+  // later sign-in resumes here instead of restarting the optional step. It is
+  // never inferred from consent or attribution: skipping and declining are
+  // supported paths that must resume the same way.
+  const [step, setStep] = useState<WizardStep>(progress.step);
   const [error, setError] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     headingRef.current?.focus({ preventScroll: true });
   }, [step]);
+
+  const advance = async () => {
+    setError(null);
+    try {
+      // Persist before rendering the next screen: a reload immediately afterwards
+      // must resume at the screen the Owner actually saw.
+      await saveProgress.mutateAsync({ step: "ready" });
+      setStep("ready");
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : t("Your progress could not be saved. Try again."),
+      );
+    }
+  };
 
   const finish = async (destination: string) => {
     setError(null);
@@ -449,7 +482,8 @@ export function OnboardingWizard({
         {error && <Alert variant="destructive">{error}</Alert>}
         {step === "improvement" ? (
           <ImprovementScreen
-            onContinue={() => setStep("ready")}
+            advancing={saveProgress.isPending}
+            onContinue={() => void advance()}
             workspaceName={progress.workspace_name}
             workspaceNamed={progress.workspace_named}
           />

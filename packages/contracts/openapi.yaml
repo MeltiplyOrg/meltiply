@@ -3835,7 +3835,7 @@ components:
     OnboardingProgress:
       type: object
       additionalProperties: false
-      required: [status, workspace_name, workspace_named, completed_at]
+      required: [status, workspace_name, workspace_named, completed_at, step]
       properties:
         status:
           type: string
@@ -3843,6 +3843,13 @@ components:
           description: |
             `not_applicable` marks an installation whose Owner predates
             onboarding and is never forced through setup.
+        step:
+          type: string
+          enum: [improvement, ready]
+          description: |
+            Optional screen the Owner reached. Persisted independently of
+            consent, attribution and completion, so a browser restart after
+            either skipping or opting in resumes at the same screen.
         workspace_name:
           type: [string, "null"]
           description: |
@@ -3857,12 +3864,21 @@ components:
     OnboardingSaveRequest:
       type: object
       additionalProperties: false
-      required: [workspace_name]
+      minProperties: 1
+      description: |
+        Saves the setup form's Workspace name, the optional screen the Owner
+        reached, or both in one idempotent write.
       properties:
         workspace_name:
           type: string
           minLength: 1
           maxLength: 200
+        step:
+          type: string
+          enum: [improvement, ready]
+          description: |
+            Optional screen to record. The step only advances, so a late write
+            from an older tab never moves the journey backwards.
     SuspendMemberRequest:
       type: object
       additionalProperties: false

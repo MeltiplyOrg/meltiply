@@ -1025,7 +1025,6 @@
   "Reports go to PostHog Cloud, operated by the Meltiply maintainer. Participating installations share one random installation identifier, so reports can be linked over time: they are pseudonymous, not completely anonymous.": "Os relatórios vão para o PostHog Cloud, operado pelo mantenedor do Meltiply. As instalações participantes compartilham um identificador aleatório de instalação, então os relatórios podem ser ligados ao longo do tempo: são pseudônimos, não totalmente anônimos.",
   "Requested": "Solicitado",
   "Review what this installation shares with the Meltiply maintainer and who decides it.": "Veja o que esta instalação compartilha com o mantenedor do Meltiply e quem decide isso.",
-  "Sanitized unexpected application failures, grouped so the maintainer can fix them.": "Falhas inesperadas da aplicação, higienizadas e agrupadas para que o mantenedor possa corrigi-las.",
   "Save reporting choices": "Salvar escolhas de relatórios",
   "Saved on this installation, but no report was queued.": "Salvo nesta instalação, mas nenhum relatório foi colocado na fila.",
   "Saved on this installation. Nothing was sent.": "Salvo nesta instalação. Nada foi enviado.",
@@ -1047,7 +1046,6 @@
   "The saved choice could not be read, so nothing is sent.": "Não foi possível ler a escolha salva, então nada é enviado.",
   "This deployment has no reporting destination configured, so nothing can be sent yet. Your choices are saved and take effect if a destination is configured.": "Esta implantação não tem destino de relatórios configurado, então nada pode ser enviado ainda. Suas escolhas são salvas e passam a valer se um destino for configurado.",
   "This deployment has no reporting destination configured.": "Esta implantação não tem destino de relatórios configurado.",
-  "Unexpected application failures with the operation category, app version, and sanitized stack frames. Expected Provider conditions such as expired authorization and rate limits are excluded.": "Falhas inesperadas da aplicação com a categoria da operação, a versão do app e frames de pilha higienizados. Condições esperadas do provedor, como autorização expirada e limites de taxa, ficam de fora.",
   "Usage statistics": "Estatísticas de uso",
   "Usage statistics and diagnostic reports": "Estatísticas de uso e relatórios de diagnóstico",
   "You are the Installation Owner, so you decide what this installation shares. Both reports start off.": "Você é o proprietário da instalação, então decide o que ela compartilha. Os dois relatórios começam desativados.",
@@ -1056,5 +1054,7 @@
   "Your choices could not be saved. Try again.": "Não foi possível salvar suas escolhas. Tente novamente.",
   "{name}'s workspace": "Espaço de trabalho de {name}",
   "Discovery source": "Como você conheceu o Meltiply",
-  "Your earlier visit did not save a Workspace name yet. Confirm it to settle the shared Workspace.": "Sua visita anterior ainda não salvou um nome de espaço de trabalho. Confirme-o para definir o espaço compartilhado."
+  "Your earlier visit did not save a Workspace name yet. Confirm it to settle the shared Workspace.": "Sua visita anterior ainda não salvou um nome de espaço de trabalho. Confirme-o para definir o espaço compartilhado.",
+  "Unexpected application failures with the operation category, app version, and sanitized release locations. Expected Provider conditions — expired authorization, rate limits, quotas, timeouts, and unconfirmed outcomes — are reported separately with their class, so they never mix with application defects. No message text, content, name, or identifier is included.": "Falhas inesperadas da aplicação com a categoria da operação, a versão do app e caminhos de release higienizados. Condições esperadas do provedor — autorização expirada, limites de taxa, cotas, tempos limite e resultados não confirmados — são informadas separadamente com sua classe, portanto nunca se misturam a defeitos da aplicação. Nenhum texto de mensagem, conteúdo, nome ou identificador é incluído.",
+  "Unexpected application failures with the operation category and sanitized release locations, plus expected Provider conditions such as expired authorization and rate limits reported separately with their class. No message text, content, name, or identifier is included.": "Falhas inesperadas da aplicação com a categoria da operação e caminhos de release higienizados, além de condições esperadas do provedor como autorização expirada e limites de taxa informadas separadamente com sua classe. Nenhum texto de mensagem, conteúdo, nome ou identificador é incluído."
 }

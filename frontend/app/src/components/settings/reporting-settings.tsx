@@ -94,7 +94,7 @@ export function ReportingSettings(): React.ReactElement {
             {
               checked: diagnostics,
               description: t(
-                "Sanitized unexpected application failures, grouped so the maintainer can fix them.",
+                "Unexpected application failures with the operation category and sanitized release locations, plus expected Provider conditions such as expired authorization and rate limits reported separately with their class. No message text, content, name, or identifier is included.",
               ),
               id: "reporting-diagnostics",
               label: t("Diagnostic reports"),

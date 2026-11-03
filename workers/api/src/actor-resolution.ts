@@ -166,6 +166,49 @@ function ensureInternalUser(
 }
 
 /**
+ * Resolves the setup form's chosen Workspace name for one account.
+ *
+ * The bootstrap row written after a successful sign-up is the primary record. A
+ * sign-up whose response never arrived — the verification mail failed, or the
+ * invocation ended between the account write and the follow-up — leaves only the
+ * pre-account intent, so it is read here by the account's normalized email and
+ * promoted into the durable bootstrap row. That is the recovery path: the name
+ * survives without reopening registration, because the account already exists.
+ *
+ * @param client - Active system EffectTransactionClient.
+ * @param user - Internal user row being resolved.
+ * @returns Effect resolving the chosen name, or null when the form omitted it.
+ */
+function bootstrapWorkspaceName(
+  client: EffectTransactionClient,
+  user: InternalUserRow,
+): Effect.Effect<string | null, DatabaseError> {
+  return Effect.gen(function* () {
+    const recorded = yield* client.query<{ workspace_name: string | null }>(
+      `SELECT workspace_name FROM installation_bootstrap WHERE auth_user_id = $1`,
+      [user.auth_user_id],
+    );
+    if (recorded.rows.length > 0) return recorded.rows[0]?.workspace_name ?? null;
+    const recovered = yield* client.query<{ workspace_name: string | null }>(
+      `UPDATE installation_bootstrap_intent
+       SET auth_user_id = $2
+       WHERE lower(email) = lower($1) AND auth_user_id IS NULL
+       RETURNING workspace_name`,
+      [user.email, user.auth_user_id],
+    );
+    const intent = recovered.rows[0];
+    if (!intent) return null;
+    yield* client.query(
+      `INSERT INTO installation_bootstrap (auth_user_id, workspace_name)
+       VALUES ($1, $2)
+       ON CONFLICT (auth_user_id) DO NOTHING`,
+      [user.auth_user_id, intent.workspace_name],
+    );
+    return intent.workspace_name;
+  });
+}
+
+/**
  * Claims Installation Ownership for the first bootstrapped account and ensures
  * the installation has exactly one shared Workspace.
  *
@@ -180,6 +223,13 @@ function ensureInternalUser(
  * name is settled, and a later Settings rename is therefore never overwritten.
  * Without a chosen name the historical `<display name>'s workspace` default
  * stands and the onboarding row keeps `workspace_named = FALSE`.
+ *
+ * The resumable first-run row is created only for an installation that actually
+ * bootstrapped through the setup form. An upgraded installation has a shared
+ * Workspace and an Owner but no bootstrap record, and must never be handed an
+ * `in_progress` journey — its Owner keeps normal sign-in. An ownership transfer
+ * on a genuinely started installation still resumes, because the row already
+ * exists and is keyed by the Workspace rather than the account.
  *
  * @param client - Active system EffectTransactionClient.
  * @param user - Internal user row being resolved.
@@ -198,11 +248,7 @@ function ensureInstallation(
       [user.id],
     );
 
-    const chosen = yield* client.query<{ workspace_name: string | null }>(
-      `SELECT workspace_name FROM installation_bootstrap WHERE auth_user_id = $1`,
-      [user.auth_user_id],
-    );
-    const chosenName = chosen.rows[0]?.workspace_name ?? null;
+    const chosenName = yield* bootstrapWorkspaceName(client, user);
     const label = (user.display_name?.trim() || user.email.split("@")[0] || "Meltiply").slice(
       0,
       180,
@@ -245,13 +291,18 @@ function ensureInstallation(
        ON CONFLICT (org_id) DO NOTHING`,
     );
     // The bootstrapped Owner gets a progress row so the wizard can resume
-    // across verification, sign-in, and browser restarts. Members never do.
+    // across verification, sign-in, and browser restarts. Members never do, and
+    // neither does an installation that never entered the setup form: the
+    // bootstrap record is the durable provenance that distinguishes the two.
     yield* client.query(
       `INSERT INTO installation_onboarding (org_id, workspace_name, workspace_named)
        SELECT o.id, $2::text, $2::text IS NOT NULL
        FROM organizations o
        JOIN users u ON u.id = $1 AND u.installation_owner
        WHERE o.is_shared
+         AND EXISTS (
+           SELECT 1 FROM installation_bootstrap b WHERE b.auth_user_id = u.auth_user_id
+         )
        ON CONFLICT (org_id) DO UPDATE
          SET workspace_name = COALESCE(installation_onboarding.workspace_name, EXCLUDED.workspace_name),
              workspace_named = installation_onboarding.workspace_named OR EXCLUDED.workspace_named,

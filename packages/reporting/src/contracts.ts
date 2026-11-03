@@ -45,6 +45,17 @@ export const REPORTING_MAX_PENDING_AGE_DAYS = 7;
 /** Upper bound on pending rows drained by one delivery pass. */
 export const REPORTING_MAX_DELIVERY_BATCH = 10;
 
+/**
+ * Wall-clock ceiling for one delivery pass.
+ *
+ * A Worker invocation's post-response continuation shares a 30-second window, so
+ * the pass must stop early enough that its last transport attempt, the lease
+ * bookkeeping around it and the terminal-payload prune all finish inside it. The
+ * pass therefore spends nothing on a send it cannot complete, and rows it has not
+ * dispatched are released back to `pending` rather than left leased.
+ */
+export const REPORTING_DELIVERY_BUDGET_MILLISECONDS = 20_000;
+
 /** Upper bound on stored pending rows, so a noisy producer cannot grow storage. */
 export const REPORTING_MAX_PENDING_ROWS = 200;
 
@@ -221,6 +232,15 @@ export interface UsageReportInput {
   readonly engagementAsOf: string | null;
   /** Cohort coverage and truncation for the gauges above; null when there is no cohort. */
   readonly engagementCoverage: UsageEngagementCoverage | null;
+  /**
+   * Consent interval these measurements were computed under.
+   *
+   * The producer reads policy and aggregates in one snapshot, then enqueues in a
+   * later transaction. Without this, a withdrawal plus re-enable in between would
+   * tag the old interval's counters with the new interval's identity and report
+   * activity the Owner had declined. A mismatch queues nothing.
+   */
+  readonly expectedIntervalStartedAt?: string;
 }
 
 /** One allowlisted diagnostic report; the module sanitizes `error` before transport. */
@@ -245,12 +265,19 @@ export interface DiagnosticReportInput {
   readonly error: { readonly name: string; readonly stack?: string };
 }
 
-/** Bounded delivery outcome surfaced by the scheduled unit's log line. */
+/**
+ * Bounded delivery outcome surfaced by the scheduled unit's log line.
+ *
+ * `released` counts rows this pass claimed but deliberately handed back to
+ * `pending` because the invocation budget could not fit another send. They are
+ * neither sent nor discarded and are expected on a later pass.
+ */
 export interface DeliverySummary {
   readonly claimed: number;
   readonly delivered: number;
   readonly discarded: number;
   readonly failed: number;
+  readonly released: number;
   readonly skipped: number;
 }
 
@@ -288,6 +315,13 @@ export interface ReportingCategoryStatus {
   readonly reason: ReportingCategoryReason;
   /** When the stored choice was last changed, or null if never decided. */
   readonly decidedAt: string | null;
+  /**
+   * Disclosure version the stored decision was recorded against, or null when
+   * that category was never decided. Reporting fails closed unless it matches
+   * `REPORTING_DISCLOSURE_VERSION`, so this is the truthful record of what the
+   * Owner actually agreed to rather than the version in force today.
+   */
+  readonly disclosureVersion: number | null;
   /** Start of the interval this category counts activity over. */
   readonly intervalStartedAt: string | null;
 }

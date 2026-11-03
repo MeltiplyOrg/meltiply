@@ -52,11 +52,11 @@ function totp(uri) {
  */
 export async function ownerBrowserSession({ origin, email, password, setupSecret, workspaceName }) {
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
+  let context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
   });
-  const page = await context.newPage();
+  let page = await context.newPage();
   await mkdir("artifacts/selfhost", { recursive: true });
   let phase = "initial setup";
   const signIn = async (currentPassword) => {
@@ -64,6 +64,39 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await page.getByLabel("Email address", { exact: true }).fill(email);
     await page.getByLabel("Password", { exact: true }).fill(currentPassword);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  };
+  /**
+   * Captures one optional-surface screenshot in both palettes and at both widths.
+   *
+   * Only screens the journey has already left behind credentials are captured:
+   * the improvement/ready screens and Settings. The sign-up, sign-in, password,
+   * token and verification screens are never captured, and the captured region
+   * carries no email, name or token because those fields are cleared first.
+   */
+  const captureOptionalSurface = async (name, heading) => {
+    for (const palette of ["light", "dark"]) {
+      for (const viewport of [
+        { height: 900, label: "desktop", width: 1280 },
+        { height: 844, label: "phone", width: 390 },
+      ]) {
+        await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        await page.evaluate((mode) => {
+          document.documentElement.classList.toggle("dark", mode === "dark");
+        }, palette);
+        await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+        assert.equal(
+          await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+          true,
+          `${name} must not scroll horizontally at ${viewport.label} width`,
+        );
+        await page.screenshot({
+          fullPage: true,
+          path: `artifacts/selfhost/owner-${name}-${viewport.label}-${palette}.png`,
+        });
+      }
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.evaluate(() => document.documentElement.classList.remove("dark"));
   };
   const signOut = async () => {
     await page.getByRole("button", { name: "Account menu", exact: true }).click();
@@ -76,13 +109,13 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
   try {
     await page.goto(`${origin}/sign-in`);
     await expect(page.getByRole("heading", { name: "Make this workspace yours." })).toBeVisible();
-    await page.screenshot({ path: "artifacts/selfhost/owner-setup-desktop.png" });
+    // The setup form carries the setup secret and the owner's credentials, so it
+    // is asserted for layout only and never captured.
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
       true,
     );
-    await page.screenshot({ path: "artifacts/selfhost/owner-setup-mobile.png", fullPage: true });
     await page.setViewportSize({ width: 1280, height: 900 });
     const rejected = await context.request.post(`${origin}/api/auth/sign-up/email`, {
       data: { email, password, name: "Owner" },
@@ -97,28 +130,43 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await expect(
       page.getByRole("status").filter({ hasText: "Owner account created" }),
     ).toBeVisible();
-    phase = "email verification and owner sign-in";
+    phase = "email verification across a browser restart";
     const link = await mailLink(email, "Verify your Meltiply email", new Set());
     await page.goto(link);
-    await signIn(password);
-    phase = "resumed first-run improvement screen";
+    // A real restart across the verification handoff: the browser is closed and
+    // a new one signs in, so the journey can only resume from installation state.
+    await context.close();
+    const restartedContext = await browser.newContext({
+      reducedMotion: "reduce",
+      viewport: { width: 1280, height: 900 },
+    });
+    const restartedPage = await restartedContext.newPage();
+    await restartedPage.goto(`${origin}/sign-in`);
+    await restartedPage.getByLabel("Email address", { exact: true }).fill(email);
+    await restartedPage.getByLabel("Password", { exact: true }).fill(password);
+    await restartedPage.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(
-      page.getByRole("heading", { name: "Help improve Meltiply", exact: true }),
-    ).toBeVisible();
+      restartedPage.getByRole("heading", { name: "Help improve Meltiply", exact: true }),
+    ).toBeVisible({ timeout: 30_000 });
+    // Continue this journey in the restarted session; the cookie it holds is what
+    // the API smoke below reuses.
+    context = restartedContext;
+    page = restartedPage;
+    phase = "resumed first-run improvement screen";
     await expect(page.getByRole("switch", { name: "Usage statistics" })).not.toBeChecked();
     await expect(page.getByRole("switch", { name: "Diagnostic reports" })).not.toBeChecked();
-    await page.screenshot({ path: "artifacts/selfhost/owner-improvement-desktop.png" });
-    await page.setViewportSize({ width: 390, height: 844 });
-    assert.equal(
-      await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
-      true,
-    );
-    await page.screenshot({ path: "artifacts/selfhost/owner-improvement-mobile.png", fullPage: true });
-    await page.setViewportSize({ width: 1280, height: 900 });
+    await captureOptionalSurface("improvement", "Help improve Meltiply");
     // Skip is explicit and leaves both categories off: no implicit consent.
     await page.getByRole("button", { name: "Skip", exact: true }).click();
     phase = "final first-run screen";
     await expect(page.getByRole("heading", { name: "You're ready", exact: true })).toBeFocused();
+    await captureOptionalSurface("ready", "You're ready");
+    // The reached screen is durable: a reload resumes "You're ready" rather than
+    // restarting the optional improvement step.
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: "You're ready", exact: true }),
+    ).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: "Enter the Workspace", exact: true }).click();
     await page.waitForURL(/\/posts/);
     await expect(page.getByRole("heading", { name: "Posts", exact: true })).toBeVisible();
@@ -132,9 +180,6 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await page.goto(`${origin}/sign-up`);
     await expect(page.getByRole("heading", { name: "Welcome back." })).toBeVisible();
     await expect(page.getByLabel("Setup secret", { exact: true })).toHaveCount(0);
-    await page.screenshot({ path: "artifacts/selfhost/owner-login-desktop.png" });
-    await page.evaluate(() => document.documentElement.classList.add("dark"));
-    await page.screenshot({ path: "artifacts/selfhost/owner-login-dark.png" });
     await signIn(password);
     await page.waitForURL(/\/posts/);
     phase = "workspace name and reporting settings";
@@ -148,6 +193,7 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     // disclosure must say so instead of claiming working reporting.
     await expect(page.getByText("Not requested").first()).toBeVisible();
     await expect(page.getByRole("switch", { name: "Usage statistics" })).not.toBeChecked();
+    await captureOptionalSurface("settings-privacy", "Improvement reporting");
     phase = "password change";
     await page.goto(`${origin}/settings?section=security`);
     let security = page.getByRole("region", { name: "Account security" });

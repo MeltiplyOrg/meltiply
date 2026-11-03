@@ -194,8 +194,10 @@ describe("diagnostic payload", () => {
     // Only the application frame survives; node internals and eval frames are cut.
     expect(stacktrace.frames).toEqual([
       {
-        filename: "workers/automation/src/distribution.ts",
-        function: "publishDistribution",
+        filename: "workers/automation/source",
+        // The stack symbol is free-form text a caller could have chosen, so it is
+        // never forwarded; grouping keys on the release location instead.
+        function: "<anonymous>",
         in_app: true,
         lang: "javascript",
         lineno: 42,
@@ -256,8 +258,8 @@ describe("diagnostic payload", () => {
       ),
     ).toEqual([
       {
-        filename: "packages/reporting/src/service.ts",
-        function: "safe",
+        filename: "packages/reporting/source",
+        function: "<anonymous>",
         in_app: true,
         lang: "javascript",
         lineno: 10,
@@ -364,5 +366,153 @@ describe("provider failure payload", () => {
     );
     expect(wrongCategory).not.toHaveProperty("provider_failure_class");
     expect(payloadViolation(wrongCategory)).toBeUndefined();
+  });
+});
+
+describe("deployed release frames", () => {
+  it("keeps a hashed frontend asset frame and strips the origin and query", () => {
+    const [frame] = sanitizedFrames(
+      "    at render (https://installation.example/assets/index-DiwrgTda.js:4:12)",
+    );
+
+    // The deployed browser build refers to the asset, not to repository source:
+    // an origin-only allowlist would drop every real frontend frame.
+    expect(frame).toEqual({
+      filename: "assets/DiwrgTda.js",
+      function: "<anonymous>",
+      in_app: true,
+      lang: "javascript",
+      lineno: 4,
+      platform: "custom",
+    });
+    expect(JSON.stringify(frame)).not.toContain("installation.example");
+  });
+
+  it("strips a cache-busting or credential-bearing suffix from a release frame", () => {
+    const frames = sanitizedFrames(
+      [
+        "    at boot (https://app.example/assets/index-AbCdEf12.js?v=2:1:1)",
+        "    at boot (https://app.example/assets/index-AbCdEf12.js?access_token=leak:1:1)",
+      ].join("\n"),
+    );
+
+    expect(frames.map((frame) => frame.filename)).toEqual([
+      "assets/AbCdEf12.js",
+      "assets/AbCdEf12.js",
+    ]);
+    expect(JSON.stringify(frames)).not.toContain("access_token");
+  });
+
+  it("still rejects dependency bundles, arbitrary file names and absolute paths", () => {
+    expect(
+      sanitizedFrames(
+        [
+          "    at third (https://cdn.provider.test/bundle.js:1:22)",
+          "    at run (/opt/meltiply/app.js:9:1)",
+          "    at guess (https://app.example/assets/customer-name.js:1:1)",
+          "    at ours (assets/index-AbCdEf12.js:1:1)",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      {
+        filename: "assets/AbCdEf12.js",
+        function: "<anonymous>",
+        in_app: true,
+        lang: "javascript",
+        lineno: 1,
+        platform: "custom",
+      },
+    ]);
+  });
+});
+
+describe("exception type and frame value allowlist", () => {
+  it("normalizes an identifier-shaped but unapproved error name to Error", () => {
+    const properties = diagnosticProperties(
+      {
+        category: "request_failure",
+        error: {
+          name: "SensitiveCustomerName",
+          stack: "    at guard (workers/api/src/app.ts:10:2)",
+        },
+        handled: true,
+        occurredAt: "2026-01-02T03:04:05.000Z",
+        operation: "publish",
+      },
+      context,
+    );
+
+    const list = properties.$exception_list as Record<string, unknown>[];
+    // A plain identifier is not evidence that it names an exception class.
+    expect(list[0]!.type).toBe("Error");
+    expect(JSON.stringify(properties)).not.toContain("SensitiveCustomerName");
+    expect(payloadViolation(properties)).toBeUndefined();
+  });
+
+  it("keeps a reviewed application exception class as the group name", () => {
+    const properties = diagnosticProperties(
+      {
+        category: "request_failure",
+        error: { name: "ProviderAdapterError" },
+        handled: true,
+        occurredAt: "2026-01-02T03:04:05.000Z",
+        operation: "publish",
+      },
+      context,
+    );
+
+    const list = properties.$exception_list as Record<string, unknown>[];
+    expect(list[0]!.type).toBe("ProviderAdapterError");
+  });
+
+  it("refuses a stored row carrying an unapproved type or free-form frame symbol", () => {
+    const base = {
+      $exception_level: "error",
+      app_version: "1.0.0-target.0",
+      deployment_category: "selfhosted",
+      diagnostic_category: "request_failure",
+      diagnostic_handled: true,
+      operation_category: "publish",
+      schema_version: 1,
+    };
+
+    expect(
+      payloadViolation({
+        ...base,
+        $exception_list: [{ type: "CustomerName", value: "request_failure" }],
+      }),
+    ).toBe("unapproved_exception_type");
+    expect(
+      payloadViolation({
+        ...base,
+        $exception_list: [
+          {
+            stacktrace: {
+              frames: [{ filename: "assets/AbCdEf12.js", function: "customerName" }],
+              type: "raw",
+            },
+            type: "TypeError",
+            value: "request_failure",
+          },
+        ],
+      }),
+    ).toBe("unapproved_frame_symbol");
+    expect(
+      payloadViolation({
+        ...base,
+        $exception_list: [
+          {
+            stacktrace: {
+              // Not in the emitted vocabulary and not URL-shaped, so the location
+              // allowlist itself is what refuses it.
+              frames: [{ filename: "packages/SensitiveCustomerName.ts", function: "<anonymous>" }],
+              type: "raw",
+            },
+            type: "TypeError",
+            value: "request_failure",
+          },
+        ],
+      }),
+    ).toBe("unapproved_frame_location");
   });
 });

@@ -1025,7 +1025,6 @@
   "Reports go to PostHog Cloud, operated by the Meltiply maintainer. Participating installations share one random installation identifier, so reports can be linked over time: they are pseudonymous, not completely anonymous.": "报告会发送到由 Meltiply 维护者运营的 PostHog Cloud。参与的安装共用一个随机安装标识符，因此报告可随时间被关联：它们是化名的，并非完全匿名。",
   "Requested": "已请求",
   "Review what this installation shares with the Meltiply maintainer and who decides it.": "查看此安装与 Meltiply 维护者共享的内容以及由谁决定。",
-  "Sanitized unexpected application failures, grouped so the maintainer can fix them.": "经过清理的意外应用故障，按组汇总以便维护者修复。",
   "Save reporting choices": "保存报告选择",
   "Saved on this installation, but no report was queued.": "已保存在此安装上，但没有报告被排队。",
   "Saved on this installation. Nothing was sent.": "已保存在此安装上。未发送任何内容。",
@@ -1047,7 +1046,6 @@
   "The saved choice could not be read, so nothing is sent.": "无法读取已保存的选择，因此不会发送任何内容。",
   "This deployment has no reporting destination configured, so nothing can be sent yet. Your choices are saved and take effect if a destination is configured.": "此部署未配置报告接收端，因此暂时无法发送任何内容。你的选择会被保存，并在配置接收端后生效。",
   "This deployment has no reporting destination configured.": "此部署未配置报告接收端。",
-  "Unexpected application failures with the operation category, app version, and sanitized stack frames. Expected Provider conditions such as expired authorization and rate limits are excluded.": "意外应用故障，包含操作类别、应用版本和经过清理的堆栈帧。授权过期和速率限制等预期内的平台服务商状况不在其中。",
   "Usage statistics": "使用统计",
   "Usage statistics and diagnostic reports": "使用统计和诊断报告",
   "You are the Installation Owner, so you decide what this installation shares. Both reports start off.": "你是安装所有者，因此由你决定此安装共享的内容。两个报告初始都处于关闭状态。",
@@ -1056,5 +1054,7 @@
   "Your choices could not be saved. Try again.": "无法保存你的选择。请重试。",
   "{name}'s workspace": "{name} 的工作区",
   "Discovery source": "你是如何得知 Meltiply 的",
-  "Your earlier visit did not save a Workspace name yet. Confirm it to settle the shared Workspace.": "你上次访问尚未保存工作区名称。确认后即可确定共享工作区。"
+  "Your earlier visit did not save a Workspace name yet. Confirm it to settle the shared Workspace.": "你上次访问尚未保存工作区名称。确认后即可确定共享工作区。",
+  "Unexpected application failures with the operation category, app version, and sanitized release locations. Expected Provider conditions — expired authorization, rate limits, quotas, timeouts, and unconfirmed outcomes — are reported separately with their class, so they never mix with application defects. No message text, content, name, or identifier is included.": "意外应用故障，包含操作类别、应用版本和经过清理的发布路径。预期内的平台服务商状况——授权过期、速率限制、配额、超时和未确认结果——会连同其分类单独上报，因此绝不会与应用缺陷混在一起。不包含任何消息文本、内容、名称或标识符。",
+  "Unexpected application failures with the operation category and sanitized release locations, plus expected Provider conditions such as expired authorization and rate limits reported separately with their class. No message text, content, name, or identifier is included.": "意外应用故障，包含操作类别和经过清理的发布路径，以及诸如授权过期和速率限制等预期内的平台服务商状况；这些状况会连同其分类单独上报。不包含任何消息文本、内容、名称或标识符。"
 }

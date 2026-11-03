@@ -127,6 +127,7 @@ fixtures:
     workspace: *workspace
   onboarding_progress: &onboarding_progress
     status: in_progress
+    step: improvement
     workspace_name: Alpha Studio
     workspace_named: true
     completed_at: null

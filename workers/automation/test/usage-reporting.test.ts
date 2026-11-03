@@ -28,6 +28,7 @@ const zeroDelivery: DeliverySummary = {
   delivered: 0,
   discarded: 0,
   failed: 0,
+  released: 0,
   skipped: 1,
 };
 

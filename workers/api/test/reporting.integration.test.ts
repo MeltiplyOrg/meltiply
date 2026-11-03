@@ -642,14 +642,71 @@ describe("diagnostic ingestion", () => {
       platform: "threads",
       provider_failure_class: "rate_limit",
     });
-    const [exception] = properties.$exception_list as Record<string, unknown>[];
     // The expected condition stays countable and handled, and its group value is
     // the fixed category rather than any Provider message.
-    expect(exception).toMatchObject({
-      mechanism: { handled: true },
-      type: "ProviderAdapterError",
-      value: "provider_failure",
+    expect(properties.$exception_list).toMatchObject([
+      {
+        mechanism: { handled: true },
+        type: "ProviderAdapterError",
+        value: "provider_failure",
+      },
+    ]);
+  });
+
+  it("drops every sensitive canary from the delivered payload", async () => {
+    await setPreferences(false, true);
+    const response = await request("/installation/reporting/diagnostics", "owner", {
+      body: {
+        category: "unhandled_exception",
+        error_name: "TypeError",
+        error_stack: [
+          "TypeError: Post 'Acme launch' failed for alpha@meltiply.local",
+          "    at publishDistribution (workers/automation/src/distribution.ts:42:7)",
+          "    at fetch (https://api.threads.test/v1/posts?access_token=secret-value)",
+          "    at handler (https://cdn.provider.test/bundle.js:1:22)",
+        ].join("\n"),
+        operation: "publish",
+        platform: "threads",
+      },
     });
+    expect(response.status).toBe(202);
+
+    const captured = await nextCapture();
+    const serialized = JSON.stringify(captured.body);
+    for (const canary of [
+      "Acme launch",
+      "alpha@meltiply.local",
+      "secret-value",
+      "api.threads.test",
+      "cdn.provider.test",
+    ]) {
+      expect(serialized, canary).not.toContain(canary);
+    }
+    const properties = captured.body.properties as Record<string, unknown>;
+    const list = properties.$exception_list;
+    expect(Array.isArray(list)).toBe(true);
+    const exception: unknown = Array.isArray(list) ? list[0] : undefined;
+    expect(exception && typeof exception === "object" && "stacktrace" in exception).toBe(true);
+    const stacktrace =
+      exception && typeof exception === "object" && "stacktrace" in exception
+        ? exception.stacktrace
+        : undefined;
+    const frames =
+      stacktrace && typeof stacktrace === "object" && "frames" in stacktrace
+        ? stacktrace.frames
+        : undefined;
+    // Only the application frame survives; the message line, the Provider URL and
+    // the bundled third-party frame are all gone.
+    expect(frames).toEqual([
+      {
+        filename: "workers/automation/src/distribution.ts",
+        function: "publishDistribution",
+        in_app: true,
+        lang: "javascript",
+        lineno: 42,
+        platform: "custom",
+      },
+    ]);
   });
 
   it("keeps a repeated failure within one hour as a single report", async () => {

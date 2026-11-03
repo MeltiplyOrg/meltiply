@@ -16,7 +16,6 @@ import {
 } from "@meltiply/reporting";
 import { errorDiagnostic, log, type LogContext } from "@meltiply/observability";
 
-import { withSystemTransactionEffect } from "./database";
 import type { AutomationEnv } from "./env";
 
 /**
@@ -210,8 +209,16 @@ export function recordDiagnostic(
   // from the very unit that drains diagnostics.
   if (input.operation === "reporting") return Effect.succeed(false);
   const configuration = reportingConfiguration(env);
+  // Resolved lazily: this module is in the automation entry point's import graph,
+  // and a static database import would evaluate `pg` in workerd unit isolates.
   const transaction: ReportingTransactionRunner = (operation) =>
-    withSystemTransactionEffect(env, (client: EffectTransactionClient) => operation(client));
+    Effect.flatMap(
+      Effect.promise(() => import("./database")),
+      (module) =>
+        module.withSystemTransactionEffect(env, (client: EffectTransactionClient) =>
+          operation(client),
+        ),
+    );
   const layer = createReportingServiceLive({
     appVersion: env.VERSION,
     configuration,

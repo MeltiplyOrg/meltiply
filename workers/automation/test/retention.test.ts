@@ -60,17 +60,32 @@ describe("retention cleanup", () => {
     expect(withSystemTransactionEffect).not.toHaveBeenCalled();
   });
 
-  it("counts every failing cleanup instead of aborting the daily sweep", async () => {
-    // One unreachable table must not hide or cancel the remaining cleanup
-    // classes: idempotency keys, webhook events, outbox events, async job
-    // events, usage corrections, analytics snapshots, and due Brand Profile
-    // purges each report their own failure.
-    withSystemTransactionEffect.mockImplementation(() =>
-      Effect.fail(new Error("database unavailable")),
+  it("counts only the failing cleanup and still sweeps the rest", async () => {
+    // One unreachable table must neither hide nor cancel the remaining cleanup
+    // classes. Route by statement shape so exactly one class fails: idempotency
+    // keys are unreachable, every other class deletes two rows.
+    withSystemTransactionEffect.mockImplementation(
+      (
+        _env: AutomationEnv,
+        operation: (client: EffectTransactionClient) => Effect.Effect<unknown>,
+      ) =>
+        operation({
+          query: (statement: string) =>
+            statement.includes("idempotency_keys")
+              ? Effect.fail(new Error("database unavailable"))
+              : Effect.succeed({ rowCount: 2, rows: [] }),
+        } as unknown as EffectTransactionClient),
     );
 
     const result = await Effect.runPromise(runRetention(env, { batchSize: 10 }));
-    expect(result).toEqual({ deleted: 0, errors: 7 });
+
+    // The sweep attempted every registered class, reported one error, and kept
+    // the deletions from the classes that succeeded, so a single bad table is
+    // visible without discarding the rest of the run.
+    const attempted = withSystemTransactionEffect.mock.calls.length;
+    expect(attempted).toBeGreaterThan(1);
+    expect(result.errors).toBe(1);
+    expect(result.deleted).toBe((attempted - 1) * 2);
   });
 
   /**

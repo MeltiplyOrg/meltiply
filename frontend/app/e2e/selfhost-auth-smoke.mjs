@@ -74,6 +74,11 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
    * carries no email, name or token because those fields are cleared first.
    */
   const captureOptionalSurface = async (name, heading) => {
+    // The cookie choice panel overlays the page until answered. Rejecting the
+    // optional cookies is the choice that grants nothing, and it clears the
+    // panel so the captured interface is the actual surface.
+    const rejectOptional = page.getByRole("button", { name: "Reject optional", exact: true });
+    if (await rejectOptional.count()) await rejectOptional.click();
     for (const palette of ["light", "dark"]) {
       for (const viewport of [
         { height: 900, label: "desktop", width: 1280 },
@@ -160,6 +165,11 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await page.getByRole("button", { name: "Skip", exact: true }).click();
     phase = "final first-run screen";
     await expect(page.getByRole("heading", { name: "You're ready", exact: true })).toBeFocused();
+    // The screen's own actions must be interactive before the capture proves the
+    // interface; a pending completion or an overlay would photograph a dead CTA.
+    await expect(
+      page.getByRole("button", { name: "Enter the Workspace", exact: true }),
+    ).toBeEnabled();
     await captureOptionalSurface("ready", "You're ready");
     // The reached screen is durable: a reload resumes "You're ready" rather than
     // restarting the optional improvement step.
@@ -182,9 +192,16 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await expect(page.getByLabel("Setup secret", { exact: true })).toHaveCount(0);
     await signIn(password);
     await page.waitForURL(/\/posts/);
-    phase = "workspace name and reporting settings";
+    phase = "account workspace name";
     await page.goto(`${origin}/settings?section=account`);
-    await expect(page.getByText(workspaceName, { exact: true })).toBeVisible();
+    // The canonical name appears in the sidebar and the account definition list;
+    // assert the account entry, which is what proves the chosen setup name was
+    // persisted to the shared Workspace.
+    const workspaceField = page
+      .locator("dl > div")
+      .filter({ has: page.locator("dt", { hasText: "Workspace" }) });
+    await expect(workspaceField.locator("dd")).toHaveText(workspaceName);
+    phase = "reporting settings";
     await page.goto(`${origin}/settings?section=privacy`);
     await expect(
       page.getByRole("heading", { name: "Improvement reporting", exact: true }),

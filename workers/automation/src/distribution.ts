@@ -1210,13 +1210,12 @@ function recordPublishOutcome(
         const updated = yield* client.query<{
           analytics_event_id: string | null;
           comments_event_id: string | null;
-          published_at: Date | string | null;
           reconciliation_attempt_count: number;
           status: string;
         }>(
           `UPDATE distributions
        SET status = CASE
-             WHEN  = 'published' THEN 'published'
+             WHEN $2 = 'published' THEN 'published'
              WHEN status = 'processing' THEN $2
              ELSE status
            END,
@@ -1280,7 +1279,6 @@ function recordPublishOutcome(
          AND status IN ('processing', 'cancel_requested', 'needs_reconciliation')
        RETURNING analytics_sync_event_id::text AS analytics_event_id,
                  comments_sync_event_id::text AS comments_event_id,
-                 published_at AS published_at,
                  reconciliation_attempt_count, status`,
           [
             row.id,
@@ -1745,7 +1743,6 @@ function recordReconciliationOutcome(
         const updated = yield* client.query<{
           analytics_event_id: string | null;
           comments_event_id: string | null;
-          published_at: Date | string | null;
           reconciliation_attempt_count: number;
           status: string;
         }>(
@@ -1791,7 +1788,6 @@ function recordReconciliationOutcome(
            AND status IN ('awaiting_provider', 'needs_reconciliation', 'cancel_requested')
          RETURNING analytics_sync_event_id::text AS analytics_event_id,
                    comments_sync_event_id::text AS comments_event_id,
-                   published_at AS published_at,
                    reconciliation_attempt_count, status`,
           [
             row.id,

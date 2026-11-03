@@ -1,5 +1,5 @@
 import { ProviderAdapterError, classifyProviderFailure } from "@meltiply/providers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   operationForScheduledUnit,

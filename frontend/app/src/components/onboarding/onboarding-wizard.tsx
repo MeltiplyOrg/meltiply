@@ -147,22 +147,27 @@ function ImprovementScreen({
   const feedbackQuery = useReportingFeedback(scope);
   const savePreferences = useUpdateReportingPreferences(scope);
   const submitFeedback = useSubmitReportingFeedback(scope);
-  const [usage, setUsage] = useState(false);
-  const [diagnostics, setDiagnostics] = useState(false);
+  // The switches render the persisted choice until the Owner edits one. Keeping
+  // an explicit local override instead of copying the read into state means the
+  // first paint already shows the stored decision and a save in flight can never
+  // be rendered as consent the installation does not have.
+  const [choiceOverride, setChoiceOverride] = useState<{
+    diagnostics: boolean;
+    usage: boolean;
+  } | null>(null);
   const [source, setSource] = useState<DiscoverySource | "">("");
   const [error, setError] = useState<string | null>(null);
-  const [initialised, setInitialised] = useState(false);
-
-  // Reflect the stored choice once it arrives. Both switches stay off for a
-  // fresh installation, so an unread policy is never rendered as consent.
-  useEffect(() => {
-    if (initialised || !policy.data) return;
-    setUsage(policy.data.categories.usage.requested);
-    setDiagnostics(policy.data.categories.diagnostics.requested);
-    setInitialised(true);
-  }, [initialised, policy.data]);
 
   const stored = policy.data;
+  // An unread policy is never rendered as consent: both switches stay off until
+  // the stored decision arrives.
+  const usage = choiceOverride?.usage ?? stored?.categories.usage.requested ?? false;
+  const diagnostics =
+    choiceOverride?.diagnostics ?? stored?.categories.diagnostics.requested ?? false;
+  const setUsage = (value: boolean) =>
+    setChoiceOverride({ diagnostics, usage: value });
+  const setDiagnostics = (value: boolean) =>
+    setChoiceOverride({ diagnostics: value, usage });
   // The read always resolves to a shape describing the surface, including for an
   // installation that never answered. Only a recorded answer — a stored source or
   // submission instant — may replace the controls, otherwise a fresh screen would
@@ -186,6 +191,9 @@ function ImprovementScreen({
     }
     try {
       await savePreferences.mutateAsync({ diagnostics, usage });
+      // The persisted decision is now authoritative; keeping the override would
+      // mask a later policy change on this screen.
+      setChoiceOverride(null);
       onContinue();
     } catch (cause) {
       setError(

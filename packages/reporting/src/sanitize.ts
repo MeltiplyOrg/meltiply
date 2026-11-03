@@ -402,7 +402,7 @@ function isNormalizedFramePath(filename: string): boolean {
 }
 
 /** Source file remainder: a path under a reviewed area ending in a source extension. */
-const sourceRemainder = /^\/[A-Za-z0-9_.\/-]{1,200}\.(?:ts|tsx|js|mjs|cjs)$/;
+const sourceRemainder = /^\/[A-Za-z0-9_./-]{1,200}\.(?:ts|tsx|js|mjs|cjs)$/;
 
 /**
  * Reduces a stack location to provable application release metadata.

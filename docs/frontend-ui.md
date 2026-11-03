@@ -418,8 +418,9 @@ interface language.
 URL parameters are `previewScenario`, `previewOperation`, and `previewStatus`. Generic
 saves, deletes, sign-in/out, and single-part uploads operate only in browser memory:
 uploaded bytes become local Blob URLs, never R2 objects. Upload completion returns a
-ready Asset; draft updates retain Channel identity and replace provider options,
-including incomplete method choices, without inheriting another Channel's fields.
+ready Asset; session reads retain the upload-session envelope. Draft updates retain
+Channel identity and replace provider options, including incomplete method choices,
+without inheriting another Channel's fields.
 No preview response sends email, changes credentials, publishes content, or invokes
 background infrastructure.
 

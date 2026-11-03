@@ -415,8 +415,13 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await runSystemTransaction(env, async (client) => {
-    // The schema belongs to this suite alone, so the measurement tables hold only
-    // what the previous case produced.
+    // The schema belongs to this suite alone, so every table holds only what the
+    // previous case produced and can be cleared wholesale. Snapshots matter as
+    // much as the marks: `seedPublications` recreates the same two Distribution
+    // ids each case, so a snapshot left by an earlier case would be read back as
+    // this case's analytics and silently establish metrics this fixture means to
+    // leave absent.
+    await client.query("DELETE FROM analytics_snapshots");
     await client.query("DELETE FROM reporting_distribution_marks");
     await client.query("DELETE FROM reporting_post_marks");
     await client.query("DELETE FROM reporting_publication_daily");

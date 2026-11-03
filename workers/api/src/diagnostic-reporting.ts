@@ -186,7 +186,7 @@ function boundaryReportingLayer(
  * @param dependencies - Optional injected reporting layer.
  * @param event - Local log event name for the continuation's own outcome.
  */
-export function scheduleDiagnostic(
+function scheduleDiagnostic(
   c: Context<ApiWorkerEnvironment>,
   input: DiagnosticReportInput,
   dependencies: ReportingRouteDependencies,

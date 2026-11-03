@@ -26,7 +26,7 @@ import { idempotentMutation } from "./workspace-lifecycle";
  * first-run account exists and before the final screen completes; `completed`
  * is terminal, so the name is thereafter changed through Workspace settings.
  */
-export interface OnboardingProgress {
+interface OnboardingProgress {
   completed_at: string | null;
   /**
    * Optional screen the current Owner reached. A restart resumes here, and it is

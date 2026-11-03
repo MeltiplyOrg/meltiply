@@ -54,7 +54,7 @@ export function discoverySourceLabel(t: (message: string) => string, source: Dis
  * @param status One category's status from the policy document.
  * @returns The reason sentence.
  */
-export function categoryReason(t: (message: string) => string, status: ReportingCategoryStatus) {
+function categoryReason(t: (message: string) => string, status: ReportingCategoryStatus) {
   switch (status.reason) {
     case "enabled":
       return t("Sending while enabled.");

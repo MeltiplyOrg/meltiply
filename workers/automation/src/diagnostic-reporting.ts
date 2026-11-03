@@ -50,10 +50,10 @@ const topicOperations: readonly (readonly [string, OperationCategory])[] = [
 ] as const;
 
 /** The reporting delivery unit, which must never report its own failure. */
-export const reportingDeliveryUnit = "improvement-reporting-delivery";
+const reportingDeliveryUnit = "improvement-reporting-delivery";
 
 /** The usage-summary producer, whose failures belong to the same operation grouping. */
-export const reportingUsageUnit = "usage-reporting";
+const reportingUsageUnit = "usage-reporting";
 
 /**
  * Maps a queue topic to the maintainer's fixed operation grouping.
@@ -245,7 +245,7 @@ export function recordDiagnostic(
  * @param input - Approved diagnostic report.
  * @param context - Local log context for the reporting attempt's own outcome.
  */
-export async function recordDiagnosticSafely(
+async function recordDiagnosticSafely(
   env: AutomationEnv,
   input: DiagnosticReportInput,
   context: LogContext,

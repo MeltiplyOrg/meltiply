@@ -199,8 +199,10 @@ own animation before the next intent settles.
 
 Smooth scrolling has one owner, `layout/smooth-scroll.tsx`. The document controller
 smooths the window and stays out of every region marked `data-lenis-prevent`, so it
-cannot swallow a nested wheel gesture. The Queue page body never installs a second
-controller on phones; only the calendar viewport owns it.
+cannot swallow a nested wheel gesture, and each list viewport that owns its own
+scrolling asks `useSmoothScrollContainer` for a container controller. On Queues both
+the plan list and the calendar viewport own one; the page body never adds a second
+document controller on phones.
 
 Verify the actual desktop, phone, and reported user viewport. Cover both palettes,
 long content, loading, empty/error states, keyboard traversal, nested scrolling, and

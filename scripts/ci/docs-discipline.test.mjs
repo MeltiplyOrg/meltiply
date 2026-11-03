@@ -63,3 +63,43 @@ test("accepts current-state prose and ignores code and exempt files", () => {
   ]);
   assert.deepEqual(findings, []);
 });
+
+test("an info string inside a fence does not close it", () => {
+  const root = fixture({
+    "guide.md": [
+      "```md",
+      "Measured on 2026-10-19 inside a fence.",
+      "```js",
+      "These supersede the statements below.",
+      "```",
+      "The migration ledger is append-only.",
+    ].join("\n"),
+  });
+  // The nested ```js line carries an info string, so it must not end the block.
+  assert.deepEqual(collectDisciplineFindings(root, ["guide.md"]), []);
+});
+
+test("a closing fence may be longer than its opener", () => {
+  const root = fixture({
+    "guide.md": [
+      "```",
+      "Measured on 2026-10-19.",
+      "````",
+      "Implementation note (2026-10-19): real finding.",
+    ].join("\n"),
+  });
+  assert.equal(collectDisciplineFindings(root, ["guide.md"]).length, 1);
+});
+
+test("double-backtick spans mask their whole content", () => {
+  const root = fixture({
+    "guide.md": [
+      "Inline ``Measured on 2026-10-19`` stays quoted.",
+      "Inline ``a `b` These supersede the statements below c`` stays quoted too.",
+      "But Measured on 2026-10-19 outside code is a finding.",
+    ].join("\n"),
+  });
+  const findings = collectDisciplineFindings(root, ["guide.md"]);
+  assert.equal(findings.length, 1, findings.join("\n"));
+  assert.match(findings[0], /guide\.md:3:/u);
+});

@@ -20,11 +20,16 @@ operation succeeded.
 
 ## Positioning
 
-Meltiply is queue-native distribution infrastructure: every publish runs through
-durable Cloudflare Queues, Workflows, and Cron Triggers with idempotent consumers,
-exponential backoff, and dead-letter routing. A direct-post scheduler cannot truthfully
-claim the same delivery semantics — retries, recovery, and auditability are the
-product's mechanism, not an implementation detail.
+Meltiply is queue-native distribution infrastructure. Every publish runs through
+durable queues, workflows, and scheduled triggers with idempotent consumers,
+exponential backoff, and dead-letter routing, and the guarantee is the product's
+mechanism rather than an implementation detail — a direct-post scheduler cannot
+truthfully claim the same retries, recovery, and auditability.
+
+Publishing is immediate when a creator chooses Now; Cron and scheduled triggers are
+what start deferred work. The managed deployment implements delivery with Cloudflare
+Queues, Workflows, and Cron Triggers; the self-hosted deployment implements the same
+contract with documented local equivalents. Neither target is part of the guarantee.
 
 ## Operating Context
 

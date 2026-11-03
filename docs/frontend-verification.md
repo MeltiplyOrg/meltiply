@@ -66,8 +66,10 @@ budgets are 0.70 performance, 0.90 accessibility, 0.90 best practices, and 0.90 
   limits stay enforced and integration-covered.
 - The Analytics journey uses deterministic cohort values but unique Post and
   Distribution ids per run so retries cannot collide.
-- Browser failures are reported without automatic retries; traces and screenshots are
-  retained in the lane artifact before the next journey runs.
+- Playwright retries a failed test twice when `CI` is set (`retries: process.env.CI ? 2 : 0`
+  in `playwright.config.ts`) unless a lane command overrides it. With no `CI` it does not
+  retry, so a local failure is real on the first run. Traces and screenshots are retained
+  in the lane artifact before the next journey runs.
 - Wrangler fires no cron triggers locally, so the acceptance API exposes a fixture-only
   route that invokes the Automation Worker's scheduled dispatcher through its existing
   service binding. Stored due times are unchanged and no future clock is injected.

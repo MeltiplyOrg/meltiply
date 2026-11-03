@@ -44,15 +44,17 @@ capability expiry must not let it outlive the persisted write hold.
 
 [`extended.yml`](../.github/workflows/extended.yml) exposes lanes selected by hand:
 `frontend-full`, `frontend-ui`, `cloudflare-full`, `cloudflare-integration`,
-`cloudflare-extended`, `publishing-flow`, `publishing-browser`,
-`device-authorization`, `object-storage`, `portable-caching`, and
-`portable-caching-smoke`. They run on GitHub-hosted machines without deployment
-secrets. A passing `ci-gate` does not imply a manual lane ran.
+`cloudflare-extended`, `publishing-flow`, `publishing-browser`, `publishing-queues`,
+`device-authorization`, `object-storage`, `portable-caching`, `portable-caching-smoke`,
+`performance-focused`, `performance-backend`, and `performance-media`. They run on
+GitHub-hosted machines without deployment secrets. A passing `ci-gate` does not imply
+a manual lane ran.
 
 Lanes use the real API, storage, processor, transport, and consumer with controlled
 external Provider responses; they do not certify live credentials, platform audit, or
-public posting. Browser failures are reported without automatic retries, and traces
-and screenshots are retained in the lane artifact before the next journey.
+public posting. Playwright retries a failed test twice under `CI` unless the lane
+command overrides it, so treat a retried pass as flaky rather than clean; traces and
+screenshots are retained in the lane artifact before the next journey.
 
 Wrangler fires no cron triggers locally, so the acceptance API exposes a fixture-only
 route that invokes the Automation Worker's scheduled dispatcher through its existing

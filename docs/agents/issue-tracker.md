@@ -14,7 +14,9 @@ Issues and specs live as GitHub issues. Use the `gh` CLI; it infers the reposito
 - **Close**: `gh issue close <number> --comment "..."`.
 
 When a skill says "publish to the issue tracker", create an issue. When it says "fetch
-the relevant ticket", run `gh issue view <number> --comments`.
+the relevant ticket", run `gh issue view <number> --comments`. A skill that names its own
+`--json` fields takes precedence: `implement` needs
+`--json number,title,body,labels,comments`, and omitting them breaks it.
 
 ## Labels
 

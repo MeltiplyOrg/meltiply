@@ -126,8 +126,8 @@ docker compose --env-file .env.selfhost -f compose.selfhost.yml up -d --wait
 ```
 
 The generator records the native architecture as `SELFHOST_PLATFORM=linux/amd64` or
-`linux/arm64`; only 64-bit ARM is a release target, and existing environment files
-must add the setting explicitly. It writes private random credentials to
+`linux/arm64`. Both are release targets with native CI builds; 32-bit ARM is not.
+Existing environment files must add the setting explicitly. It writes private random credentials to
 `.env.selfhost` with mode 0600 and refuses to overwrite an existing file. Keep that
 file out of version control, in backups readable only by administrators.
 
@@ -235,7 +235,7 @@ The Owner controls installation-level actions: suspending, reactivating, and
 hard-deleting accounts, and transferring ownership after reauthentication.
 Workspace Admins manage Editors and Viewers, Brand Profiles, Channels, the
 Workspace name, and the audit trail. Editors create and publish content; Viewers
-read Posts, Channels, analytics, and Inbox.
+read Posts, Channels, and analytics.
 
 `AUTH_SETUP_SECRET` must be a private, randomly generated value of at least 32
 characters. Existing environment files must add it; the generator does not

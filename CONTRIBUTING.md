@@ -22,10 +22,11 @@ development-tool restrictions and binary/native redistribution obligations.
 
 Follow [Get started](README.md#get-started) for supported versions and initial setup.
 
-`make install` checks host prerequisites, installs the pinned Bun, and installs
-Chromium. `make setup` installs workspace dependencies, creates the ignored root
-`.env`, applies migrations, and seeds fixtures. Keep credentials out of commits;
-configure overrides in that root `.env` using [`.env.example`](.env.example).
+`make install` checks host prerequisites, installs the pinned Bun and Chromium, and
+then runs the same repository setup: workspace dependencies, the ignored root `.env`,
+migrations, and fixtures. Run `make setup` alone only when the host tools are already
+present. Keep credentials out of commits; configure overrides in that root `.env`
+using [`.env.example`](.env.example).
 
 `make dev` starts the database, Workers, app, and public site on loopback. Public
 tunnels require `MELTIPLY_DEV_TUNNEL=1 make dev`; callback and webhook URLs must match

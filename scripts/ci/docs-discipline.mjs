@@ -66,6 +66,10 @@ function isExempt(path) {
  * Masks fenced code blocks and inline code so quoted examples cannot trip the scan.
  * Inline code is replaced with spaces, keeping offsets stable.
  *
+ * A closing fence carries no info string: only a run of the same character that is at
+ * least as long, followed by nothing but whitespace, ends the block. Treating
+ * ```js as a closer would end the block early and expose its content to the scan.
+ *
  * @param {string} content - Full Markdown content
  * @returns {Array<string>} Lines as `lineNumber:text`, or "" for fenced content
  */
@@ -74,13 +78,52 @@ function markdownLines(content) {
   return content.split("\n").map((line, index) => {
     const marker = line.match(/^\s{0,3}(`{3,}|~{3,})/u)?.[1];
     if (marker) {
+      const isCloser =
+        fence !== undefined &&
+        marker[0] === fence.character &&
+        marker.length >= fence.length &&
+        line.trim() === marker;
       if (!fence) fence = { character: marker[0], length: marker.length };
-      else if (marker[0] === fence.character && marker.length >= fence.length) fence = undefined;
+      else if (isCloser) fence = undefined;
       return "";
     }
     if (fence) return "";
-    return `${index + 1}:${line.replace(/`[^`\n]*`/gu, (code) => " ".repeat(code.length))}`;
+    return `${index + 1}:${maskInlineCode(line)}`;
   });
+}
+
+/**
+ * Replaces inline code spans with spaces of equal length. A span opens with a run of
+ * backticks and closes with the next run of exactly the same length, so
+ * ``a `b` c`` masks as one span instead of three fragments. Unmatched runs stay
+ * literal.
+ *
+ * @param {string} line - Single Markdown line
+ * @returns {string} Line with inline code blanked
+ */
+function maskInlineCode(line) {
+  let masked = "";
+  let index = 0;
+  while (index < line.length) {
+    if (line[index] !== "`") {
+      masked += line[index];
+      index += 1;
+      continue;
+    }
+    let runLength = 0;
+    while (line[index + runLength] === "`") runLength += 1;
+    const delimiter = "`".repeat(runLength);
+    const close = line.indexOf(delimiter, index + runLength);
+    // The closing run must be exactly this long, so a longer run is a different span.
+    if (close === -1 || line[close + runLength] === "`") {
+      masked += delimiter;
+      index += runLength;
+      continue;
+    }
+    masked += " ".repeat(close + runLength - index);
+    index = close + runLength;
+  }
+  return masked;
 }
 
 /**
@@ -111,8 +154,9 @@ export function collectDisciplineFindings(root, files) {
 }
 
 /**
- * Lists Git-tracked Markdown files, collapsing symlinked aliases (such as
- * `CLAUDE.md` pointing at `AGENTS.md`) so one file reports findings once.
+ * Lists Git-tracked Markdown files that exist in the working tree, collapsing
+ * symlinked aliases (such as `CLAUDE.md` pointing at `AGENTS.md`) so one file
+ * reports findings once.
  *
  * @returns {Array<string>} Repository-relative paths
  */
@@ -129,7 +173,9 @@ function trackedMarkdownFiles() {
       try {
         identity = realpathSync(resolve(repositoryRoot, file));
       } catch {
-        return true;
+        // Tracked but absent from the working tree: a deletion or an unresolved
+        // rename. Scanning it would throw, so skip it.
+        return false;
       }
       if (seen.has(identity)) return false;
       seen.add(identity);

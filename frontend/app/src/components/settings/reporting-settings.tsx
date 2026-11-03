@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Alert } from "@meltiply/ui/alert";
 import { Button } from "@meltiply/ui/button";
 import { Switch } from "@meltiply/ui/switch";
@@ -29,19 +29,22 @@ export function ReportingSettings(): React.ReactElement {
   const scope = useSessionScope();
   const policy = useReportingPolicy(scope);
   const save = useUpdateReportingPreferences(scope);
-  const [usage, setUsage] = useState(false);
-  const [diagnostics, setDiagnostics] = useState(false);
+  // The controls render the persisted choice until the Owner edits one. An
+  // explicit local override keeps the first paint honest and means a policy read
+  // can never be rendered as a choice that has not been saved.
+  const [choiceOverride, setChoiceOverride] = useState<{
+    diagnostics: boolean;
+    usage: boolean;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [initialised, setInitialised] = useState(false);
-
-  useEffect(() => {
-    if (initialised || !policy.data) return;
-    setUsage(policy.data.categories.usage.requested);
-    setDiagnostics(policy.data.categories.diagnostics.requested);
-    setInitialised(true);
-  }, [initialised, policy.data]);
 
   const stored = policy.data;
+  const usage = choiceOverride?.usage ?? stored?.categories.usage.requested ?? false;
+  const diagnostics =
+    choiceOverride?.diagnostics ?? stored?.categories.diagnostics.requested ?? false;
+  const setUsage = (value: boolean) => setChoiceOverride({ diagnostics, usage: value });
+  const setDiagnostics = (value: boolean) =>
+    setChoiceOverride({ diagnostics: value, usage });
   const canChange = isInstallationOwner && stored?.owner_can_change === true;
   const dirty =
     stored !== undefined &&
@@ -52,6 +55,8 @@ export function ReportingSettings(): React.ReactElement {
     setError(null);
     try {
       await save.mutateAsync({ diagnostics, usage });
+      // Hand the controls back to the persisted policy once the write lands.
+      setChoiceOverride(null);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : t("Your choices could not be saved. Try again."),

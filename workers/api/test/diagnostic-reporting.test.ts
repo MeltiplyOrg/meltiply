@@ -58,6 +58,11 @@ function boundaryContext(path: string) {
   } as unknown as Parameters<typeof runWorkerEffect>[0];
 }
 
+/** Error document the API returns for a mapped failure. */
+interface ErrorBody {
+  error: { code: string };
+}
+
 describe("diagnostic boundary classification", () => {
   it("groups API paths by the fixed operation vocabulary", () => {
     expect(operationForPath("/api/v1/posts/post-1")).toBe("publish");
@@ -119,7 +124,7 @@ describe("failed invocation reporting", () => {
     );
 
     expect(response.status).toBe(503);
-    const body = (await response.json()) as { error: { code: string } };
+    const body: ErrorBody = await response.json();
     expect(body.error.code).toBe("service_unavailable");
     // The local operational log still records the failure; the reporting attempt
     // is separate and cannot alter the response above.

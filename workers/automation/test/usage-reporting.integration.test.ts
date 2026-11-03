@@ -87,7 +87,7 @@ function registryWithAnalytics(platforms: Array<"threads" | "youtube">): Provide
         throw new Error("reporting must not call listAnalytics");
       },
       transferModes: [],
-    } as unknown as ProviderAdapter);
+    } satisfies ProviderAdapter);
   }
   return registry;
 }
@@ -124,7 +124,7 @@ function publishRegistry(platform: "threads" | "youtube") {
     }),
     retryPolicy: { baseDelaySeconds: 15, maxAttempts: 5, maxDelaySeconds: 300 },
     transferModes: [],
-  } as unknown as ProviderAdapter);
+  } satisfies ProviderAdapter);
   return registry;
 }
 
@@ -546,7 +546,7 @@ describe("usage publication measurement with PostgreSQL", () => {
       }),
       retryPolicy: { baseDelaySeconds: 15, maxAttempts: 5, maxDelaySeconds: 300 },
       transferModes: [],
-    } as unknown as ProviderAdapter);
+    } satisfies ProviderAdapter);
 
     await Effect.runPromise(
       processDistributionMessage(env, publishMessage("usage-failure", youtubeDistributionId), {
@@ -601,7 +601,7 @@ describe("usage publication measurement with PostgreSQL", () => {
       }),
       retryPolicy: { baseDelaySeconds: 15, maxAttempts: 5, maxDelaySeconds: 300 },
       transferModes: [],
-    } as unknown as ProviderAdapter);
+    } satisfies ProviderAdapter);
 
     await Effect.runPromise(
       processDistributionMessage(env, publishMessage("usage-ambiguous", youtubeDistributionId), {

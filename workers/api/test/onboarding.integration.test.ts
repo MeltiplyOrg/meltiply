@@ -240,26 +240,29 @@ function onboardingRequest(
   );
 }
 
+/** Requested bits of the reporting policy, as the durable-progress case reads them. */
+interface ReportingRequestedBody {
+  categories: { diagnostics: { requested: boolean }; usage: { requested: boolean } };
+}
+
+/** Wire shape of the onboarding progress document this suite asserts against. */
+interface OnboardingProgressBody {
+  completed_at: string | null;
+  status: string;
+  step: string;
+  workspace_name: string | null;
+  workspace_named: boolean;
+}
+
 /**
  * Reads a JSON response body as an onboarding progress record.
  *
  * @param response - Onboarding response.
  * @returns The parsed progress payload.
  */
-async function progressOf(response: Response): Promise<{
-  completed_at: string | null;
-  status: string;
-  step: string;
-  workspace_name: string | null;
-  workspace_named: boolean;
-}> {
-  return (await response.json()) as {
-    completed_at: string | null;
-    status: string;
-    step: string;
-    workspace_name: string | null;
-    workspace_named: boolean;
-  };
+async function progressOf(response: Response): Promise<OnboardingProgressBody> {
+  const body: OnboardingProgressBody = await response.json();
+  return body;
 }
 
 /**
@@ -786,9 +789,7 @@ describe("durable setup progress", () => {
       { headers: { Authorization: `Bearer ${token}` } },
       env(),
     );
-    const policy = (await reporting.json()) as {
-      categories: { diagnostics: { requested: boolean }; usage: { requested: boolean } };
-    };
+    const policy: ReportingRequestedBody = await reporting.json();
     expect(policy.categories.usage.requested).toBe(false);
     expect(policy.categories.diagnostics.requested).toBe(false);
   });

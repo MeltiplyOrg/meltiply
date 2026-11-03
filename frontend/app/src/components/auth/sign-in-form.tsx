@@ -43,11 +43,15 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
   const [name, setName] = useState(() => draft?.name ?? "");
   const [password, setPassword] = useState("");
   const [setupSecret, setSetupSecret] = useState("");
-  const [workspaceName, setWorkspaceName] = useState(() => draft?.workspaceName ?? "");
-  // The chosen name is editable, but the default follows the typed display name
-  // until the owner changes it themselves, so finishing quickly needs no typing
-  // and a deliberate name is never overwritten.
-  const workspaceNameTouched = useRef(draft?.workspaceName ? true : false);
+  // One coherent draft: the field's text and whether the owner chose it are a
+  // single piece of state, so the displayed value, the value persisted to the
+  // setup draft and the value sent to the API always agree. The default follows
+  // the typed display name until the owner edits the field, so finishing quickly
+  // needs no typing and a deliberate name is never overwritten.
+  const [workspaceNameDraft, setWorkspaceNameDraft] = useState(() => ({
+    touched: Boolean(draft?.workspaceName),
+    value: draft?.workspaceName ?? "",
+  }));
   const [code, setCode] = useState("");
   const [backup, setBackup] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,9 +106,9 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
     writeSetupDraft({
       email,
       name,
-      workspaceName: workspaceNameTouched.current ? workspaceName : "",
+      workspaceName: workspaceNameDraft.touched ? workspaceNameDraft.value : "",
     });
-  }, [email, mode, name, workspaceName]);
+  }, [email, mode, name, workspaceNameDraft]);
 
   const complete = () => {
     if (onSuccess) onSuccess();
@@ -117,8 +121,10 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
   // is translated for the reader; only a name the owner actually edits is sent.
   const derivedLabel = (name.trim() || email.trim().split("@")[0] || "Meltiply").slice(0, 180);
   const derivedWorkspaceName = t("{name}'s workspace", { name: derivedLabel });
-  const chosenWorkspaceName = workspaceNameTouched.current ? workspaceName.trim() : "";
-  const workspaceNameValue = workspaceNameTouched.current ? workspaceName : derivedWorkspaceName;
+  const chosenWorkspaceName = workspaceNameDraft.touched ? workspaceNameDraft.value.trim() : "";
+  const workspaceNameValue = workspaceNameDraft.touched
+    ? workspaceNameDraft.value
+    : derivedWorkspaceName;
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -227,10 +233,9 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
     setPassword,
     setupSecret,
     setSetupSecret,
-    workspaceName,
+    workspaceName: workspaceNameDraft.touched ? workspaceNameDraft.value : "",
     setWorkspaceName: (value: string) => {
-      workspaceNameTouched.current = true;
-      setWorkspaceName(value);
+      setWorkspaceNameDraft({ touched: true, value });
     },
     workspaceNameValue,
     code,

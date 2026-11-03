@@ -892,8 +892,14 @@ describe("recoverable setup-name handoff", () => {
 
     // Simulate the lost follow-up: the account exists, the bootstrap row does
     // not, and only the intent the sign-up wrote before creating the account
-    // remains.
+    // remains. An interrupted handoff never ran either follow-up write, so the
+    // intent is also still unbound — deleting only the bootstrap row would
+    // leave a state the real interruption cannot produce.
     await systemPoolFor(env()).query("DELETE FROM installation_bootstrap");
+    await systemPoolFor(env()).query(
+      "UPDATE installation_bootstrap_intent SET auth_user_id = NULL WHERE lower(email) = lower($1)",
+      [owner.email],
+    );
     const intent = await systemPoolFor(env()).query<{ workspace_name: string | null }>(
       "SELECT workspace_name FROM installation_bootstrap_intent WHERE lower(email) = lower($1)",
       [owner.email],

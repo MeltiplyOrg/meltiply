@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createHyperdrivePool } from "@meltiply/database";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
@@ -25,6 +26,19 @@ const connectionString =
   process.env.MELTIPLY_DATABASE_TEST_URL ??
   "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
 
+/**
+ * Privileged fixture connection, used only to reset rows before a case.
+ *
+ * `MELTIPLY_DATABASE_TEST_URL` authenticates as `meltiply_rls`, and the reporting
+ * migrations deliberately revoke the RLS role from their tables — the runtime
+ * writes them through the system connection. Seeding therefore has to use the
+ * admin credentials rather than widening runtime grants for a test.
+ */
+const adminConnectionString =
+  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
+  "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const adminPool = createHyperdrivePool({ connectionString: adminConnectionString });
+
 const organizationId = "20000000-0000-4000-8000-0000000000b1";
 const profileId = "30000000-0000-4000-8000-0000000000b1";
 const channelId = "40000000-0000-4000-8000-0000000000b1";
@@ -46,7 +60,7 @@ const env = {
 
 /** Creates the minimum domain rows an operator reconciliation reads. */
 async function seedDomain(): Promise<void> {
-  const database = systemPoolFor(env);
+  const database = adminPool;
   await database.query("DELETE FROM reporting_publication_daily WHERE TRUE");
   await database.query("DELETE FROM reporting_distribution_marks WHERE TRUE");
   await database.query("DELETE FROM reporting_post_marks WHERE TRUE");
@@ -153,6 +167,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await systemPoolFor(env).end();
+  await adminPool.end();
 });
 
 describe("operator-confirmed publication measurement", () => {

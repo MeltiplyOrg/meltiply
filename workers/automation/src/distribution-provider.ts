@@ -519,6 +519,8 @@ async function decryptAccessToken(
 /**
  * Normalizes provider operation results, enforcing identifier sanitation and URL safety.
  * Degrades confirmed successes lacking both operation ID and post ID to ambiguous outcomes.
+ * Accepts only the closed public warning vocabulary; partial content failures
+ * retain publication success instead of entering a duplicate-publish retry.
  *
  * @param result - Raw ProviderOperationResult from an adapter.
  * @returns Normalized ProviderOperationResult with sanitized fields.
@@ -537,6 +539,22 @@ function normalizeResult(result: ProviderOperationResult): ProviderOperationResu
   const providerOperationId = normalizeIdentifier(result.providerOperationId);
   const providerPostId = normalizeIdentifier(result.providerPostId);
   const providerUrl = safeProviderUrl(result.providerUrl);
+  const warnings = result.warnings;
+  if (
+    warnings !== undefined &&
+    (!Array.isArray(warnings) ||
+      warnings.length > 1 ||
+      warnings.some(
+        (warning) =>
+          warning !== "instagram_crossshare_failed" && warning !== "instagram_publish_partial",
+      ))
+  ) {
+    return ambiguousResult(
+      "provider_success_with_invalid_warnings",
+      providerOperationId,
+      result.metadata,
+    );
+  }
   if (
     (!providerOperationId && !providerPostId) ||
     (result.providerUrl !== undefined && !providerUrl)
@@ -545,6 +563,8 @@ function normalizeResult(result: ProviderOperationResult): ProviderOperationResu
   }
   return {
     outcome: "confirmed_success",
+    ...(result.delivery ? { delivery: result.delivery } : {}),
+    ...(warnings?.length ? { warnings } : {}),
     ...(providerOperationId ? { providerOperationId } : {}),
     ...(providerPostId ? { providerPostId } : {}),
     ...(providerUrl ? { providerUrl } : {}),
@@ -580,8 +600,8 @@ function normalizeCancelResult(result: ProviderOperationResult): ProviderOperati
 }
 
 /**
- * Normalizes publication lookup status responses into standardized states:
- * "processing", "published", "failed", "unknown", or "not_found".
+ * Normalizes processing, publication, terminal handoff, failure, uncertainty,
+ * and not-found outcomes without treating a native draft as Published.
  *
  * @param status - Raw ProviderPublicationStatus from adapter lookup.
  * @returns Normalized ProviderPublicationStatus.
@@ -597,10 +617,17 @@ function normalizePublicationStatus(status: ProviderPublicationStatus): Provider
             state: "unknown",
           };
     }
+    case "delivered":
     case "published": {
       const result = normalizeResult(status.result);
       if (result.outcome === "confirmed_success") {
-        return { result, state: "published" };
+        if (status.state === "delivered" && !result.delivery) {
+          return {
+            state: "unknown",
+            result: ambiguousResult("provider_delivery_without_kind", result.providerOperationId),
+          };
+        }
+        return { result, state: result.delivery ? "delivered" : "published" };
       }
       return result.outcome === "confirmed_failure"
         ? { result, state: "failed" }

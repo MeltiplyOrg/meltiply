@@ -1686,6 +1686,70 @@ export interface paths {
         patch: operations["updateScheduledDistribution"];
         trace?: never;
     };
+    "/distributions/{distribution_id}/broadcast": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path: {
+                distribution_id: components["parameters"]["DistributionId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read encoder credentials and live state
+         * @description Admin and Editor only. Contains secrets; responses are never cached.
+         */
+        get: operations["getBroadcast"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/distributions/{distribution_id}/broadcast/end": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path: {
+                distribution_id: components["parameters"]["DistributionId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End the existing live broadcast
+         * @description Writer-only remote write. A durable per-Distribution reservation fences
+         *     concurrent clients even when they choose different Idempotency-Key values.
+         *     Confirmed results replay after ending; uncertain results stay fenced for inspection.
+         */
+        post: operations["endBroadcast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/distributions/{distribution_id}/retry": {
         parameters: {
             query?: never;
@@ -1931,7 +1995,7 @@ export interface components {
         /** @enum {string} */
         AssetStatus: "pending_upload" | "uploading" | "processing" | "ready" | "failed" | "deleting" | "deleted";
         /** @enum {string} */
-        DistributionStatus: "scheduled" | "queued" | "processing" | "awaiting_provider" | "published" | "failed" | "cancel_requested" | "cancelled" | "needs_reconciliation";
+        DistributionStatus: "scheduled" | "queued" | "processing" | "awaiting_provider" | "delivered" | "published" | "failed" | "cancel_requested" | "cancelled" | "needs_reconciliation";
         /** @enum {string} */
         ReplyStatus: "not_replied" | "queued" | "processing" | "replied" | "failed" | "needs_reconciliation";
         /** @enum {string} */
@@ -2784,7 +2848,8 @@ export interface components {
             attachment_ids?: string[] | null;
         };
         /**
-         * @description Creates one nonempty authoritative draft Post. attachment_ids is the
+         * @description Creates one authoritative draft containing text, Assets, or provider-hosted
+         *     content such as a link, repost, or prepared Live workflow. attachment_ids is the
          *     ordered attachment set; the array order becomes the attachment
          *     positions and each Asset may appear once. References may name Assets
          *     still uploading or processing inside a live upload session of the
@@ -2804,14 +2869,16 @@ export interface components {
             default_text: string;
         } | {
             attachment_ids: unknown[];
+        } | {
+            targets: unknown[];
         };
         /**
          * @description Patch-style save of the same Post. Omitted fields stay unchanged;
          *     attachment_ids replaces the whole ordered set and targets replaces
          *     the saved target set. The request must name the Post's owning Brand
          *     Profile (mismatch is a 422 validation error) and cannot leave the
-         *     Post without text or attachments; claims to Assets already claimed
-         *     for deletion are rejected.
+         *     Post without text, attachments, or provider-hosted content; claims to
+         *     Assets already claimed for deletion are rejected.
          */
         UpdatePostRequest: {
             /**
@@ -2895,6 +2962,14 @@ export interface components {
             platform_post_id: string | null;
             /** Format: uri */
             platform_url: string | null;
+            /** @description The primary Post published, but a secondary share or some requested Instagram content failed. Do not retry the primary publication. */
+            provider_warnings?: ("instagram_crossshare_failed" | "instagram_publish_partial")[];
+            /**
+             * @description Opaque remote reference for a terminal native draft, inbox, or
+             *     experiment handoff. Present only for delivered outcomes; never a
+             *     public Post ID or an encoder/upload credential.
+             */
+            provider_reference?: string;
             /**
              * @description Frozen composition of the newest claimed publish attempt, or null
              *     while no Provider attempt has claimed this Distribution. Once an
@@ -2972,7 +3047,12 @@ export interface components {
         /** @enum {string} */
         TikTokPrivacyLevel: "PUBLIC_TO_EVERYONE" | "MUTUAL_FOLLOW_FRIENDS" | "FOLLOWER_OF_CREATOR" | "SELF_ONLY";
         TikTokPublishOptions: {
-            privacy_level: components["schemas"]["TikTokPrivacyLevel"];
+            /**
+             * @description Inbox sends a native draft for the creator to finish in TikTok; it is not a published Post.
+             * @enum {string}
+             */
+            post_mode?: "direct" | "inbox";
+            privacy_level?: components["schemas"]["TikTokPrivacyLevel"];
             allow_comment: boolean;
             allow_duet: boolean;
             allow_stitch: boolean;
@@ -2986,29 +3066,14 @@ export interface components {
              *     music the creator can later change in the app.
              */
             auto_add_music?: boolean;
-            /** @description Video posts only. The cover frame offset in milliseconds. */
-            cover_timestamp_ms?: number;
         };
         /** @enum {string} */
         YouTubePrivacyStatus: "public" | "unlisted" | "private";
-        /** @enum {string} */
-        YouTubeLicense: "youtube" | "creativeCommon";
         YouTubePublishOptions: {
+            /** @enum {string} */
+            post_type?: "video" | "live";
             made_for_kids: boolean;
             privacy_status?: components["schemas"]["YouTubePrivacyStatus"];
-            license?: components["schemas"]["YouTubeLicense"];
-            embeddable?: boolean;
-            public_stats_viewable?: boolean;
-            /** @description YouTube's altered or synthetic content disclosure. */
-            contains_synthetic_media?: boolean;
-            /**
-             * Format: date-time
-             * @description Scheduled publication instant. YouTube accepts it only while
-             *     privacy_status is private.
-             */
-            publish_at?: string;
-            /** Format: date-time */
-            recording_date?: string;
         };
         /**
          * @description Saved creator choices. Privacy may remain unanswered in a draft.
@@ -3018,6 +3083,8 @@ export interface components {
          *     before creating complete TikTokPublishOptions for a Distribution.
          */
         TikTokPostOptions: {
+            /** @enum {string} */
+            post_mode?: "direct" | "inbox";
             privacy_level?: components["schemas"]["TikTokPrivacyLevel"];
             allow_comment: boolean;
             allow_duet: boolean;
@@ -3029,11 +3096,6 @@ export interface components {
             /** @constant */
             music_usage_confirmed: true;
             auto_add_music?: boolean;
-            /**
-             * @description Video posts only. The cover frame offset in milliseconds; TikTok
-             *     accepts a frame offset rather than an uploaded cover image.
-             */
-            cover_timestamp_ms?: number;
         };
         /**
          * @description Saved audience and visibility choices. An omitted made_for_kids is an
@@ -3041,49 +3103,27 @@ export interface components {
          *     boolean before creating YouTubePublishOptions for a Distribution.
          */
         YouTubePostOptions: {
+            /** @enum {string} */
+            post_type?: "video" | "live";
             made_for_kids?: boolean;
             privacy_status?: components["schemas"]["YouTubePrivacyStatus"];
-            license?: components["schemas"]["YouTubeLicense"];
-            embeddable?: boolean;
-            public_stats_viewable?: boolean;
-            contains_synthetic_media?: boolean;
-            /** Format: date-time */
-            publish_at?: string;
-            /** Format: date-time */
-            recording_date?: string;
-        };
-        /** @enum {string} */
-        FacebookPostType: "post" | "photo" | "reel" | "story";
-        /**
-         * @description Saved Facebook Page publication choices. An omitted post_type infers the
-         *     family from the attachment set: no media publishes a text or link post,
-         *     images publish as a photo post, and a single video publishes as a Reel.
-         *     link attaches a Page feed link and needs no media. is_ai_generated is
-         *     honoured only for Reels and Stories, the families that document it.
-         */
-        FacebookPostOptions: {
-            post_type?: components["schemas"]["FacebookPostType"];
-            /** Format: uri */
-            link?: string;
-            is_ai_generated?: boolean;
-        };
-        FacebookPublishOptions: {
-            post_type?: components["schemas"]["FacebookPostType"];
-            /** Format: uri */
-            link?: string;
-            is_ai_generated?: boolean;
         };
         /** @enum {string} */
         InstagramPostType: "feed" | "reel" | "story";
-        /**
-         * @description One account tagged in the published media. x and y are normalized
-         *     0..1 positions and must be supplied together; Instagram accepts tags on
-         *     feed images, videos, Reels, and Stories, but not carousel children.
-         */
-        InstagramUserTag: {
-            username: string;
-            x?: number;
-            y?: number;
+        InstagramContentOptions: {
+            alt_text?: string;
+            collaborators?: string[];
+            cover_url?: string;
+            thumb_offset?: number;
+            share_to_feed?: boolean;
+            audio_name?: string;
+            is_ai_generated?: boolean;
+            location_id?: string;
+            user_tags?: {
+                username: string;
+                x?: number;
+                y?: number;
+            }[];
         };
         /**
          * @description Saved Instagram publication choices. A single image defaults to feed
@@ -3094,79 +3134,21 @@ export interface components {
          *     trial_reel.
          */
         InstagramPostOptions: {
+            content?: components["schemas"]["InstagramContentOptions"];
+            /** @description Per-attachment alt text and user tags in selected attachment order. */
+            media_options?: components["schemas"]["InstagramContentOptions"][];
             post_type?: components["schemas"]["InstagramPostType"];
             trial_reel?: boolean;
             /** @enum {string} */
             trial_graduation?: "manual" | "performance";
-            /** @description Image-only accessible description. */
-            alt_text?: string;
-            location_id?: string;
-            user_tags?: components["schemas"]["InstagramUserTag"][];
-            /**
-             * Format: uri
-             * @description Reel cover image; wins over cover_frame_ms.
-             */
-            cover_url?: string;
-            /** @description Reel cover frame offset in milliseconds. */
-            cover_frame_ms?: number;
-            /** @description Reel audio label; Instagram allows one rename. */
-            audio_name?: string;
-            is_ai_generated?: boolean;
         };
         InstagramPublishOptions: {
+            content?: components["schemas"]["InstagramContentOptions"];
+            media_options?: components["schemas"]["InstagramContentOptions"][];
             post_type?: components["schemas"]["InstagramPostType"];
             trial_reel?: boolean;
             /** @enum {string} */
             trial_graduation?: "manual" | "performance";
-            alt_text?: string;
-            location_id?: string;
-            user_tags?: components["schemas"]["InstagramUserTag"][];
-            /** Format: uri */
-            cover_url?: string;
-            cover_frame_ms?: number;
-            audio_name?: string;
-            is_ai_generated?: boolean;
-        };
-        /** @enum {string} */
-        ThreadsReplyControl: "everyone" | "accounts_you_follow" | "mentioned_only" | "parent_post_author_only" | "followers_only";
-        /**
-         * @description Text-only Threads poll. Each option is 1-25 characters and option_d
-         *     requires option_c.
-         */
-        ThreadsPoll: {
-            option_a: string;
-            option_b: string;
-            option_c?: string;
-            option_d?: string;
-        };
-        ThreadsSpoilerEntity: {
-            offset: number;
-            length: number;
-        };
-        /**
-         * @description Saved Threads publication controls. Polls, link attachments, and
-         *     spoiler entities apply to text-only posts; spoiler media requires an
-         *     attachment. topic_tag is limited to one tag per post.
-         */
-        ThreadsPostOptions: {
-            topic_tag?: string;
-            reply_control?: components["schemas"]["ThreadsReplyControl"];
-            /** Format: uri */
-            link_attachment?: string;
-            poll?: components["schemas"]["ThreadsPoll"];
-            spoiler_entities?: components["schemas"]["ThreadsSpoilerEntity"][];
-            is_spoiler_media?: boolean;
-            is_made_with_ai?: boolean;
-        };
-        ThreadsPublishOptions: {
-            topic_tag?: string;
-            reply_control?: components["schemas"]["ThreadsReplyControl"];
-            /** Format: uri */
-            link_attachment?: string;
-            poll?: components["schemas"]["ThreadsPoll"];
-            spoiler_entities?: components["schemas"]["ThreadsSpoilerEntity"][];
-            is_spoiler_media?: boolean;
-            is_made_with_ai?: boolean;
         };
         /**
          * @description One reusable signature. body may use {brand_profile}, {platform}, and
@@ -3219,23 +3201,144 @@ export interface components {
             signature_templates: components["schemas"]["SignatureTemplate"][];
             notifications: components["schemas"]["NotificationPreferences"];
         };
+        /** @enum {string} */
+        FacebookPostType: "feed" | "video" | "reel" | "story" | "slideshow" | "crosspost" | "ab_test" | "live";
+        FacebookLinkCard: {
+            /** Format: uri */
+            link: string;
+            /** Format: uri */
+            picture: string;
+            name?: string;
+            description?: string;
+        };
+        /** @description Saved experiment choices; scheduling requires a name, goal, and two to four existing unpublished video IDs including the control. */
+        FacebookABTestOptions: {
+            name?: string;
+            control_video_id?: string;
+            experiment_video_ids?: string[];
+            /** @enum {string} */
+            optimization_goal?: "AVG_TIME_WATCHED" | "COMMENTS" | "IMPRESSIONS" | "IMPRESSIONS_UNIQUE" | "LINK_CLICKS" | "REACTIONS" | "REELS_PLAYS" | "SHARES" | "VIDEO_VIEWS_60S";
+            duration_seconds?: number;
+        };
+        FacebookABTestPostOptions: {
+            name?: string;
+            control_video_id?: string;
+            experiment_video_ids?: string[];
+            /** @enum {string} */
+            optimization_goal?: "AVG_TIME_WATCHED" | "COMMENTS" | "IMPRESSIONS" | "IMPRESSIONS_UNIQUE" | "LINK_CLICKS" | "REACTIONS" | "REELS_PLAYS" | "SHARES" | "VIDEO_VIEWS_60S";
+            duration_seconds?: number;
+        };
+        /** @description Saved Page publishing intent, including incomplete link cards and experiments. Scheduling enforces complete method-specific inputs. */
+        FacebookPostOptions: {
+            post_type?: components["schemas"]["FacebookPostType"];
+            /** @enum {string} */
+            delivery_mode?: "publish" | "draft";
+            link?: string;
+            link_cards?: {
+                link?: string;
+                picture?: string;
+                name?: string;
+                description?: string;
+            }[];
+            crossposted_video_id?: string;
+            ab_test?: components["schemas"]["FacebookABTestPostOptions"];
+        };
+        /**
+         * @description Page publication method. One video defaults to a Reel; text and photos
+         *     default to feed. Links and link cards require a media-free feed target.
+         *     Live broadcasts require an external encoder, not an uploaded Asset.
+         */
+        FacebookPublishOptions: {
+            post_type?: components["schemas"]["FacebookPostType"];
+            /**
+             * @description Native Page drafts are terminal delivered outcomes, never Published. Not available for Stories, live broadcasts, or experiments.
+             * @enum {string}
+             */
+            delivery_mode?: "publish" | "draft";
+            /** Format: uri */
+            link?: string;
+            link_cards?: components["schemas"]["FacebookLinkCard"][];
+            crossposted_video_id?: string;
+            ab_test?: components["schemas"]["FacebookABTestOptions"];
+        };
+        /** @description Native Threads publishing options. Reposts have no caption or Assets. Poll, GIF, long-text and ghost posts are text-only. */
+        ThreadsPostOptions: {
+            /** @enum {string} */
+            post_type?: "post" | "poll" | "long_text" | "gif" | "ghost" | "quote" | "reply" | "repost";
+            repost_id?: string;
+            quote_post_id?: string;
+            reply_to_id?: string;
+            poll_attachment?: {
+                option_a?: string;
+                option_b?: string;
+                option_c?: string;
+                option_d?: string;
+            };
+            gif_attachment?: {
+                gif_id?: string;
+                /** @enum {string} */
+                provider: "GIPHY";
+            };
+            text_attachment?: {
+                plaintext?: string;
+                link_attachment_url?: string;
+                text_with_styling_info?: {
+                    offset: number;
+                    length: number;
+                    styling_info: ("bold" | "italic" | "highlight" | "underline" | "strikethrough")[];
+                }[];
+            };
+            text_entities?: {
+                /** @enum {string} */
+                entity_type: "SPOILER";
+                offset: number;
+                length: number;
+            }[];
+            link_attachment?: string;
+            topic_tag?: string;
+            is_ghost_post?: boolean;
+            is_spoiler_media?: boolean;
+            is_made_with_ai?: boolean;
+            alt_text?: string;
+            /** @enum {string} */
+            reply_control?: "everyone" | "accounts_you_follow" | "mentioned_only" | "parent_post_author_only" | "followers_only";
+            enable_reply_approvals?: boolean;
+            allowlisted_country_codes?: string[];
+            location_id?: string;
+            crossreshare_to_ig?: boolean;
+            crossreshare_to_ig_dark_mode?: boolean;
+        };
+        ThreadsPublishOptions: components["schemas"]["ThreadsPostOptions"] & {
+            poll_attachment?: {
+                option_a: string;
+                option_b: string;
+                option_c?: string;
+                option_d?: string;
+            };
+            gif_attachment?: {
+                gif_id: string;
+            };
+            text_attachment?: {
+                plaintext: string;
+            };
+        };
         /**
          * @description Provider choices saved on a Post, including incomplete drafts.
          *     Scheduling validates completeness before creating publication options.
          */
         PostProviderOptions: {
+            threads?: components["schemas"]["ThreadsPostOptions"];
             facebook?: components["schemas"]["FacebookPostOptions"];
             tiktok?: components["schemas"]["TikTokPostOptions"];
             youtube?: components["schemas"]["YouTubePostOptions"];
             instagram?: components["schemas"]["InstagramPostOptions"];
-            threads?: components["schemas"]["ThreadsPostOptions"];
         };
         ProviderPublishOptions: {
+            threads?: components["schemas"]["ThreadsPublishOptions"];
             facebook?: components["schemas"]["FacebookPublishOptions"];
             tiktok?: components["schemas"]["TikTokPublishOptions"];
             youtube?: components["schemas"]["YouTubePublishOptions"];
             instagram?: components["schemas"]["InstagramPublishOptions"];
-            threads?: components["schemas"]["ThreadsPublishOptions"];
         };
         UpdateDistributionRequest: {
             /** Format: date-time */
@@ -6409,6 +6512,98 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
+        };
+    };
+    getBroadcast: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path: {
+                distribution_id: components["parameters"]["DistributionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current provider broadcast state and owner-scoped RTMPS credentials. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        state: "ready" | "testing" | "live" | "ended";
+                        ingestUrl?: string;
+                        streamKey?: string;
+                        providerUrl?: string;
+                        providerPostId?: string;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["RateLimited"];
+            502: components["responses"]["UpstreamError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    endBroadcast: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                distribution_id: components["parameters"]["DistributionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider confirmed the broadcast ended. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        ended: true;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["RateLimited"];
+            502: components["responses"]["UpstreamError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     retryDistribution: {

@@ -11,7 +11,12 @@ import {
 import { useWorkspace } from "@/context/workspace.context";
 import { DestinationSelector } from "@/components/workspace/destination-selector";
 import type { WorkspaceView } from "@/lib/navigation";
-import { PlatformSettings, providerDescriptorFor, type PostTargetDraft } from "./platform-settings";
+import {
+  PlatformSettings,
+  providerDescriptorFor,
+  settingsForAttachmentOrder,
+  type PostTargetDraft,
+} from "./platform-settings";
 import { ScheduleDateTime } from "./schedule-date-time";
 import { MediaPreview } from "@/components/media/media-preview";
 import { Button } from "@meltiply/ui/button";
@@ -439,7 +444,10 @@ function overridesFromPost(
       content,
       hasOverride:
         target.description_override !== null && target.description_override !== post.default_text,
-      settings: descriptor?.readTarget?.(target) ?? {},
+      settings: settingsForAttachmentOrder(
+        descriptor?.readTarget?.(target) ?? {},
+        target.attachment_ids ?? post.attachments.map((attachment) => attachment.asset_id),
+      ),
       signature: target.signature,
     };
   }
@@ -1434,7 +1442,12 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         const target: PostTargetDraft = { platform_account_id: channel.id };
         providerDescriptorFor(channel.providerIdentifier)?.applyTarget?.(
           target,
-          override?.settings ?? {},
+          settingsForAttachmentOrder(
+            override?.settings ?? {},
+            attachmentsForChannel(channel.id).map(
+              (attachment) => attachment.assetId ?? attachment.key,
+            ),
+          ),
           attachmentsForChannel(channel.id).flatMap((attachment) =>
             attachment.assetType ? [attachment.assetType] : [],
           ),
@@ -1483,11 +1496,21 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           hasOverride: previous[channelId]?.hasOverride ?? false,
           settings: previous[channelId]?.settings ?? {},
           ...updates,
+          ...(updates.settings
+            ? {
+                settings: settingsForAttachmentOrder(
+                  updates.settings,
+                  attachmentsForChannel(channelId).map(
+                    (attachment) => attachment.assetId ?? attachment.key,
+                  ),
+                ),
+              }
+            : {}),
         },
       }));
       markDirty();
     },
-    [markDirty, sharedContent],
+    [markDirty, sharedContent, attachmentsForChannel],
   );
 
   /**
@@ -1954,7 +1977,38 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           }
         }
       }
-      if (!sharedContent.trim() && attachments.length === 0) {
+      const hostedContentChannels = new Set(
+        selectedChannels
+          .filter((channel) => {
+            const platform = channel.providerIdentifier.toLowerCase();
+            const settings = channelOverrides[channel.id]?.settings;
+            return (
+              (platform === "facebook" &&
+                ((typeof settings?.link === "string" && settings.link.trim()) ||
+                  ["crosspost", "ab_test", "live"].includes(String(settings?.post_type ?? "")))) ||
+              (platform === "youtube" && settings?.post_type === "live") ||
+              (platform === "threads" &&
+                ((typeof settings?.repost_id === "string" && settings.repost_id.trim()) ||
+                  (typeof settings?.gif_attachment === "object" &&
+                    settings.gif_attachment !== null &&
+                    "gif_id" in settings.gif_attachment &&
+                    typeof settings.gif_attachment.gif_id === "string" &&
+                    settings.gif_attachment.gif_id.trim()) ||
+                  (typeof settings?.text_attachment === "object" &&
+                    settings.text_attachment !== null &&
+                    "plaintext" in settings.text_attachment &&
+                    typeof settings.text_attachment.plaintext === "string" &&
+                    settings.text_attachment.plaintext.trim())))
+            );
+          })
+          .map((channel) => channel.id),
+      );
+      if (
+        !sharedContent.trim() &&
+        attachments.length === 0 &&
+        hostedContentChannels.size === 0 &&
+        !selectedChannels.some((channel) => resolvedContentFor(channel.id).trim())
+      ) {
         errors.push(t("Post must contain text content or at least one media item."));
       }
       if (starting.length > 0) {
@@ -1991,11 +2045,33 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         const channelAttachments = attachmentsForChannel(channel.id);
         const channelSignature = signatureFor(channel);
         const finalCaption = captionWithSignature(content, channelSignature);
-
-        if (!content.trim() && channelAttachments.length === 0) {
+        const settings = channelOverrides[channel.id]?.settings;
+        const youtubeLive = platform === "youtube" && settings?.post_type === "live";
+        if (
+          !content.trim() &&
+          channelAttachments.length === 0 &&
+          !hostedContentChannels.has(channel.id)
+        ) {
           errors.push(t("{name}: post text is empty for this channel.", { name }));
         }
-        const maxCaption = capability?.max_caption_length;
+        if (
+          (platform === "instagram" || platform === "facebook") &&
+          settings?.post_type === "story" &&
+          (finalCaption.trim() || channelSignature)
+        ) {
+          errors.push(
+            t(
+              "{name}: Stories do not accept a caption or signature. Clear this Channel's custom text and turn off its signature.",
+              { name },
+            ),
+          );
+        }
+        const maxCaption =
+          platform === "tiktok" &&
+          settings?.post_mode !== "inbox" &&
+          channelAttachments.some((attachment) => attachment.assetType === "video")
+            ? 2_200
+            : capability?.max_caption_length;
         if (
           maxCaption !== null &&
           maxCaption !== undefined &&
@@ -2009,6 +2085,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           );
         }
         if (
+          !youtubeLive &&
           capability?.min_media_count != null &&
           capability.min_media_count > 0 &&
           channelAttachments.length < capability.min_media_count
@@ -2091,6 +2168,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       attachmentsForChannel,
       capabilityByPlatform,
       capabilitiesQuery.isPending,
+      channelOverrides,
       providerValidationErrors,
       resolvedContentFor,
       publishingTimeZone,
@@ -2947,6 +3025,27 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                           limit: channelCaptionLimit ?? "—",
                         })}
                       </span>
+                      {(channelSignature || defaultSignature) && (
+                        <label className="flex min-h-12 items-center justify-between gap-3 text-xs text-ink-3">
+                          {t("Include signature for this Channel")}
+                          <Switch
+                            checked={Boolean(channelSignature)}
+                            onCheckedChange={(enabled) =>
+                              handleChannelOverrideChange(channel.id, {
+                                signature:
+                                  enabled && defaultSignature
+                                    ? resolveSignature(defaultSignature.body, {
+                                        brandProfileName:
+                                          profileNames.get(channel.brandProfileId) ?? "",
+                                        channelName: channel.name,
+                                        platform: channel.providerIdentifier,
+                                      })
+                                    : null,
+                              })
+                            }
+                          />
+                        </label>
+                      )}
                       {channelSignature && (
                         <div className="rounded-control border border-line bg-field px-3 py-2">
                           <p className="text-(length:--font-size-micro) font-medium text-ink-3">
@@ -3049,7 +3148,10 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                     provider={channel.providerIdentifier}
                     channelName={channel.name}
                     channelId={channel.id}
-                    settings={override.settings}
+                    settings={settingsForAttachmentOrder(
+                      override.settings,
+                      channelAttachments.map((attachment) => attachment.assetId ?? attachment.key),
+                    )}
                     mediaKinds={channelAttachments.flatMap((attachment) =>
                       attachment.assetType ? [attachment.assetType] : [],
                     )}

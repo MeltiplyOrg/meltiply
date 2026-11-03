@@ -29,7 +29,7 @@ export function createPreviewUploads(assetTemplate: PreviewObject, sessionTempla
     return new HttpResponse(null, { headers: { ETag: "preview-local-blob" } });
   });
 
-  /** Applies only byte/session effects that static HTTP examples cannot supply. All route registration and selected errors remain owned by the generated handler. */
+  /** Applies local byte/session effects; completion returns the Asset itself, while session reads retain their envelope. Generated handlers own registration and selected errors. */
   function handle(
     operation: PreviewOperation,
     request: Request,
@@ -105,7 +105,9 @@ export function createPreviewUploads(assetTemplate: PreviewObject, sessionTempla
       return {
         status: operation.success.status,
         body:
-          operation.operationId === "getUploadSession" ? { ...upload, uploaded_parts: [] } : upload,
+          operation.operationId === "getUploadSession"
+            ? { ...upload, uploaded_parts: [] }
+            : upload.asset,
       };
     }
     if (["getAsset", "getAssetPreviewUrl", "getAssetDownloadUrl"].includes(operation.operationId)) {

@@ -156,6 +156,70 @@ describe("composeCaption", () => {
 });
 
 describe("validatePublishInput", () => {
+  it("applies TikTok's video caption ceiling without reducing photo descriptions", () => {
+    const tiktok = capability({ platform: "tiktok", max_caption_length: 4_000 });
+    expect(
+      only(
+        validatePublishInput(
+          tiktok,
+          input({
+            caption: "a".repeat(2_201),
+            providerOptions: { tiktok: tiktokOptions },
+          }),
+        ),
+      ),
+    ).toMatchObject({ constraint: "provider_caption_limit", actual: 2_201, limit: 2_200 });
+    expect(
+      validatePublishInput(
+        tiktok,
+        input({
+          caption: "a".repeat(4_000),
+          media: [image()],
+          providerOptions: { tiktok: { ...tiktokOptions, allowDuet: false, allowStitch: false } },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([
+    {
+      platform: "youtube" as const,
+      providerOptions: {
+        youtube: {
+          postType: "live" as const,
+          madeForKids: false,
+          privacyStatus: "unlisted" as const,
+        },
+      },
+    },
+    { platform: "facebook" as const, providerOptions: { facebook: { postType: "live" as const } } },
+    {
+      platform: "threads" as const,
+      providerOptions: {
+        threads: { gif_attachment: { provider: "GIPHY" as const, gif_id: "native-gif" } },
+      },
+    },
+    {
+      platform: "threads" as const,
+      providerOptions: { threads: { text_attachment: { plaintext: "Native long text" } } },
+    },
+  ])(
+    "accepts provider-hosted $platform content without an invented caption or attachment",
+    ({ platform, providerOptions }) => {
+      expect(
+        validatePublishInput(
+          capability({ platform, min_media_count: platform === "youtube" ? 1 : 0 }),
+          input({
+            caption: "",
+            hashtags: [],
+            media: [],
+            providerOptions,
+          }),
+        ),
+      ).toEqual([]);
+    },
+  );
+
   it("returns no issues for a publishable payload", () => {
     expect(validatePublishInput(capability(), input())).toEqual([]);
   });

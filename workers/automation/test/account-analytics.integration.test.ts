@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import {
@@ -15,8 +16,7 @@ import { runSystemTransaction } from "./system-transaction";
 const organizationId = "9b000000-0000-4000-8000-000000000001";
 const env = {
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   ENVIRONMENT: "test",
   TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",

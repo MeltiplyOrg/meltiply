@@ -58,6 +58,9 @@ import {
   abortUploadSession,
   acceptWorkspaceInvitation,
   ApiError,
+  getBroadcast,
+  endBroadcast,
+  type BroadcastInfo,
   cancelOAuthSelection,
   confirmOAuthSelection,
   cancelDistribution,
@@ -158,6 +161,14 @@ function inWorkspace<T>(
  * metadata, and idempotency-key behavior.
  */
 export interface ApiClientServiceShape {
+  readonly getBroadcast: (
+    id: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<BroadcastInfo>;
+  readonly endBroadcast: (
+    id: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<{ ended: true }>;
   readonly getCurrentUser: () => ApiClientEffect<UserProfile>;
   readonly listBrandProfiles: (
     options?: ApiRequestOptions,
@@ -432,6 +443,8 @@ export function createApiClientServiceTest(
     Effect.die(new Error(`ApiClientService.${name} is not stubbed in this test`));
 
   const service: ApiClientServiceShape = {
+    getBroadcast: unstubbed("getBroadcast"),
+    endBroadcast: unstubbed("endBroadcast"),
     listQueues: unstubbed("listQueues"),
     createQueue: unstubbed("createQueue"),
     updateQueue: unstubbed("updateQueue"),
@@ -554,6 +567,10 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
     getAnalyticsPosts: (params, options) =>
       inWorkspace((workspaceId) => getAnalyticsPosts(workspaceId, params, options)),
     getCurrentUser: () => inWorkspace((workspaceId) => getCurrentUser(workspaceId)),
+    getBroadcast: (id, options) =>
+      inWorkspace((workspaceId) => getBroadcast(workspaceId, id, options)),
+    endBroadcast: (id, options) =>
+      inWorkspace((workspaceId) => endBroadcast(workspaceId, id, options)),
     getDistribution: (id, options) =>
       inWorkspace((workspaceId) => getDistribution(workspaceId, id, options)),
     getDistributionAnalytics: (id, options) =>

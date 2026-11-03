@@ -1,5 +1,5 @@
 import { createMeltiplyClient, type MeltiplyClient } from "@meltiply/contracts/client";
-import type { components } from "@meltiply/contracts/schema";
+import type { components, operations } from "@meltiply/contracts/schema";
 import { Effect } from "effect";
 
 import type {
@@ -1151,6 +1151,39 @@ export function disconnectPlatform(
         params: {
           header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
           path: { account_id: id },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+export type BroadcastInfo =
+  operations["getBroadcast"]["responses"][200]["content"]["application/json"];
+
+/** Reads no-store encoder credentials on explicit writer demand; callers must not put the result in a query cache. */
+export function getBroadcast(workspaceId: string | null, id: string, options?: ApiRequestOptions) {
+  return unwrap<BroadcastInfo>(
+    (signal) =>
+      client().GET("/distributions/{distribution_id}/broadcast", {
+        headers: workspaceHeaders(workspaceId),
+        params: { path: { distribution_id: id } },
+        signal,
+        cache: "no-store",
+      }),
+    options?.signal,
+  );
+}
+
+/** Ends an existing broadcast with a stable mutation key; no automatic retry creates or restarts media. */
+export function endBroadcast(workspaceId: string | null, id: string, options?: ApiRequestOptions) {
+  return unwrap<{ ended: true }>(
+    (signal) =>
+      client().POST("/distributions/{distribution_id}/broadcast/end", {
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          path: { distribution_id: id },
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
         },
         signal,
       }),

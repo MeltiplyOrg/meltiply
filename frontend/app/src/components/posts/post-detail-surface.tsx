@@ -20,12 +20,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@meltiply/ui/tooltip";
 import { Input } from "@meltiply/ui/input";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { StatusBadge } from "./status-badge";
+import { BroadcastControls } from "./broadcast-controls";
 import { toast } from "@meltiply/ui/toast";
 import { useLatchedValue } from "@meltiply/ui/use-latched-value";
 import { useSessionScope } from "@/hooks/use-session-scope";
 import { useRetryDistribution, useUpdateScheduledDistribution } from "@/lib/queries";
 import { useI18n } from "@/lib/i18n";
 import { usePublishingTimeZone } from "@/context/publishing-timezone.context";
+import { useWorkspace } from "@/context/workspace.context";
 import { instantToWallClock, wallClockToInstant } from "@/lib/publishing-preferences";
 import { Skeleton } from "@meltiply/ui/skeleton";
 import { platformDisplayName } from "@/lib/platforms";
@@ -78,7 +80,7 @@ function toLocalInputValue(value: string | null | undefined, timeZone: string): 
 
 /**
  * Per-channel detail row: platform icon, localized status pill, schedule/publish
- * timestamps, provider failure message, outbound post link, and the contract-real
+ * timestamps, provider failure/partial-success messages, outbound post link, and the contract-real
  * actions (retry, reschedule, cancel) gated by distribution lifecycle state.
  *
  * A saved target with no outcome yet renders as a pending destination with its
@@ -108,6 +110,7 @@ function ChannelOutcomeRow({
   const { t } = useI18n();
   const timeZone = usePublishingTimeZone();
   const scope = useSessionScope();
+  const { canWriteContent } = useWorkspace();
   const retry = useRetryDistribution(scope);
   const reschedule = useUpdateScheduledDistribution(scope);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
@@ -265,6 +268,38 @@ function ChannelOutcomeRow({
         </p>
       )}
 
+      {distribution?.status === "delivered" && (
+        <p className="text-xs text-ink-3">
+          {t(
+            "Delivered to the provider; not a published Post. Finish the native draft, inbox handoff, experiment, or broadcast on its provider.",
+          )}
+        </p>
+      )}
+      {canWriteContent && distribution?.provider_reference?.startsWith("live:") && (
+        <BroadcastControls key={distribution.id} distributionId={distribution.id} />
+      )}
+      {distribution?.status === "delivered" && distribution.provider_reference && (
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-ink-3">
+          {t("Provider reference (not a published Post ID)")}
+          <Input readOnly value={distribution.provider_reference} />
+        </label>
+      )}
+
+      {distribution?.provider_warnings?.includes("instagram_crossshare_failed") && (
+        <p role="status" className="text-xs text-red">
+          {t(
+            "The Threads Post published, but sharing it to Instagram Stories failed. Do not retry the Threads publication.",
+          )}
+        </p>
+      )}
+      {distribution?.provider_warnings?.includes("instagram_publish_partial") && (
+        <p role="status" className="text-xs text-red">
+          {t(
+            "Instagram published this Post, but some requested content was not attached. Check it on Instagram; do not publish it again.",
+          )}
+        </p>
+      )}
+
       {distribution?.platform_url && (
         <a
           href={distribution.platform_url}
@@ -372,7 +407,8 @@ export interface PostDetailSurfaceProps {
    * Whether scope-owned mutations are allowed; `false` in the aggregate
    * "All Brand Profiles" view. Post deletion no longer consumes this flag —
    * the Post's own `brand_profile_id` authorizes it — so only edit, retry,
-   * reschedule, and channel cancels stay gated.
+   * reschedule, and channel cancels stay gated. Live controls instead use the
+   * writer capability and the Distribution's own tenant-scoped identity.
    */
   canMutate: boolean;
   /** Whether this Post may be deleted by the current role. */

@@ -51,6 +51,14 @@ describe("resolvePublicationStatus", () => {
 });
 
 describe("canonical publication status classification", () => {
+  it("protects native provider handoffs without treating them as published or in flight", () => {
+    expect(isCancellablePublicationStatus("delivered")).toBe(false);
+    expect(isDeleteProtectedPublicationStatus("delivered")).toBe(true);
+    expect(isInFlightPublicationStatus("delivered")).toBe(false);
+    expect(publicationStatusFilterBucket("delivered")).toBeNull();
+    expect(summarizePublicationStatuses(["published", "delivered"])).toBe("delivered");
+  });
+
   it("keeps only pending outcomes cancellable", () => {
     for (const status of [
       "scheduled",

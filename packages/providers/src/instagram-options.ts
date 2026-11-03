@@ -1,4 +1,5 @@
 import type { InstagramPostType, InstagramPublishOptions, InstagramTrialGraduation } from "./types";
+import { instagramContentIssue } from "./instagram-content";
 
 /**
  * Attachment kind the option rules evaluate. `null` is an attachment whose
@@ -46,6 +47,15 @@ export function resolveInstagramOptions(
     (trialReel && postType !== "reel") ||
     (options?.trialGraduation !== undefined && !trialReel) ||
     !instagramTrialGraduations.includes(trialGraduation);
+  if (options?.mediaOptions && options.mediaOptions.length > kinds.length) return null;
+  if (instagramContentIssue(options?.content, kinds.length === 1 ? (only ?? null) : null, postType))
+    return null;
+  if (
+    options?.mediaOptions?.some((metadata, index) =>
+      instagramContentIssue(metadata, kinds[index] ?? null, postType, kinds.length > 1),
+    )
+  )
+    return null;
   if (invalid) return null;
   return { postType, trialGraduation, trialReel };
 }

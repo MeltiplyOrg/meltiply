@@ -2,6 +2,14 @@
   "schemaVersion": 1,
   "contractVersion": "1.0.0-target.0",
   "operations": {
+    "getBroadcast": {
+      "state": "specified",
+      "evidenceAndGate": "PR #100 adds writer-only no-store encoder reads. Provider protocol tests cover Facebook and YouTube Live; tenant authorization and live-account acceptance remain separate gates."
+    },
+    "endBroadcast": {
+      "state": "specified",
+      "evidenceAndGate": "PR #100 adds idempotent broadcast ending, distinguishing unstarted cancellation from a published recording. Tenant authorization and live-account acceptance remain separate gates."
+    },
     "getPublishingPreferences": {
       "state": "specified",
       "evidenceAndGate": "Preference persistence and browser acceptance tracked in issues #6, #7, and #8; hosted mail delivery remains separate."

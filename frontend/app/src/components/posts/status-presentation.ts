@@ -33,6 +33,7 @@ const PRESENTATION: Record<
   queued: { tone: "accent", Icon: Clock },
   processing: { tone: "accent", Icon: Clock },
   awaiting_provider: { tone: "accent", Icon: Clock },
+  delivered: { tone: "neutral", Icon: FileText },
   published: { tone: "green", Icon: CircleCheck },
   failed: { tone: "red", Icon: AlertCircle },
   needs_reconciliation: { tone: "orange", Icon: TriangleAlert },

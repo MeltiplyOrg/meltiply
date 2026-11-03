@@ -1602,3 +1602,27 @@ operations:
     errors:
       - status: 422
         body: *validation_error
+  getBroadcast:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        state: ready
+        ingestUrl: rtmps://example.invalid/live
+        streamKey: preview-only-not-a-real-stream-key
+    errors:
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
+  endBroadcast:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        ended: true
+    errors:
+      - status: 403
+        body: *forbidden_error
+      - status: 409
+        body: *invalid_state_error

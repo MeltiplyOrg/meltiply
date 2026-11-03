@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 // Ownership-aware retention, cleanup, and grant safety for post-owned media
 // (issue #284), proven through the two public seams that actually own the
 // lifecycle:
@@ -58,8 +59,10 @@ if (!connectionString) {
   throw new Error("MELTIPLY_DATABASE_TEST_URL is required for PostgreSQL integration suites");
 }
 const describeIntegration = describe;
-const systemConnectionString =
-  "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const systemConnectionString = integrationDatabaseUrl(
+  process.env.MELTIPLY_DATABASE_TEST_URL,
+  "system",
+);
 
 // A throwaway workspace with its own Brand Profile and Channel, created and
 // dropped by this file. Nothing here shares rows, ids, or usage counters with

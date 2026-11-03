@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { Effect } from "effect";
 import { ProviderRegistry } from "@meltiply/providers";
 import { afterAll, beforeEach, describe, expect, it } from "vite-plus/test";
@@ -49,8 +50,7 @@ const queue: Queue<unknown> = {
 };
 const env: AutomationEnv = {
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   ENVIRONMENT: "test",
   VERSION: "comment-policy",

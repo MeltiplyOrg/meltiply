@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
-import type { ProviderPublishOptions } from "@meltiply/providers";
+import { facebookOptionsToWire, type ProviderPublishOptions } from "@meltiply/providers";
 import {
   type DatabaseError,
   isoDateTime,
@@ -78,6 +78,8 @@ interface DistributionRow extends Record<string, unknown> {
   platform_post_id: string | null;
   platform_url: string | null;
   post_id: string;
+  provider_operation_id: string | null;
+  provider_warnings?: Schemas["Distribution"]["provider_warnings"];
   publication_snapshot: StoredPublicationSnapshot | null;
   published_at: Date | string | null;
   scheduled_at: Date | string | null;
@@ -130,7 +132,8 @@ interface StoredPublicationSnapshot {
  */
 export const distributionColumns = `
   id, org_id, brand_profile_id, post_id, platform_account_id, platform, status,
-  scheduled_at, published_at, platform_post_id, platform_url,
+  scheduled_at, published_at, platform_post_id, platform_url, provider_operation_id,
+  provider_warnings,
   title_override, description_override, hashtags, error_message,
   attempt_count, last_attempt_at, next_attempt_at, failure_code,
   failure_retryable, batch_id, created_at, updated_at`;
@@ -192,11 +195,17 @@ function toWireProviderOptions(
   const tiktok = options.tiktok;
   const youtube = options.youtube;
   const instagram = options.instagram;
-  if (!tiktok && !youtube && !instagram) return null;
+  const facebook = options.facebook;
+  const threads = options.threads;
+  if (!tiktok && !youtube && !instagram && !facebook && !threads) return null;
   return {
+    ...(threads ? { threads } : {}),
+    ...(facebook ? { facebook: facebookOptionsToWire(facebook) } : {}),
     ...(instagram
       ? {
           instagram: {
+            ...(instagram.content ? { content: instagram.content } : {}),
+            ...(instagram.mediaOptions ? { media_options: instagram.mediaOptions } : {}),
             ...(instagram.postType ? { post_type: instagram.postType } : {}),
             ...(instagram.trialReel !== undefined ? { trial_reel: instagram.trialReel } : {}),
             ...(instagram.trialGraduation ? { trial_graduation: instagram.trialGraduation } : {}),
@@ -206,6 +215,7 @@ function toWireProviderOptions(
     ...(tiktok
       ? {
           tiktok: {
+            ...(tiktok.postMode !== undefined ? { post_mode: tiktok.postMode } : {}),
             allow_comment: tiktok.allowComment,
             allow_duet: tiktok.allowDuet,
             allow_stitch: tiktok.allowStitch,
@@ -221,6 +231,7 @@ function toWireProviderOptions(
     ...(youtube
       ? {
           youtube: {
+            ...(youtube.postType ? { post_type: youtube.postType } : {}),
             made_for_kids: youtube.madeForKids,
             ...(youtube.privacyStatus ? { privacy_status: youtube.privacyStatus } : {}),
           },
@@ -309,6 +320,11 @@ export function mapDistribution(row: DistributionRow): Distribution {
     platform_post_id: row.platform_post_id,
     platform_url: row.platform_url,
     post_id: row.post_id,
+    ...((row.status === "delivered" || row.provider_operation_id?.startsWith("live:")) &&
+    row.provider_operation_id
+      ? { provider_reference: row.provider_operation_id }
+      : {}),
+    ...(row.provider_warnings?.length ? { provider_warnings: row.provider_warnings } : {}),
     publication: row.publication_snapshot ? mapPublicationSnapshot(row.publication_snapshot) : null,
     published_at: optionalDate(row.published_at),
     scheduled_at: optionalDate(row.scheduled_at),
@@ -857,7 +873,7 @@ export function createDistributionMethods() {
                 new CoreApiError(404, "not_found", "The distribution was not found."),
               );
             }
-            if (["published", "failed", "cancelled"].includes(row.status)) {
+            if (["delivered", "published", "failed", "cancelled"].includes(row.status)) {
               return yield* Effect.fail(
                 new CoreApiError(
                   409,

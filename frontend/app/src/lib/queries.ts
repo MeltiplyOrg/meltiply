@@ -1121,6 +1121,25 @@ export function usePlatformCapabilities(scope: SessionScope) {
 }
 
 /**
+ * Supplies explicit broadcast actions without caching encoder credentials.
+ * Only the end action enters the mutation cache, containing a boolean result.
+ * The read result belongs to the mounted writer-only control and is discarded
+ * when hidden/unmounted. Existing collection invalidation follows confirmed end.
+ */
+export function useBroadcastControls(scope: SessionScope) {
+  const end = useIdempotentMutation(
+    scope,
+    (api, id: string, key) => api.endBroadcast(id, { idempotencyKey: key }),
+    () => [queryKeys.posts(), queryKeys.distributions(), queryKeys.calendar()],
+  );
+  return {
+    read: (id: string, signal?: AbortSignal) =>
+      runApiQuery(scope, (api) => api.getBroadcast(id, { signal }), signal),
+    end,
+  };
+}
+
+/**
  * Dynamic creator requirements must refresh whenever the publishing surface
  * mounts, including an immediate draft reopen. Unlike deployment capabilities,
  * creator permissions are never treated as fresh across composition sessions.

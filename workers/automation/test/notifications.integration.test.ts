@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { randomUUID } from "node:crypto";
 
 import { Effect } from "effect";
@@ -28,8 +29,7 @@ const sendMail = vi.fn(async (_mail: SentMail) => ({ messageId: "mail_accepted_1
 const env = {
   APP_URL: "https://meltiply.test",
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   ENVIRONMENT: "test",
   MAIL: { send: sendMail } as unknown as SendEmail,

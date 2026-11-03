@@ -3,10 +3,9 @@ import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
 import type { DatabaseError, DomainError } from "@meltiply/domain";
 import type {
-  FacebookPostType,
+  FacebookPublishOptions,
   InstagramPostType,
   InstagramTrialGraduation,
-  ThreadsReplyControl,
   TikTokPrivacyLevel,
   TikTokPublishOptions,
   YouTubePublishOptions,
@@ -38,31 +37,14 @@ interface PostFilters {
  * validates these choices and converts them to strict ProviderPublishOptions.
  */
 export interface PostProviderOptions {
-  facebook?: {
-    postType?: FacebookPostType;
-    link?: string;
-    isAiGenerated?: boolean;
-  };
+  threads?: components["schemas"]["ThreadsPostOptions"];
+  facebook?: FacebookPublishOptions;
   instagram?: {
+    content?: components["schemas"]["InstagramContentOptions"];
+    mediaOptions?: components["schemas"]["InstagramContentOptions"][];
     postType?: InstagramPostType;
     trialGraduation?: InstagramTrialGraduation;
     trialReel?: boolean;
-    altText?: string;
-    locationId?: string;
-    userTags?: { username: string; x?: number; y?: number }[];
-    coverUrl?: string;
-    coverFrameMs?: number;
-    audioName?: string;
-    isAiGenerated?: boolean;
-  };
-  threads?: {
-    topicTag?: string;
-    replyControl?: ThreadsReplyControl;
-    linkAttachment?: string;
-    poll?: { optionA: string; optionB: string; optionC?: string; optionD?: string };
-    spoilerEntities?: { length: number; offset: number }[];
-    isSpoilerMedia?: boolean;
-    isMadeWithAi?: boolean;
   };
   tiktok?: Omit<TikTokPublishOptions, "privacyLevel"> & {
     privacyLevel?: TikTokPrivacyLevel;

@@ -3,6 +3,20 @@
   "description": "Status and JSON content-type cases shared by the Worker contract conformance suite.",
   "cases": [
     {
+      "name": "broadcast encoder credentials require authorization",
+      "method": "GET",
+      "path": "/api/v1/distributions/00000000-0000-4000-8000-000000000301/broadcast",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "broadcast ending requires authorization",
+      "method": "POST",
+      "path": "/api/v1/distributions/00000000-0000-4000-8000-000000000301/broadcast/end",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
       "name": "health success",
       "method": "GET",
       "path": "/api/v1/health",

@@ -7,7 +7,13 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { I18nProvider } from "@/lib/i18n";
-import { PlatformSettings } from "./platform-settings";
+import {
+  PlatformSettings,
+  providerDescriptorFor,
+  settingsForAttachmentOrder,
+  type PostTargetDraft,
+} from "./platform-settings";
+import { composeCaption } from "../../../../../packages/providers/src/validator";
 
 vi.mock("@/hooks/use-session-scope", () => ({
   useSessionScope: () => ({ isSignedIn: false, workspaceId: null }),
@@ -21,6 +27,66 @@ vi.mock("@/lib/queries", () => ({
     refetch: vi.fn(),
   }),
 }));
+
+it("keeps image alt text and tags with their Asset through reordering, replacement, and subset changes", () => {
+  const original = settingsForAttachmentOrder(
+    {
+      media_options: [{ alt_text: "First image" }, { alt_text: "Second image" }],
+    },
+    ["first", "second"],
+  );
+  const reversed = settingsForAttachmentOrder(original, ["second", "first"]);
+  expect(reversed.media_options).toEqual([
+    { alt_text: "Second image" },
+    { alt_text: "First image" },
+  ]);
+  const replaced = settingsForAttachmentOrder(reversed, ["new", "first"]);
+  expect(replaced.media_options).toEqual([{}, { alt_text: "First image" }]);
+  expect(settingsForAttachmentOrder(original, ["second"]).media_options).toEqual([
+    { alt_text: "Second image" },
+  ]);
+  expect(original.media_options).toEqual([
+    { alt_text: "First image" },
+    { alt_text: "Second image" },
+  ]);
+  const single = settingsForAttachmentOrder(
+    {
+      content: { alt_text: "Only the original image", collaborators: ["creator"] },
+    },
+    ["original"],
+  );
+  const replacement = settingsForAttachmentOrder(single, ["replacement"]);
+  expect(replacement.content).toEqual({ collaborators: ["creator"] });
+  expect(replacement.media_options).toEqual([{}]);
+});
+
+it.each([
+  { provider: "facebook", settings: { post_type: "story" } },
+  { provider: "instagram", settings: { post_type: "story" } },
+  { provider: "threads", settings: { post_type: "repost", repost_id: "12345678" } },
+])(
+  "does not leak a hidden Post title into captionless $provider content",
+  ({ provider, settings }) => {
+    const target: PostTargetDraft = { platform_account_id: "channel" };
+    providerDescriptorFor(provider)!.applyTarget!(
+      target,
+      settings,
+      provider === "threads" ? [] : ["image"],
+      null,
+      "publication",
+    );
+    expect(
+      composeCaption({
+        title: "Title from an earlier publishing method",
+        titleOverride: target.title_override ?? null,
+        defaultText: "",
+        descriptionOverride: "",
+        signature: null,
+        hashtags: [],
+      }),
+    ).toBe("");
+  },
+);
 
 beforeAll(() => {
   // Radix focuses the selected option with an API jsdom does not implement.
@@ -62,90 +128,5 @@ describe("Instagram publication shape transitions", () => {
     fireEvent.keyDown(screen.getByRole("combobox", { name: "Post type" }), { key: "Enter" });
     fireEvent.click(await screen.findByRole("option", { name: /^Reel$/ }));
     expect(screen.getByRole("switch", { name: "Trial Reel" })).not.toBeChecked();
-  });
-});
-
-/** Keeps the real Facebook settings editor controlled, as the composer does. */
-function FacebookSettings({ initial }: { initial: Record<string, unknown> }) {
-  const [settings, setSettings] = useState<Record<string, unknown>>(initial);
-  return (
-    <I18nProvider>
-      <PlatformSettings
-        provider="facebook"
-        channelName="Facebook destination"
-        channelId="facebook-channel"
-        settings={settings}
-        mediaKinds={["video"]}
-        onChange={setSettings}
-      />
-    </I18nProvider>
-  );
-}
-
-describe("Facebook publication shape transitions", () => {
-  it("offers only the families the attachment set can carry", async () => {
-    render(<FacebookSettings initial={{}} />);
-    fireEvent.keyDown(screen.getByRole("combobox", { name: "Post type" }), { key: "Enter" });
-    // A single video can only become a Reel or a Story on Facebook.
-    // Radix marks a disabled option with `aria-disabled`, not the native attribute.
-    expect(await screen.findByRole("option", { name: "Post" })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    expect(screen.getByRole("option", { name: "Photo post" })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    // An enabled option simply omits the attribute.
-    expect(screen.getByRole("option", { name: "Reel" })).not.toHaveAttribute("aria-disabled");
-    fireEvent.click(screen.getByRole("option", { name: "Story" }));
-
-    expect(screen.getByRole("combobox", { name: "Post type" })).toHaveTextContent("Story");
-    expect(screen.getByRole("switch", { name: "Made with AI" })).toBeInTheDocument();
-  });
-
-  it("keeps the AI disclosure off for a post and hides the link off a post family", async () => {
-    render(<FacebookSettings initial={{ post_type: "reel", is_ai_generated: true }} />);
-    expect(screen.getByRole("switch", { name: "Made with AI" })).toBeChecked();
-
-    fireEvent.keyDown(screen.getByRole("combobox", { name: "Post type" }), { key: "Enter" });
-    fireEvent.click(await screen.findByRole("option", { name: "Reel" }));
-    expect(screen.getByRole("switch", { name: "Made with AI" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Link")).not.toBeInTheDocument();
-  });
-});
-
-/** Keeps the real Threads settings editor controlled, as the composer does. */
-function ThreadsSettings({ mediaKinds }: { mediaKinds: ("image" | "video")[] }) {
-  const [settings, setSettings] = useState<Record<string, unknown>>({});
-  return (
-    <I18nProvider>
-      <PlatformSettings
-        provider="threads"
-        channelName="Threads destination"
-        channelId="threads-channel"
-        settings={settings}
-        mediaKinds={mediaKinds}
-        onChange={setSettings}
-      />
-    </I18nProvider>
-  );
-}
-
-describe("Threads publication controls", () => {
-  it("offers a link attachment only for a text-only post", () => {
-    const { rerender } = render(<ThreadsSettings mediaKinds={[]} />);
-    expect(screen.getByLabelText("Link attachment")).toBeInTheDocument();
-    rerender(<ThreadsSettings mediaKinds={["image"]} />);
-    // Threads documents link attachments for text posts only.
-    expect(screen.queryByLabelText("Link attachment")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Topic tag")).toBeInTheDocument();
-  });
-
-  it("stores the chosen reply control and topic tag", () => {
-    render(<ThreadsSettings mediaKinds={[]} />);
-    fireEvent.change(screen.getByLabelText("Topic tag"), { target: { value: "launch" } });
-    expect(screen.getByLabelText("Topic tag")).toHaveValue("launch");
-    expect(screen.getByRole("combobox", { name: "Who can reply" })).toHaveTextContent("Everyone");
   });
 });

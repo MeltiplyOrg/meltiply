@@ -1,4 +1,6 @@
-import type { PlatformCapability } from "@meltiply/contracts";
+import type { components, PlatformCapability } from "@meltiply/contracts";
+import type { ThreadsPublishOptions } from "./threads-options";
+import type { InstagramContentOptions } from "./instagram-content";
 
 import type { RateLimitBudget } from "./rate-limit";
 
@@ -40,7 +42,10 @@ export interface ProviderFailure {
 export type ProviderOperationResult =
   | {
       metadata?: ProviderOperationMetadata;
+      /** Terminal remote handoff, not a published Post (native draft/inbox/experiment). */
+      delivery?: "draft" | "inbox" | "experiment" | "broadcast";
       outcome: "confirmed_success";
+      warnings?: components["schemas"]["Distribution"]["provider_warnings"];
       providerOperationId?: string;
       providerPostId?: string;
       providerUrl?: string;
@@ -68,6 +73,10 @@ export type ProviderPublicationStatus = (
       metadata?: ProviderOperationMetadata;
       result: Extract<ProviderOperationResult, { outcome: "confirmed_success" }>;
       state: "published";
+    }
+  | {
+      result: Extract<ProviderOperationResult, { outcome: "confirmed_success" }>;
+      state: "delivered";
     }
   | {
       result: Extract<ProviderOperationResult, { outcome: "confirmed_failure" }>;
@@ -126,74 +135,17 @@ export type TikTokPrivacyLevel =
   | "SELF_ONLY";
 
 export interface TikTokPublishOptions {
+  postMode?: "direct" | "inbox";
   allowComment: boolean;
   allowDuet: boolean;
   allowStitch: boolean;
   autoAddMusic?: boolean;
   brandContent: boolean;
   brandOrganic: boolean;
-  /**
-   * Video-only cover frame offset in milliseconds, mapped to TikTok's
-   * documented `video_cover_timestamp_ms`. The API accepts a frame offset, not
-   * an uploaded cover image.
-   */
-  coverTimestampMs?: number;
   isAiGenerated: boolean;
   musicUsageConfirmed: true;
-  privacyLevel: TikTokPrivacyLevel;
+  privacyLevel?: TikTokPrivacyLevel;
 }
-
-export type FacebookPostType = "post" | "photo" | "reel" | "story";
-
-/**
- * Creator-selected Facebook Page publication shape.
- *
- * `postType` defaults to `reel` for a single video (the historical behaviour)
- * and `photo` for a single image. Graph API exposes three distinct Page
- * publishing families — `/feed` (text, link, multi-photo), `/videos` (ordinary
- * video), `/video_reels`, and `/video_stories` + `/photo_stories` (Stories) —
- * so the shape is chosen explicitly rather than inferred silently.
- *
- * `link` is a `/feed` link attachment and needs no media. `isAiGenerated`
- * applies only to Reels and Stories, the two families that document the field.
- */
-export interface FacebookPublishOptions {
-  isAiGenerated?: boolean;
-  link?: string;
-  postType?: FacebookPostType;
-}
-
-/**
- * Creator-selected Threads publication controls.
- *
- * Every field maps to a documented container parameter. Polls, link
- * attachments, and long-form text attachments are text-only on Threads, so they
- * are rejected alongside media rather than silently dropped. `topicTag` is one
- * tag per post, and `spoilerEntities` masks ranges of the post text.
- */
-export interface ThreadsPublishOptions {
-  /** Masks the media of the published post behind Instagram's spoiler treatment. */
-  isSpoilerMedia?: boolean;
-  /** Declares the post as made with AI; Instagram shows the label. */
-  isMadeWithAi?: boolean;
-  /** One link attachment; text-only posts carry up to five unique links. */
-  linkAttachment?: string;
-  /** Poll options, 2-4 entries of 1-25 characters each; text-only. */
-  poll?: { optionA: string; optionB: string; optionC?: string; optionD?: string };
-  /** Who may reply: everyone, followed accounts, mentioned accounts, or followers. */
-  replyControl?: ThreadsReplyControl;
-  /** Masked ranges of the post text, at most ten entities. */
-  spoilerEntities?: { length: number; offset: number }[];
-  /** The single topic tag shown on the post, 1-50 characters. */
-  topicTag?: string;
-}
-
-export type ThreadsReplyControl =
-  | "everyone"
-  | "accounts_you_follow"
-  | "mentioned_only"
-  | "parent_post_author_only"
-  | "followers_only";
 
 export type InstagramPostType = "feed" | "reel" | "story";
 
@@ -203,68 +155,84 @@ export type InstagramTrialGraduation = "manual" | "performance";
  * Creator-selected Instagram publication shape. `postType` defaults to `feed`
  * for images and `reel` for videos; `trialReel` is valid only for a single
  * video Reel and asks Instagram to test it with non-followers first.
- *
- * Every field maps to a documented container-creation parameter. `altText`
- * applies to images only, `coverUrl`/`coverFrameMs` and `audioName` to Reels,
- * `locationId` and `userTags` to the families that accept them, and
- * `isAiGenerated` to the carousel parent where Instagram documents it.
- * `collaborators` is deliberately absent: Instagram documents it as Facebook
- * Login only, which this Instagram-Login integration does not use.
  */
 export interface InstagramPublishOptions {
-  /** Accessible image description; Instagram caps it at 1,000 characters. */
-  altText?: string;
-  /** Reel audio label the creator can set once. */
-  audioName?: string;
-  /** Reel cover image URL; wins over `coverFrameMs` when both are present. */
-  coverUrl?: string;
-  /** Reel cover frame offset in milliseconds. */
-  coverFrameMs?: number;
-  /** Discloses altered or synthetic media on the carousel parent. */
-  isAiGenerated?: boolean;
-  /** Facebook Page id that carries a location; Instagram validates the binding. */
-  locationId?: string;
+  content?: InstagramContentOptions;
+  mediaOptions?: InstagramContentOptions[];
   postType?: InstagramPostType;
   trialGraduation?: InstagramTrialGraduation;
   trialReel?: boolean;
-  /** Accounts tagged in the published media; position is optional. */
-  userTags?: { username: string; x?: number; y?: number }[];
 }
 
 export type YouTubePrivacyStatus = "public" | "unlisted" | "private";
 
-export type YouTubeLicense = "youtube" | "creativeCommon";
-
 /**
- * Creator-selected YouTube publication options mapped to `videos.insert`.
- *
- * `madeForKids` is the required COPPA declaration and stays mandatory. Every
- * other field mirrors a documented `videos.insert` property that this adapter
- * can set without additional API calls; omitted fields keep YouTube's own
- * defaults rather than inventing a value. `publishAt` is valid only while
- * `privacyStatus` is `private`, matching YouTube's documented restriction.
+ * Creator-selected YouTube publication options mapped to `videos.insert` status fields.
+ * `madeForKids` is a required COPPA declaration; `privacyStatus` is optional and the
+ * adapter applies the established public default when it is omitted.
  */
 export interface YouTubePublishOptions {
-  /** YouTube's altered/synthetic-content disclosure (`status.containsSyntheticMedia`). */
-  containsSyntheticMedia?: boolean;
-  /** Whether the video can be embedded elsewhere (`status.embeddable`). */
-  embeddable?: boolean;
-  /** `status.license`; omitted keeps YouTube's standard license. */
-  license?: YouTubeLicense;
+  postType?: "video" | "live";
   madeForKids: boolean;
   privacyStatus?: YouTubePrivacyStatus;
-  /** `status.publicStatsViewable`; false hides public like/view counts. */
-  publicStatsViewable?: boolean;
-  /** `status.publishAt` as an ISO instant; requires `privacyStatus: "private"`. */
-  publishAt?: string;
-  /** `recordingDetails.recordingDate` as an ISO instant. */
-  recordingDate?: string;
+}
+
+export type FacebookPostType =
+  | "feed"
+  | "video"
+  | "reel"
+  | "story"
+  | "slideshow"
+  | "crosspost"
+  | "ab_test"
+  | "live";
+
+/** A link carousel card; Meta requires a public preview image for each card. */
+export interface FacebookLinkCard {
+  link: string;
+  picture: string;
+  name?: string;
+  description?: string;
+}
+
+export type FacebookOptimizationGoal =
+  | "AVG_TIME_WATCHED"
+  | "COMMENTS"
+  | "IMPRESSIONS"
+  | "IMPRESSIONS_UNIQUE"
+  | "LINK_CLICKS"
+  | "REACTIONS"
+  | "REELS_PLAYS"
+  | "SHARES"
+  | "VIDEO_VIEWS_60S";
+
+/** Saved experiment intent; drafts may retain unanswered required choices. */
+export interface FacebookABTestOptions {
+  name?: string;
+  controlVideoId?: string;
+  experimentVideoIds?: string[];
+  optimizationGoal?: FacebookOptimizationGoal;
+  durationSeconds?: number;
+}
+
+/**
+ * Page publication intent. Omitted type uses a Reel for one video and a feed
+ * post otherwise. Links and link carousels apply only to media-free feed
+ * posts. Live broadcasts use an external encoder rather than Asset uploads.
+ */
+export interface FacebookPublishOptions {
+  postType?: FacebookPostType;
+  deliveryMode?: "publish" | "draft";
+  link?: string;
+  linkCards?: FacebookLinkCard[];
+  crosspostedVideoId?: string;
+  abTest?: FacebookABTestOptions;
 }
 
 export interface ProviderPublishOptions {
   facebook?: FacebookPublishOptions;
-  instagram?: InstagramPublishOptions;
   threads?: ThreadsPublishOptions;
+  instagram?: InstagramPublishOptions;
   tiktok?: TikTokPublishOptions;
   youtube?: YouTubePublishOptions;
 }
@@ -369,6 +337,18 @@ export interface ProviderTokenSet {
   scopes: string[];
 }
 
+/**
+ * Encoder credentials read on demand for an authorized content writer.
+ * Never persist in publication IDs, shared read models, analytics, or logs.
+ */
+export interface ProviderBroadcastInfo {
+  state: "ready" | "testing" | "live" | "ended";
+  ingestUrl?: string;
+  streamKey?: string;
+  providerUrl?: string;
+  providerPostId?: string;
+}
+
 export interface ProviderRetryPolicy {
   baseDelaySeconds: number;
   maxAttempts: number;
@@ -408,6 +388,16 @@ export type OAuthExchangeResult = OAuthConnection | OAuthAccountSelection;
  * construction, capability inspection, and injected boundary fakes.
  */
 export interface ProviderAdapter {
+  getBroadcastInfo?(
+    context: ProviderRequestContext,
+    credentials: ProviderCredentials,
+    lookup: ProviderPublicationLookup,
+  ): Promise<ProviderBroadcastInfo>;
+  endBroadcast?(
+    context: ProviderRequestContext,
+    credentials: ProviderCredentials,
+    lookup: ProviderPublicationLookup,
+  ): Promise<ProviderOperationResult>;
   authorizationUrl?(input: OAuthAuthorizationInput): string;
   extractRateLimitBudget?(headers: Headers): RateLimitBudget | null;
   cancelPublication?(

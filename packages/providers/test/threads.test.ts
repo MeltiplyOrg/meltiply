@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   createThreadsAdapter,
   ProviderAdapterError,
-  ProviderRegistry,
   type ProviderRequestContext,
   type PublishInput,
 } from "../src";
@@ -55,27 +54,159 @@ function publishInput(patch: Partial<PublishInput> = {}): PublishInput {
 }
 
 describe("createThreadsAdapter", () => {
-  it("advertises text, media, and carousel publishing behavior", () => {
-    const provider = adapter(vi.fn<typeof fetch>());
-    expect(provider.capability).toMatchObject({
-      analytics: true,
-      asset_types: ["image", "video"],
-      comments: true,
-      connect_available: true,
-      max_caption_length: 500,
-      max_file_size: 500 * 1024 * 1024,
-      max_hashtags: 1,
-      max_media_count: 20,
-      max_video_duration_sec: 300,
-      min_media_count: 0,
-      multi_asset_types: ["image", "video"],
-      platform: "threads",
-      publish: true,
-      reply: true,
+  it.each([
+    { gif_attachment: { gif_id: "native-gif", provider: "GIPHY" as const } },
+    { text_attachment: { plaintext: "A long-text attachment with no teaser caption" } },
+  ])("creates provider-hosted content without inventing a teaser caption: %j", async (options) => {
+    const calls = sequence((url) => {
+      expect(url.searchParams.get("media_type")).toBe("TEXT");
+      expect(url.searchParams.has("text")).toBe(false);
+      return json({ id: "native-container" });
     });
-    expect(provider.transferModes).toEqual(["remote_ingest"]);
-    const registry = new ProviderRegistry();
-    expect(() => registry.register("threads", provider)).not.toThrow();
+    await expect(
+      adapter(calls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          caption: "",
+          providerOptions: { threads: options },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      outcome: "confirmed_success",
+      providerOperationId: "created:native-container",
+    });
+  });
+
+  it("rejects overlapping long-text styling before creating a remote container", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    await expect(
+      adapter(fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: {
+            threads: {
+              text_attachment: {
+                plaintext: "A long-text attachment",
+                text_with_styling_info: [
+                  { offset: 0, length: 6, styling_info: ["bold"] },
+                  { offset: 5, length: 4, styling_info: ["italic"] },
+                ],
+              },
+            },
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ failure: { code: "threads_publish_options_invalid" } });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("does not substitute an ordinary Post for incomplete ghost intent", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    await expect(
+      adapter(fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: { threads: { post_type: "ghost" } },
+        }),
+      ),
+    ).rejects.toMatchObject({ failure: { code: "threads_publish_options_invalid" } });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("retains primary publication when Instagram cross-sharing fails", async () => {
+    const calls = sequence(
+      () => json({ id: "container-one" }),
+      () => json({ id: "container-one", status: "FINISHED" }),
+      () => json({ id: "threads-published", crossreshare_to_ig_status: "FAILED" }),
+    );
+    const provider = adapter(calls.fetcher);
+    const submitted = await provider.publish!(
+      context,
+      credentials,
+      publishInput({
+        providerOptions: { threads: { crossreshare_to_ig: true } },
+      }),
+    );
+    await expect(
+      provider.lookupPublication!(context, credentials, submitted),
+    ).resolves.toMatchObject({
+      state: "published",
+      result: {
+        outcome: "confirmed_success",
+        providerPostId: "threads-published",
+        warnings: ["instagram_crossshare_failed"],
+      },
+    });
+  });
+
+  it.each([
+    { poll_attachment: { option_a: "A", option_b: "B", option_c: "C" } },
+    { gif_attachment: { gif_id: "giphy-one", provider: "GIPHY" as const } },
+    { text_attachment: { plaintext: "An essay ".repeat(1000) } },
+    { is_ghost_post: true },
+    { quote_post_id: "quoted-one" },
+    { reply_to_id: "parent-one" },
+  ])("creates the native content form %j without losing its options", async (options) => {
+    const calls = sequence((url) => {
+      expect(url.pathname).toBe("/me/threads");
+      for (const [key, value] of Object.entries(options)) {
+        expect(url.searchParams.get(key)).toBe(
+          typeof value === "object" ? JSON.stringify(value) : String(value),
+        );
+      }
+      return json({ id: "container-one" });
+    });
+    await expect(
+      adapter(calls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: { threads: options },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      outcome: "confirmed_success",
+      providerOperationId: "created:container-one",
+    });
+  });
+
+  it("reposts the specified source without creating a text container", async () => {
+    const calls = sequence((url) => {
+      expect(url.pathname).toBe("/source-one/repost");
+      return json({ id: "repost-one" });
+    });
+    await expect(
+      adapter(calls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          caption: "",
+          providerOptions: { threads: { repost_id: "source-one" } },
+        }),
+      ),
+    ).resolves.toEqual({ outcome: "confirmed_success", providerPostId: "repost-one" });
+  });
+
+  it("rejects poll and long-text combinations before creating remote content", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    await expect(
+      adapter(fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: {
+            threads: {
+              poll_attachment: { option_a: "A", option_b: "B" },
+              text_attachment: { plaintext: "Not valid together" },
+            },
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ failure: { code: "threads_publish_options_invalid" } });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("builds a state-bound authorization URL and pins the callback", () => {
@@ -93,7 +224,7 @@ describe("createThreadsAdapter", () => {
       redirect_uri: redirectUri,
       response_type: "code",
       scope:
-        "threads_basic,threads_content_publish,threads_delete,threads_manage_insights,threads_manage_replies,threads_read_replies",
+        "threads_basic,threads_content_publish,threads_delete,threads_location_tagging,threads_share_to_instagram,threads_keyword_search,threads_manage_mentions,threads_manage_insights,threads_manage_replies,threads_read_replies",
       state: "oauth-state",
     });
     expect(() =>
@@ -131,6 +262,19 @@ describe("createThreadsAdapter", () => {
           username: "creator",
         });
       },
+      (url, init) => {
+        expect(url.pathname).toBe("/v1.0/debug_token");
+        expect(new Headers(init.headers).get("Authorization")).toBe(
+          "Bearer TH|threads-client|threads-client-secret",
+        );
+        return json({
+          data: {
+            is_valid: true,
+            user_id: "12345",
+            scopes: ["threads_basic", "threads_content_publish"],
+          },
+        });
+      },
     );
     const connection = await adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
       code: "authorization-code",
@@ -148,14 +292,7 @@ describe("createThreadsAdapter", () => {
       },
       expiresAt: "2026-09-17T00:00:00.000Z",
       refreshToken: "long-secret",
-      scopes: [
-        "threads_basic",
-        "threads_content_publish",
-        "threads_delete",
-        "threads_manage_insights",
-        "threads_manage_replies",
-        "threads_read_replies",
-      ],
+      scopes: ["threads_basic", "threads_content_publish"],
     });
     expect(providerCalls.calls[0]!.url.search).toBe("");
     expect(providerCalls.calls[0]!.url.toString()).not.toContain("threads-client-secret");
@@ -167,12 +304,18 @@ describe("createThreadsAdapter", () => {
     );
   });
 
-  it("publishes text through a recoverable two-step container flow", async () => {
+  it("waits for text-container readiness before publishing the retained container", async () => {
     const providerCalls = sequence(
       () => json({ id: "container-1" }),
-      () => json({ id: "post-1" }),
+      () => json({ id: "container-1", status: "IN_PROGRESS" }),
+      () => json({ id: "container-1", status: "FINISHED" }),
+      (url) => {
+        expect(url.searchParams.get("creation_id")).toBe("container-1");
+        return json({ id: "post-1" });
+      },
     );
-    const result = await adapter(providerCalls.fetcher).publish!(
+    const provider = adapter(providerCalls.fetcher);
+    const result = await provider.publish!(
       context,
       credentials,
       publishInput({ caption: "Hello #launch", hashtags: ["launch"] }),
@@ -180,17 +323,16 @@ describe("createThreadsAdapter", () => {
     expect(result).toEqual({
       outcome: "confirmed_success",
       providerOperationId: "created:container-1",
-      providerPostId: "post-1",
     });
-    const create = providerCalls.calls[0]!;
-    expect(create.url.pathname).toBe("/me/threads");
-    expect(Object.fromEntries(create.url.searchParams)).toEqual({
-      media_type: "TEXT",
-      text: "Hello #launch",
+    await expect(provider.lookupPublication!(context, credentials, result)).resolves.toEqual({
+      state: "processing",
+      providerOperationId: "created:container-1",
     });
-    expect(create.url.searchParams.has("auto_publish_text")).toBe(false);
-    expect(providerCalls.calls[1]!.url.searchParams.get("creation_id")).toBe("container-1");
-    expect(providerCalls.calls.every(({ init }) => init.redirect === "manual")).toBe(true);
+    await expect(provider.lookupPublication!(context, credentials, result)).resolves.toMatchObject({
+      state: "published",
+      result: { providerPostId: "post-1" },
+    });
+    expect(providerCalls.calls.filter(({ init }) => init.method === "POST")).toHaveLength(2);
   });
 
   it("creates an image container without publishing before readiness", async () => {
@@ -350,12 +492,28 @@ describe("createThreadsAdapter", () => {
     ).toHaveLength(1);
   });
 
+  it("allows ordinary in-text hashtags beyond the one native topic tag", async () => {
+    const calls = sequence(() => json({ id: "tagged-container" }));
+    await expect(
+      adapter(calls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          caption: "Launch #one #two",
+          hashtags: ["one", "two"],
+        }),
+      ),
+    ).resolves.toMatchObject({
+      outcome: "confirmed_success",
+      providerOperationId: "created:tagged-container",
+    });
+  });
+
   it("rejects unsupported media, oversize images, and excessive content locally", async () => {
     const fetcher = vi.fn<typeof fetch>();
     const provider = adapter(fetcher);
     const invalidInputs: PublishInput[] = [
       publishInput({ caption: "x".repeat(501) }),
-      publishInput({ caption: "#one #two", hashtags: ["one", "two"] }),
       publishInput({
         media: [
           {
@@ -545,26 +703,6 @@ describe("createThreadsAdapter", () => {
     expect(providerCalls.calls).toHaveLength(1);
   });
 
-  it("retains the submitted container ID when the publish response is ambiguous", async () => {
-    const providerCalls = sequence(
-      () => json({ id: "container-ambiguous" }),
-      async () => {
-        throw new Error("socket closed after write");
-      },
-    );
-    const result = await adapter(providerCalls.fetcher).publish!(
-      context,
-      credentials,
-      publishInput(),
-    );
-    expect(result).toMatchObject({
-      failure: { classification: "ambiguous", retryable: false },
-      outcome: "unknown",
-      providerOperationId: "submitted:container-ambiguous",
-    });
-    expect(JSON.stringify(result)).not.toMatch(/socket|secret/i);
-  });
-
   it.each([
     ["IN_PROGRESS", "processing"],
     ["FINISHED", "unknown"],
@@ -653,6 +791,18 @@ describe("createThreadsAdapter", () => {
         providerPostId: "post-missing",
       }),
     ).resolves.toEqual({ state: "not_found" });
+  });
+
+  it("confirms the matching published Post when Meta withholds its permalink", async () => {
+    const calls = sequence(() => json({ id: "copyright-restricted-post" }));
+    await expect(
+      adapter(calls.fetcher).lookupPublication!(context, credentials, {
+        providerPostId: "copyright-restricted-post",
+      }),
+    ).resolves.toEqual({
+      state: "published",
+      result: { outcome: "confirmed_success", providerPostId: "copyright-restricted-post" },
+    });
   });
 
   it("deletes a published post idempotently and does not guess from a live container", async () => {
@@ -879,113 +1029,34 @@ describe("createThreadsAdapter", () => {
   });
 
   it("refreshes a Threads long-lived access token", async () => {
-    const providerCalls = sequence((url) => {
-      expect(url.origin).toBe("https://graph.threads.com");
-      expect(url.searchParams.get("grant_type")).toBe("th_refresh_token");
-      expect(url.searchParams.get("access_token")).toBe("current-long-token");
-      return json({
-        access_token: "refreshed-long-token",
-        expires_in: 5_184_000,
-        token_type: "bearer",
-      });
-    });
+    const providerCalls = sequence(
+      (url) => {
+        expect(url.origin).toBe("https://graph.threads.com");
+        expect(url.searchParams.get("grant_type")).toBe("th_refresh_token");
+        expect(url.searchParams.get("access_token")).toBe("current-long-token");
+        return json({
+          access_token: "refreshed-long-token",
+          expires_in: 5_184_000,
+          token_type: "bearer",
+        });
+      },
+      () =>
+        json({
+          data: {
+            is_valid: true,
+            user_id: "12345",
+            scopes: ["threads_basic", "threads_content_publish"],
+          },
+        }),
+    );
     await expect(
       adapter(providerCalls.fetcher).refreshAccessToken!(context, "current-long-token"),
     ).resolves.toEqual({
       accessToken: "refreshed-long-token",
       expiresAt: "2026-09-17T00:00:00.000Z",
       refreshToken: "refreshed-long-token",
-      scopes: [
-        "threads_basic",
-        "threads_content_publish",
-        "threads_delete",
-        "threads_manage_insights",
-        "threads_manage_replies",
-        "threads_read_replies",
-      ],
+      scopes: ["threads_basic", "threads_content_publish"],
     });
     expect(providerCalls.calls[0]!.url.pathname).toBe("/refresh_access_token");
-  });
-});
-
-describe("createThreadsAdapter documented controls", () => {
-  /** Captures the container-creation query so each test can assert its fields. */
-  function containerQuery(captured: URL[]) {
-    return (url: URL) => {
-      captured.push(url);
-      return json({ id: "container-1" });
-    };
-  }
-
-  it("sends a poll, topic tag, and reply control on a text post", async () => {
-    const captured: URL[] = [];
-    const providerCalls = sequence(containerQuery(captured), () => json({ id: "post-1" }));
-    await expect(
-      adapter(providerCalls.fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          providerOptions: {
-            threads: {
-              poll: { optionA: "Yes", optionB: "No" },
-              replyControl: "followers_only",
-              topicTag: "launch",
-            },
-          },
-        }),
-      ),
-    ).resolves.toMatchObject({ outcome: "confirmed_success" });
-    const query = captured[0]!;
-    expect(query.searchParams.get("topic_tag")).toBe("launch");
-    expect(query.searchParams.get("reply_control")).toBe("followers_only");
-    expect(JSON.parse(query.searchParams.get("poll_attachment")!)).toEqual({
-      option_a: "Yes",
-      option_b: "No",
-    });
-  });
-
-  it("rejects a poll combined with media, which Threads does not accept", async () => {
-    await expect(
-      adapter(vi.fn<typeof fetch>()).publish!(
-        context,
-        credentials,
-        publishInput({
-          media: [
-            {
-              contentType: "image/jpeg",
-              fileSize: 1024,
-              mode: "remote_ingest",
-              url: "https://assets.example/one.jpg",
-            },
-          ],
-          providerOptions: { threads: { poll: { optionA: "Yes", optionB: "No" } } },
-        }),
-      ),
-    ).rejects.toBeInstanceOf(ProviderAdapterError);
-  });
-
-  it("masks text spoilers and refuses spoiler media without an attachment", async () => {
-    const captured: URL[] = [];
-    const providerCalls = sequence(containerQuery(captured), () => json({ id: "threads-2" }));
-    await expect(
-      adapter(providerCalls.fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          providerOptions: { threads: { spoilerEntities: [{ length: 4, offset: 0 }] } },
-        }),
-      ),
-    ).resolves.toMatchObject({ outcome: "confirmed_success" });
-    expect(JSON.parse(captured[0]!.searchParams.get("text_entities")!)).toEqual([
-      { entity_type: "SPOILER", length: 4, offset: 0 },
-    ]);
-
-    await expect(
-      adapter(vi.fn<typeof fetch>()).publish!(
-        context,
-        credentials,
-        publishInput({ providerOptions: { threads: { isSpoilerMedia: true } } }),
-      ),
-    ).rejects.toBeInstanceOf(ProviderAdapterError);
   });
 });

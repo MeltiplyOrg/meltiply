@@ -322,11 +322,22 @@ the corresponding local mutation.
 
 Generic form saves, deletes, sign-in/out, and single-part media uploads operate
 only in browser memory. Uploaded bytes become local Blob URLs, never R2 objects.
+Upload completion returns a ready Asset so the composer can attach and poll it.
+Draft updates retain each Channel's identity and replace its provider options,
+including incomplete method choices, without inheriting another Channel's fields.
 No preview response sends email, changes real credentials, publishes content,
 or invokes background infrastructure. This is frontend scenario testing, not a
 second backend implementation or proof of backend business semantics. A new
 feature-specific multi-request outcome may need a small scenario transformation;
 ordinary UI changes and newly documented endpoints need no duplicate mock data.
+
+The seed includes a native Facebook Page draft, a TikTok inbox handoff, a
+prepared Facebook Live broadcast, and a successful Threads Post with a failed
+secondary Instagram Story share. Use these to inspect **Delivered**, provider
+references, warning copy, and writer-only Live controls. Preview encoder values
+are deliberately nonfunctional contract examples. Method selection and draft
+reopen are reviewable here; actual grants, account eligibility, media ingestion,
+native completion, and external encoder delivery require approved live accounts.
 
 The dedicated `wrangler.ui-preview.jsonc` Worker has no service, database, or
 storage bindings. It rejects API/telemetry requests that reach the server.

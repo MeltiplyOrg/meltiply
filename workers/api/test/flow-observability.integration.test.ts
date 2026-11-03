@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 // Response.json() is `unknown` under the pool's types but `any` in eslint's
 // project, so the necessary body assertions look unnecessary to the rule
 // (AUD-055); the assertions are required for tsc.
@@ -21,8 +22,7 @@ const env = {
   ALLOWED_ORIGINS: "http://localhost:3000",
   DB_AUTHENTICATED: { connectionString } as Hyperdrive,
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   ENVIRONMENT: "test",
   VERSION: "1.0.0-target.0",

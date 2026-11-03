@@ -74,6 +74,14 @@ const PUBLICATION_STATUSES = {
     deleteProtected: true,
     inFlight: true,
   },
+  delivered: {
+    group: 5,
+    summary: 3,
+    filter: null,
+    cancellable: false,
+    deleteProtected: true,
+    inFlight: false,
+  },
   published: {
     group: 5,
     summary: 8,

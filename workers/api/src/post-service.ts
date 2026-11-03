@@ -4,6 +4,8 @@ import type { components } from "@meltiply/contracts/schema";
 import { isoDateTime, type DatabaseError } from "@meltiply/domain";
 import {
   composeCaption,
+  facebookOptionsToWire,
+  parseThreadsOptions,
   ProviderRegistry,
   validatePublishInput,
   type ProviderMedia,
@@ -228,34 +230,14 @@ function toWirePostProviderOptions(
   const threads = options?.threads;
   if (!tiktok && !youtube && !instagram && !facebook && !threads) return null;
   return {
-    ...(facebook
-      ? {
-          facebook: {
-            ...(facebook.postType !== undefined ? { post_type: facebook.postType } : {}),
-            ...(facebook.link !== undefined ? { link: facebook.link } : {}),
-            ...(facebook.isAiGenerated !== undefined
-              ? { is_ai_generated: facebook.isAiGenerated }
-              : {}),
-          },
-        }
-      : {}),
+    ...(threads ? { threads } : {}),
+    ...(facebook ? { facebook: facebookOptionsToWire(facebook) } : {}),
     ...(instagram
       ? {
           instagram: {
+            ...(instagram.content ? { content: instagram.content } : {}),
+            ...(instagram.mediaOptions ? { media_options: instagram.mediaOptions } : {}),
             ...(instagram.postType !== undefined ? { post_type: instagram.postType } : {}),
-            ...(instagram.altText !== undefined ? { alt_text: instagram.altText } : {}),
-            ...(instagram.locationId !== undefined ? { location_id: instagram.locationId } : {}),
-            ...(instagram.userTags
-              ? { user_tags: instagram.userTags.map((tag) => ({ ...tag })) }
-              : {}),
-            ...(instagram.coverUrl !== undefined ? { cover_url: instagram.coverUrl } : {}),
-            ...(instagram.coverFrameMs !== undefined
-              ? { cover_frame_ms: instagram.coverFrameMs }
-              : {}),
-            ...(instagram.audioName !== undefined ? { audio_name: instagram.audioName } : {}),
-            ...(instagram.isAiGenerated !== undefined
-              ? { is_ai_generated: instagram.isAiGenerated }
-              : {}),
             ...(instagram.trialReel !== undefined ? { trial_reel: instagram.trialReel } : {}),
             ...(instagram.trialGraduation !== undefined
               ? { trial_graduation: instagram.trialGraduation }
@@ -263,37 +245,10 @@ function toWirePostProviderOptions(
           },
         }
       : {}),
-    ...(threads
-      ? {
-          threads: {
-            ...(threads.topicTag ? { topic_tag: threads.topicTag } : {}),
-            ...(threads.replyControl ? { reply_control: threads.replyControl } : {}),
-            ...(threads.linkAttachment ? { link_attachment: threads.linkAttachment } : {}),
-            ...(threads.poll
-              ? {
-                  poll: {
-                    option_a: threads.poll.optionA,
-                    option_b: threads.poll.optionB,
-                    ...(threads.poll.optionC ? { option_c: threads.poll.optionC } : {}),
-                    ...(threads.poll.optionD ? { option_d: threads.poll.optionD } : {}),
-                  },
-                }
-              : {}),
-            ...(threads.spoilerEntities?.length
-              ? { spoiler_entities: threads.spoilerEntities.map((entity) => ({ ...entity })) }
-              : {}),
-            ...(threads.isSpoilerMedia !== undefined
-              ? { is_spoiler_media: threads.isSpoilerMedia }
-              : {}),
-            ...(threads.isMadeWithAi !== undefined
-              ? { is_made_with_ai: threads.isMadeWithAi }
-              : {}),
-          },
-        }
-      : {}),
     ...(tiktok
       ? {
           tiktok: {
+            ...(tiktok.postMode !== undefined ? { post_mode: tiktok.postMode } : {}),
             allow_comment: tiktok.allowComment,
             allow_duet: tiktok.allowDuet,
             allow_stitch: tiktok.allowStitch,
@@ -305,9 +260,6 @@ function toWirePostProviderOptions(
             is_ai_generated: tiktok.isAiGenerated,
             music_usage_confirmed: tiktok.musicUsageConfirmed,
             ...(tiktok.autoAddMusic !== undefined ? { auto_add_music: tiktok.autoAddMusic } : {}),
-            ...(tiktok.coverTimestampMs !== undefined
-              ? { cover_timestamp_ms: tiktok.coverTimestampMs }
-              : {}),
             ...(tiktok.privacyLevel !== undefined ? { privacy_level: tiktok.privacyLevel } : {}),
           },
         }
@@ -315,18 +267,9 @@ function toWirePostProviderOptions(
     ...(youtube
       ? {
           youtube: {
+            ...(youtube.postType ? { post_type: youtube.postType } : {}),
             ...(youtube.madeForKids !== undefined ? { made_for_kids: youtube.madeForKids } : {}),
             ...(youtube.privacyStatus ? { privacy_status: youtube.privacyStatus } : {}),
-            ...(youtube.license ? { license: youtube.license } : {}),
-            ...(youtube.embeddable !== undefined ? { embeddable: youtube.embeddable } : {}),
-            ...(youtube.publicStatsViewable !== undefined
-              ? { public_stats_viewable: youtube.publicStatsViewable }
-              : {}),
-            ...(youtube.containsSyntheticMedia !== undefined
-              ? { contains_synthetic_media: youtube.containsSyntheticMedia }
-              : {}),
-            ...(youtube.publishAt ? { publish_at: youtube.publishAt } : {}),
-            ...(youtube.recordingDate ? { recording_date: youtube.recordingDate } : {}),
           },
         }
       : {}),
@@ -1129,33 +1072,17 @@ function publicationProviderOptions(
 ): ProviderPublishOptions | undefined {
   if (!options && platform !== "youtube") return undefined;
   const result: ProviderPublishOptions = {};
-  if (platform === "facebook" && options?.facebook) {
-    const { postType, link, isAiGenerated } = options.facebook;
-    result.facebook = {
-      ...(postType !== undefined ? { postType } : {}),
-      ...(link !== undefined ? { link } : {}),
-      ...(isAiGenerated !== undefined ? { isAiGenerated } : {}),
-    };
-  }
-  if (platform === "instagram" && options?.instagram) {
-    const instagram = options.instagram;
-    result.instagram = {
-      ...(instagram.postType !== undefined ? { postType: instagram.postType } : {}),
-      ...(instagram.trialReel !== undefined ? { trialReel: instagram.trialReel } : {}),
-      ...(instagram.trialGraduation !== undefined
-        ? { trialGraduation: instagram.trialGraduation }
-        : {}),
-      ...(instagram.altText !== undefined ? { altText: instagram.altText } : {}),
-      ...(instagram.locationId !== undefined ? { locationId: instagram.locationId } : {}),
-      ...(instagram.userTags ? { userTags: instagram.userTags } : {}),
-      ...(instagram.coverUrl !== undefined ? { coverUrl: instagram.coverUrl } : {}),
-      ...(instagram.coverFrameMs !== undefined ? { coverFrameMs: instagram.coverFrameMs } : {}),
-      ...(instagram.audioName !== undefined ? { audioName: instagram.audioName } : {}),
-      ...(instagram.isAiGenerated !== undefined ? { isAiGenerated: instagram.isAiGenerated } : {}),
-    };
-  }
-  if (platform === "threads" && options?.threads) {
-    result.threads = { ...options.threads };
+  if (options?.threads) {
+    if (platform !== "threads")
+      throw new CoreApiError(422, "validation_error", "Threads options require a Threads Channel.");
+    const threads = parseThreadsOptions(options.threads);
+    if (!threads)
+      throw new CoreApiError(
+        422,
+        "validation_error",
+        "Complete the Threads publication choices before sending.",
+      );
+    result.threads = threads;
   }
   if (platform === "youtube" || options?.youtube) {
     const madeForKids = options?.youtube?.madeForKids;
@@ -1174,39 +1101,27 @@ function publicationProviderOptions(
         "Choose a YouTube visibility before publishing.",
       );
     }
-    const youtube = options?.youtube;
-    if (youtube?.publishAt !== undefined && privacyStatus !== "private") {
-      throw new CoreApiError(
-        422,
-        "validation_error",
-        "YouTube scheduled publication requires private visibility.",
-      );
-    }
     result.youtube = {
-      ...(youtube?.containsSyntheticMedia !== undefined
-        ? { containsSyntheticMedia: youtube.containsSyntheticMedia }
-        : {}),
-      ...(youtube?.embeddable !== undefined ? { embeddable: youtube.embeddable } : {}),
-      ...(youtube?.license !== undefined ? { license: youtube.license } : {}),
       madeForKids,
-      ...(youtube?.publicStatsViewable !== undefined
-        ? { publicStatsViewable: youtube.publicStatsViewable }
-        : {}),
-      ...(youtube?.publishAt !== undefined ? { publishAt: youtube.publishAt } : {}),
-      ...(youtube?.recordingDate !== undefined ? { recordingDate: youtube.recordingDate } : {}),
       privacyStatus,
+      ...(options?.youtube?.postType ? { postType: options.youtube.postType } : {}),
     };
   }
   if (options?.tiktok) {
     const { privacyLevel, discloseCommercialContent, ...choices } = options.tiktok;
-    if (privacyLevel === undefined) {
+    if (privacyLevel === undefined && choices.postMode !== "inbox") {
       throw new CoreApiError(
         422,
         "validation_error",
         "Choose a TikTok privacy level before publishing.",
       );
     }
-    if (discloseCommercialContent && !choices.brandContent && !choices.brandOrganic) {
+    if (
+      choices.postMode !== "inbox" &&
+      discloseCommercialContent &&
+      !choices.brandContent &&
+      !choices.brandOrganic
+    ) {
       throw new CoreApiError(
         422,
         "validation_error",
@@ -1224,6 +1139,12 @@ function publicationProviderOptions(
       );
     }
     result.instagram = { ...options.instagram };
+  }
+  if (options?.facebook) {
+    if (platform !== "facebook") {
+      throw new CoreApiError(422, "validation_error", "Facebook options require a Facebook Page.");
+    }
+    result.facebook = { ...options.facebook };
   }
   return result;
 }
@@ -1263,20 +1184,6 @@ function validateProviderOptions(
       "Instagram provider options require an Instagram account.",
     );
   }
-  if (platform !== "threads" && providerOptions?.threads) {
-    throw new CoreApiError(
-      422,
-      "validation_error",
-      "Threads provider options require a Threads account.",
-    );
-  }
-  if (platform !== "facebook" && providerOptions?.facebook) {
-    throw new CoreApiError(
-      422,
-      "validation_error",
-      "Facebook provider options require a Facebook account.",
-    );
-  }
 
   const kinds = selection.map((assetId) => {
     const available = candidates.get(assetId) ?? [];
@@ -1298,7 +1205,7 @@ function validateProviderOptions(
         "TikTok publishing choices and music-usage confirmation are required.",
       );
     }
-    if (publishesPhoto && (tiktok.allowDuet || tiktok.allowStitch)) {
+    if (tiktok.postMode !== "inbox" && publishesPhoto && (tiktok.allowDuet || tiktok.allowStitch)) {
       throw new CoreApiError(
         422,
         "validation_error",
@@ -1312,14 +1219,7 @@ function validateProviderOptions(
         "TikTok automatic music applies to photo posts only.",
       );
     }
-    if (publishesPhoto && tiktok.coverTimestampMs !== undefined) {
-      throw new CoreApiError(
-        422,
-        "validation_error",
-        "A TikTok cover frame applies to video posts only.",
-      );
-    }
-    if (tiktok.brandContent && tiktok.privacyLevel === "SELF_ONLY") {
+    if (tiktok.postMode !== "inbox" && tiktok.brandContent && tiktok.privacyLevel === "SELF_ONLY") {
       throw new CoreApiError(
         422,
         "validation_error",
@@ -1346,55 +1246,6 @@ function validateProviderOptions(
         422,
         "validation_error",
         "The selected Instagram post type or trial Reel does not apply to this attachment set.",
-      );
-    }
-  }
-
-  const threads = providerOptions?.threads;
-  if (platform === "threads" && threads) {
-    // Polls, links, and spoiler entities are text-only on Threads, while
-    // spoiler media needs an attachment; reject the mix before any write.
-    const hasMedia = kinds.length > 0;
-    if (
-      ((threads.poll !== undefined || threads.linkAttachment !== undefined) && hasMedia) ||
-      (threads.isSpoilerMedia === true && !hasMedia)
-    ) {
-      throw new CoreApiError(
-        422,
-        "validation_error",
-        "The selected Threads controls do not apply to this attachment set.",
-      );
-    }
-  }
-
-  const facebook = providerOptions?.facebook;
-  if (platform === "facebook" && facebook) {
-    const postType = facebook.postType ?? "post";
-    const hasLink = facebook.link !== undefined;
-    // Each family maps to one documented Graph endpoint, so an attachment set
-    // the chosen family cannot carry is rejected here rather than after a
-    // remote write has already published part of it.
-    let fits: boolean;
-    switch (postType) {
-      case "post":
-        // The feed edge carries text, a link, or photo attachments — never video.
-        fits = !publishesVideo && (!hasLink || kinds.length <= 1);
-        break;
-      case "photo":
-        // Photo posts cannot carry a link, and 2-10 images become one post.
-        fits = !hasLink && publishesPhoto && kinds.length >= 1 && kinds.length <= 10;
-        break;
-      case "reel":
-      case "story":
-        // Reels and Stories publish exactly one video each.
-        fits = !hasLink && publishesVideo && kinds.length === 1;
-        break;
-    }
-    if (!fits) {
-      throw new CoreApiError(
-        422,
-        "validation_error",
-        "The selected Facebook post type does not apply to this attachment set.",
       );
     }
   }
@@ -1559,23 +1410,35 @@ function validatePostText(title: string, defaultText: string): void {
 }
 
 /**
- * Rejects a Post that would carry neither text nor media.
- *
- * Opening a composer must not create an indefinitely retained empty server
- * draft, so a Post needs text or at least one attachment before it persists.
- *
- * @param defaultText - Effective default text after the requested edit.
- * @param attachmentIds - Effective ordered attachment selection.
- * @throws {CoreApiError} 422 `validation_error` when the result would be empty.
+ * Rejects empty editor scaffolding while retaining real provider-hosted content:
+ * link/source identities, configured native text attachments, or a selected
+ * Live/experiment workflow. Those methods need no invented caption or Asset.
+ * Method completeness and Channel compatibility are enforced when scheduling.
  */
-function requireNonEmptyPost(defaultText: string, attachmentIds: readonly string[]): void {
-  if (defaultText.trim().length === 0 && attachmentIds.length === 0) {
-    throw new CoreApiError(
-      422,
-      "validation_error",
-      "A post requires default_text or at least one attachment.",
-    );
-  }
+function requireNonEmptyPost(
+  defaultText: string,
+  attachmentIds: readonly string[],
+  targets: readonly PostTargetInput[],
+): void {
+  if (defaultText.trim() || attachmentIds.length) return;
+  if (
+    targets.some(
+      ({ descriptionOverride, providerOptions: options }) =>
+        descriptionOverride?.trim() ||
+        options?.facebook?.link?.trim() ||
+        ["crosspost", "ab_test", "live"].includes(options?.facebook?.postType ?? "") ||
+        options?.youtube?.postType === "live" ||
+        options?.threads?.repost_id?.trim() ||
+        options?.threads?.gif_attachment?.gif_id?.trim() ||
+        options?.threads?.text_attachment?.plaintext?.trim(),
+    )
+  )
+    return;
+  throw new CoreApiError(
+    422,
+    "validation_error",
+    "A Post requires text, an attachment, or provider-hosted content.",
+  );
 }
 
 /**
@@ -1890,7 +1753,7 @@ export function createPostApiService(
             yield* requireActiveBrandProfileEffect(client, organizationId, input.brandProfileId);
             const attachmentIds = input.attachmentIds ?? [];
             const targets = input.targets ?? [];
-            requireNonEmptyPost(input.defaultText ?? "", attachmentIds);
+            requireNonEmptyPost(input.defaultText ?? "", attachmentIds, targets);
             requireTargetAttachmentScope(targets, attachmentIds);
             yield* lockAttachmentAssetsEffect(client, input.brandProfileId, attachmentIds);
             yield* validateTargetScopesEffect(
@@ -2044,12 +1907,17 @@ export function createPostApiService(
             const attachmentIds = input.attachmentIds ?? currentAttachmentIds;
             const attachmentChange = input.attachmentIds !== undefined;
             const targets = input.targets;
+            const effectiveTargets =
+              targets ??
+              (!(input.defaultText ?? post.default_text).trim() && attachmentIds.length === 0
+                ? (yield* loadSavedTargetsEffect(client, postId)).inputs
+                : []);
             yield* Effect.try({
               try: () => {
                 const title = input.title ?? post.title;
                 const defaultText = input.defaultText ?? post.default_text;
                 validatePostText(title, defaultText);
-                requireNonEmptyPost(defaultText, attachmentIds);
+                requireNonEmptyPost(defaultText, attachmentIds, effectiveTargets);
                 if (targets) requireTargetAttachmentScope(targets, attachmentIds);
               },
               catch: validationError,
@@ -2189,7 +2057,7 @@ export function createPostApiService(
                 : undefined;
             yield* Effect.try({
               try: () => {
-                requireNonEmptyPost(post.default_text, attachmentIds);
+                requireNonEmptyPost(post.default_text, attachmentIds, targets);
                 requireTargetAttachmentScope(targets, attachmentIds);
               },
               catch: validationError,
@@ -2453,7 +2321,7 @@ export function createPostApiService(
                    SELECT 1 FROM distributions
                    WHERE post_id = $1
                      AND status IN (
-                       'processing', 'awaiting_provider', 'published', 'needs_reconciliation'
+                       'processing', 'awaiting_provider', 'delivered', 'published', 'needs_reconciliation'
                      )
                  ) AS exists`,
                 [postId],

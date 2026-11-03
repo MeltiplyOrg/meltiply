@@ -7,6 +7,12 @@ import { useSessionScope } from "@/hooks/use-session-scope";
 import { usePlatformPublishingRequirements } from "@/lib/queries";
 import { useI18n, type TranslationValues } from "@/lib/i18n";
 import type { YoutubeSettings, TikTokSettings } from "@/api/types";
+import {
+  ThreadsPublishingFields,
+  threadsTargetOptions,
+  type ThreadsComposerSettings,
+} from "./threads-settings";
+import { InstagramContentFields } from "./instagram-content-fields";
 import type {
   PlatformCapability,
   PostTargetInput,
@@ -21,6 +27,12 @@ import type {
  */
 export type PostTargetDraft = PostTargetInput;
 
+type FacebookComposerSettings = NonNullable<
+  NonNullable<PostTargetDraft["provider_options"]>["facebook"]
+>;
+interface YouTubeComposerSettings extends YoutubeSettings {
+  post_type?: "video" | "live";
+}
 /** Localized translate function signature shared by descriptor hooks. */
 type Translate = (message: string, values?: TranslationValues) => string;
 
@@ -30,6 +42,7 @@ type Translate = (message: string, values?: TranslationValues) => string;
  * base settings interface.
  */
 interface TikTokComposerSettings extends TikTokSettings {
+  post_mode?: "direct" | "inbox";
   auto_add_music?: boolean;
   brand_content?: boolean;
   brand_organic?: boolean;
@@ -206,7 +219,7 @@ function YoutubeEditor({
   settings: yt,
   update,
   t,
-}: ProviderEditorProps<YoutubeSettings>): React.ReactElement {
+}: ProviderEditorProps<YouTubeComposerSettings>): React.ReactElement {
   const fieldId = useId();
   const tagsString = (yt.tags ?? []).map((tag) => tag.label).join(", ");
 
@@ -227,6 +240,30 @@ function YoutubeEditor({
   return (
     <ProviderPanel channelName={channelName} t={t}>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="flex flex-col gap-1.5 sm:col-span-2">
+          <label htmlFor={`${fieldId}-method`} className="text-xs font-medium text-ink-3">
+            {t("Publishing method")}
+          </label>
+          <Select
+            value={yt.post_type ?? "video"}
+            onValueChange={(value) => update("post_type", value)}
+          >
+            <SelectTrigger id={`${fieldId}-method`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="video">{t("Video or Short")}</SelectItem>
+              <SelectItem value="live">{t("Live broadcast")}</SelectItem>
+            </SelectContent>
+          </Select>
+          {yt.post_type === "live" && (
+            <p className="text-xs text-ink-3">
+              {t(
+                "Requires an external encoder. After delivery, open the Post to retrieve RTMPS credentials and start streaming. Do not attach an Asset.",
+              )}
+            </p>
+          )}
+        </div>
         <div className="flex flex-col gap-1.5 sm:col-span-2">
           <label htmlFor={`${fieldId}-title`} className="text-xs font-medium text-ink-3">
             {t("Video Title (required, 2-100 characters)")}
@@ -287,81 +324,6 @@ function YoutubeEditor({
           </Select>
         </div>
       </div>
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor={`${fieldId}-license`} className="text-xs font-medium text-ink-3">
-          {t("License")}
-        </label>
-        <Select
-          value={yt.license ?? "standard"}
-          onValueChange={(value) => update("license", value === "standard" ? undefined : value)}
-        >
-          <SelectTrigger id={`${fieldId}-license`}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="standard">{t("Standard YouTube license")}</SelectItem>
-            <SelectItem value="creativeCommon">{t("Creative Commons")}</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      {/* publishAt is only valid on a private video, so the control is hidden
-          for other visibilities instead of producing a rejected publish. */}
-      {yt.type === "private" && (
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor={`${fieldId}-publish-at`} className="text-xs font-medium text-ink-3">
-            {t("Publish at")}
-          </label>
-          <Input
-            id={`${fieldId}-publish-at`}
-            type="datetime-local"
-            value={yt.publishAt ?? ""}
-            onChange={(event) =>
-              update(
-                "publishAt",
-                event.target.value ? new Date(event.target.value).toISOString() : undefined,
-              )
-            }
-          />
-          <p className="text-xs text-ink-3">
-            {t("YouTube publishes the video at this time while it stays private until then.")}
-          </p>
-        </div>
-      )}
-      <div className="flex flex-col gap-2 rounded-control border border-line p-3">
-        <label
-          htmlFor={`${fieldId}-stats`}
-          className="flex min-h-12 items-center justify-between gap-3"
-        >
-          <span className="text-xs font-medium text-ink">{t("Show public stats")}</span>
-          <Switch
-            id={`${fieldId}-stats`}
-            checked={yt.publicStatsViewable ?? true}
-            onCheckedChange={(checked) => update("publicStatsViewable", checked)}
-          />
-        </label>
-        <label
-          htmlFor={`${fieldId}-embeddable`}
-          className="flex min-h-12 items-center justify-between gap-3"
-        >
-          <span className="text-xs font-medium text-ink">{t("Allow embedding")}</span>
-          <Switch
-            id={`${fieldId}-embeddable`}
-            checked={yt.embeddable ?? true}
-            onCheckedChange={(checked) => update("embeddable", checked)}
-          />
-        </label>
-        <label
-          htmlFor={`${fieldId}-synthetic`}
-          className="flex min-h-12 items-center justify-between gap-3"
-        >
-          <span className="text-xs font-medium text-ink">{t("Altered or synthetic content")}</span>
-          <Switch
-            id={`${fieldId}-synthetic`}
-            checked={yt.containsSyntheticMedia ?? false}
-            onCheckedChange={(checked) => update("containsSyntheticMedia", checked)}
-          />
-        </label>
-      </div>
     </ProviderPanel>
   );
 }
@@ -416,136 +378,175 @@ function TikTokEditor({
       label: t("AI Generated"),
       checked: tt.is_ai_generated ?? false,
       disabled: false,
-      visible: !photo,
+      visible: true,
     },
   ] as const;
   return (
     <ProviderPanel channelName={channelName} t={t}>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={`${fieldId}-mode`} className="text-xs font-medium text-ink-3">
+          {t("Publishing method")}
+        </label>
+        <Select
+          value={tt.post_mode ?? "direct"}
+          onValueChange={(value) => update("post_mode", value)}
+        >
+          <SelectTrigger id={`${fieldId}-mode`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="direct">{t("Direct post")}</SelectItem>
+            <SelectItem value="inbox">{t("Send to TikTok inbox")}</SelectItem>
+          </SelectContent>
+        </Select>
+        {tt.post_mode === "inbox" && (
+          <p className="text-xs text-ink-3">
+            {t(
+              "Finish this draft in the TikTok app. Sending to the inbox is not publication. Video captions, visibility, and interactions are chosen in TikTok.",
+            )}
+          </p>
+        )}
+      </div>
       {requirements && (
         <p className="text-xs text-ink-2">
           {t("Posting as {name}", { name: requirements.creator.display_name })}
         </p>
       )}
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor={`${fieldId}-title`} className="text-xs font-medium text-ink-3">
-          {t("Post Title (optional, max 90 characters)")}
-        </label>
-        <Input
-          id={`${fieldId}-title`}
-          placeholder={t("TikTok post title...")}
-          value={tt.title ?? ""}
-          onChange={(event) => update("title", event.target.value)}
-          maxLength={90}
-        />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor={`${fieldId}-privacy`} className="text-xs font-medium text-ink-3">
-          {t("Privacy Level")}
-        </label>
-        <Select
-          value={
-            tt.privacy_level && requirements?.privacy_levels.includes(tt.privacy_level)
-              ? tt.privacy_level
-              : ""
-          }
-          onValueChange={(value) => update("privacy_level", value)}
-          disabled={!requirements}
-        >
-          <SelectTrigger id={`${fieldId}-privacy`}>
-            <SelectValue placeholder={t("Select privacy")} />
-          </SelectTrigger>
-          <SelectContent>
-            {(requirements?.privacy_levels ?? []).map((level) => (
-              <SelectItem
-                key={level}
-                value={level}
-                disabled={disclose && tt.brand_content === true && level === "SELF_ONLY"}
-              >
-                {privacyLabels[level]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="grid grid-cols-1 gap-x-6 @sm:grid-cols-2">
-        {toggles
-          .filter((toggle) => toggle.visible)
-          .map((toggle) => (
-            <label
-              key={toggle.field}
-              htmlFor={`${fieldId}-${toggle.field}`}
-              className="flex min-h-12 min-w-0 cursor-pointer items-center justify-between gap-3 py-2 has-[:disabled]:cursor-not-allowed"
-            >
-              <span className="min-w-0 text-xs font-medium text-ink">{toggle.label}</span>
-              <Switch
-                id={`${fieldId}-${toggle.field}`}
-                checked={toggle.checked && !toggle.disabled}
-                disabled={toggle.disabled}
-                onCheckedChange={(checked) => update(toggle.field, checked)}
-              />
-            </label>
-          ))}
-      </div>
-      {photo && (
-        <label
-          htmlFor={`${fieldId}-auto-music`}
-          className="flex min-h-12 items-center justify-between gap-3"
-        >
-          <span className="text-xs font-medium text-ink">
-            {t("Automatically add recommended music")}
-          </span>
+      {(tt.post_mode !== "inbox" || photo) && (
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={`${fieldId}-title`} className="text-xs font-medium text-ink-3">
+            {t("Post Title (optional, max 90 characters)")}
+          </label>
+          <Input
+            id={`${fieldId}-title`}
+            placeholder={t("TikTok post title...")}
+            value={tt.title ?? ""}
+            onChange={(event) => update("title", event.target.value)}
+            maxLength={90}
+          />
+        </div>
+      )}
+      {tt.post_mode === "inbox" && photo && (
+        <label className="flex min-h-12 items-center justify-between gap-3 text-xs text-ink-3">
+          {t("AI Generated")}
           <Switch
-            id={`${fieldId}-auto-music`}
-            checked={tt.auto_add_music ?? false}
-            onCheckedChange={(checked) => update("auto_add_music", checked)}
+            checked={tt.is_ai_generated ?? false}
+            onCheckedChange={(value) => update("is_ai_generated", value)}
           />
         </label>
       )}
-      <label
-        htmlFor={`${fieldId}-disclose`}
-        className="flex min-h-12 items-center justify-between gap-3"
-      >
-        <span className="text-xs font-medium text-ink">{t("Disclose commercial content")}</span>
-        <Switch
-          id={`${fieldId}-disclose`}
-          checked={disclose}
-          onCheckedChange={(checked) => update("disclose", checked)}
-        />
-      </label>
-      {disclose && (
-        <div className="flex flex-col gap-2">
-          <label
-            htmlFor={`${fieldId}-organic`}
-            className="flex min-h-12 items-center justify-between gap-3"
-          >
-            <span className="text-xs font-medium text-ink">{t("Organic Brand")}</span>
-            <Switch
-              id={`${fieldId}-organic`}
-              checked={tt.brand_organic ?? false}
-              onCheckedChange={(checked) => update("brand_organic", checked)}
-            />
-          </label>
-          <label
-            htmlFor={`${fieldId}-brand`}
-            className="flex min-h-12 items-center justify-between gap-3"
-          >
-            <span className="text-xs font-medium text-ink">{t("Brand Content")}</span>
-            <Switch
-              id={`${fieldId}-brand`}
-              checked={tt.brand_content ?? false}
-              disabled={tt.privacy_level === "SELF_ONLY" && tt.brand_content !== true}
-              onCheckedChange={(checked) => update("brand_content", checked)}
-            />
-          </label>
-          <p className="text-xs text-ink-3">{t("Branded content cannot be private.")}</p>
-          {(tt.brand_content || tt.brand_organic) && (
-            <p className="text-xs text-ink-2">
-              {tt.brand_content
-                ? t("Your post will be labeled Paid partnership.")
-                : t("Your post will be labeled Promotional content.")}
-            </p>
+      {tt.post_mode !== "inbox" && (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={`${fieldId}-privacy`} className="text-xs font-medium text-ink-3">
+              {t("Privacy Level")}
+            </label>
+            <Select
+              value={
+                tt.privacy_level && requirements?.privacy_levels.includes(tt.privacy_level)
+                  ? tt.privacy_level
+                  : ""
+              }
+              onValueChange={(value) => update("privacy_level", value)}
+              disabled={!requirements}
+            >
+              <SelectTrigger id={`${fieldId}-privacy`}>
+                <SelectValue placeholder={t("Select privacy")} />
+              </SelectTrigger>
+              <SelectContent>
+                {(requirements?.privacy_levels ?? []).map((level) => (
+                  <SelectItem
+                    key={level}
+                    value={level}
+                    disabled={disclose && tt.brand_content === true && level === "SELF_ONLY"}
+                  >
+                    {privacyLabels[level]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-1 gap-x-6 @sm:grid-cols-2">
+            {toggles
+              .filter((toggle) => toggle.visible)
+              .map((toggle) => (
+                <label
+                  key={toggle.field}
+                  htmlFor={`${fieldId}-${toggle.field}`}
+                  className="flex min-h-12 min-w-0 cursor-pointer items-center justify-between gap-3 py-2 has-[:disabled]:cursor-not-allowed"
+                >
+                  <span className="min-w-0 text-xs font-medium text-ink">{toggle.label}</span>
+                  <Switch
+                    id={`${fieldId}-${toggle.field}`}
+                    checked={toggle.checked && !toggle.disabled}
+                    disabled={toggle.disabled}
+                    onCheckedChange={(checked) => update(toggle.field, checked)}
+                  />
+                </label>
+              ))}
+          </div>
+          {photo && (
+            <label
+              htmlFor={`${fieldId}-auto-music`}
+              className="flex min-h-12 items-center justify-between gap-3"
+            >
+              <span className="text-xs font-medium text-ink">
+                {t("Automatically add recommended music")}
+              </span>
+              <Switch
+                id={`${fieldId}-auto-music`}
+                checked={tt.auto_add_music ?? false}
+                onCheckedChange={(checked) => update("auto_add_music", checked)}
+              />
+            </label>
           )}
-        </div>
+          <label
+            htmlFor={`${fieldId}-disclose`}
+            className="flex min-h-12 items-center justify-between gap-3"
+          >
+            <span className="text-xs font-medium text-ink">{t("Disclose commercial content")}</span>
+            <Switch
+              id={`${fieldId}-disclose`}
+              checked={disclose}
+              onCheckedChange={(checked) => update("disclose", checked)}
+            />
+          </label>
+          {disclose && (
+            <div className="flex flex-col gap-2">
+              <label
+                htmlFor={`${fieldId}-organic`}
+                className="flex min-h-12 items-center justify-between gap-3"
+              >
+                <span className="text-xs font-medium text-ink">{t("Organic Brand")}</span>
+                <Switch
+                  id={`${fieldId}-organic`}
+                  checked={tt.brand_organic ?? false}
+                  onCheckedChange={(checked) => update("brand_organic", checked)}
+                />
+              </label>
+              <label
+                htmlFor={`${fieldId}-brand`}
+                className="flex min-h-12 items-center justify-between gap-3"
+              >
+                <span className="text-xs font-medium text-ink">{t("Brand Content")}</span>
+                <Switch
+                  id={`${fieldId}-brand`}
+                  checked={tt.brand_content ?? false}
+                  disabled={tt.privacy_level === "SELF_ONLY" && tt.brand_content !== true}
+                  onCheckedChange={(checked) => update("brand_content", checked)}
+                />
+              </label>
+              <p className="text-xs text-ink-3">{t("Branded content cannot be private.")}</p>
+              {(tt.brand_content || tt.brand_organic) && (
+                <p className="text-xs text-ink-2">
+                  {tt.brand_content
+                    ? t("Your post will be labeled Paid partnership.")
+                    : t("Your post will be labeled Promotional content.")}
+                </p>
+              )}
+            </div>
+          )}
+        </>
       )}
       <p className="text-xs text-ink-2">
         {t("By posting, you agree to TikTok's")}{" "}
@@ -583,31 +584,9 @@ function TikTokEditor({
  * `post_type` is deliberately unanswered until the creator selects a shape so
  * the adapter's documented image/feed and video/Reel defaults remain in force.
  */
-interface InstagramComposerSettings {
-  post_type?: "feed" | "reel" | "story";
-  trial_graduation?: "manual" | "performance";
-  trial_reel?: boolean;
-  alt_text?: string;
-  location_id?: string;
-  cover_url?: string;
-  cover_frame_ms?: number;
-  audio_name?: string;
-  is_ai_generated?: boolean;
-}
-
-/**
- * Composer-only Threads settings: the saved controls this editor owns.
- */
-interface ThreadsComposerSettings {
-  topic_tag?: string;
-  reply_control?:
-    | "everyone"
-    | "accounts_you_follow"
-    | "mentioned_only"
-    | "parent_post_author_only"
-    | "followers_only";
-  link_attachment?: string;
-}
+type InstagramComposerSettings = NonNullable<
+  NonNullable<PostTargetDraft["provider_options"]>["instagram"]
+>;
 
 /**
  * Instagram publication shape controls. Feed accepts one or a carousel; Reel
@@ -700,283 +679,274 @@ function InstagramEditor({
           )}
         </div>
       )}
-      {mediaKinds.includes("image") && (
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor={`${fieldId}-alt`} className="text-xs font-medium text-ink-3">
-            {t("Alt text")}
-          </label>
-          <Input
-            id={`${fieldId}-alt`}
-            maxLength={1000}
-            value={instagram.alt_text ?? ""}
-            onChange={(event) => update("alt_text", event.target.value || undefined)}
-          />
-          <p className="text-xs text-ink-3">
-            {t("Describes the image for screen readers. Instagram limits it to 1,000 characters.")}
-          </p>
-        </div>
-      )}
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor={`${fieldId}-location`} className="text-xs font-medium text-ink-3">
-          {t("Location ID")}
-        </label>
-        <Input
-          id={`${fieldId}-location`}
-          value={instagram.location_id ?? ""}
-          onChange={(event) => update("location_id", event.target.value.trim() || undefined)}
-        />
-        <p className="text-xs text-ink-3">
-          {t("The Facebook Page ID that carries the location you want to tag.")}
-        </p>
-      </div>
-      {postType === "reel" && (
-        <div className="flex flex-col gap-2 rounded-control border border-line p-3">
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${fieldId}-cover`} className="text-xs font-medium text-ink-3">
-              {t("Cover image URL")}
-            </label>
-            <Input
-              id={`${fieldId}-cover`}
-              type="url"
-              inputMode="url"
-              placeholder={t("https://example.com/cover.jpg")}
-              value={instagram.cover_url ?? ""}
-              onChange={(event) => update("cover_url", event.target.value.trim() || undefined)}
-            />
-            <p className="text-xs text-ink-3">
-              {t("Optional. A cover image replaces the frame chosen by offset.")}
-            </p>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${fieldId}-cover-ms`} className="text-xs font-medium text-ink-3">
-              {t("Cover frame offset (ms)")}
-            </label>
-            <Input
-              id={`${fieldId}-cover-ms`}
-              type="number"
-              min={0}
-              step={100}
-              value={instagram.cover_frame_ms ?? ""}
-              onChange={(event) =>
-                update(
-                  "cover_frame_ms",
-                  event.target.value === "" ? undefined : Number(event.target.value),
-                )
-              }
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${fieldId}-audio`} className="text-xs font-medium text-ink-3">
-              {t("Audio name")}
-            </label>
-            <Input
-              id={`${fieldId}-audio`}
-              maxLength={255}
-              value={instagram.audio_name ?? ""}
-              onChange={(event) => update("audio_name", event.target.value || undefined)}
-            />
-            <p className="text-xs text-ink-3">{t("Instagram allows one rename.")}</p>
-          </div>
-          <label
-            htmlFor={`${fieldId}-ai`}
-            className="flex min-h-12 items-center justify-between gap-3"
-          >
-            <span className="text-xs font-medium text-ink">{t("Made with AI")}</span>
-            <Switch
-              id={`${fieldId}-ai`}
-              checked={instagram.is_ai_generated ?? false}
-              onCheckedChange={(checked) => update("is_ai_generated", checked)}
-            />
-          </label>
-        </div>
-      )}
+      <InstagramContentFields
+        settings={instagram}
+        mediaKinds={mediaKinds}
+        update={update}
+        updateMany={updateMany}
+        t={t}
+      />
     </ProviderPanel>
   );
 }
 
 /**
- * Composer-only Facebook settings: the saved Post contract plus the controls
- * this editor owns. Every field maps onto `provider_options.facebook`.
- */
-interface FacebookComposerSettings {
-  post_type?: "post" | "photo" | "reel" | "story";
-  link?: string;
-  is_ai_generated?: boolean;
-}
-
-/**
- * Facebook settings editor covering each documented Page publishing family.
- *
- * Families are enabled only when the Channel's actual attachment kinds can
- * carry them, mirroring the adapter's endpoint mapping: the feed takes text, a
- * link, or photos; photo posts need 1-10 images; Reels and Stories need exactly
- * one video. AI disclosure appears only for the two families that document it.
+ * Selects the actual Page endpoint and its method-specific inputs. External
+ * resources use provider IDs, never invented public Post IDs. Switching methods
+ * preserves local edits; applyTarget sends only fields for the chosen method.
  */
 function FacebookEditor({
   channelName,
   settings,
   update,
-  updateMany,
   mediaKinds,
   t,
 }: ProviderEditorProps<FacebookComposerSettings>): React.ReactElement {
-  const fieldId = useId();
-  const postType = settings.post_type ?? "";
-  const imageCount = mediaKinds.filter((kind) => kind === "image").length;
-  const hasVideo = mediaKinds.includes("video");
-  const single = mediaKinds.length === 1;
-  const onlyImages = mediaKinds.length > 0 && !hasVideo;
+  const id = useId();
+  const method =
+    settings.post_type ?? (mediaKinds.length === 1 && mediaKinds[0] === "video" ? "reel" : "feed");
+  const methods = [
+    ["feed", t("Feed: text, link, or photos")],
+    ["video", t("Regular video")],
+    ["reel", t("Reel")],
+    ["story", t("Story")],
+    ["slideshow", t("Photo slideshow")],
+    ["crosspost", t("Crosspost an existing video")],
+    ["ab_test", t("Video A/B test")],
+    ["live", t("Live broadcast")],
+  ] as const;
+  const test = settings.ab_test ?? {};
   return (
     <ProviderPanel channelName={channelName} t={t}>
       <div className="flex flex-col gap-1.5">
-        <label htmlFor={`${fieldId}-post-type`} className="text-xs font-medium text-ink-3">
-          {t("Post type")}
+        <label htmlFor={`${id}-method`} className="text-xs font-medium text-ink-3">
+          {t("Publishing method")}
         </label>
-        <Select
-          value={postType}
-          onValueChange={(value) =>
-            updateMany({
-              post_type: value,
-              ...(value === "reel" || value === "story" ? {} : { is_ai_generated: false }),
-              ...(value === "post" ? {} : { link: undefined }),
-            })
-          }
-        >
-          <SelectTrigger id={`${fieldId}-post-type`}>
-            <SelectValue placeholder={t("Choose the Facebook post type")} />
+        <Select value={method} onValueChange={(value) => update("post_type", value)}>
+          <SelectTrigger id={`${id}-method`}>
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="post" disabled={hasVideo}>
-              {t("Post")}
-            </SelectItem>
-            <SelectItem value="photo" disabled={!onlyImages || imageCount > 10}>
-              {t("Photo post")}
-            </SelectItem>
-            <SelectItem value="reel" disabled={!single || !hasVideo}>
-              {t("Reel")}
-            </SelectItem>
-            <SelectItem value="story" disabled={!single || !hasVideo}>
-              {t("Story")}
-            </SelectItem>
+            {methods.map(([value, label]) => (
+              <SelectItem key={value} value={value}>
+                {label}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
-        <p className="text-xs text-ink-3">
-          {t("Posts take text, a link, or up to ten photos. Reels and Stories take one video.")}
-        </p>
       </div>
-      {postType === "post" && mediaKinds.length === 0 && (
+      {!["story", "ab_test", "live"].includes(method) && (
         <div className="flex flex-col gap-1.5">
-          <label htmlFor={`${fieldId}-link`} className="text-xs font-medium text-ink-3">
-            {t("Link")}
+          <label htmlFor={`${id}-delivery`} className="text-xs font-medium text-ink-3">
+            {t("Delivery")}
+          </label>
+          <Select
+            value={settings.delivery_mode ?? "publish"}
+            onValueChange={(value) => update("delivery_mode", value)}
+          >
+            <SelectTrigger id={`${id}-delivery`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="publish">{t("Publish publicly")}</SelectItem>
+              <SelectItem value="draft">{t("Save a native Page draft")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      {method === "feed" && (
+        <div className="flex flex-col gap-3">
+          <label htmlFor={`${id}-link`} className="text-xs font-medium text-ink-3">
+            {t("Link (optional; no attached photos)")}
           </label>
           <Input
-            id={`${fieldId}-link`}
+            id={`${id}-link`}
             type="url"
-            inputMode="url"
-            placeholder={t("https://example.com")}
             value={settings.link ?? ""}
-            onChange={(event) => update("link", event.target.value.trim() || undefined)}
+            onChange={(event) => update("link", event.target.value)}
+            maxLength={2048}
           />
+          {(settings.link_cards ?? []).map((card, index) => (
+            <fieldset
+              key={index}
+              className="flex min-w-0 flex-col gap-2 rounded-control border border-line p-3"
+            >
+              <legend className="text-xs text-ink-3">
+                {t("Link card {number}", { number: index + 1 })}
+              </legend>
+              {(["link", "picture", "name", "description"] as const).map((field) => (
+                <label key={field} className="flex flex-col gap-1 text-xs text-ink-3">
+                  {
+                    {
+                      link: t("Destination URL"),
+                      picture: t("Image URL"),
+                      name: t("Title"),
+                      description: t("Description"),
+                    }[field]
+                  }
+                  <Input
+                    value={card[field] ?? ""}
+                    type={field === "link" || field === "picture" ? "url" : "text"}
+                    maxLength={2048}
+                    onChange={(event) =>
+                      update(
+                        "link_cards",
+                        settings.link_cards?.map((item, position) =>
+                          position === index ? { ...item, [field]: event.target.value } : item,
+                        ),
+                      )
+                    }
+                  />
+                </label>
+              ))}
+              <Button
+                variant="outline"
+                onClick={() =>
+                  update(
+                    "link_cards",
+                    settings.link_cards?.filter((_, position) => position !== index),
+                  )
+                }
+              >
+                {t("Remove card")}
+              </Button>
+            </fieldset>
+          ))}
+          <Button
+            variant="outline"
+            disabled={(settings.link_cards?.length ?? 0) >= 5}
+            onClick={() =>
+              update("link_cards", [...(settings.link_cards ?? []), { link: "", picture: "" }])
+            }
+          >
+            {t("Add link card")}
+          </Button>
           <p className="text-xs text-ink-3">
-            {t("Optional. A Page post needs text, a link, or a photo.")}
+            {t(
+              "A link carousel requires two to five cards and a main link. Photo posts use the ordered Assets instead.",
+            )}
           </p>
         </div>
       )}
-      {(postType === "reel" || postType === "story") && (
-        <div className="flex flex-col gap-2 rounded-control border border-line p-3">
-          <label
-            htmlFor={`${fieldId}-ai`}
-            className="flex min-h-12 items-center justify-between gap-3"
-          >
-            <span className="text-xs font-medium text-ink">{t("Made with AI")}</span>
-            <Switch
-              id={`${fieldId}-ai`}
-              checked={settings.is_ai_generated ?? false}
-              onCheckedChange={(checked) => update("is_ai_generated", checked)}
+      {method === "crosspost" && (
+        <label className="flex flex-col gap-1.5 text-xs text-ink-3">
+          {t("Source video ID (crossposting permission required)")}
+          <Input
+            value={settings.crossposted_video_id ?? ""}
+            onChange={(event) => update("crossposted_video_id", event.target.value)}
+            maxLength={200}
+          />
+        </label>
+      )}
+      {method === "ab_test" && (
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-ink-3">
+            {t(
+              "Use two to four existing unpublished videos, including the control. This creates a native experiment, not a published winner. Do not attach Assets.",
+            )}
+          </p>
+          <label className="flex flex-col gap-1 text-xs text-ink-3">
+            {t("Experiment name")}
+            <Input
+              value={test.name ?? ""}
+              maxLength={200}
+              onChange={(event) => update("ab_test", { ...test, name: event.target.value })}
             />
           </label>
-          <p className="text-xs text-ink-3">
-            {t("Discloses to Facebook that this media was created or edited with AI.")}
-          </p>
+          <label className="flex flex-col gap-1 text-xs text-ink-3">
+            {t("Video IDs (comma separated)")}
+            <Input
+              value={(test.experiment_video_ids ?? []).join(", ")}
+              onChange={(event) =>
+                update("ab_test", {
+                  ...test,
+                  experiment_video_ids: event.target.value.split(",").map((value) => value.trim()),
+                })
+              }
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-ink-3">
+            {t("Control video ID")}
+            <Input
+              value={test.control_video_id ?? ""}
+              onChange={(event) =>
+                update("ab_test", { ...test, control_video_id: event.target.value })
+              }
+            />
+          </label>
+          <label htmlFor={`${id}-goal`} className="text-xs text-ink-3">
+            {t("Optimization goal")}
+          </label>
+          <Select
+            value={test.optimization_goal ?? ""}
+            onValueChange={(value) => update("ab_test", { ...test, optimization_goal: value })}
+          >
+            <SelectTrigger id={`${id}-goal`}>
+              <SelectValue placeholder={t("Choose a goal")} />
+            </SelectTrigger>
+            <SelectContent>
+              {[
+                "AVG_TIME_WATCHED",
+                "COMMENTS",
+                "IMPRESSIONS",
+                "IMPRESSIONS_UNIQUE",
+                "LINK_CLICKS",
+                "REACTIONS",
+                "REELS_PLAYS",
+                "SHARES",
+                "VIDEO_VIEWS_60S",
+              ].map((goal) => (
+                <SelectItem key={goal} value={goal}>
+                  {goal}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <label className="flex flex-col gap-1 text-xs text-ink-3">
+            {t("Duration in seconds (1,800–604,800)")}
+            <Input
+              type="number"
+              min={1800}
+              max={604800}
+              value={test.duration_seconds ?? ""}
+              onChange={(event) =>
+                update("ab_test", {
+                  ...test,
+                  duration_seconds:
+                    event.target.value === "" ? undefined : Number(event.target.value),
+                })
+              }
+            />
+          </label>
         </div>
       )}
-      {postType && (
-        <p className="text-xs text-ink-2">
-          {t("This will be shared publicly on your Facebook Page.")}
+      {method === "slideshow" && (
+        <p className="text-xs text-ink-3">{t("Attach three to seven images in playback order.")}</p>
+      )}
+      {method === "live" && (
+        <p className="text-xs text-ink-3">
+          {t(
+            "Requires an external encoder. After delivery, open the Post to retrieve RTMPS credentials and start streaming. Do not attach an Asset.",
+          )}
         </p>
       )}
+      {method === "story" && (
+        <p className="text-xs text-ink-3">
+          {t("Attach one photo or video. Stories do not accept a text caption.")}
+        </p>
+      )}
+      <p className="text-xs text-ink-3">
+        {t("Published Page content is public. Native drafts remain unpublished.")}
+      </p>
     </ProviderPanel>
   );
 }
 
-/**
- * Threads settings editor covering the controls Threads documents for a post.
- *
- * A topic tag is limited to one per post and forbids `.` and `&`; reply control
- * narrows who may respond; a link attachment applies to text-only posts, which
- * is why it is hidden as soon as the Channel carries media.
- */
-function ThreadsEditor({
-  channelName,
-  settings,
-  update,
-  mediaKinds,
-  t,
-}: ProviderEditorProps<ThreadsComposerSettings>): React.ReactElement {
-  const fieldId = useId();
-  const hasMedia = mediaKinds.length > 0;
+/** Keeps the canonical provider panel while the Threads module owns its typed content forms. */
+function ThreadsEditor(props: ProviderEditorProps<ThreadsComposerSettings>): React.ReactElement {
   return (
-    <ProviderPanel channelName={channelName} t={t}>
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor={`${fieldId}-topic`} className="text-xs font-medium text-ink-3">
-          {t("Topic tag")}
-        </label>
-        <Input
-          id={`${fieldId}-topic`}
-          maxLength={50}
-          value={settings.topic_tag ?? ""}
-          onChange={(event) => update("topic_tag", event.target.value.trim() || undefined)}
-        />
-        <p className="text-xs text-ink-3">
-          {t("One tag per post, up to 50 characters. Periods and ampersands are not allowed.")}
-        </p>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor={`${fieldId}-reply`} className="text-xs font-medium text-ink-3">
-          {t("Who can reply")}
-        </label>
-        <Select
-          value={settings.reply_control ?? "everyone"}
-          onValueChange={(value) => update("reply_control", value)}
-        >
-          <SelectTrigger id={`${fieldId}-reply`}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="everyone">{t("Everyone")}</SelectItem>
-            <SelectItem value="accounts_you_follow">{t("Accounts you follow")}</SelectItem>
-            <SelectItem value="mentioned_only">{t("Mentioned accounts only")}</SelectItem>
-            <SelectItem value="followers_only">{t("Followers only")}</SelectItem>
-            <SelectItem value="parent_post_author_only">{t("Only the original author")}</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      {!hasMedia && (
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor={`${fieldId}-link`} className="text-xs font-medium text-ink-3">
-            {t("Link attachment")}
-          </label>
-          <Input
-            id={`${fieldId}-link`}
-            type="url"
-            inputMode="url"
-            placeholder={t("https://example.com")}
-            value={settings.link_attachment ?? ""}
-            onChange={(event) => update("link_attachment", event.target.value.trim() || undefined)}
-          />
-          <p className="text-xs text-ink-3">{t("Threads attaches links to text posts only.")}</p>
-        </div>
-      )}
+    <ProviderPanel channelName={props.channelName} t={props.t}>
+      <ThreadsPublishingFields {...props} />
     </ProviderPanel>
   );
 }
@@ -985,11 +955,13 @@ function ThreadsEditor({
  * Registry of typed provider descriptors — the single provider boundary for
  * settings narrowing, editor selection, Post target mapping (both directions),
  * and submit-time validation. Provider lookup is by normalized identifier.
+ * Captionless methods explicitly clear inherited titles as well as requiring an
+ * empty Channel body/signature; hidden Post titles must not become Story text.
  */
 const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
-  defineProviderDescriptor<YoutubeSettings>({
+  defineProviderDescriptor<YouTubeComposerSettings>({
     providers: ["youtube"],
-    read: (settings) => settings as Partial<YoutubeSettings>,
+    read: (settings) => settings as Partial<YouTubeComposerSettings>,
     Editor: YoutubeEditor,
     applyTarget: (target, yt) => {
       const title = yt.title?.trim();
@@ -997,22 +969,12 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
       const tags = (yt.tags ?? []).map((tag) => tag.label).filter(Boolean);
       if (tags.length > 0) target.hashtags = tags;
       target.provider_options = {
-        ...target.provider_options,
         youtube: {
+          ...(yt.post_type ? { post_type: yt.post_type } : {}),
           ...(yt.selfDeclaredMadeForKids !== undefined
             ? { made_for_kids: yt.selfDeclaredMadeForKids === "yes" }
             : {}),
           ...(yt.type ? { privacy_status: yt.type } : {}),
-          ...(yt.license ? { license: yt.license } : {}),
-          ...(yt.publicStatsViewable !== undefined
-            ? { public_stats_viewable: yt.publicStatsViewable }
-            : {}),
-          ...(yt.embeddable !== undefined ? { embeddable: yt.embeddable } : {}),
-          ...(yt.containsSyntheticMedia !== undefined
-            ? { contains_synthetic_media: yt.containsSyntheticMedia }
-            : {}),
-          ...(yt.publishAt ? { publish_at: yt.publishAt } : {}),
-          ...(yt.recordingDate ? { recording_date: yt.recordingDate } : {}),
         },
       };
     },
@@ -1020,15 +982,10 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
     readTarget: (target) => {
       const hashtags = target.hashtags ?? [];
       return {
+        post_type: target.provider_options?.youtube?.post_type,
         title: target.title_override ?? undefined,
         tags: hashtags.map((tag) => ({ value: tag, label: tag })),
         type: target.provider_options?.youtube?.privacy_status,
-        license: target.provider_options?.youtube?.license,
-        publicStatsViewable: target.provider_options?.youtube?.public_stats_viewable,
-        embeddable: target.provider_options?.youtube?.embeddable,
-        containsSyntheticMedia: target.provider_options?.youtube?.contains_synthetic_media,
-        publishAt: target.provider_options?.youtube?.publish_at,
-        recordingDate: target.provider_options?.youtube?.recording_date,
         selfDeclaredMadeForKids:
           target.provider_options?.youtube?.made_for_kids !== undefined
             ? target.provider_options.youtube.made_for_kids
@@ -1089,6 +1046,7 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
       const publishing = purpose === "publication";
       target.provider_options = {
         tiktok: {
+          ...(tt.post_mode ? { post_mode: tt.post_mode } : {}),
           ...(tt.privacy_level ? { privacy_level: tt.privacy_level } : {}),
           allow_comment:
             (!publishing || requirements?.comment_allowed === true) && (tt.comment ?? false),
@@ -1102,7 +1060,7 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
           brand_content: disclose && (tt.brand_content ?? false),
           brand_organic: disclose && (tt.brand_organic ?? false),
           disclose_commercial_content: disclose,
-          is_ai_generated: !photo && (tt.is_ai_generated ?? false),
+          is_ai_generated: tt.is_ai_generated ?? false,
           music_usage_confirmed: true,
         },
       };
@@ -1115,6 +1073,7 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
       if (!options) return {};
       return {
         title: target.title_override ?? undefined,
+        post_mode: options.post_mode,
         privacy_level: options.privacy_level,
         comment: options.allow_comment,
         duet: options.allow_duet,
@@ -1129,6 +1088,7 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
     },
     validate: ({ channelName, settings: tt, requirements, t }) => {
       const errors: string[] = [];
+      if (tt.post_mode === "inbox") return [];
       const disclose = tt.disclose ?? Boolean(tt.brand_content || tt.brand_organic);
       if (!requirements) {
         errors.push(
@@ -1161,18 +1121,12 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
     read: (settings) => settings as Partial<InstagramComposerSettings>,
     Editor: InstagramEditor,
     applyTarget: (target, instagram) => {
+      if (instagram.post_type === "story") target.title_override = "";
       target.provider_options = {
-        ...target.provider_options,
         instagram: {
           ...(instagram.post_type ? { post_type: instagram.post_type } : {}),
-          ...(instagram.alt_text ? { alt_text: instagram.alt_text } : {}),
-          ...(instagram.location_id ? { location_id: instagram.location_id } : {}),
-          ...(instagram.cover_url ? { cover_url: instagram.cover_url } : {}),
-          ...(instagram.cover_frame_ms !== undefined
-            ? { cover_frame_ms: instagram.cover_frame_ms }
-            : {}),
-          ...(instagram.audio_name ? { audio_name: instagram.audio_name } : {}),
-          ...(instagram.is_ai_generated ? { is_ai_generated: true } : {}),
+          ...(instagram.content ? { content: instagram.content } : {}),
+          ...(instagram.media_options ? { media_options: instagram.media_options } : {}),
           ...(instagram.trial_reel ? { trial_reel: true } : {}),
           ...(instagram.trial_reel && instagram.trial_graduation
             ? { trial_graduation: instagram.trial_graduation }
@@ -1185,14 +1139,10 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
       if (!options) return {};
       return {
         post_type: options.post_type,
+        content: options.content,
+        media_options: options.media_options,
         trial_reel: options.trial_reel,
         trial_graduation: options.trial_graduation,
-        alt_text: options.alt_text,
-        location_id: options.location_id,
-        cover_url: options.cover_url,
-        cover_frame_ms: options.cover_frame_ms,
-        audio_name: options.audio_name,
-        is_ai_generated: options.is_ai_generated,
       };
     },
     validate: ({ channelName, settings: instagram, mediaKinds, t }) => {
@@ -1217,99 +1167,39 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
     providers: ["facebook"],
     read: (settings) => settings as Partial<FacebookComposerSettings>,
     Editor: FacebookEditor,
-    applyTarget: (target, facebook) => {
+    applyTarget: (target, settings) => {
+      const method = settings.post_type;
+      if (method === "story") target.title_override = "";
       target.provider_options = {
         facebook: {
-          ...(facebook.post_type ? { post_type: facebook.post_type } : {}),
-          ...(facebook.post_type === "post" && facebook.link ? { link: facebook.link } : {}),
-          ...(facebook.is_ai_generated ? { is_ai_generated: true } : {}),
+          ...(method ? { post_type: method } : {}),
+          ...(settings.delivery_mode && !["story", "live", "ab_test"].includes(method ?? "")
+            ? { delivery_mode: settings.delivery_mode }
+            : {}),
+          ...(method === "feed" || !method
+            ? {
+                ...(settings.link ? { link: settings.link } : {}),
+                ...(settings.link_cards?.length ? { link_cards: settings.link_cards } : {}),
+              }
+            : {}),
+          ...(method === "crosspost" && settings.crossposted_video_id
+            ? { crossposted_video_id: settings.crossposted_video_id }
+            : {}),
+          ...(method === "ab_test" && settings.ab_test ? { ab_test: settings.ab_test } : {}),
         },
       };
     },
-    // Rehydrates exactly the fields this editor owns; an absent subtree leaves
-    // every control unanswered so the adapter keeps inferring the family.
-    readTarget: (target) => {
-      const options = target.provider_options?.facebook;
-      if (!options) return {};
-      return {
-        post_type: options.post_type,
-        link: options.link,
-        is_ai_generated: options.is_ai_generated,
-      };
-    },
-    validate: ({ channelName, settings: facebook, mediaKinds, t }) => {
-      const errors: string[] = [];
-      const hasVideo = mediaKinds.includes("video");
-      const single = mediaKinds.length === 1;
-      const onlyImages = mediaKinds.length > 0 && !hasVideo;
-      if (facebook.post_type === "post" && hasVideo) {
-        errors.push(
-          t("{name}: Facebook posts cannot carry a video; use a Reel or Story.", {
-            name: channelName,
-          }),
-        );
-      }
-      if (
-        facebook.post_type === "photo" &&
-        (!onlyImages || mediaKinds.length < 1 || mediaKinds.length > 10)
-      ) {
-        errors.push(
-          t("{name}: Facebook photo posts need between one and ten images.", { name: channelName }),
-        );
-      }
-      if (
-        (facebook.post_type === "reel" || facebook.post_type === "story") &&
-        (!single || !hasVideo)
-      ) {
-        errors.push(
-          t("{name}: Facebook Reels and Stories need exactly one video.", { name: channelName }),
-        );
-      }
-      if (facebook.link && facebook.post_type !== "post") {
-        errors.push(t("{name}: a link applies to Facebook posts only.", { name: channelName }));
-      }
-      return errors;
-    },
+    readTarget: (target) => target.provider_options?.facebook ?? {},
   }),
   defineProviderDescriptor<ThreadsComposerSettings>({
     providers: ["threads"],
     read: (settings) => settings as Partial<ThreadsComposerSettings>,
     Editor: ThreadsEditor,
-    applyTarget: (target, threads) => {
-      target.provider_options = {
-        ...target.provider_options,
-        threads: {
-          ...(threads.topic_tag ? { topic_tag: threads.topic_tag } : {}),
-          ...(threads.reply_control && threads.reply_control !== "everyone"
-            ? { reply_control: threads.reply_control }
-            : {}),
-          ...(threads.link_attachment ? { link_attachment: threads.link_attachment } : {}),
-        },
-      };
+    applyTarget: (target, settings, mediaKinds, _requirements, purpose) => {
+      target.provider_options = { threads: threadsTargetOptions(settings, mediaKinds, purpose) };
+      if (settings.post_type === "repost" || settings.repost_id) target.title_override = "";
     },
-    readTarget: (target) => {
-      const options = target.provider_options?.threads;
-      if (!options) return {};
-      return {
-        topic_tag: options.topic_tag,
-        reply_control: options.reply_control,
-        link_attachment: options.link_attachment,
-      };
-    },
-    validate: ({ channelName, settings: threads, mediaKinds, t }) => {
-      const errors: string[] = [];
-      if (threads.topic_tag && /[.&]/.test(threads.topic_tag)) {
-        errors.push(
-          t("{name}: a Threads topic tag cannot contain a period or ampersand.", {
-            name: channelName,
-          }),
-        );
-      }
-      if (threads.link_attachment && mediaKinds.length > 0) {
-        errors.push(t("{name}: Threads attaches links to text posts only.", { name: channelName }));
-      }
-      return errors;
-    },
+    readTarget: (target) => target.provider_options?.threads ?? {},
   }),
 ];
 
@@ -1348,6 +1238,50 @@ interface PlatformSettingsProps {
 }
 
 /**
+ * Keeps positional Instagram metadata attached to the same Asset as selection
+ * and ordering change. The private identity list lives only in composer recovery;
+ * descriptors emit just the reordered native metadata, never these UI keys.
+ * New Assets get empty metadata; detached Assets cannot donate tags or alt text.
+ */
+export function settingsForAttachmentOrder(
+  settings: Record<string, unknown>,
+  assetIds: readonly string[],
+): Record<string, unknown> {
+  const content = settings.content;
+  if (
+    !Array.isArray(settings.media_options) &&
+    assetIds.length === 1 &&
+    content !== null &&
+    typeof content === "object" &&
+    !Array.isArray(content)
+  ) {
+    const entries = Object.entries(content);
+    const perItem = entries.filter(([key]) => key === "alt_text" || key === "user_tags");
+    if (perItem.length)
+      settings = {
+        ...settings,
+        content: Object.fromEntries(
+          entries.filter(([key]) => key !== "alt_text" && key !== "user_tags"),
+        ),
+        media_options: [Object.fromEntries(perItem)],
+      };
+  }
+  if (!Array.isArray(settings.media_options)) return settings;
+  const metadata: readonly unknown[] = settings.media_options;
+  const previous = settings._instagram_media_asset_ids;
+  if (!Array.isArray(previous) || !previous.every((id) => typeof id === "string")) {
+    return { ...settings, _instagram_media_asset_ids: [...assetIds] };
+  }
+  if (previous.length === assetIds.length && previous.every((id, index) => id === assetIds[index]))
+    return settings;
+  return {
+    ...settings,
+    _instagram_media_asset_ids: [...assetIds],
+    media_options: assetIds.map((id) => metadata[previous.indexOf(id)] ?? {}),
+  };
+}
+
+/**
  * Dynamic platform-specific settings editor for social destinations.
  *
  * Resolves the channel's provider to its typed descriptor in
@@ -1378,7 +1312,7 @@ export function PlatformSettings({
   onRequirementsChange,
 }: PlatformSettingsProps) {
   const descriptor = providerDescriptorFor(provider);
-  const usesRequirements = descriptor?.usesRequirements === true;
+  const usesRequirements = descriptor?.usesRequirements === true && settings.post_mode !== "inbox";
   const scope = useSessionScope();
   const { t } = useI18n();
   const requirementsQuery = usePlatformPublishingRequirements(scope, channelId, usesRequirements);

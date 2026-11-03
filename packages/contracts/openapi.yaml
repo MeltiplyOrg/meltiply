@@ -2389,6 +2389,104 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+  /distributions/{distribution_id}/broadcast:
+    parameters:
+      - $ref: "#/components/parameters/DistributionId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Distributions]
+      operationId: getBroadcast
+      summary: Read encoder credentials and live state
+      description: Admin and Editor only. Contains secrets; responses are never cached.
+      responses:
+        "200":
+          description: Current provider broadcast state and owner-scoped RTMPS credentials.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [state]
+                properties:
+                  state:
+                    type: string
+                    enum: [ready, testing, live, ended]
+                  ingestUrl:
+                    type: string
+                  streamKey:
+                    type: string
+                  providerUrl:
+                    type: string
+                  providerPostId:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /distributions/{distribution_id}/broadcast/end:
+    parameters:
+      - $ref: "#/components/parameters/DistributionId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    post:
+      tags: [Distributions]
+      operationId: endBroadcast
+      summary: End the existing live broadcast
+      description: |
+        Writer-only remote write. A durable per-Distribution reservation fences
+        concurrent clients even when they choose different Idempotency-Key values.
+        Confirmed results replay after ending; uncertain results stay fenced for inspection.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Provider confirmed the broadcast ended.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [ended]
+                properties:
+                  ended:
+                    type: boolean
+                    const: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /distributions/{distribution_id}/retry:
     parameters:
       - $ref: "#/components/parameters/DistributionId"
@@ -3064,6 +3162,7 @@ components:
         - queued
         - processing
         - awaiting_provider
+        - delivered
         - published
         - failed
         - cancel_requested
@@ -4909,7 +5008,8 @@ components:
       additionalProperties: false
       required: [brand_profile_id]
       description: |
-        Creates one nonempty authoritative draft Post. attachment_ids is the
+        Creates one authoritative draft containing text, Assets, or provider-hosted
+        content such as a link, repost, or prepared Live workflow. attachment_ids is the
         ordered attachment set; the array order becomes the attachment
         positions and each Asset may appear once. References may name Assets
         still uploading or processing inside a live upload session of the
@@ -4925,6 +5025,12 @@ components:
             attachment_ids:
               type: array
               minItems: 1
+        - required: [targets]
+          properties:
+            targets:
+              type: array
+              minItems: 1
+          description: The server requires actual Channel text or provider-hosted content, not an empty target scaffold.
       properties:
         brand_profile_id:
           type: string
@@ -4957,8 +5063,8 @@ components:
         attachment_ids replaces the whole ordered set and targets replaces
         the saved target set. The request must name the Post's owning Brand
         Profile (mismatch is a 422 validation error) and cannot leave the
-        Post without text or attachments; claims to Assets already claimed
-        for deletion are rejected.
+        Post without text, attachments, or provider-hosted content; claims to
+        Assets already claimed for deletion are rejected.
       properties:
         brand_profile_id:
           type: string
@@ -5106,6 +5212,20 @@ components:
         platform_url:
           type: [string, "null"]
           format: uri
+        provider_warnings:
+          type: array
+          maxItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum: [instagram_crossshare_failed, instagram_publish_partial]
+          description: The primary Post published, but a secondary share or some requested Instagram content failed. Do not retry the primary publication.
+        provider_reference:
+          type: string
+          description: |
+            Opaque remote reference for a terminal native draft, inbox, or
+            experiment handoff. Present only for delivered outcomes; never a
+            public Post ID or an encoder/upload credential.
         publication:
           oneOf:
             - $ref: "#/components/schemas/DistributionPublication"
@@ -5266,7 +5386,6 @@ components:
       type: object
       additionalProperties: false
       required:
-        - privacy_level
         - allow_comment
         - allow_duet
         - allow_stitch
@@ -5275,6 +5394,10 @@ components:
         - is_ai_generated
         - music_usage_confirmed
       properties:
+        post_mode:
+          type: string
+          enum: [direct, inbox]
+          description: Inbox sends a native draft for the creator to finish in TikTok; it is not a published Post.
         privacy_level:
           $ref: "#/components/schemas/TikTokPrivacyLevel"
         allow_comment:
@@ -5297,51 +5420,25 @@ components:
           description: |
             Only applies to photo posts. When true TikTok adds recommended
             music the creator can later change in the app.
-        cover_timestamp_ms:
-          type: integer
-          minimum: 0
-          description: |
-            Video posts only. The cover frame offset in milliseconds.
     YouTubePrivacyStatus:
       type: string
       enum:
         - public
         - unlisted
         - private
-    YouTubeLicense:
-      type: string
-      enum:
-        - youtube
-        - creativeCommon
     YouTubePublishOptions:
       type: object
       additionalProperties: false
       required:
         - made_for_kids
       properties:
+        post_type:
+          type: string
+          enum: [video, live]
         made_for_kids:
           type: boolean
         privacy_status:
           $ref: "#/components/schemas/YouTubePrivacyStatus"
-        license:
-          $ref: "#/components/schemas/YouTubeLicense"
-        embeddable:
-          type: boolean
-        public_stats_viewable:
-          type: boolean
-        contains_synthetic_media:
-          type: boolean
-          description: |
-            YouTube's altered or synthetic content disclosure.
-        publish_at:
-          type: string
-          format: date-time
-          description: |
-            Scheduled publication instant. YouTube accepts it only while
-            privacy_status is private.
-        recording_date:
-          type: string
-          format: date-time
     TikTokPostOptions:
       type: object
       additionalProperties: false
@@ -5360,6 +5457,9 @@ components:
         - is_ai_generated
         - music_usage_confirmed
       properties:
+        post_mode:
+          type: string
+          enum: [direct, inbox]
         privacy_level:
           $ref: "#/components/schemas/TikTokPrivacyLevel"
         allow_comment:
@@ -5381,12 +5481,6 @@ components:
           const: true
         auto_add_music:
           type: boolean
-        cover_timestamp_ms:
-          type: integer
-          minimum: 0
-          description: |
-            Video posts only. The cover frame offset in milliseconds; TikTok
-            accepts a frame offset rather than an uploaded cover image.
     YouTubePostOptions:
       type: object
       additionalProperties: false
@@ -5395,89 +5489,68 @@ components:
         unanswered audience question, not false. Scheduling requires an explicit
         boolean before creating YouTubePublishOptions for a Distribution.
       properties:
+        post_type:
+          type: string
+          enum: [video, live]
         made_for_kids:
           type: boolean
         privacy_status:
           $ref: "#/components/schemas/YouTubePrivacyStatus"
-        license:
-          $ref: "#/components/schemas/YouTubeLicense"
-        embeddable:
-          type: boolean
-        public_stats_viewable:
-          type: boolean
-        contains_synthetic_media:
-          type: boolean
-        publish_at:
-          type: string
-          format: date-time
-        recording_date:
-          type: string
-          format: date-time
-    FacebookPostType:
-      type: string
-      enum:
-        - post
-        - photo
-        - reel
-        - story
-    FacebookPostOptions:
-      type: object
-      additionalProperties: false
-      description: |
-        Saved Facebook Page publication choices. An omitted post_type infers the
-        family from the attachment set: no media publishes a text or link post,
-        images publish as a photo post, and a single video publishes as a Reel.
-        link attaches a Page feed link and needs no media. is_ai_generated is
-        honoured only for Reels and Stories, the families that document it.
-      properties:
-        post_type:
-          $ref: "#/components/schemas/FacebookPostType"
-        link:
-          type: string
-          format: uri
-          maxLength: 2048
-        is_ai_generated:
-          type: boolean
-    FacebookPublishOptions:
-      type: object
-      additionalProperties: false
-      properties:
-        post_type:
-          $ref: "#/components/schemas/FacebookPostType"
-        link:
-          type: string
-          format: uri
-          maxLength: 2048
-        is_ai_generated:
-          type: boolean
     InstagramPostType:
       type: string
       enum:
         - feed
         - reel
         - story
-    InstagramUserTag:
+    InstagramContentOptions:
       type: object
       additionalProperties: false
-      required:
-        - username
-      description: |
-        One account tagged in the published media. x and y are normalized
-        0..1 positions and must be supplied together; Instagram accepts tags on
-        feed images, videos, Reels, and Stories, but not carousel children.
       properties:
-        username:
+        alt_text:
           type: string
-          minLength: 1
-          maxLength: 30
-        x:
-          type: number
+          maxLength: 1000
+        collaborators:
+          type: array
+          maxItems: 3
+          uniqueItems: true
+          items:
+            type: string
+            maxLength: 30
+        cover_url:
+          type: string
+          maxLength: 2048
+        thumb_offset:
+          type: integer
           minimum: 0
-          maximum: 1
-        y:
-          type: number
-          minimum: 0
-          maximum: 1
+        share_to_feed:
+          type: boolean
+        audio_name:
+          type: string
+          maxLength: 255
+        is_ai_generated:
+          type: boolean
+        location_id:
+          type: string
+          maxLength: 200
+        user_tags:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [username]
+            properties:
+              username:
+                type: string
+                maxLength: 30
+              x:
+                type: number
+                minimum: 0
+                maximum: 1
+              y:
+                type: number
+                minimum: 0
+                maximum: 1
     InstagramPostOptions:
       type: object
       additionalProperties: false
@@ -5489,6 +5562,14 @@ components:
         reel with non-followers first; trial_graduation applies only with
         trial_reel.
       properties:
+        content:
+          $ref: "#/components/schemas/InstagramContentOptions"
+        media_options:
+          type: array
+          maxItems: 20
+          description: Per-attachment alt text and user tags in selected attachment order.
+          items:
+            $ref: "#/components/schemas/InstagramContentOptions"
         post_type:
           $ref: "#/components/schemas/InstagramPostType"
         trial_reel:
@@ -5498,37 +5579,17 @@ components:
           enum:
             - manual
             - performance
-        alt_text:
-          type: string
-          maxLength: 1000
-          description: Image-only accessible description.
-        location_id:
-          type: string
-          maxLength: 255
-        user_tags:
-          type: array
-          maxItems: 30
-          items:
-            $ref: "#/components/schemas/InstagramUserTag"
-        cover_url:
-          type: string
-          format: uri
-          maxLength: 2048
-          description: Reel cover image; wins over cover_frame_ms.
-        cover_frame_ms:
-          type: integer
-          minimum: 0
-          description: Reel cover frame offset in milliseconds.
-        audio_name:
-          type: string
-          maxLength: 255
-          description: Reel audio label; Instagram allows one rename.
-        is_ai_generated:
-          type: boolean
     InstagramPublishOptions:
       type: object
       additionalProperties: false
       properties:
+        content:
+          $ref: "#/components/schemas/InstagramContentOptions"
+        media_options:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/InstagramContentOptions"
         post_type:
           $ref: "#/components/schemas/InstagramPostType"
         trial_reel:
@@ -5538,126 +5599,6 @@ components:
           enum:
             - manual
             - performance
-        alt_text:
-          type: string
-          maxLength: 1000
-        location_id:
-          type: string
-          maxLength: 255
-        user_tags:
-          type: array
-          maxItems: 30
-          items:
-            $ref: "#/components/schemas/InstagramUserTag"
-        cover_url:
-          type: string
-          format: uri
-          maxLength: 2048
-        cover_frame_ms:
-          type: integer
-          minimum: 0
-        audio_name:
-          type: string
-          maxLength: 255
-        is_ai_generated:
-          type: boolean
-    ThreadsReplyControl:
-      type: string
-      enum:
-        - everyone
-        - accounts_you_follow
-        - mentioned_only
-        - parent_post_author_only
-        - followers_only
-    ThreadsPoll:
-      type: object
-      additionalProperties: false
-      required: [option_a, option_b]
-      description: |
-        Text-only Threads poll. Each option is 1-25 characters and option_d
-        requires option_c.
-      properties:
-        option_a:
-          type: string
-          minLength: 1
-          maxLength: 25
-        option_b:
-          type: string
-          minLength: 1
-          maxLength: 25
-        option_c:
-          type: string
-          minLength: 1
-          maxLength: 25
-        option_d:
-          type: string
-          minLength: 1
-          maxLength: 25
-    ThreadsSpoilerEntity:
-      type: object
-      additionalProperties: false
-      required: [offset, length]
-      properties:
-        offset:
-          type: integer
-          minimum: 0
-        length:
-          type: integer
-          minimum: 1
-    ThreadsPostOptions:
-      type: object
-      additionalProperties: false
-      description: |
-        Saved Threads publication controls. Polls, link attachments, and
-        spoiler entities apply to text-only posts; spoiler media requires an
-        attachment. topic_tag is limited to one tag per post.
-      properties:
-        topic_tag:
-          type: string
-          minLength: 1
-          maxLength: 50
-        reply_control:
-          $ref: "#/components/schemas/ThreadsReplyControl"
-        link_attachment:
-          type: string
-          format: uri
-          maxLength: 2048
-        poll:
-          $ref: "#/components/schemas/ThreadsPoll"
-        spoiler_entities:
-          type: array
-          maxItems: 10
-          items:
-            $ref: "#/components/schemas/ThreadsSpoilerEntity"
-        is_spoiler_media:
-          type: boolean
-        is_made_with_ai:
-          type: boolean
-    ThreadsPublishOptions:
-      type: object
-      additionalProperties: false
-      properties:
-        topic_tag:
-          type: string
-          minLength: 1
-          maxLength: 50
-        reply_control:
-          $ref: "#/components/schemas/ThreadsReplyControl"
-        link_attachment:
-          type: string
-          format: uri
-          maxLength: 2048
-        poll:
-          $ref: "#/components/schemas/ThreadsPoll"
-        spoiler_entities:
-          type: array
-          maxItems: 10
-          items:
-            $ref: "#/components/schemas/ThreadsSpoilerEntity"
-        is_spoiler_media:
-          type: boolean
-        is_made_with_ai:
-          type: boolean
     SignatureTemplate:
       type: object
       additionalProperties: false
@@ -5764,6 +5705,335 @@ components:
             $ref: "#/components/schemas/SignatureTemplate"
         notifications:
           $ref: "#/components/schemas/NotificationPreferences"
+    FacebookPostType:
+      type: string
+      enum: [feed, video, reel, story, slideshow, crosspost, ab_test, live]
+    FacebookLinkCard:
+      type: object
+      additionalProperties: false
+      required: [link, picture]
+      properties:
+        link:
+          type: string
+          format: uri
+          pattern: "^https?://"
+          maxLength: 2048
+        picture:
+          type: string
+          format: uri
+          pattern: "^https://"
+          maxLength: 2048
+        name:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 5000
+    FacebookABTestOptions:
+      type: object
+      additionalProperties: false
+      description: Saved experiment choices; scheduling requires a name, goal, and two to four existing unpublished video IDs including the control.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        control_video_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+        experiment_video_ids:
+          type: array
+          minItems: 2
+          maxItems: 4
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 255
+        optimization_goal:
+          type: string
+          enum:
+            [
+              AVG_TIME_WATCHED,
+              COMMENTS,
+              IMPRESSIONS,
+              IMPRESSIONS_UNIQUE,
+              LINK_CLICKS,
+              REACTIONS,
+              REELS_PLAYS,
+              SHARES,
+              VIDEO_VIEWS_60S,
+            ]
+        duration_seconds:
+          type: integer
+          minimum: 1800
+          maximum: 604800
+    FacebookABTestPostOptions:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          maxLength: 200
+        control_video_id:
+          type: string
+          maxLength: 255
+        experiment_video_ids:
+          type: array
+          maxItems: 4
+          items:
+            type: string
+            maxLength: 255
+        optimization_goal:
+          type: string
+          enum:
+            [
+              AVG_TIME_WATCHED,
+              COMMENTS,
+              IMPRESSIONS,
+              IMPRESSIONS_UNIQUE,
+              LINK_CLICKS,
+              REACTIONS,
+              REELS_PLAYS,
+              SHARES,
+              VIDEO_VIEWS_60S,
+            ]
+        duration_seconds:
+          type: integer
+          minimum: 1
+          maximum: 604800
+    FacebookPostOptions:
+      type: object
+      additionalProperties: false
+      description: Saved Page publishing intent, including incomplete link cards and experiments. Scheduling enforces complete method-specific inputs.
+      properties:
+        post_type:
+          $ref: "#/components/schemas/FacebookPostType"
+        delivery_mode:
+          type: string
+          enum: [publish, draft]
+        link:
+          type: string
+          maxLength: 2048
+        link_cards:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              link:
+                type: string
+                maxLength: 2048
+              picture:
+                type: string
+                maxLength: 2048
+              name:
+                type: string
+                maxLength: 200
+              description:
+                type: string
+                maxLength: 5000
+        crossposted_video_id:
+          type: string
+          maxLength: 255
+        ab_test:
+          $ref: "#/components/schemas/FacebookABTestPostOptions"
+    FacebookPublishOptions:
+      type: object
+      additionalProperties: false
+      description: |
+        Page publication method. One video defaults to a Reel; text and photos
+        default to feed. Links and link cards require a media-free feed target.
+        Live broadcasts require an external encoder, not an uploaded Asset.
+      properties:
+        post_type:
+          $ref: "#/components/schemas/FacebookPostType"
+        delivery_mode:
+          type: string
+          enum: [publish, draft]
+          description: Native Page drafts are terminal delivered outcomes, never Published. Not available for Stories, live broadcasts, or experiments.
+        link:
+          type: string
+          format: uri
+          pattern: "^https?://"
+          maxLength: 2048
+        link_cards:
+          type: array
+          minItems: 2
+          maxItems: 5
+          items:
+            $ref: "#/components/schemas/FacebookLinkCard"
+        crossposted_video_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+        ab_test:
+          $ref: "#/components/schemas/FacebookABTestOptions"
+    ThreadsPostOptions:
+      type: object
+      additionalProperties: false
+      description: Native Threads publishing options. Reposts have no caption or Assets. Poll, GIF, long-text and ghost posts are text-only.
+      properties:
+        post_type:
+          type: string
+          enum: [post, poll, long_text, gif, ghost, quote, reply, repost]
+        repost_id:
+          type: string
+          maxLength: 200
+        quote_post_id:
+          type: string
+          maxLength: 200
+        reply_to_id:
+          type: string
+          maxLength: 200
+        poll_attachment:
+          type: object
+          additionalProperties: false
+          properties:
+            option_a:
+              type: string
+              maxLength: 25
+            option_b:
+              type: string
+              maxLength: 25
+            option_c:
+              type: string
+              maxLength: 25
+            option_d:
+              type: string
+              maxLength: 25
+        gif_attachment:
+          type: object
+          additionalProperties: false
+          required: [provider]
+          properties:
+            gif_id:
+              type: string
+              maxLength: 200
+            provider:
+              type: string
+              enum: [GIPHY]
+        text_attachment:
+          type: object
+          additionalProperties: false
+          properties:
+            plaintext:
+              type: string
+              maxLength: 10000
+            link_attachment_url:
+              type: string
+              maxLength: 2048
+            text_with_styling_info:
+              type: array
+              maxItems: 100
+              items:
+                type: object
+                additionalProperties: false
+                required: [offset, length, styling_info]
+                properties:
+                  offset:
+                    type: integer
+                    minimum: 0
+                  length:
+                    type: integer
+                    minimum: 1
+                  styling_info:
+                    type: array
+                    minItems: 1
+                    maxItems: 5
+                    uniqueItems: true
+                    items:
+                      type: string
+                      enum: [bold, italic, highlight, underline, strikethrough]
+        text_entities:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            additionalProperties: false
+            required: [entity_type, offset, length]
+            properties:
+              entity_type:
+                type: string
+                enum: [SPOILER]
+              offset:
+                type: integer
+                minimum: 0
+              length:
+                type: integer
+                minimum: 1
+        link_attachment:
+          type: string
+          maxLength: 2048
+        topic_tag:
+          type: string
+          maxLength: 50
+        is_ghost_post:
+          type: boolean
+        is_spoiler_media:
+          type: boolean
+        is_made_with_ai:
+          type: boolean
+        alt_text:
+          type: string
+          maxLength: 1000
+        reply_control:
+          type: string
+          enum:
+            [everyone, accounts_you_follow, mentioned_only, parent_post_author_only, followers_only]
+        enable_reply_approvals:
+          type: boolean
+        allowlisted_country_codes:
+          type: array
+          minItems: 1
+          maxItems: 249
+          uniqueItems: true
+          items:
+            type: string
+            pattern: "^[A-Z]{2}$"
+        location_id:
+          type: string
+          maxLength: 200
+        crossreshare_to_ig:
+          type: boolean
+        crossreshare_to_ig_dark_mode:
+          type: boolean
+    ThreadsPublishOptions:
+      allOf:
+        - $ref: "#/components/schemas/ThreadsPostOptions"
+        - properties:
+            poll_attachment:
+              allOf:
+                - required: [option_a, option_b]
+                  properties:
+                    option_a:
+                      type: string
+                      minLength: 1
+                    option_b:
+                      type: string
+                      minLength: 1
+                    option_c:
+                      type: string
+                      minLength: 1
+                    option_d:
+                      type: string
+                      minLength: 1
+            gif_attachment:
+              allOf:
+                - required: [gif_id]
+                  properties:
+                    gif_id:
+                      type: string
+                      minLength: 1
+            text_attachment:
+              allOf:
+                - required: [plaintext]
+                  properties:
+                    plaintext:
+                      type: string
+                      minLength: 1
     PostProviderOptions:
       type: object
       additionalProperties: false
@@ -5771,6 +6041,8 @@ components:
         Provider choices saved on a Post, including incomplete drafts.
         Scheduling validates completeness before creating publication options.
       properties:
+        threads:
+          $ref: "#/components/schemas/ThreadsPostOptions"
         facebook:
           $ref: "#/components/schemas/FacebookPostOptions"
         tiktok:
@@ -5779,12 +6051,12 @@ components:
           $ref: "#/components/schemas/YouTubePostOptions"
         instagram:
           $ref: "#/components/schemas/InstagramPostOptions"
-        threads:
-          $ref: "#/components/schemas/ThreadsPostOptions"
     ProviderPublishOptions:
       type: object
       additionalProperties: false
       properties:
+        threads:
+          $ref: "#/components/schemas/ThreadsPublishOptions"
         facebook:
           $ref: "#/components/schemas/FacebookPublishOptions"
         tiktok:
@@ -5793,8 +6065,6 @@ components:
           $ref: "#/components/schemas/YouTubePublishOptions"
         instagram:
           $ref: "#/components/schemas/InstagramPublishOptions"
-        threads:
-          $ref: "#/components/schemas/ThreadsPublishOptions"
     UpdateDistributionRequest:
       type: object
       additionalProperties: false

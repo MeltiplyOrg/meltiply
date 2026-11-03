@@ -379,9 +379,12 @@ describe("frontend Worker diagnostic relay", () => {
     );
     expect(crossOrigin.status).toBe(403);
 
+    // A payload that parses but violates the approved schema is a 400: the stack
+    // is within the request-size limit and only exceeds the relayed-stack bound.
+    // (An oversized body is a separate 413 case covered above.)
     const malformed = await worker.fetch(
       telemetryRequest(
-        { kind: "frontend-error", stack: "x".repeat(5_000) },
+        { kind: "frontend-error", stack: "x".repeat(2_000) },
         { Authorization: "Bearer session-jwt" },
       ),
       { ...environment, API: api },

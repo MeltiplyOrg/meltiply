@@ -66,9 +66,19 @@ export const DISCOVERY_SOURCES = [
 
 export type DiscoverySource = (typeof DISCOVERY_SOURCES)[number];
 
-/** Unexpected-application-failure classes; expected Provider conditions stay separate. */
+/**
+ * Diagnostic classes an allowed producer may report.
+ *
+ * `provider_failure` is the one expected-condition class: a classified
+ * `ProviderAdapterError` (auth, quota, rate limit, timeout, transient,
+ * deterministic, ambiguous) is normal recoverable Provider behavior and must not
+ * be stacked as an unexpected exception, or it hides application defects in Error
+ * Tracking. Every other member is an unexpected failure, and the producer marks
+ * which one it saw through `handled` as well.
+ */
 export const DIAGNOSTIC_CATEGORIES = [
   "unhandled_exception",
+  "provider_failure",
   "request_failure",
   "scheduled_job_failure",
   "client_exception",
@@ -90,6 +100,24 @@ export const OPERATION_CATEGORIES = [
 ] as const;
 
 export type OperationCategory = (typeof OPERATION_CATEGORIES)[number];
+
+/**
+ * Expected Provider conditions, as the canonical adapter classification names
+ * them. Reporting restates the roster rather than importing `@meltiply/providers`
+ * so the shared module keeps its single small dependency surface; producers map
+ * an adapter failure to one member and the module rejects anything else.
+ */
+export const PROVIDER_FAILURE_CLASSES = [
+  "ambiguous",
+  "auth",
+  "deterministic",
+  "quota",
+  "rate_limit",
+  "timeout",
+  "transient",
+] as const;
+
+export type ProviderFailureClass = (typeof PROVIDER_FAILURE_CLASSES)[number];
 
 /** How the installation is deployed; reported coarsely, never as a hostname. */
 export type DeploymentCategory = "managed" | "selfhosted" | "unknown";
@@ -117,6 +145,11 @@ export function isDiagnosticCategory(value: unknown): value is DiagnosticCategor
 /** Narrows untrusted input to one of the fixed operation groupings. */
 export function isOperationCategory(value: unknown): value is OperationCategory {
   return typeof value === "string" && (OPERATION_CATEGORIES as readonly string[]).includes(value);
+}
+
+/** Narrows untrusted input to one of the canonical Provider failure classes. */
+export function isProviderFailureClass(value: unknown): value is ProviderFailureClass {
+  return typeof value === "string" && (PROVIDER_FAILURE_CLASSES as readonly string[]).includes(value);
 }
 
 /** Narrows untrusted input to a supported Platform identifier. */
@@ -158,6 +191,14 @@ export interface UsageReportInput {
 /** One allowlisted diagnostic report; the module sanitizes `error` before transport. */
 export interface DiagnosticReportInput {
   readonly category: DiagnosticCategory;
+  /**
+   * Canonical adapter class of the Provider condition this report describes.
+   *
+   * Only meaningful with `category: "provider_failure"`, where it is what makes
+   * "expired authorization" or "rate limited" countable without any Provider
+   * message, status text or response body leaving the installation.
+   */
+  readonly failureClass?: ProviderFailureClass;
   /** Fixed logical identity; a repeated report reuses the same pending row. */
   readonly logicalId?: string;
   readonly occurredAt: string;

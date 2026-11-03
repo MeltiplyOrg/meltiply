@@ -4,6 +4,7 @@ import type { DatabaseError } from "@meltiply/domain";
 import type { ReportingConfiguration } from "./configuration";
 import { reportedAppVersion } from "./configuration";
 import {
+  isProviderFailureClass,
   REPORTING_CATEGORIES,
   REPORTING_DISCLOSURE_VERSION,
   REPORTING_MAX_DELIVERY_BATCH,
@@ -481,11 +482,19 @@ export function createReportingServiceLive(
             appVersion,
             deploymentCategory: configuration.deploymentCategory,
           });
+          // The logical identity is what collapses a repeating failure into one
+          // pending row per hour. The Provider class joins it because two
+          // expected conditions in the same hour — expired authorization and a
+          // rate limit, say — are different facts, not a repeat of one.
+          const failureClass =
+            input.category === "provider_failure" && isProviderFailureClass(input.failureClass)
+              ? input.failureClass
+              : "";
           const logicalId =
             input.logicalId ??
             `${input.category}:${input.operation}:${input.platform ?? "none"}:${
               typeof input.error?.name === "string" ? input.error.name.slice(0, 40) : "Error"
-            }:${hourBucket(input.occurredAt)}`;
+            }${failureClass ? `:${failureClass}` : ""}:${hourBucket(input.occurredAt)}`;
           const occurredAt = new Date(input.occurredAt);
           const inserted = yield* insertPending(client, {
             category: "diagnostics",

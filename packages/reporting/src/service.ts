@@ -301,11 +301,16 @@ function feedbackDeliveryStatus(
   if (!responseId) return Effect.succeed("not_recorded");
   return Effect.map(
     client.query<{ state: string }>(
-      `SELECT state FROM reporting_pending_reports
-       WHERE category = 'feedback' AND logical_id = $1
-       UNION ALL
-       SELECT state FROM reporting_delivery_receipts
-       WHERE category = 'feedback' AND logical_id = $1
+      // The ordering runs outside the union: PostgreSQL only accepts an output
+      // column name in a set-operation ORDER BY, so the preference for a
+      // confirmed send has to be applied to the combined rows.
+      `SELECT state FROM (
+         SELECT state FROM reporting_pending_reports
+         WHERE category = 'feedback' AND logical_id = $1
+         UNION ALL
+         SELECT state FROM reporting_delivery_receipts
+         WHERE category = 'feedback' AND logical_id = $1
+       ) AS states
        ORDER BY CASE state WHEN 'sent' THEN 0 ELSE 1 END
        LIMIT 1`,
       [responseId],

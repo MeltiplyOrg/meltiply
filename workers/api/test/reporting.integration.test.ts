@@ -205,10 +205,26 @@ async function resetReportingState() {
   // Reporting is the only writer of these actions in this suite, so clearing
   // them keeps the audit count assertion scoped to the current test.
   await database.query("DELETE FROM workspace_audit_entries WHERE action LIKE 'reporting.%'");
-  await database.query("UPDATE users SET installation_owner = FALSE WHERE installation_owner");
-  await database.query("UPDATE users SET installation_owner = TRUE WHERE email = $1", [
-    "alpha@meltiply.local",
-  ]);
+  // The flip runs in one transaction so the intermediate "no owner" state is
+  // never visible to another session. The two statements must stay ordered: the
+  // partial unique index is checked per row and is not deferrable, so clearing
+  // first is what keeps the second statement legal. Leaving the window observable
+  // would let actor resolution promote whichever account it was resolving into
+  // the vacancy, turning a concurrent suite's Viewer into the Owner.
+  const client = await database.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("UPDATE users SET installation_owner = FALSE WHERE installation_owner");
+    await client.query("UPDATE users SET installation_owner = TRUE WHERE email = $1", [
+      "alpha@meltiply.local",
+    ]);
+    await client.query("COMMIT");
+  } catch (cause) {
+    await client.query("ROLLBACK");
+    throw cause;
+  } finally {
+    client.release();
+  }
 }
 
 /** Builds the production reporting service for the current bindings. */
@@ -707,18 +723,22 @@ describe("diagnostic ingestion", () => {
       stacktrace && typeof stacktrace === "object" && "frames" in stacktrace
         ? stacktrace.frames
         : undefined;
-    // Only the application frame survives; the message line, the Provider URL and
-    // the bundled third-party frame are all gone.
+    // Only an approved release location survives: the file name the stack named
+    // is replaced by its reviewed module area, and the free-form symbol is not
+    // forwarded at all. Asserting the old raw pair would re-require the leak.
     expect(frames).toEqual([
       {
-        filename: "workers/automation/src/distribution.ts",
-        function: "publishDistribution",
+        filename: "workers/automation/source",
+        function: "<anonymous>",
         in_app: true,
         lang: "javascript",
         lineno: 42,
         platform: "custom",
       },
     ]);
+    // The retained location is a fixed token, never the customer-visible name.
+    expect(serialized).not.toContain("distribution.ts");
+    expect(serialized).not.toContain("publishDistribution");
   });
 
   it("keeps a repeated failure within one hour as a single report", async () => {
@@ -930,19 +950,35 @@ describe("sensitive canaries never reach the destination", () => {
 
 describe("consent-interval fencing over real HTTP", () => {
   /**
+   * Enqueues one diagnostic through the real service producer.
+   *
+   * The HTTP ingestion route also drains on the request's background
+   * continuation, so its row is already sent by the time the response returns.
+   * The fencing property under test starts from a row that is still queued, and
+   * the automation producer is that same production write without the drain.
+   *
+   * @returns The producer's decision for the report.
+   */
+  async function enqueueDiagnostic() {
+    return withReporting((reporting) =>
+      reporting.enqueueDiagnostic({
+        category: "request_failure",
+        error: { name: "TypeError" },
+        handled: true,
+        occurredAt: new Date().toISOString(),
+        operation: "publish",
+      }),
+    );
+  }
+
+  /**
    * Proves the withdrawn interval's rows can never reach egress after the Owner
    * re-enables: a detached batch claimed before the withdrawal is not
    * authorized by the new interval.
    */
   it("never sends a row claimed before a withdrawal after re-enabling", async () => {
     await setPreferences(false, true);
-    await request("/installation/reporting/diagnostics", "owner", {
-      body: {
-        category: "request_failure",
-        error_name: "TypeError",
-        operation: "publish",
-      },
-    });
+    expect(await enqueueDiagnostic()).toBe("queued");
     const firstIntervalRow = (await pendingRows())[0]!;
     expect(firstIntervalRow.state).toBe("pending");
 
@@ -992,9 +1028,7 @@ describe("consent-interval fencing over real HTTP", () => {
    */
   it("discards a claimed row whose category was withdrawn", async () => {
     await setPreferences(false, true);
-    await request("/installation/reporting/diagnostics", "owner", {
-      body: { category: "request_failure", error_name: "TypeError", operation: "publish" },
-    });
+    expect(await enqueueDiagnostic()).toBe("queued");
     await systemPoolFor(env).query(
       `UPDATE reporting_pending_reports
        SET state = 'leased', attempts = attempts + 1,
@@ -1021,17 +1055,16 @@ describe("consent-interval fencing over real HTTP", () => {
    */
   it("admits a same-hour failure from the re-enabled interval", async () => {
     await setPreferences(false, true);
-    await request("/installation/reporting/diagnostics", "owner", {
-      body: { category: "request_failure", error_name: "TypeError", operation: "publish" },
-    });
+    expect(await enqueueDiagnostic()).toBe("queued");
     await setPreferences(false, false);
     await setPreferences(false, true);
 
-    const repeated = await request("/installation/reporting/diagnostics", "owner", {
-      body: { category: "request_failure", error_name: "TypeError", operation: "publish" },
-    });
-    expect(await repeated.json()).toEqual({ accepted: true, reason: "queued" });
+    // The repeat is produced after the re-enable, so it belongs to the new
+    // interval and must not be absorbed by the withdrawn interval's row.
+    expect(await enqueueDiagnostic()).toBe("queued");
 
+    const summary = await runDelivery();
+    expect(summary.delivered).toBe(1);
     const captured = await nextCapture();
     expect(captured.body.event).toBe("$exception");
     const rows = await pendingRows();
@@ -1182,7 +1215,12 @@ describe("disclosure-version enforcement over real HTTP", () => {
       expect(await pendingRows()).toHaveLength(0);
     }
 
-    // A current decision restores transmission.
+    // A genuine new decision restores transmission. Re-saving the same value
+    // deliberately does not: an unchanged choice must not silently upgrade a
+    // stale disclosure to the current version, so the Owner has to decline and
+    // accept again for the stored version to advance.
+    expect((await readPolicy()).categories.diagnostics.effective).toBe(false);
+    await setPreferences(false, false);
     await setPreferences(false, true);
     expect((await readPolicy()).categories.diagnostics.effective).toBe(true);
   });

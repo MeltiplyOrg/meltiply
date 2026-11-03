@@ -50,7 +50,7 @@ function totp(uri) {
  * Never records traces, filled forms, or secret artifacts.
  * Returns only the current cookie to the API smoke in the same process.
  */
-export async function ownerBrowserSession({ origin, email, password, setupSecret }) {
+export async function ownerBrowserSession({ origin, email, password, setupSecret, workspaceName }) {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
@@ -92,6 +92,7 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await page.getByLabel("Email address", { exact: true }).fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
     await page.getByLabel("Setup secret", { exact: true }).fill(setupSecret);
+    await page.getByLabel("Workspace name", { exact: true }).fill(workspaceName);
     await page.getByRole("button", { name: "Create owner account", exact: true }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "Owner account created" }),
@@ -100,8 +101,28 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     const link = await mailLink(email, "Verify your Meltiply email", new Set());
     await page.goto(link);
     await signIn(password);
+    phase = "resumed first-run improvement screen";
+    await expect(
+      page.getByRole("heading", { name: "Help improve Meltiply", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole("switch", { name: "Usage statistics" })).not.toBeChecked();
+    await expect(page.getByRole("switch", { name: "Diagnostic reports" })).not.toBeChecked();
+    await page.screenshot({ path: "artifacts/selfhost/owner-improvement-desktop.png" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      true,
+    );
+    await page.screenshot({ path: "artifacts/selfhost/owner-improvement-mobile.png", fullPage: true });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    // Skip is explicit and leaves both categories off: no implicit consent.
+    await page.getByRole("button", { name: "Skip", exact: true }).click();
+    phase = "final first-run screen";
+    await expect(page.getByRole("heading", { name: "You're ready", exact: true })).toBeFocused();
+    await page.getByRole("button", { name: "Enter the Workspace", exact: true }).click();
     await page.waitForURL(/\/posts/);
     await expect(page.getByRole("heading", { name: "Posts", exact: true })).toBeVisible();
+    phase = "closed registration after setup";
     const closed = await context.request.post(`${origin}/api/auth/sign-up/email`, {
       headers: { "X-Setup-Secret": setupSecret },
       data: { email: `other-${randomUUID()}@example.com`, password, name: "Another owner" },
@@ -116,6 +137,17 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await page.screenshot({ path: "artifacts/selfhost/owner-login-dark.png" });
     await signIn(password);
     await page.waitForURL(/\/posts/);
+    phase = "workspace name and reporting settings";
+    await page.goto(`${origin}/settings?section=account`);
+    await expect(page.getByText(workspaceName, { exact: true })).toBeVisible();
+    await page.goto(`${origin}/settings?section=privacy`);
+    await expect(
+      page.getByRole("heading", { name: "Improvement reporting", exact: true }),
+    ).toBeVisible();
+    // The operator and this deployment configure no destination here, so the
+    // disclosure must say so instead of claiming working reporting.
+    await expect(page.getByText("Not requested").first()).toBeVisible();
+    await expect(page.getByRole("switch", { name: "Usage statistics" })).not.toBeChecked();
     phase = "password change";
     await page.goto(`${origin}/settings?section=security`);
     let security = page.getByRole("region", { name: "Account security" });

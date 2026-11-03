@@ -10,11 +10,21 @@ Each Meltiply installation has one owner. Workspaces and Brand Profiles organize
 ## Create the installation owner
 
 1. Open `/sign-in` on an empty installation.
-2. Enter the deployment administrator's private **Setup secret**, **Your name**, **Email address**, and a unique **Password** of 8–128 characters.
+2. Enter the deployment administrator's private **Setup secret**, **Your name**, **Email address**, a unique **Password** of 8–128 characters, and a **Workspace name**. The Workspace name is pre-filled from your display name and stays editable until you change it; you can rename it later in Settings.
 3. Select **Create owner account**.
-4. Follow the email verification link, then return to sign in.
+4. Follow the email verification link, then sign in.
 
-After setup, registration closes. The setup secret is not your login password. Use **Resend verification** if the verification email is missing.
+After the account exists, registration closes even while the remaining optional setup screens are unfinished. The setup secret is not your login password. Use **Resend verification** if the verification email is missing. Only your name, email, and Workspace name are remembered for a reload; the password and setup secret are never stored.
+
+## Finish setup
+
+After verification and sign-in, two optional screens finish the journey. They resume after a reload, a browser restart, or another sign-in, and they never reopen registration or change your role.
+
+**Help improve Meltiply** offers two reporting choices, both off, and an optional question about how you found Meltiply. Reading or continuing this screen does not opt you in. See [Privacy](/docs/privacy) for what each category would send.
+
+**You're ready** offers to connect a first Channel through [Channels](/docs/channels), invite a teammate through Settings, or enter the Workspace directly. None of the three is required, so a Provider outage or a missing credential never blocks installation. Completing any of them finishes setup.
+
+An installation that existed before this first-run flow keeps normal sign-in and is never pushed back through account creation.
 
 ## Sign in and recover access
 
@@ -37,7 +47,7 @@ Sign out from **Account menu → Sign out** at the bottom of the sidebar or **Se
 | ---------------------------------- | ------------------------------------------------------------------------------------------- |
 | Posts                              | Opens one collection with **Table → Calendar → Grid** in its toolbar. Table is the default. |
 | Channels                           | Opens the Accounts directory and Brand Profiles tab.                                        |
-| Settings                           | Opens Appearance, Language, Account, and Security.                                          |
+| Settings                           | Opens Appearance, Language, Account, Privacy, and Security.                                 |
 | Top-bar search / Command-Control-K | Jumps to a supported destination or loaded Brand Profile.                                   |
 | Collection search and Filter       | Narrows the current Posts or Channels data.                                                 |
 | Post row/card/chip                 | Opens its publishing details in the side drawer.                                            |
@@ -54,7 +64,7 @@ Post details use a right-side drawer with real properties, caption, attachments,
 
 ## Preferences and phones
 
-Appearance offers **Light**, **Dark**, and **System**; System follows device palette changes. Language supports English and Spanish. Current-page changes work immediately; persistence requires [functional cookie consent](/docs/cookies). Security controls appear directly in their Settings section. There is no separate motion mode.
+Appearance offers **Light**, **Dark**, and **System**; System follows device palette changes. Language supports the eight interface languages offered in Settings. Current-page changes work immediately; persistence requires [functional cookie consent](/docs/cookies). Security controls appear directly in their Settings section. There is no separate motion mode.
 
 On smaller screens, open navigation from the persistent header. The full-height panel includes Posts, Channels, Help and resources, Settings, and the same Account menu used on desktop, including theme choices and Sign out. Collection controls wrap, wide tables/calendars scroll within their working area, Settings sections become a horizontal row, and Post inspection fills the viewport. Focused dialogs scroll within the available screen height, including landscape orientation.
 

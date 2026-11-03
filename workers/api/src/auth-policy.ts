@@ -9,6 +9,7 @@ import {
   noStore,
 } from "./device-authorization";
 import { requiresEmailVerification, type ApiWorkerEnv } from "./env";
+import { workspaceNameValue } from "./validation";
 
 /** Reads only the installation's public initialized bit; never returns owner details. */
 async function installationInitialized(env: ApiWorkerEnv): Promise<boolean> {
@@ -179,6 +180,112 @@ async function validSetupSecret(env: ApiWorkerEnv, request: Request): Promise<bo
   return crypto.subtle.verify("HMAC", key, signature, encoder.encode(expected));
 }
 /**
+ * Reads and validates the optional `workspace_name` from a sign-up body.
+ *
+ * The name belongs to the setup form rather than the Better Auth user record,
+ * so it is validated here (before any account exists) and stripped before the
+ * library sees the body.
+ *
+ * @param request - Incoming sign-up request.
+ * @returns The trimmed name, undefined when the field was omitted, or the
+ *   rejection response for an invalid value.
+ */
+async function signUpWorkspaceName(request: Request): Promise<string | undefined | Response> {
+  let body: unknown;
+  try {
+    body = await request.clone().json();
+  } catch {
+    return undefined;
+  }
+  if (!body || typeof body !== "object" || !("workspace_name" in body)) return undefined;
+  if (body.workspace_name === undefined || body.workspace_name === null) return undefined;
+  try {
+    return workspaceNameValue(body.workspace_name, "workspace_name");
+  } catch (cause) {
+    if (cause instanceof CoreApiError) {
+      return Response.json({ message: cause.message }, { status: cause.status });
+    }
+    throw cause;
+  }
+}
+
+/**
+ * Persists the chosen Workspace name against the account Better Auth created.
+ *
+ * Called inside the bootstrap lock after a successful sign-up, so the name is
+ * durable before the verification handoff and later applied by actor resolution
+ * when the canonical shared Workspace is provisioned.
+ *
+ * @param env - Worker environment bindings.
+ * @param authUserId - Better Auth subject returned by the sign-up response.
+ * @param workspaceName - Chosen name, or undefined to keep the derived default.
+ * @returns True when a bootstrap row was written.
+ */
+async function recordBootstrap(
+  env: ApiWorkerEnv,
+  authUserId: string | undefined,
+  workspaceName: string | undefined,
+): Promise<boolean> {
+  if (!authUserId) return false;
+  // Exception: pg cannot be loaded in workerd unit-test isolates.
+  const { systemPoolFor } = await import("./database");
+  await systemPoolFor(env).query(
+    `INSERT INTO installation_bootstrap (auth_user_id, workspace_name)
+     VALUES ($1, $2)
+     ON CONFLICT (auth_user_id) DO UPDATE
+       SET workspace_name = COALESCE(EXCLUDED.workspace_name, installation_bootstrap.workspace_name)`,
+    [authUserId, workspaceName ?? null],
+  );
+  return true;
+}
+
+/**
+ * Strips the setup-only `workspace_name` field from a sign-up request body.
+ *
+ * Better Auth's sign-up schema rejects undeclared user fields, and the name is
+ * not part of the account record. The rebuilt request keeps every other header
+ * and body field, so the library still receives the exact credentials the
+ * caller submitted.
+ *
+ * @param request - Incoming sign-up request.
+ * @returns A request whose JSON body omits `workspace_name`.
+ */
+async function withoutWorkspaceName(request: Request): Promise<Request> {
+  let body: unknown;
+  try {
+    body = await request.clone().json();
+  } catch {
+    return request;
+  }
+  if (!body || typeof body !== "object" || !("workspace_name" in body)) return request;
+  const { workspace_name: _ignored, ...rest } = body as Record<string, unknown>;
+  const headers = new Headers(request.headers);
+  // The rebuilt body has a different length; a copied Content-Length would make
+  // the request unreadable for the library.
+  headers.delete("Content-Length");
+  return new Request(request.url, { body: JSON.stringify(rest), headers, method: request.method });
+}
+
+/**
+ * Extracts the Better Auth subject from a sign-up response body.
+ *
+ * @param response - Sign-up response to inspect without consuming it.
+ * @returns The created subject, or undefined when the body is unusable.
+ */
+async function signedUpSubject(response: Response): Promise<string | undefined> {
+  if (!response.ok) return undefined;
+  try {
+    const body: unknown = await response.clone().json();
+    if (!body || typeof body !== "object" || !("user" in body)) return undefined;
+    const user = body.user;
+    if (!user || typeof user !== "object" || !("id" in user)) return undefined;
+    return typeof user.id === "string" ? user.id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Guards account creation and verification at the auth surface.
  *
  * After bootstrap, public sign-up is closed: an account may only be created
@@ -247,7 +354,18 @@ export function authPolicyHandler(env: ApiWorkerEnv, auth: BetterAuthInstance): 
                 { status: configured ? 403 : 503 },
               );
             }
-            return (await profileValidationResponse(request)) ?? auth.handler(request);
+            const workspaceName = await signUpWorkspaceName(request);
+            if (workspaceName instanceof Response) return workspaceName;
+            const invalidProfile = await profileValidationResponse(request);
+            if (invalidProfile) return invalidProfile;
+            const response = await auth.handler(await withoutWorkspaceName(request));
+            // Recording the chosen name inside the lock keeps it ordered with
+            // account creation, so a retry cannot pair a name with a different
+            // account and a failure here never reopens registration.
+            if (response.ok) {
+              await recordBootstrap(env, await signedUpSubject(response), workspaceName);
+            }
+            return response;
           });
         }
       }

@@ -213,6 +213,10 @@ export interface paths {
          *     database-backed fixed-window authentication rate limit keyed by
          *     action and normalized email/IP.
          *     This installation accepts exactly one owner; subsequent signup is forbidden.
+         *     The optional `workspace_name` is the setup form's chosen name for the
+         *     shared Workspace. It is not an account field: it is stored with the
+         *     bootstrap record and applied once when the canonical Workspace is
+         *     created, so it survives email verification. Ignored for invited sign-ups.
          */
         post: operations["signUpWithEmail"];
         delete?: never;
@@ -732,6 +736,66 @@ export interface paths {
          *     Workspace Admin. Owner only.
          */
         post: operations["transferInstallationOwnership"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read first-run setup progress
+         * @description Returns the resumable onboarding progress of the current Installation
+         *     Owner. `not_applicable` marks an installation whose Owner predates
+         *     onboarding (an upgrade): those Owners keep normal sign-in and are never
+         *     forced through setup. `in_progress` is the resumable state after the
+         *     first-run account exists and before the final screen is completed.
+         *     `completed` is terminal; the Workspace name is thereafter changed
+         *     through Workspace settings. Installation Owner only — the address is
+         *     resolved from the live session, so authority follows ownership transfer.
+         */
+        get: operations["getOnboarding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Save the chosen Workspace name
+         * @description Persists the setup screen's Workspace name and applies it to the
+         *     canonical shared Workspace, auditing the rename with the same action
+         *     Settings uses. Repeating the same name is a no-op. Once onboarding is
+         *     complete this returns `409 onboarding_complete`: rename the Workspace
+         *     through Workspace settings instead, so finalization can never overwrite
+         *     a later change. Installation Owner only.
+         */
+        patch: operations["saveOnboarding"];
+        trace?: never;
+    };
+    "/onboarding/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish first-run setup
+         * @description Marks onboarding complete once the Owner enters the Workspace. Optional
+         *     screens, Channel connection, and teammate invitations are independent,
+         *     so a skipped improvement screen or a failed connection cannot block
+         *     completion. Completion never renames the Workspace and is idempotent:
+         *     retries replay the stored response. Installation Owner only.
+         */
+        post: operations["completeOnboarding"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2014,6 +2078,13 @@ export interface components {
             password: string;
             /** Format: uri */
             callbackURL?: string;
+            /**
+             * @description Initial shared Workspace name from the setup form. Trimmed; applied
+             *     once when the canonical Workspace is created so it survives email
+             *     verification. Omitted keeps the derived default. Ignored for
+             *     invited sign-ups.
+             */
+            workspace_name?: string;
         };
         RequestPasswordResetRequest: {
             /** Format: email */
@@ -2170,6 +2241,26 @@ export interface components {
             /** Format: date-time */
             suspended_at: string | null;
             suspension_reason: string | null;
+        };
+        OnboardingProgress: {
+            /**
+             * @description `not_applicable` marks an installation whose Owner predates
+             *     onboarding and is never forced through setup.
+             * @enum {string}
+             */
+            status: "not_applicable" | "in_progress" | "completed";
+            /**
+             * @description Canonical shared Workspace name, or null when no Workspace exists
+             *     yet. Reflects a rename performed in Settings.
+             */
+            workspace_name: string | null;
+            /** @description True once the chosen setup name was applied to the Workspace. */
+            workspace_named: boolean;
+            /** Format: date-time */
+            completed_at: string | null;
+        };
+        OnboardingSaveRequest: {
+            workspace_name: string;
         };
         SuspendMemberRequest: {
             reason?: string;
@@ -4496,6 +4587,85 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getOnboarding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current onboarding progress. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingProgress"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    saveOnboarding: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OnboardingSaveRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated onboarding progress. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingProgress"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    completeOnboarding: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Completed onboarding progress. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingProgress"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
         };
     };

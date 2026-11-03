@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Add `GET /onboarding` (`getOnboarding`), `PATCH /onboarding` (`saveOnboarding`),
+  and `POST /onboarding/complete` (`completeOnboarding`) with
+  `OnboardingProgress`/`OnboardingSaveRequest`. They carry the current
+  Installation Owner's resumable first-run progress, report an upgraded
+  installation as `not_applicable`, and keep completion idempotent before a
+  later Workspace rename.
+- Add optional `SignUpEmailRequest.workspace_name` (1–200 characters). It is
+  bootstrap data for the canonical shared Workspace, not an account field, and
+  is applied once when that Workspace is created so it survives verification.
+  Omitting it keeps the existing derived default.
+
 - Separate saved `PostProviderOptions` from complete `ProviderPublishOptions`.
   Post targets retain YouTube visibility with an unanswered audience and TikTok
   privacy/disclosure choices before completion. Scheduling rejects unanswered

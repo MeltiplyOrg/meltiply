@@ -42,6 +42,7 @@ import {
   registerFlowRoutes,
 } from "./flow-observability";
 import { registerInstallationRoutes } from "./installation-routes";
+import { registerOnboardingRoutes } from "./onboarding";
 import { registerOperatorRoutes, type OperatorRouteDependencies } from "./operator-routes";
 import { scheduleEagerOutboxRelay } from "./outbox-relay";
 import { Effect, type Layer } from "effect";
@@ -799,6 +800,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
 
   registerCoreRoutes(app, dependencies);
   registerInstallationRoutes(app);
+  registerOnboardingRoutes(app);
   registerOperatorRoutes(app, dependencies);
   registerFlowRoutes(app);
 

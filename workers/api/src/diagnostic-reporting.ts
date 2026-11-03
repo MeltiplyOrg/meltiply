@@ -189,8 +189,8 @@ function boundaryReportingLayer(
 export function scheduleDiagnostic(
   c: Context<ApiWorkerEnvironment>,
   input: DiagnosticReportInput,
-  dependencies: ReportingRouteDependencies = {},
-  event = "diagnostic_report",
+  dependencies: ReportingRouteDependencies,
+  event: string,
 ): void {
   // Reporting never reports itself: an ingestion or delivery failure inside the
   // reporting surface would otherwise recurse into another ingestion attempt.

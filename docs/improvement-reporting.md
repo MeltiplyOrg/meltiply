@@ -183,7 +183,10 @@ See [self-hosting](self-hosting.md) for the rest of the deployment.
 No maintainer PostHog project token or region exists in this repository, and a
 release that offers working improvement reporting must have both. Until the
 maintainer provisions a project and supplies the token and matching origin
-through the release input and the image build variables, released artifacts ship
+through the release input (`runtime.reporting_posthog_project_token` and
+`runtime.reporting_posthog_host`) and, for released self-hosted images, the
+`REPORTING_POSTHOG_PROJECT_TOKEN` and `REPORTING_POSTHOG_HOST` repository
+variables the image workflow passes as build arguments, released artifacts ship
 **no destination**: the settings screen honestly reports reporting as
 unavailable, and no improvement data is transmitted. Creating the project is a
 release prerequisite, not something an installation can satisfy locally.

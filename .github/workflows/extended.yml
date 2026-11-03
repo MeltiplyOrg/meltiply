@@ -457,23 +457,6 @@ jobs:
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
           bun run --cwd frontend/app test:e2e e2e/workspace-design.spec.ts --project workspace \
             --grep "keeps navigation focus and reconnect assignment correct" --trace on
-      - name: Prepare first-run reporting acceptance
-        if: inputs.lane == 'cloudflare-full'
-        # The journey exercises the real first-run setup form, which closes as
-        # soon as any account exists. A fresh volume is seeded, so the seeded
-        # accounts, Workspace, and any installation state are removed here;
-        # migrations stay applied and acceptance still runs the production
-        # Worker entries against the same PostgreSQL, SMTP capture, and
-        # controlled Provider. The gate's own traffic already finished.
-        run: |
-          bun run --cwd frontend/app --no-install playwright install --with-deps chromium
-          # TRUNCATE ... CASCADE clears every table that references accounts or
-          # the shared Workspace, so no ordered delete can miss a dependent
-          # record; the migration ledger is untouched.
-          ./scripts/cloudflare-local/compose.sh exec -T postgres \
-            psql -U postgres -d meltiply -v ON_ERROR_STOP=1 \
-            -c 'TRUNCATE TABLE public."user", public.users, public.organizations CASCADE' \
-            -c 'SELECT count(*) AS remaining_users FROM "user"'
       - name: Exercise first-run setup and opt-in reporting
         if: inputs.lane == 'cloudflare-full'
         env:
@@ -483,10 +466,13 @@ jobs:
           # acceptance configs point both Workers at the same origin.
           MELTIPLY_E2E_EGRESS_URL: http://127.0.0.1:9787
         run: |
+          bun run --cwd frontend/app --no-install playwright install --with-deps chromium
           status=0
-          # The spec disables screenshots and traces itself because it types a
-          # setup secret, a password, and a verification link; assertions are
-          # its evidence, and this step must not add capture flags back.
+          # The journey resumes optional onboarding for the seeded Owner, so it
+          # needs the deterministic seed from the reset above, not an empty
+          # installation. It disables screenshots and traces itself because it
+          # types a password and a session credential; assertions are its
+          # evidence, and this step must not add capture flags back.
           bun run --cwd frontend/app test:e2e e2e/onboarding-reporting.spec.ts \
             --project onboarding --trace off --retries 0 || status=1
           # Nothing from this journey is published: no screenshot, trace, or

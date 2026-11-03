@@ -1,4 +1,5 @@
 import { ProviderAdapterError, classifyProviderFailure } from "@meltiply/providers";
+import { diagnosticProperties, payloadViolation } from "@meltiply/reporting";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -14,8 +15,18 @@ import {
  * The real-PostgreSQL and controlled-egress behaviour is covered by
  * `test/improvement-reporting.integration.test.ts`; these pin the translation
  * contract: which fixed category, grouping and Provider class a boundary failure
- * becomes, and that no message, id or payload rides along.
+ * becomes.
+ *
+ * The boundary report intentionally keeps the thrown value's bounded stack — the
+ * allowlist that strips it runs downstream, in the payload the installation
+ * sends. So the privacy assertions below cross that real consumer boundary by
+ * assembling the properties and validating them with the same
+ * `payloadViolation` gate the service applies before transport, rather than
+ * searching the boundary input for a message it is supposed to carry.
  */
+
+/** Payload context the consumer uses for a self-hosted installation. */
+const payloadContext = { appVersion: "1.0.0", deploymentCategory: "selfhosted" } as const;
 
 describe("automation diagnostic classification", () => {
   it("groups queue topics and scheduled units by their fixed operation", () => {
@@ -71,7 +82,12 @@ describe("automation diagnostic classification", () => {
       handled: true,
       operation: "publish",
     });
-    expect(JSON.stringify(report)).not.toContain("timed out waiting");
+    // The runtime message must not survive into the payload the installation
+    // would send: the exception value is the fixed category, and the frame the
+    // test's own stack names reduces to a reviewed release location.
+    const properties = diagnosticProperties(report, payloadContext);
+    expect(JSON.stringify(properties)).not.toContain("timed out waiting");
+    expect(payloadViolation(properties)).toBeUndefined();
   });
 
   it("reports a scheduled unit failure as a scheduled-job class", () => {
@@ -82,6 +98,11 @@ describe("automation diagnostic classification", () => {
       handled: false,
       operation: "other",
     });
-    expect(JSON.stringify(report)).not.toContain("maintenance boom");
+    // Same boundary: the boundary report carries the stack, the sent payload
+    // must not carry the message or the unit name the failure came from.
+    const properties = diagnosticProperties(report, payloadContext);
+    expect(JSON.stringify(properties)).not.toContain("maintenance boom");
+    expect(JSON.stringify(properties)).not.toContain("retention");
+    expect(payloadViolation(properties)).toBeUndefined();
   });
 });

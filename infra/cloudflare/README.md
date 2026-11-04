@@ -73,6 +73,35 @@ for migration, password, and authenticator policies. Managed Workers trust
 Cloudflare's `CF-Connecting-IP` for shared rate limits, not caller-supplied
 `X-Forwarded-For`; the self-hosted ingress instead uses its socket peer.
 
+## Improvement reporting
+
+Usage statistics and diagnostic reports are optional and start off. A release is
+not required to configure them: without a destination both categories report
+`destination_unavailable` and nothing is transmitted. Enable maintainer reporting
+by adding the publishable project token and its matching ingestion origin to
+`runtime` in the release input:
+
+```json
+{
+  "reporting_posthog_project_token": "phc_…",
+  "reporting_posthog_host": "https://us.i.posthog.com",
+  "reporting_forced_off": false
+}
+```
+
+Set both destination fields or neither; the renderer rejects a half-configured
+destination, so a release cannot ship a token without a usable origin. The token
+is publishable rather than secret — it authorizes event ingestion only and grants
+no project administration — so keep it in the reviewed release input, not in a
+Worker secret bundle. `reporting_forced_off: true` disables both categories over
+any saved Owner choice. The rendered Workers always receive
+`DEPLOYMENT_CATEGORY=managed` and `REPORTING_FORCED_OFF`.
+
+The receiving project itself must discard client IP data, keep IP enrichment,
+autocapture, pageviews, session replay, and person profiles off, and set billing
+limits. Event fields, dashboard definitions, and the synthetic verification
+procedure are in [improvement reporting operations](../../docs/improvement-reporting.md).
+
 ## Object storage selection
 
 Releases default to the IaC-managed R2 bucket. To select an S3-compatible service,

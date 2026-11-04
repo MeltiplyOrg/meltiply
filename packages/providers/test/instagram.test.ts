@@ -929,3 +929,18 @@ describe("createInstagramAdapter", () => {
     ).toBe("instagram_business_basic,instagram_business_content_publish");
   });
 });
+
+describe("ambiguous provider metrics", () => {
+  it("declares exactly the insights it normalizes to zero", () => {
+    const declaration = createInstagramAdapter({
+      clientId: "local-client",
+      clientSecret: "local-secret",
+      redirectUri: "https://app.example/api/auth/oauth/instagram/callback",
+    });
+
+    // Instagram writes `metrics.get(name) ?? 0`, so a stored zero cannot be told
+    // apart from an absent insight. The declaration is what lets a consumer treat
+    // those zeros as unknown instead of as observed counts.
+    expect(declaration.ambiguousZeroMetrics).toEqual(["views", "reactions", "comments", "shares"]);
+  });
+});

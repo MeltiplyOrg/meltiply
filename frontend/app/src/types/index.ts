@@ -129,6 +129,11 @@ export function brandProfileColorClass(color: BrandProfileColor): string {
   return BRAND_PROFILE_COLOR_CLASSES[color];
 }
 
+export type OnboardingProgress = components["schemas"]["OnboardingProgress"];
+export type ReportingPolicy = components["schemas"]["ReportingPolicy"];
+export type ReportingCategoryStatus = components["schemas"]["ReportingCategoryStatus"];
+export type ReportingFeedback = components["schemas"]["ReportingFeedback"];
+export type DiscoverySource = components["schemas"]["DiscoverySource"];
 export type UserProfile = components["schemas"]["UserProfile"];
 export type WorkspaceRole = components["schemas"]["WorkspaceRole"];
 export type WorkspaceMember = components["schemas"]["WorkspaceMember"];

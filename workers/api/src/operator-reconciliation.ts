@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
 import type { DatabaseError } from "@meltiply/domain";
+import { isPlatform, recordPublicationUsage, reportingConfiguration } from "@meltiply/reporting";
 
 import { CoreApiError } from "./core-types";
 import { withSystemTransactionEffect } from "./database";
@@ -26,9 +27,12 @@ interface DistributionResolutionState extends Record<string, unknown> {
   failure_retryable: boolean | null;
   id: string;
   next_attempt_at: Date | string | null;
+  platform: string;
   platform_post_id: string | null;
   platform_url: string | null;
+  post_id: string;
   provider_operation_id: string | null;
+  published_at: Date | string | null;
   status: string;
 }
 
@@ -175,7 +179,7 @@ export function createOperatorReconciliationService(): OperatorReconciliationSer
             const selected = yield* client.query<DistributionResolutionState>(
               `SELECT id, status, next_attempt_at, provider_operation_id,
                       platform_post_id, platform_url, failure_code,
-                      failure_retryable
+                      failure_retryable, platform, post_id, published_at
                FROM distributions WHERE id = $1 FOR UPDATE`,
               [distributionId],
             );
@@ -230,7 +234,7 @@ export function createOperatorReconciliationService(): OperatorReconciliationSer
                WHERE id = $1
                RETURNING id, status, next_attempt_at, provider_operation_id,
                          platform_post_id, platform_url, failure_code,
-                         failure_retryable`,
+                         failure_retryable, platform, post_id, published_at`,
               [
                 distributionId,
                 input.resolution,
@@ -240,7 +244,25 @@ export function createOperatorReconciliationService(): OperatorReconciliationSer
                 input.retryable,
               ],
             );
-            const afterState = auditState(updated.rows[0]!);
+            const updatedRow = updated.rows[0]!;
+            // An operator-confirmed success is a real publication: the
+            // automation worker's own measurement never sees it because the
+            // resolving queue message finds the row already published. Measuring
+            // it inside this transaction keeps the counter and the audit atomic,
+            // and the call is savepoint-scoped, so a reporting failure cannot
+            // roll back the resolution.
+            if (updatedRow.status === "published" && isPlatform(updatedRow.platform)) {
+              yield* recordPublicationUsage(
+                client,
+                {
+                  distributionId: updatedRow.id,
+                  platform: updatedRow.platform,
+                  postId: updatedRow.post_id,
+                },
+                reportingConfiguration(env),
+              );
+            }
+            const afterState = auditState(updatedRow);
             const audit = yield* client.query<{ id: string }>(
               `INSERT INTO operator_actions
                  (action, actor_subject, actor_email, idempotency_key,

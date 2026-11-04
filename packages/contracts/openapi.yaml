@@ -39,6 +39,12 @@ tags:
       Installation-level settings: Seat usage, account suspension,
       reactivation, hard deletion, and ownership transfer. Mutating operations
       require the Installation Owner.
+  - name: Onboarding
+    description: |
+      First-run setup progress for the Installation Owner: the chosen shared
+      Workspace name and completion of the optional wizard. The public setup
+      status exposes only the initialized bit; nothing here is readable
+      without an authenticated Owner session.
   - name: Brand Profiles
     description: |
       Named, color-labelled ownership scopes inside a workspace. Every Asset,
@@ -405,6 +411,10 @@ paths:
         database-backed fixed-window authentication rate limit keyed by
         action and normalized email/IP.
         This installation accepts exactly one owner; subsequent signup is forbidden.
+        The optional `workspace_name` is the setup form's chosen name for the
+        shared Workspace. It is not an account field: it is stored with the
+        bootstrap record and applied once when the canonical Workspace is
+        created, so it survives email verification. Ignored for invited sign-ups.
       parameters:
         - name: X-Setup-Secret
           in: header
@@ -1143,6 +1153,236 @@ paths:
           $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/RateLimited"
+  /onboarding:
+    get:
+      tags: [Onboarding]
+      operationId: getOnboarding
+      summary: Read first-run setup progress
+      description: |
+        Returns the resumable onboarding progress of the current Installation
+        Owner. `not_applicable` marks an installation whose Owner predates
+        onboarding (an upgrade): those Owners keep normal sign-in and are never
+        forced through setup. `in_progress` is the resumable state after the
+        first-run account exists and before the final screen is completed.
+        `completed` is terminal; the Workspace name is thereafter changed
+        through Workspace settings. Installation Owner only — the address is
+        resolved from the live session, so authority follows ownership transfer.
+      responses:
+        "200":
+          description: Current onboarding progress.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingProgress"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    patch:
+      tags: [Onboarding]
+      operationId: saveOnboarding
+      summary: Save the reached setup screen
+      description: |
+        Records optional-screen progress independently of reporting choices.
+        The step only advances, so an older tab cannot rewind the journey.
+        Completed onboarding returns `409 onboarding_complete`; upgraded
+        installations return `409 onboarding_not_applicable`. Installation Owner only.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OnboardingSaveRequest"
+      responses:
+        "200":
+          description: Updated onboarding progress.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingProgress"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /onboarding/complete:
+    post:
+      tags: [Onboarding]
+      operationId: completeOnboarding
+      summary: Finish first-run setup
+      description: |
+        Marks onboarding complete once the Owner enters the Workspace. Optional
+        screens, Channel connection, and teammate invitations are independent,
+        so a skipped improvement screen or a failed connection cannot block
+        completion. Completion never renames the Workspace and is idempotent:
+        retries replay the stored response. Installation Owner only.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Completed onboarding progress.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingProgress"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /installation/reporting:
+    get:
+      tags: [Installation]
+      operationId: getReportingPolicy
+      summary: Read installation improvement-reporting policy
+      description: |
+        Returns the Owner's requested choices and the effective outbound status
+        of each category, the disclosure version, and whether the deployment can
+        transmit at all. Every active member may read this, so the Owner's
+        choices and the effective policy stay visible to the whole team.
+      responses:
+        "200":
+          description: Member-readable reporting policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingPolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      tags: [Installation]
+      operationId: updateReportingPreferences
+      summary: Change installation improvement-reporting choices
+      description: |
+        Sets the two independent reporting choices. Only the current
+        Installation Owner may change them, and authority follows ownership
+        transfer. Withdrawing a category discards its unsent reports; enabling
+        it again starts a new reporting interval. The response reports the
+        requested and effective status of each category, so a deployment
+        override or a missing destination is never presented as working
+        reporting.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportingPreferencesUpdate"
+      responses:
+        "200":
+          description: Updated policy with effective status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /installation/reporting/feedback:
+    get:
+      tags: [Installation]
+      operationId: getReportingFeedback
+      summary: Read the one-time discovery-source answer
+      description: |
+        Returns the recorded discovery-source answer and its honest delivery
+        state: not shared, locally recorded, queued, or confirmed delivered.
+        Owner only.
+      responses:
+        "200":
+          description: Attribution state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingFeedback"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Installation]
+      operationId: submitReportingFeedback
+      summary: Share the one-time discovery-source answer
+      description: |
+        Shares one answer from the fixed discovery-source enumeration through an
+        explicit action. The answer carries its own random response identity and
+        never enables either reporting category. Skipping, or answering
+        "prefer not to say", shares nothing. A retry reuses the recorded logical
+        identity instead of creating a second response.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackSubmission"
+      responses:
+        "200":
+          description: Attribution state, including delivery status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingFeedback"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /installation/reporting/diagnostics:
+    post:
+      tags: [Installation]
+      operationId: ingestDiagnosticReport
+      summary: Submit a sanitized diagnostic report
+      description: |
+        Accepts an authenticated application failure for diagnostic reporting.
+        The receiving server re-checks persisted diagnostics consent before any
+        third-party transmission, so a browser-provided flag is never authority.
+        The report is saved locally and delivered best-effort; the response says
+        whether it was queued, not that the destination received it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DiagnosticReportSubmission"
+      responses:
+        "202":
+          description: Ingestion decision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiagnosticReportReceipt"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /workspaces/{workspaceId}/audit:
     parameters:
       - $ref: "#/components/parameters/WorkspaceIdPath"
@@ -3426,6 +3666,15 @@ components:
         callbackURL:
           type: string
           format: uri
+        workspace_name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: |
+            Initial shared Workspace name from the setup form. Trimmed; applied
+            once when the canonical Workspace is created so it survives email
+            verification. Omitted keeps the derived default. Ignored for
+            invited sign-ups.
     RequestPasswordResetRequest:
       type: object
       additionalProperties: false
@@ -3744,6 +3993,47 @@ components:
           format: date-time
         suspension_reason:
           type: [string, "null"]
+    OnboardingProgress:
+      type: object
+      additionalProperties: false
+      required: [status, workspace_name, workspace_named, completed_at, step]
+      properties:
+        status:
+          type: string
+          enum: [not_applicable, in_progress, completed]
+          description: |
+            `not_applicable` marks an installation whose Owner predates
+            onboarding and is never forced through setup.
+        step:
+          type: string
+          enum: [improvement, ready]
+          description: |
+            Optional screen the Owner reached. Persisted independently of
+            consent, attribution and completion, so a browser restart after
+            either skipping or opting in resumes at the same screen.
+        workspace_name:
+          type: [string, "null"]
+          description: |
+            Canonical shared Workspace name, or null when no Workspace exists
+            yet. Reflects a rename performed in Settings.
+        workspace_named:
+          type: boolean
+          description: True once the chosen setup name was applied to the Workspace.
+        completed_at:
+          type: [string, "null"]
+          format: date-time
+    OnboardingSaveRequest:
+      type: object
+      additionalProperties: false
+      required: [step]
+      description: Records the reached optional screen in one idempotent write.
+      properties:
+        step:
+          type: string
+          enum: [improvement, ready]
+          description: |
+            Optional screen to record. The step only advances, so a late write
+            from an older tab never moves the journey backwards.
     SuspendMemberRequest:
       type: object
       additionalProperties: false
@@ -3781,6 +4071,199 @@ components:
         installation_owner_user_id:
           type: string
           format: uuid
+    ReportingCategoryStatus:
+      type: object
+      additionalProperties: false
+      required: [requested, effective, reason, decision_at, interval_started_at]
+      properties:
+        requested:
+          type: boolean
+          description: The Installation Owner's stored choice.
+        effective:
+          type: boolean
+          description: Whether an outbound report may be sent right now.
+        reason:
+          type: string
+          enum:
+            - enabled
+            - not_requested
+            - destination_unavailable
+            - operator_disabled
+            - preference_unavailable
+          description: Why the category is or is not effective.
+        decision_at:
+          type: [string, "null"]
+          format: date-time
+          description: When the stored choice was last changed.
+        interval_started_at:
+          type: [string, "null"]
+          format: date-time
+          description: Start of the interval this category counts activity over.
+    ReportingPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          disclosure_version,
+          destination_configured,
+          operator_forced_off,
+          owner_can_change,
+          installation_reporting_id,
+          categories,
+        ]
+      properties:
+        disclosure_version:
+          type: integer
+          minimum: 1
+        destination_configured:
+          type: boolean
+          description: Whether this deployment has a usable reporting destination.
+        operator_forced_off:
+          type: boolean
+          description: Whether the deployment override disables reporting outright.
+        owner_can_change:
+          type: boolean
+          description: True only for the current Installation Owner.
+        installation_reporting_id:
+          type: [string, "null"]
+          format: uuid
+          description: |
+            Pseudonymous installation identifier, created on the first opt-in.
+            Reports linked by it are pseudonymous, not completely anonymous.
+        categories:
+          type: object
+          additionalProperties: false
+          required: [usage, diagnostics]
+          properties:
+            usage:
+              $ref: "#/components/schemas/ReportingCategoryStatus"
+            diagnostics:
+              $ref: "#/components/schemas/ReportingCategoryStatus"
+    ReportingPreferencesUpdate:
+      type: object
+      additionalProperties: false
+      required: [usage, diagnostics]
+      properties:
+        usage:
+          type: boolean
+        diagnostics:
+          type: boolean
+    DiscoverySource:
+      type: string
+      enum:
+        - github
+        - search_engine
+        - social_media
+        - video
+        - article_newsletter
+        - friend_word_of_mouth
+        - ai_assistant
+        - other
+        - prefer_not_to_say
+      description: Fixed discovery-source enumeration; there is no free-text answer.
+    FeedbackSubmission:
+      type: object
+      additionalProperties: false
+      required: [discovery_source]
+      properties:
+        discovery_source:
+          $ref: "#/components/schemas/DiscoverySource"
+    ReportingFeedback:
+      type: object
+      additionalProperties: false
+      required: [shared, discovery_source, submitted_at, delivery_status]
+      properties:
+        shared:
+          type: boolean
+        discovery_source:
+          oneOf:
+            - $ref: "#/components/schemas/DiscoverySource"
+            - type: "null"
+        submitted_at:
+          type: [string, "null"]
+          format: date-time
+        delivery_status:
+          type: string
+          enum: [not_shared, not_recorded, pending, delivered]
+          description: |
+            `not_shared` means no answer was ever submitted, `not_recorded`
+            means a local choice was saved without sharing, `pending` means the
+            report is queued, and `delivered` means the destination accepted it.
+    DiagnosticCategory:
+      type: string
+      description: |
+        Fixed diagnostic class. `provider_failure` marks an expected Provider
+        condition the adapter already classified — a normal recoverable outcome
+        such as an expired authorization or a rate limit — and is kept separate
+        from unexpected application exceptions so expected conditions cannot hide
+        defects in Error Tracking. Every other value is an unexpected failure.
+      enum:
+        - unhandled_exception
+        - provider_failure
+        - request_failure
+        - scheduled_job_failure
+        - client_exception
+    ProviderFailureClass:
+      type: string
+      description: |
+        Canonical Provider failure classification, as the adapter records it.
+        Only meaningful with `category: provider_failure`, where it is the
+        countable fact behind the condition; no Provider message, status text or
+        response body is ever reported.
+      enum:
+        - ambiguous
+        - auth
+        - deterministic
+        - quota
+        - rate_limit
+        - timeout
+        - transient
+    OperationCategory:
+      type: string
+      enum:
+        - publish
+        - analytics
+        - inbox
+        - auth
+        - assets
+        - queues
+        - installation
+        - reporting
+        - other
+    DiagnosticReportSubmission:
+      type: object
+      additionalProperties: false
+      required: [category, operation]
+      properties:
+        category:
+          $ref: "#/components/schemas/DiagnosticCategory"
+        operation:
+          $ref: "#/components/schemas/OperationCategory"
+        platform:
+          $ref: "#/components/schemas/Platform"
+        provider_failure_class:
+          $ref: "#/components/schemas/ProviderFailureClass"
+        error_name:
+          type: string
+          maxLength: 80
+          description: Error type name; sanitized to a plain identifier.
+        error_stack:
+          type: string
+          maxLength: 8192
+          description: |
+            Raw stack text. Only allowlisted application frames survive
+            sanitization; messages, URLs, query strings and identifiers are
+            dropped before transport.
+    DiagnosticReportReceipt:
+      type: object
+      additionalProperties: false
+      required: [accepted, reason]
+      properties:
+        accepted:
+          type: boolean
+        reason:
+          type: string
+          enum: [queued, category_disabled]
     AuditEntry:
       type: object
       additionalProperties: false

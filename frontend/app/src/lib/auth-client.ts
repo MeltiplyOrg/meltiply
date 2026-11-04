@@ -37,6 +37,12 @@ interface SignUpCredentials extends SignInCredentials {
   name: string;
   setupSecret?: string;
   invitationToken?: string;
+  /**
+   * Chosen shared-Workspace name for the first-run screen. Sent as the
+   * bootstrap `workspace_name` so it survives the verification handoff and is
+   * applied once when the canonical Workspace is created.
+   */
+  workspaceName?: string;
 }
 
 /**
@@ -158,6 +164,7 @@ async function signInEmail(credentials: SignInCredentials): Promise<AuthTokenRes
 async function signUpEmail({
   setupSecret,
   invitationToken,
+  workspaceName,
   ...credentials
 }: SignUpCredentials): Promise<AuthTokenResult> {
   const baseUrl = getApiBaseUrl();
@@ -168,6 +175,9 @@ async function signUpEmail({
     body: JSON.stringify({
       ...credentials,
       callbackURL,
+      // Omitted rather than empty: the API falls back to the derived default
+      // and rejects a blank name as a validation error.
+      ...(workspaceName ? { workspace_name: workspaceName } : {}),
     }),
     credentials: "include",
     headers: {

@@ -93,6 +93,13 @@ const acceptanceProjects = [
     testMatch: "**/publishing-queues.spec.ts",
     use: { ...devices["Desktop Chrome"] },
   },
+  {
+    // First-run onboarding and improvement-reporting consent, including the
+    // controlled reporting egress receiver the journey starts itself.
+    name: "onboarding",
+    testMatch: "**/onboarding-reporting.spec.ts",
+    use: { ...devices["Desktop Chrome"] },
+  },
 ];
 const stagingProjects = stagingBaseUrl
   ? [

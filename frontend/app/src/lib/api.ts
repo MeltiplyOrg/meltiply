@@ -19,9 +19,11 @@ import type {
   CreateUploadPartsInput,
   CreateUploadPartsResponse,
   CreateUploadSessionInput,
+  DiscoverySource,
   Distribution,
   InstallationSummary,
   InvitationPreview,
+  OnboardingProgress,
   OAuthSelection,
   OAuthSelectionConfirmRequest,
   Platform,
@@ -39,6 +41,8 @@ import type {
   SchedulePostInput,
   PublishingQueue,
   QueueListResponse,
+  ReportingFeedback,
+  ReportingPolicy,
   CreateQueueInput,
   UpdateQueueInput,
   QueueQueryParams,
@@ -1795,6 +1799,127 @@ export function acceptWorkspaceInvitation(token: string, options?: ApiRequestOpt
     (signal) =>
       client().POST("/workspace-invitations/{token}/accept", {
         params: { path: { token } },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/** Reads Owner-only progress; upgrades report `not_applicable`. */
+export function getOnboarding(options?: ApiRequestOptions) {
+  return unwrap<OnboardingProgress>(
+    (signal) => client().GET("/onboarding", { signal }),
+    options?.signal,
+  );
+}
+
+/** Persists the reached screen idempotently; completed journeys reject further saves. */
+export function saveOnboarding(
+  input: { step: "improvement" | "ready" },
+  options?: ApiRequestOptions,
+) {
+  return unwrap<OnboardingProgress>(
+    (signal) =>
+      client().PATCH("/onboarding", {
+        body: input,
+        params: {
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/** Completes setup idempotently without changing the Workspace name. */
+export function completeOnboarding(options?: ApiRequestOptions) {
+  return unwrap<OnboardingProgress>(
+    (signal) =>
+      client().POST("/onboarding/complete", {
+        params: {
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Reads the installation improvement-reporting policy. Every active member may
+ * read it, so the Owner's choices and the effective outbound state stay
+ * visible to the team; only the current Installation Owner may mutate it.
+ *
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the requested and effective policy.
+ */
+export function getReportingPolicy(options?: ApiRequestOptions) {
+  return unwrap<ReportingPolicy>(
+    (signal) => client().GET("/installation/reporting", { signal }),
+    options?.signal,
+  );
+}
+
+/**
+ * Replaces both reporting choices. Only the current Installation Owner may
+ * call it; the response carries the effective state, so a disabled destination
+ * or operator override is never reported as working consent.
+ *
+ * @param input Independent usage and diagnostics choices.
+ * @param options Request options with optional idempotency key.
+ * @returns Effect resolving to the updated policy.
+ */
+export function updateReportingPreferences(
+  input: { usage: boolean; diagnostics: boolean },
+  options?: ApiRequestOptions,
+) {
+  return unwrap<ReportingPolicy>(
+    (signal) =>
+      client().PUT("/installation/reporting", {
+        body: input,
+        params: {
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Reads the one-time discovery-source answer and its delivery state. Owner
+ * only: the answer belongs to the installation rather than to a member.
+ *
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the attribution state.
+ */
+export function getReportingFeedback(options?: ApiRequestOptions) {
+  return unwrap<ReportingFeedback>(
+    (signal) => client().GET("/installation/reporting/feedback", { signal }),
+    options?.signal,
+  );
+}
+
+/**
+ * Shares the fixed-enum discovery-source answer. Separate from the reporting
+ * switches: submitting feedback never enables a category, and skipping or
+ * choosing `prefer_not_to_say` records a local decision with no event.
+ *
+ * @param input Fixed discovery-source value.
+ * @param options Request options with optional idempotency key.
+ * @returns Effect resolving to the attribution state, including delivery status.
+ */
+export function submitReportingFeedback(
+  input: { discovery_source: DiscoverySource },
+  options?: ApiRequestOptions,
+) {
+  return unwrap<ReportingFeedback>(
+    (signal) =>
+      client().POST("/installation/reporting/feedback", {
+        body: input,
+        params: {
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+        },
         signal,
       }),
     options?.signal,

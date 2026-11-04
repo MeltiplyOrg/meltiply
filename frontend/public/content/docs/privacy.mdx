@@ -33,6 +33,8 @@ The entity operating Meltiply — the controller of the information described he
 
 **Usage data.** Workspace upload, publication, and storage counters enforce the [resource limits](/docs/resource-limits).
 
+**Optional improvement reporting.** If the Installation Owner turns on usage statistics, Meltiply sends the maintainer a daily aggregate summary of that UTC day: connected Channel counts per platform, confirmed successful Posts and Distributions per platform, and views, reactions, comments, and shares read from the latest stored platform snapshots, with when those snapshots were taken and how many posts lacked one. If the Owner turns on diagnostics, unexpected application failures are sent as sanitized exception reports: a fixed failure category, an operation group, the app version, an optional platform, and application code locations. Expected Provider conditions, including expired authorization, rate limits, quotas, timeouts, and unconfirmed outcomes, are reported separately with their class rather than counted as application defects. These reports never include names, email addresses, Workspace or Brand Profile names, channel identities, post text, media URLs, audience comments, credentials, request bodies, or cookie values. Both choices start off, are controlled by the Installation Owner in Settings and are visible to all workspace members, and can be switched off at any time, which stops future reports and discards unsent ones. A deployment operator can also turn reporting off for the whole installation. Reports carry a random installation identifier created at the first opt-in, so they are linked to one installation over time; they are **pseudonymous, not anonymous**, and they never create or enrich a person profile. No autocapture, pageviews, session replay, heatmaps, advertising attribution, or cross-device member tracking is used. Target reports are delivered to PostHog Cloud, whose own terms apply. Sending stops when no destination is configured or PostHog is unavailable, so nothing here is a condition of using Meltiply.
+
 **Operational records.** Records needed to run reliably — scheduled and delivered work, platform notifications, and abuse-prevention activity.
 
 ## Where information comes from
@@ -47,7 +49,7 @@ Most information enters Meltiply directly from you (sign-up details, uploads, co
 - **Operate and improve reliability** — monitor scheduled work and delivery so publishing completes and failures surface clearly.
 - **Meet legal obligations** — and enforce the [Terms of Service](/docs/terms).
 
-This draft describes the purposes the product serves today; product analytics based on social-platform reports and comments are backend capabilities, not visitor tracking. No visitor-measurement or advertising trackers are currently installed on public Meltiply sites.
+This draft describes the purposes the product serves today; product analytics based on social-platform reports and comments are backend capabilities, not visitor tracking. No visitor-measurement or advertising trackers are installed on public Meltiply sites, and the app has no advertising integration. The optional improvement reporting described above is the only outbound product telemetry, and it is off until the Installation Owner chooses it.
 
 ## Public posts and private workspaces
 
@@ -59,6 +61,7 @@ Everything else in your workspace — drafts, media attachments, scheduled and q
 
 - **Social platforms you connect.** Publishing a post sends that content to the platform you selected; syncing retrieves analytics and comments from it. Each platform's own privacy policy applies to data it receives or provides.
 - **Service providers** that help run the service — cloud infrastructure, database hosting, media storage, and transactional email delivery — process information on our behalf; provider terms will be described in the final version once verified.
+- **PostHog Cloud**, which receives the optional improvement reports described above only after the Installation Owner opts in. Reports are pseudonymous installation aggregates and sanitized exception records; no person profile is created, and IP-derived enrichment is not requested. An installation whose operator replaces the destination sends to that project instead.
 - **Legal and safety.** We may disclose information where required by law or where we believe it is necessary to protect the service, its users, or others.
 
 We have not yet adopted formal commitments about the sale of personal information or sharing data with third parties for their own marketing, so this draft states none.
@@ -83,11 +86,13 @@ What the product does today:
 - Deleting a Brand Profile permanently deletes the profile and its related database records, including channels, posts, and asset metadata. Scheduled and queued work is cancelled, but provider-owned attempts already in progress may still publish. Deleting asset records does not guarantee removal of stored media; storage cleanup may be delayed or incomplete. The app does not offer a recovery window or undo for this deletion. Backend operations for separately soft-deleted records do not recover a profile permanently deleted through the app.
 - Disconnecting a channel on the [Channels](/docs/channels) page stops its scheduled and queued posts and ends Meltiply's use of that connection for publishing and syncing. It deletes nothing in Meltiply and does not revoke the authorization on the platform's side — revoke that in the platform's own settings; you can reconnect anytime.
 - None of these actions — deleting content, disconnecting a channel, or ending an account — removes content already published to a platform. Published posts cannot be deleted from inside Meltiply; remove them on the platform itself.
+- Turning improvement reporting off stops future reports and discards reports that have not been sent. It does not remove reports already delivered to the analytics provider. Deletion of already-received reports follows that provider's documented deletion procedure; a project deletion removes all of its data, while a narrower request needs the provider's support. Meltiply does not promise a deletion outcome its configured analytics plan does not provide.
 
 ## Your choices and controls
 
 - **Disconnect channels** — remove a platform's connection from your workspace on the [Channels](/docs/channels) page; you can also revoke Meltiply's access on the platform itself.
 - **Manage content** — delete media assets, drafts, and Brand Profiles in the app; each confirmation describes consequences that can be permanent.
+- **Improvement reporting** — the Installation Owner changes usage-statistics and diagnostic-report choices in Settings, and every workspace member can read the current disclosure and effective state there. Withdrawal stops future reports and discards unsent ones. A deployment operator can force both off.
 - **Cookies and local storage** — choose the optional functional purpose in the initial consent prompt; use browser site-data controls to reset a saved choice. [Cookies and storage](/docs/cookies) explains known browser storage and reset behavior. Appearance is available in Settings; there is no separate motion mode or stored motion preference.
 - **Resource usage** — [Resource usage](/docs/resource-limits) explains unrestricted community allowances and your infrastructure responsibility. No subscription or payment data is collected by the community application.
 - **Profile and account data** — the app does not yet offer self-service controls for editing account profile data or requesting account deletion, and no in-product request route exists yet. Request handling will be described in the final version of this policy.

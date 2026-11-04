@@ -50,6 +50,25 @@ vi.mock("@/lib/preload-routes", () => ({
   preloadDashboardRoute: vi.fn(),
 }));
 
+// The dashboard layout renders the onboarding gate, which reads the session scope
+// and the Owner's progress. Both are data providers here, mocked to a resolved
+// non-applicable read exactly as the settings and brand-profile suites do, so the
+// shell under test never depends on an ambient auth provider.
+vi.mock("@/hooks/use-session-scope", () => ({
+  useSessionScope: () => ({
+    brandProfileId: null,
+    isSignedIn: true,
+    workspaceId: null,
+  }),
+}));
+
+vi.mock("@/lib/queries", () => ({
+  useOnboarding: () => ({
+    data: { status: "not_applicable" },
+    isPending: false,
+  }),
+}));
+
 /**
  * Exposes the live router location plus test-only route controls. The buttons
  * change the URL through the same router the shell reads, so assertions observe

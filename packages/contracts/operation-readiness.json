@@ -160,6 +160,18 @@
       "state": "specified",
       "evidenceAndGate": "Reauthenticated ownership transfer; hosted database and browser acceptance required."
     },
+    "getOnboarding": {
+      "state": "specified",
+      "evidenceAndGate": "Resumable Owner onboarding read; real PostgreSQL bootstrap coverage plus hosted browser acceptance required."
+    },
+    "saveOnboarding": {
+      "state": "specified",
+      "evidenceAndGate": "Monotonic optional-screen progress; real PostgreSQL bootstrap coverage plus hosted browser acceptance required."
+    },
+    "completeOnboarding": {
+      "state": "specified",
+      "evidenceAndGate": "Idempotent onboarding completion; real PostgreSQL bootstrap coverage plus hosted browser acceptance required."
+    },
     "listWorkspaceAudit": {
       "state": "specified",
       "evidenceAndGate": "Workspace Audit read; hosted database acceptance required."
@@ -355,6 +367,26 @@
     "getAnalyticsDashboard": {
       "state": "specified",
       "evidenceAndGate": "Worker series/heatmap/format/platform/follower aggregation tests pass; preview measurement remains."
+    },
+    "getReportingPolicy": {
+      "state": "specified",
+      "evidenceAndGate": "Reporting policy read; real-PostgreSQL HTTP acceptance required."
+    },
+    "ingestDiagnosticReport": {
+      "state": "specified",
+      "evidenceAndGate": "Server-side consent-gated diagnostic ingestion; controlled-egress acceptance required."
+    },
+    "getReportingFeedback": {
+      "state": "specified",
+      "evidenceAndGate": "One-time attribution read; real-PostgreSQL HTTP acceptance required."
+    },
+    "submitReportingFeedback": {
+      "state": "specified",
+      "evidenceAndGate": "One-time attribution submission with separate identity; controlled-egress acceptance required."
+    },
+    "updateReportingPreferences": {
+      "state": "specified",
+      "evidenceAndGate": "Owner-only reporting consent mutation with Audit; real-PostgreSQL HTTP acceptance required."
     }
   }
 }

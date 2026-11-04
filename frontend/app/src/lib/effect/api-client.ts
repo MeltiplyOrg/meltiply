@@ -20,11 +20,15 @@ import type {
   CreateUploadPartsInput,
   CreateUploadPartsResponse,
   CreateUploadSessionInput,
+  DiscoverySource,
   Distribution,
   InstallationSummary,
   InvitationPreview,
   OAuthSelection,
   OAuthSelectionConfirmRequest,
+  OnboardingProgress,
+  ReportingFeedback,
+  ReportingPolicy,
   Platform,
   PlatformAccountsResponse,
   PlatformCapabilitiesResponse,
@@ -65,6 +69,7 @@ import {
   confirmOAuthSelection,
   cancelDistribution,
   completeUploadSession,
+  completeOnboarding,
   createBrandProfile,
   createPost,
   listQueues,
@@ -88,6 +93,9 @@ import {
   getInstallation,
   getInvitationPreview,
   getOAuthSelection,
+  getOnboarding,
+  getReportingFeedback,
+  getReportingPolicy,
   getDistribution,
   getDistributionAnalytics,
   getPlatformPublishingRequirements,
@@ -107,12 +115,15 @@ import {
   resendWorkspaceInvitation,
   retryDistribution,
   revokeWorkspaceInvitation,
+  saveOnboarding,
   schedulePost,
   startPlatformOAuth,
+  submitReportingFeedback,
   suspendInstallationMember,
   transferInstallationOwnership,
   updateBrandProfile,
   updatePost,
+  updateReportingPreferences,
   updateScheduledDistribution,
   updateWorkspaceMember,
   updateWorkspaceName,
@@ -413,6 +424,24 @@ export interface ApiClientServiceShape {
     member: WorkspaceMember;
     workspace: { id: string; name: string; role: WorkspaceRole; slug: string };
   }>;
+  readonly getOnboarding: (options?: ApiRequestOptions) => ApiClientEffect<OnboardingProgress>;
+  readonly saveOnboarding: (
+    input: { step: "improvement" | "ready" },
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<OnboardingProgress>;
+  readonly completeOnboarding: (options?: ApiRequestOptions) => ApiClientEffect<OnboardingProgress>;
+  readonly getReportingPolicy: (options?: ApiRequestOptions) => ApiClientEffect<ReportingPolicy>;
+  readonly updateReportingPreferences: (
+    input: { diagnostics: boolean; usage: boolean },
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<ReportingPolicy>;
+  readonly getReportingFeedback: (
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<ReportingFeedback>;
+  readonly submitReportingFeedback: (
+    input: { discovery_source: DiscoverySource },
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<ReportingFeedback>;
 }
 
 /**
@@ -502,6 +531,13 @@ export function createApiClientServiceTest(
     updateScheduledDistribution: unstubbed("updateScheduledDistribution"),
     updateWorkspaceMember: unstubbed("updateWorkspaceMember"),
     updateWorkspaceName: unstubbed("updateWorkspaceName"),
+    getOnboarding: unstubbed("getOnboarding"),
+    saveOnboarding: unstubbed("saveOnboarding"),
+    completeOnboarding: unstubbed("completeOnboarding"),
+    getReportingPolicy: unstubbed("getReportingPolicy"),
+    updateReportingPreferences: unstubbed("updateReportingPreferences"),
+    getReportingFeedback: unstubbed("getReportingFeedback"),
+    submitReportingFeedback: unstubbed("submitReportingFeedback"),
     ...impl,
   };
 
@@ -633,5 +669,12 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
       updateWorkspaceMember(workspaceId, memberId, role, options),
     updateWorkspaceName: (workspaceId, input, options) =>
       updateWorkspaceName(workspaceId, input, options),
+    getOnboarding: (options) => getOnboarding(options),
+    saveOnboarding: (input, options) => saveOnboarding(input, options),
+    completeOnboarding: (options) => completeOnboarding(options),
+    getReportingPolicy: (options) => getReportingPolicy(options),
+    updateReportingPreferences: (input, options) => updateReportingPreferences(input, options),
+    getReportingFeedback: (options) => getReportingFeedback(options),
+    submitReportingFeedback: (input, options) => submitReportingFeedback(input, options),
   },
 );

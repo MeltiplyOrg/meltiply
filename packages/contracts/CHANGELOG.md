@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add member-readable reporting policy and Owner-only idempotent consent,
+  one-time discovery feedback, and closed-schema diagnostic ingestion under
+  `/installation/reporting`. Ingestion decisions never claim delivery.
+- Add Owner-only resumable `/onboarding` reads, monotonic optional-screen saves,
+  and idempotent completion. Upgraded installations report `not_applicable`.
+- Add optional `SignUpEmailRequest.workspace_name`: bootstrap data applied once
+  to the shared Workspace, surviving verification. Omission keeps the derived default.
+- All additions are additive; existing operations and required fields are unchanged.
+
 ## 1.0.0 - 2026-11-03
 
 - Add method-specific Facebook Page, Threads, Instagram content, TikTok inbox,

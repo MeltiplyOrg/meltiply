@@ -69,6 +69,7 @@ beforeAll(async () => {
     "twoFactor",
     "users",
     "workspace_invitations",
+    "installation_bootstrap",
   ]) {
     await adminPool.query(
       `CREATE TABLE auth_lifecycle."${table}" (LIKE public."${table}" INCLUDING ALL)`,
@@ -85,7 +86,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await systemPoolFor(systemEnv()).query(
-    `TRUNCATE "user", "session", "account", "verification", "twoFactor", users, workspace_invitations`,
+    `TRUNCATE "user", "session", "account", "verification", "twoFactor", users, workspace_invitations, installation_bootstrap`,
   );
 });
 
@@ -774,6 +775,56 @@ describe("bootstrap and invite-only sign-up", () => {
       [body.password, emails.stagingVerified],
     );
     expect(stored.rows).toEqual([{ plaintext: false, stored: true }]);
+  });
+
+  it("captures the chosen Workspace name as bootstrap data without storing it on the account", async () => {
+    const auth = await betterAuthFor(localTestEnv(recordingMailBinding()));
+    const body = {
+      email: emails.localUnverified,
+      name: "Owner",
+      password: crypto.randomUUID(),
+      workspace_name: "  Acme Studio  ",
+    };
+    const created = await authPost(auth, "/api/auth/sign-up/email", body);
+    expect(created.status).toBe(200);
+    const subject = recordOf(recordOf(await created.json()).user).id;
+    if (typeof subject !== "string") throw new Error("sign-up must return a user id");
+
+    // The setup name is trimmed and stored as bootstrap data, not as a Better
+    // Auth user field, so the library's user record stays exactly name/email.
+    const bootstrap = await systemPoolFor(systemEnv()).query<{ workspace_name: string }>(
+      "SELECT workspace_name FROM installation_bootstrap WHERE auth_user_id = $1",
+      [subject],
+    );
+    expect(bootstrap.rows).toEqual([{ workspace_name: "Acme Studio" }]);
+    const account = await systemPoolFor(systemEnv()).query<{ name: string }>(
+      `SELECT name FROM "user" WHERE id = $1`,
+      [subject],
+    );
+    expect(account.rows).toEqual([{ name: "Owner" }]);
+  });
+
+  it("rejects an invalid Workspace name before any account or bootstrap row exists", async () => {
+    const auth = await betterAuthFor(localTestEnv(recordingMailBinding()));
+    const created = await authPost(auth, "/api/auth/sign-up/email", {
+      email: emails.localUnverified,
+      name: "Owner",
+      password: crypto.randomUUID(),
+      workspace_name: "   ",
+    });
+    expect(created.status).toBe(400);
+    expect(await created.json()).toMatchObject({
+      message: expect.stringContaining("workspace_name"),
+    });
+
+    const accounts = await systemPoolFor(systemEnv()).query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "user"`,
+    );
+    expect(accounts.rows[0]?.count).toBe("0");
+    const bootstrap = await systemPoolFor(systemEnv()).query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM installation_bootstrap",
+    );
+    expect(bootstrap.rows[0]?.count).toBe("0");
   });
 
   it("serializes concurrent first registrations so only one account is created", async () => {

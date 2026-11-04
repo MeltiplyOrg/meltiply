@@ -31,9 +31,24 @@ type TelemetryPayload = {
   field?: unknown;
   kind?: unknown;
   retryable?: unknown;
+  stack?: unknown;
   status?: unknown;
   valueHash?: unknown;
   valueType?: unknown;
+};
+
+/** Longest stack text the relay will forward; the API bounds it again. */
+const maximumRelayStackCharacters = 1_500;
+
+/** Approved diagnostic operation for a client-side failure context. */
+const operationByField: Record<string, string> = {
+  "api-error": "other",
+  "auth-refresh": "auth",
+  "auth-refresh-throttled": "auth",
+  "query-cache": "other",
+  "react-render": "other",
+  "unhandled-rejection": "other",
+  "window-error": "other",
 };
 
 /**
@@ -127,6 +142,96 @@ function sameOrigin(request: Request, url: URL): boolean {
 }
 
 /**
+ * Forwards one sanitized client failure to the API's consent-gated diagnostics route.
+ *
+ * This is the second half of the existing producer, not a new pipeline: the same
+ * `POST /__frontend-telemetry` request that records the installation-local log
+ * line also carries the approved diagnostic facts to the API Worker, which alone
+ * re-checks persisted consent before any third-party transmission.
+ *
+ * Four guarantees hold here:
+ *
+ * - Only an authenticated browser relays. The browser's bearer JWT is the only
+ *   credential the SPA holds, and it is forwarded unchanged; without one nothing
+ *   is forwarded, so a pre-sign-in or setup-screen failure never leaves the
+ *   browser.
+ * - Only a genuine client exception is relayed. An `api-error` is the API
+ *   Worker's own failure, already reported at that boundary when it was
+ *   unexpected; forwarding it here would report one failure twice.
+ * - Only the approved fields travel: fixed category, fixed operation, error type
+ *   name and frame lines. The runtime message, request URL, request id and every
+ *   availability flag stay local.
+ * - No flag on the wire is authority. The API decides from persisted policy, so a
+ *   tampered client cannot cause a single extra outbound request.
+ *
+ * The relay runs on the invocation lifecycle, is bounded, and never changes the
+ * response: local observability is already recorded and a relay failure is
+ * invisible to the browser.
+ *
+ * @param payload Validated telemetry payload.
+ * @param request Inbound telemetry request, source of the bearer credential.
+ * @param env Worker environment bindings.
+ * @param executionCtx Invocation lifecycle for the bounded relay.
+ * @param context Structured log context for the relay's own outcome.
+ */
+function relayAuthenticatedDiagnostic(
+  payload: TelemetryPayload,
+  request: Request,
+  env: Env,
+  executionCtx: { waitUntil(promise: Promise<unknown>): void } | undefined,
+  context: FrontendTelemetryContext,
+): void {
+  if (payload.kind !== "frontend-error") return;
+  const authorization = request.headers.get("Authorization");
+  if (!authorization || !/^Bearer \S+$/.test(authorization)) return;
+  const stack =
+    typeof payload.stack === "string" ? payload.stack.slice(0, maximumRelayStackCharacters) : "";
+  const field = safeField(payload.field);
+  const body = JSON.stringify({
+    category: "client_exception",
+    ...(stack ? { error_stack: stack } : {}),
+    error_name: safeField(payload.valueType) ?? "Error",
+    operation: (field && operationByField[field]) ?? "other",
+  });
+  const work = (async () => {
+    try {
+      const init: RequestInit = {
+        body,
+        headers: { Authorization: authorization, "Content-Type": "application/json" },
+        method: "POST",
+      };
+      const response = env.API_ORIGIN
+        ? await fetch(new URL("/api/v1/installation/reporting/diagnostics", env.API_ORIGIN), init)
+        : env.API
+          ? await env.API.fetch(
+              new Request("http://frontend.local/api/v1/installation/reporting/diagnostics", init),
+            )
+          : undefined;
+      await response?.body?.cancel().catch(() => {});
+      log("debug", context, {
+        diagnostic_relay: response ? response.status : "unavailable",
+        event: "frontend_diagnostic_relay",
+        outcome: "ok",
+        retry_class: "none",
+      });
+    } catch {
+      // Best-effort: the local log line is the operational record and the browser
+      // must never see a reporting failure.
+      log("debug", context, {
+        event: "frontend_diagnostic_relay",
+        outcome: "failed",
+        retry_class: "none",
+      });
+    }
+  })();
+  try {
+    executionCtx?.waitUntil(work);
+  } catch {
+    void work;
+  }
+}
+
+/**
  * Reports whether a request path belongs to the bearer-authenticated public API.
  * Only these paths must have the Better Auth session cookie stripped before
  * proxying, so the API Worker never receives it.
@@ -208,6 +313,20 @@ async function proxyApiRequest(request: Request, env: Env, url: URL): Promise<Re
 }
 
 /**
+ * Structured log context for this Worker's own records.
+ *
+ * Named rather than inferred from the builder so the relay helper and the
+ * handlers can state the contract they pass around.
+ */
+export interface FrontendTelemetryContext {
+  readonly environment: string;
+  readonly request_id: string;
+  readonly service: "frontend";
+  readonly trace_id: string;
+  readonly version: string;
+}
+
+/**
  * Builds standard structured logging context with request ID, trace ID, service name, and environment.
  *
  * @param env Worker environment bindings.
@@ -215,7 +334,7 @@ async function proxyApiRequest(request: Request, env: Env, url: URL): Promise<Re
  * @param traceId Distributed trace identifier.
  * @returns Structured log context object.
  */
-function telemetryContext(env: Env, requestId: string, traceId: string) {
+function telemetryContext(env: Env, requestId: string, traceId: string): FrontendTelemetryContext {
   return {
     environment: safeField(env.ENVIRONMENT) ?? "unknown",
     request_id: requestId,
@@ -266,11 +385,20 @@ async function readTelemetryBody(request: Request): Promise<string | 413 | null>
 /**
  * Validates, deserializes, sanitizes, and logs client-side telemetry events forwarded from the frontend SPA.
  *
+ * The local record is written first and always. Afterwards, an authenticated
+ * browser exception is relayed to the API's consent-gated diagnostics route on
+ * the invocation lifecycle, so forwarding cannot delay or alter the 204.
+ *
  * @param request Inbound POST request containing telemetry JSON.
  * @param env Worker environment bindings.
+ * @param executionCtx Invocation lifecycle for the bounded diagnostic relay.
  * @returns 204 No Content on success, or 400/413 error response.
  */
-async function handleTelemetry(request: Request, env: Env): Promise<Response> {
+async function handleTelemetry(
+  request: Request,
+  env: Env,
+  executionCtx: { waitUntil(promise: Promise<unknown>): void } | undefined,
+): Promise<Response> {
   const contentLength = request.headers.get("Content-Length");
   if (contentLength !== null) {
     if (!integerPattern.test(contentLength)) return invalidTelemetryResponse(400);
@@ -324,6 +452,8 @@ async function handleTelemetry(request: Request, env: Env): Promise<Response> {
       (typeof payload.valueType !== "string" ||
         payload.valueType.length === 0 ||
         payload.valueType.length > 64)) ||
+    (payload.stack !== undefined &&
+      (typeof payload.stack !== "string" || payload.stack.length > maximumRelayStackCharacters)) ||
     (payload.retryable !== undefined && typeof payload.retryable !== "boolean") ||
     (payload.status !== undefined && safeStatus(payload.status) === undefined) ||
     (payload.valueHash !== undefined && safeHash(payload.valueHash) === undefined)
@@ -357,7 +487,9 @@ async function handleTelemetry(request: Request, env: Env): Promise<Response> {
     ...(configurationState ? { configuration_state: configurationState } : {}),
     ...(diagnosticCode ? { diagnostic_code: diagnosticCode } : {}),
   };
-  log("error", telemetryContext(env, requestId, traceId), fields);
+  const logContext = telemetryContext(env, requestId, traceId);
+  log("error", logContext, fields);
+  relayAuthenticatedDiagnostic(payload, request, env, executionCtx, logContext);
   return new Response(null, { status: 204 });
 }
 
@@ -370,9 +502,14 @@ export default {
    *
    * @param request Inbound HTTP request.
    * @param env Worker environment bindings containing ASSETS and API bindings.
+   * @param executionCtx Invocation lifecycle; keeps a best-effort diagnostic relay alive after the response.
    * @returns HTTP Response for the client.
    */
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+    executionCtx?: { waitUntil(promise: Promise<unknown>): void },
+  ): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
       try {
@@ -399,7 +536,7 @@ export default {
       if (!contentType || contentType.split(";", 1)[0].trim() !== "application/json") {
         return invalidTelemetryResponse(400);
       }
-      return handleTelemetry(request, env);
+      return handleTelemetry(request, env, executionCtx);
     }
     try {
       return await env.ASSETS.fetch(request);

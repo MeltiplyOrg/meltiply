@@ -84,13 +84,36 @@ const email = `selfhost-${randomUUID()}@example.com`;
 const password = `Selfhost-${randomUUID()}!`;
 const setupSecret = parseEnv(await readFile(".env.selfhost", "utf8")).AUTH_SETUP_SECRET;
 assert.equal(typeof setupSecret, "string");
-const cookie = await ownerBrowserSession({ origin, email, password, setupSecret });
+// The chosen Workspace name is real installation data: it must survive the
+// verification handoff and land on the canonical shared Workspace.
+const workspaceName = `Selfhost Studio ${randomUUID().slice(0, 8)}`;
+// Acceptance launch pointer: the owner journey opens with this command and the
+// credential-free captures land in artifacts/selfhost/. See
+// docs/self-hosting.md#verifying-an-installation.
+const cookie = await ownerBrowserSession({ origin, email, password, setupSecret, workspaceName });
 const minted = await fetch(`${origin}/api/auth/token`, { headers: { cookie, origin } });
 assert.equal(minted.status, 200);
 token = (await minted.json()).token;
 assert.equal(typeof token, "string");
 const identity = await api("/api/v1/users/me");
 assert.ok(identity, "Authenticated identity must resolve from PostgreSQL");
+assert.equal(
+  identity.active_organization.name,
+  workspaceName,
+  "The first-run Workspace name must reach the canonical shared Workspace",
+);
+// Onboarding completed through the wizard, so the journey is not offered again.
+const onboarding = await api("/api/v1/onboarding");
+assert.equal(onboarding.status, "completed");
+assert.equal(onboarding.workspace_named, true);
+// Skipping the improvement screen left both categories off, and the shipped
+// policy reports the effective state honestly instead of assuming a destination.
+const reporting = await api("/api/v1/installation/reporting");
+assert.equal(reporting.categories.usage.requested, false);
+assert.equal(reporting.categories.diagnostics.requested, false);
+assert.equal(reporting.categories.usage.effective, false);
+assert.equal(reporting.categories.diagnostics.effective, false);
+assert.equal(reporting.categories.usage.reason, "not_requested");
 const profile = await api(
   "/api/v1/brand-profiles",
   { name: "Selfhost smoke", description: "Production image acceptance", color: "#1d4ed8" },

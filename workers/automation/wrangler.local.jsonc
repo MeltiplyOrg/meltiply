@@ -27,6 +27,8 @@
     "MAIL_FROM_NAME": "Meltiply Local",
     "RECURRING_COMMENTS_ENABLED": "false",
     "PUBLISH_BATCH_CONCURRENCY": "1",
+    "REPORTING_FORCED_OFF": "false",
+    "DEPLOYMENT_CATEGORY": "selfhosted",
     "VERSION": "1.0.0-target.0",
   },
   "send_email": [

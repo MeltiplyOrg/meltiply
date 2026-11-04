@@ -46,7 +46,15 @@ jobs:
           file: ${{ matrix.image.file }}
           target: ${{ matrix.image.target }}
           platforms: linux/${{ matrix.platform.arch }}
-          build-args: PROCESSOR_PLATFORM=linux/${{ matrix.platform.arch }}
+          # The runtime image bakes the maintainer's improvement-reporting
+          # destination so a self-hoster needs no PostHog account. Both values
+          # are publishable configuration in repository variables, not secrets;
+          # when they are unset the image ships no destination and both
+          # reporting categories stay off instead of failing the build.
+          build-args: |
+            PROCESSOR_PLATFORM=linux/${{ matrix.platform.arch }}
+            REPORTING_POSTHOG_PROJECT_TOKEN=${{ vars.REPORTING_POSTHOG_PROJECT_TOKEN }}
+            REPORTING_POSTHOG_HOST=${{ vars.REPORTING_POSTHOG_HOST }}
           push: false
           outputs: type=docker,dest=${{ runner.temp }}/selfhost-${{ matrix.image.component }}-${{ matrix.platform.arch }}.tar
           tags: ${{ env.SELFHOST_IMAGE_PREFIX }}-${{ matrix.image.component }}:ci
@@ -126,11 +134,11 @@ jobs:
           bun build scripts/selfhost/requirements-cache-check.ts --target=node --external miniflare --external pg --outfile=scripts/selfhost/.requirements-cache-check.mjs
       - name: Exercise application, email, storage, jobs, workflows, and crash recovery
         run: node scripts/selfhost/smoke.mjs
-      - name: Preserve credential-free browser and cache observations
+      - name: Preserve credential-free browser observations and cache measurements
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: owner-login-${{ matrix.platform.arch }}
+          name: selfhost-optional-surfaces-${{ matrix.platform.arch }}
           path: |
             artifacts/selfhost/*.png
             artifacts/cache/

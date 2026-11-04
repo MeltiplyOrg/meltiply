@@ -144,18 +144,45 @@ to require verification explicitly; doing so requires working SMTP settings.
 The `verification` profile contains a capture-only Mailpit service for CI,
 **not email delivery**.
 
-Open <http://localhost:8080/sign-in>. On an empty installation, enter the private
-`AUTH_SETUP_SECRET` from `.env.selfhost`, your name, email, and a unique password
-to create the installation's only owner. With SMTP configured, follow the emailed
-verification link, then sign in; without SMTP, setup completes without a
-verification step. Once the owner exists, registration closes, including direct
-API requests. Development fixtures and passwords are not installed. PostgreSQL is
-not published to the host. Only loopback application ports are published by default.
+Open <http://localhost:8080/sign-in>. On an empty installation, the first-run
+setup screen asks for the private `AUTH_SETUP_SECRET` from `.env.selfhost`, your
+name, email, a unique password, and the shared Workspace name. With SMTP
+configured, follow the emailed verification link, then sign in; without SMTP,
+setup completes without a verification step. The next screen offers the optional
+discovery-source question and the two independently off improvement-reporting
+choices, each of which can be skipped. Once the owner exists, registration closes,
+including direct API requests. Development fixtures and passwords are not
+installed. PostgreSQL is not published to the host. Only loopback application
+ports are published by default.
 
 Set optional Provider/billing variables in `.env.selfhost` using the names in
 [`.env.example`](../.env.example). Self-hosting does not bypass Provider live-mode
 checks or account permissions. Do not change `ENVIRONMENT` to control verification;
 use `SELFHOST_REQUIRE_EMAIL_VERIFICATION` instead.
+
+## Improvement reporting
+
+Optional usage statistics and diagnostic reports are controlled by the Installation
+Owner in Settings and start off. The released runtime image carries the maintainer's
+publishable PostHog Cloud project token and matching ingestion origin, so you need no
+PostHog account and no extra configuration to let the Owner contribute.
+
+Nothing is sent while a destination is unconfigured or the Owner has not opted in:
+readiness and publishing never depend on it, and the settings screen reports the
+destination as unavailable rather than pretending reporting works. Set
+`REPORTING_FORCED_OFF=true` in `.env.selfhost` to disable both categories installation-wide,
+or set your own `REPORTING_POSTHOG_PROJECT_TOKEN` and `REPORTING_POSTHOG_HOST` to point
+at a project you control. An empty value in `.env.selfhost` with no image default keeps
+reporting off.
+
+Reports are bounded aggregates and sanitized application exceptions. Channels appear
+only as per-Platform counts; content, member identities, Workspace names, Post text,
+Assets, and credentials are never included, and no person profile, autocapture, pageview,
+session replay, or GeoIP enrichment is used. The reports still carry a random installation
+identifier and are therefore pseudonymous rather than anonymous, and the vendor ingress
+still sees the runtime's outbound address. What is collected, the dashboard setup, and
+the retention and deletion facts are in
+[improvement reporting operations](improvement-reporting.md).
 
 ## Object storage
 
@@ -240,6 +267,25 @@ read Posts, Channels, and analytics.
 characters. Existing environment files must add it; the generator does not
 overwrite them. It is an API-only bootstrap credential, never a browser build
 variable. Setup status reveals only whether the installation has an Owner.
+
+The first sign-up may carry the shared Workspace name as `workspace_name`. It is
+recorded before the account is created and promoted to the bootstrap record when
+the account exists, so a failed verification mail or an interrupted invocation
+cannot lose the choice; the name is applied once, when that sign-up's first
+authenticated request creates the Workspace. Omitting it keeps the derived
+`<display name>'s workspace` default. The Owner's `/api/v1/onboarding` read, save,
+and complete operations carry that journey's progress and are
+Installation-Owner-only; the reached optional screen is stored with it, so a
+restart resumes there rather than restarting the step. An installation that
+already has an Owner and Workspace without a bootstrap record reports
+`not_applicable`: its Owner signs in normally and is never pushed back through
+setup. Completion never renames the Workspace, so a later Settings rename stands.
+
+An installation that upgrades to a release with improvement reporting keeps both
+categories off until its Owner decides in Settings; nothing is enrolled silently.
+Improvement reporting choices are installation-level, so they do not grant
+permission to record every member: the [privacy policy](../frontend/public/content/docs/privacy.mdx)
+states the member-facing boundary, and no cross-device member tracking is added.
 
 JWT issuer and audience use `APP_URL`. By default the API retrieves signing keys
 from that origin's `/api/auth/jwks`. If browser-only ingress authentication protects the public host,

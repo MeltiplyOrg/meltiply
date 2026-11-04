@@ -109,6 +109,9 @@ const exactRuntimeKeys = new Set([
   "instagram_client_id",
   "r2_account_id",
   "object_storage_provider",
+  "reporting_forced_off",
+  "reporting_posthog_host",
+  "reporting_posthog_project_token",
   "s3_bucket",
   "s3_endpoint",
   "s3_force_path_style",
@@ -299,6 +302,53 @@ export function containsCredentialMaterial(serialized) {
   return credentialMaterialPattern.test(serialized);
 }
 
+/** Publishable PostHog project tokens are `phc_`-prefixed, url-safe, and bounded. */
+const posthogProjectTokenPattern = /^phc_[A-Za-z0-9_-]{8,200}$/;
+
+/**
+ * Validates the optional improvement-reporting settings of a staging release.
+ *
+ * Reporting is optional deployment configuration, never a release prerequisite:
+ * a release without a maintainer destination deploys normally and simply fails
+ * closed for both categories. When a destination is supplied the publishable
+ * project token and the matching ingestion origin must both be present and
+ * usable, so a half-configured release cannot claim reporting works. The token
+ * authorizes event ingestion only; it is not a personal API key and carries no
+ * project administration.
+ *
+ * @param {object} runtime - Raw `runtime` section of the release input
+ * @returns {object} Reporting keys to merge into the validated runtime section
+ * @throws {TypeError} If the destination is half-configured or invalid
+ */
+function reportingRuntime(runtime) {
+  const token = optionalString(
+    runtime.reporting_posthog_project_token,
+    "runtime.reporting_posthog_project_token",
+    posthogProjectTokenPattern,
+    210,
+  );
+  const host =
+    runtime.reporting_posthog_host === undefined
+      ? undefined
+      : httpsUrl(runtime.reporting_posthog_host, "runtime.reporting_posthog_host", {
+          originOnly: true,
+        });
+  if ((token === undefined) !== (host === undefined)) {
+    throw new TypeError(
+      "runtime.reporting_posthog_project_token and runtime.reporting_posthog_host must be set together",
+    );
+  }
+  return {
+    ...(host === undefined ? {} : { reporting_posthog_host: host }),
+    ...(token === undefined ? {} : { reporting_posthog_project_token: token }),
+    // Normalized so the rendered Workers always declare one string value.
+    reporting_forced_off:
+      runtime.reporting_forced_off === undefined
+        ? false
+        : boolean(runtime.reporting_forced_off, "runtime.reporting_forced_off"),
+  };
+}
+
 /**
  * Validates a non-secret staging release specification document against structural and security invariants.
  * Enforces schema version 1, staging environment, valid deployment mode ('bootstrap' or 'update'),
@@ -399,6 +449,7 @@ export function validateReleaseSpec(input) {
       "runtime.r2_account_id",
       cloudflareIdPattern,
     ),
+    ...reportingRuntime(runtime),
     threads_client_id: optionalString(runtime.threads_client_id, "runtime.threads_client_id"),
     tiktok_client_key: optionalString(runtime.tiktok_client_key, "runtime.tiktok_client_key"),
     tiktok_media_url_prefix:
@@ -627,6 +678,18 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
   const api = structuredClone(sourceConfigs.api);
   const commonVars = {
     ENVIRONMENT: "staging",
+    // Coarse deployment label; managed releases are always the maintainer's own
+    // Cloudflare deployment, so the same value reaches API and Automation.
+    DEPLOYMENT_CATEGORY: "managed",
+    // Optional improvement reporting. Absent settings leave both categories
+    // reporting `destination_unavailable` instead of failing deployment.
+    ...(spec.runtime.reporting_posthog_host
+      ? {
+          REPORTING_POSTHOG_HOST: spec.runtime.reporting_posthog_host,
+          REPORTING_POSTHOG_PROJECT_TOKEN: spec.runtime.reporting_posthog_project_token,
+        }
+      : {}),
+    REPORTING_FORCED_OFF: String(spec.runtime.reporting_forced_off),
     APP_URL: spec.app_url,
     MAIL_FROM_ADDRESS: spec.runtime.mail_from_address,
     ...(spec.runtime.mail_from_name ? { MAIL_FROM_NAME: spec.runtime.mail_from_name } : {}),

@@ -213,6 +213,10 @@ export interface paths {
          *     database-backed fixed-window authentication rate limit keyed by
          *     action and normalized email/IP.
          *     This installation accepts exactly one owner; subsequent signup is forbidden.
+         *     The optional `workspace_name` is the setup form's chosen name for the
+         *     shared Workspace. It is not an account field: it is stored with the
+         *     bootstrap record and applied once when the canonical Workspace is
+         *     created, so it survives email verification. Ignored for invited sign-ups.
          */
         post: operations["signUpWithEmail"];
         delete?: never;
@@ -732,6 +736,151 @@ export interface paths {
          *     Workspace Admin. Owner only.
          */
         post: operations["transferInstallationOwnership"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read first-run setup progress
+         * @description Returns the resumable onboarding progress of the current Installation
+         *     Owner. `not_applicable` marks an installation whose Owner predates
+         *     onboarding (an upgrade): those Owners keep normal sign-in and are never
+         *     forced through setup. `in_progress` is the resumable state after the
+         *     first-run account exists and before the final screen is completed.
+         *     `completed` is terminal; the Workspace name is thereafter changed
+         *     through Workspace settings. Installation Owner only — the address is
+         *     resolved from the live session, so authority follows ownership transfer.
+         */
+        get: operations["getOnboarding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Save the reached setup screen
+         * @description Records optional-screen progress independently of reporting choices.
+         *     The step only advances, so an older tab cannot rewind the journey.
+         *     Completed onboarding returns `409 onboarding_complete`; upgraded
+         *     installations return `409 onboarding_not_applicable`. Installation Owner only.
+         */
+        patch: operations["saveOnboarding"];
+        trace?: never;
+    };
+    "/onboarding/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish first-run setup
+         * @description Marks onboarding complete once the Owner enters the Workspace. Optional
+         *     screens, Channel connection, and teammate invitations are independent,
+         *     so a skipped improvement screen or a failed connection cannot block
+         *     completion. Completion never renames the Workspace and is idempotent:
+         *     retries replay the stored response. Installation Owner only.
+         */
+        post: operations["completeOnboarding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/installation/reporting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read installation improvement-reporting policy
+         * @description Returns the Owner's requested choices and the effective outbound status
+         *     of each category, the disclosure version, and whether the deployment can
+         *     transmit at all. Every active member may read this, so the Owner's
+         *     choices and the effective policy stay visible to the whole team.
+         */
+        get: operations["getReportingPolicy"];
+        /**
+         * Change installation improvement-reporting choices
+         * @description Sets the two independent reporting choices. Only the current
+         *     Installation Owner may change them, and authority follows ownership
+         *     transfer. Withdrawing a category discards its unsent reports; enabling
+         *     it again starts a new reporting interval. The response reports the
+         *     requested and effective status of each category, so a deployment
+         *     override or a missing destination is never presented as working
+         *     reporting.
+         */
+        put: operations["updateReportingPreferences"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/installation/reporting/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the one-time discovery-source answer
+         * @description Returns the recorded discovery-source answer and its honest delivery
+         *     state: not shared, locally recorded, queued, or confirmed delivered.
+         *     Owner only.
+         */
+        get: operations["getReportingFeedback"];
+        put?: never;
+        /**
+         * Share the one-time discovery-source answer
+         * @description Shares one answer from the fixed discovery-source enumeration through an
+         *     explicit action. The answer carries its own random response identity and
+         *     never enables either reporting category. Skipping, or answering
+         *     "prefer not to say", shares nothing. A retry reuses the recorded logical
+         *     identity instead of creating a second response.
+         */
+        post: operations["submitReportingFeedback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/installation/reporting/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a sanitized diagnostic report
+         * @description Accepts an authenticated application failure for diagnostic reporting.
+         *     The receiving server re-checks persisted diagnostics consent before any
+         *     third-party transmission, so a browser-provided flag is never authority.
+         *     The report is saved locally and delivered best-effort; the response says
+         *     whether it was queued, not that the destination received it.
+         */
+        post: operations["ingestDiagnosticReport"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2123,6 +2272,13 @@ export interface components {
             password: string;
             /** Format: uri */
             callbackURL?: string;
+            /**
+             * @description Initial shared Workspace name from the setup form. Trimmed; applied
+             *     once when the canonical Workspace is created so it survives email
+             *     verification. Omitted keeps the derived default. Ignored for
+             *     invited sign-ups.
+             */
+            workspace_name?: string;
         };
         RequestPasswordResetRequest: {
             /** Format: email */
@@ -2280,6 +2436,39 @@ export interface components {
             suspended_at: string | null;
             suspension_reason: string | null;
         };
+        OnboardingProgress: {
+            /**
+             * @description `not_applicable` marks an installation whose Owner predates
+             *     onboarding and is never forced through setup.
+             * @enum {string}
+             */
+            status: "not_applicable" | "in_progress" | "completed";
+            /**
+             * @description Optional screen the Owner reached. Persisted independently of
+             *     consent, attribution and completion, so a browser restart after
+             *     either skipping or opting in resumes at the same screen.
+             * @enum {string}
+             */
+            step: "improvement" | "ready";
+            /**
+             * @description Canonical shared Workspace name, or null when no Workspace exists
+             *     yet. Reflects a rename performed in Settings.
+             */
+            workspace_name: string | null;
+            /** @description True once the chosen setup name was applied to the Workspace. */
+            workspace_named: boolean;
+            /** Format: date-time */
+            completed_at: string | null;
+        };
+        /** @description Records the reached optional screen in one idempotent write. */
+        OnboardingSaveRequest: {
+            /**
+             * @description Optional screen to record. The step only advances, so a late write
+             *     from an older tab never moves the journey backwards.
+             * @enum {string}
+             */
+            step: "improvement" | "ready";
+        };
         SuspendMemberRequest: {
             reason?: string;
         };
@@ -2299,6 +2488,109 @@ export interface components {
         OwnershipTransferResponse: {
             /** Format: uuid */
             installation_owner_user_id: string;
+        };
+        ReportingCategoryStatus: {
+            /** @description The Installation Owner's stored choice. */
+            requested: boolean;
+            /** @description Whether an outbound report may be sent right now. */
+            effective: boolean;
+            /**
+             * @description Why the category is or is not effective.
+             * @enum {string}
+             */
+            reason: "enabled" | "not_requested" | "destination_unavailable" | "operator_disabled" | "preference_unavailable";
+            /**
+             * Format: date-time
+             * @description When the stored choice was last changed.
+             */
+            decision_at: string | null;
+            /**
+             * Format: date-time
+             * @description Start of the interval this category counts activity over.
+             */
+            interval_started_at: string | null;
+        };
+        ReportingPolicy: {
+            disclosure_version: number;
+            /** @description Whether this deployment has a usable reporting destination. */
+            destination_configured: boolean;
+            /** @description Whether the deployment override disables reporting outright. */
+            operator_forced_off: boolean;
+            /** @description True only for the current Installation Owner. */
+            owner_can_change: boolean;
+            /**
+             * Format: uuid
+             * @description Pseudonymous installation identifier, created on the first opt-in.
+             *     Reports linked by it are pseudonymous, not completely anonymous.
+             */
+            installation_reporting_id: string | null;
+            categories: {
+                usage: components["schemas"]["ReportingCategoryStatus"];
+                diagnostics: components["schemas"]["ReportingCategoryStatus"];
+            };
+        };
+        ReportingPreferencesUpdate: {
+            usage: boolean;
+            diagnostics: boolean;
+        };
+        /**
+         * @description Fixed discovery-source enumeration; there is no free-text answer.
+         * @enum {string}
+         */
+        DiscoverySource: "github" | "search_engine" | "social_media" | "video" | "article_newsletter" | "friend_word_of_mouth" | "ai_assistant" | "other" | "prefer_not_to_say";
+        FeedbackSubmission: {
+            discovery_source: components["schemas"]["DiscoverySource"];
+        };
+        ReportingFeedback: {
+            shared: boolean;
+            discovery_source: components["schemas"]["DiscoverySource"] | null;
+            /** Format: date-time */
+            submitted_at: string | null;
+            /**
+             * @description `not_shared` means no answer was ever submitted, `not_recorded`
+             *     means a local choice was saved without sharing, `pending` means the
+             *     report is queued, and `delivered` means the destination accepted it.
+             * @enum {string}
+             */
+            delivery_status: "not_shared" | "not_recorded" | "pending" | "delivered";
+        };
+        /**
+         * @description Fixed diagnostic class. `provider_failure` marks an expected Provider
+         *     condition the adapter already classified — a normal recoverable outcome
+         *     such as an expired authorization or a rate limit — and is kept separate
+         *     from unexpected application exceptions so expected conditions cannot hide
+         *     defects in Error Tracking. Every other value is an unexpected failure.
+         * @enum {string}
+         */
+        DiagnosticCategory: "unhandled_exception" | "provider_failure" | "request_failure" | "scheduled_job_failure" | "client_exception";
+        /**
+         * @description Canonical Provider failure classification, as the adapter records it.
+         *     Only meaningful with `category: provider_failure`, where it is the
+         *     countable fact behind the condition; no Provider message, status text or
+         *     response body is ever reported.
+         * @enum {string}
+         */
+        ProviderFailureClass: "ambiguous" | "auth" | "deterministic" | "quota" | "rate_limit" | "timeout" | "transient";
+        /** @enum {string} */
+        OperationCategory: "publish" | "analytics" | "inbox" | "auth" | "assets" | "queues" | "installation" | "reporting" | "other";
+        DiagnosticReportSubmission: {
+            category: components["schemas"]["DiagnosticCategory"];
+            operation: components["schemas"]["OperationCategory"];
+            platform?: components["schemas"]["Platform"];
+            provider_failure_class?: components["schemas"]["ProviderFailureClass"];
+            /** @description Error type name; sanitized to a plain identifier. */
+            error_name?: string;
+            /**
+             * @description Raw stack text. Only allowlisted application frames survive
+             *     sanitization; messages, URLs, query strings and identifiers are
+             *     dropped before transport.
+             */
+            error_stack?: string;
+        };
+        DiagnosticReportReceipt: {
+            accepted: boolean;
+            /** @enum {string} */
+            reason: "queued" | "category_disabled";
         };
         AuditEntry: {
             /** Format: uuid */
@@ -4864,6 +5156,218 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             429: components["responses"]["RateLimited"];
+        };
+    };
+    getOnboarding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current onboarding progress. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingProgress"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    saveOnboarding: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OnboardingSaveRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated onboarding progress. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingProgress"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    completeOnboarding: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Completed onboarding progress. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingProgress"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getReportingPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Member-readable reporting policy. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingPolicy"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    updateReportingPreferences: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportingPreferencesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated policy with effective status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getReportingFeedback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Attribution state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingFeedback"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    submitReportingFeedback: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackSubmission"];
+            };
+        };
+        responses: {
+            /** @description Attribution state, including delivery status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingFeedback"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    ingestDiagnosticReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiagnosticReportSubmission"];
+            };
+        };
+        responses: {
+            /** @description Ingestion decision. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiagnosticReportReceipt"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listWorkspaceAudit: {

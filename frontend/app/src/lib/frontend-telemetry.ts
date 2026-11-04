@@ -1,3 +1,5 @@
+import { applyAuthJwt } from "./auth-token";
+
 const unsafeFieldCharactersPattern = /[^a-zA-Z0-9_.-]/g;
 const configurationKeyPattern = /^[A-Z][A-Z0-9_]{0,63}$/;
 const hashPattern = /^[0-9a-f]{8,64}$/i;
@@ -16,9 +18,33 @@ export interface FrontendTelemetryDetail {
   kind: FrontendTelemetryKind;
   requestId?: string | null;
   retryable?: boolean;
+  /** Application stack frames only; see `frameLines`. */
+  stack?: string;
   status?: number;
   valueHash?: string;
   valueType?: string;
+}
+
+/** Longest frame text retained before the receiving server's own allowlist runs. */
+const maximumStackCharacters = 1_500;
+
+/**
+ * Extracts the frame lines of a stack, dropping everything else.
+ *
+ * The first line of a V8 stack is the runtime message, which can contain a Post
+ * title, an email address or a Provider error body. Only lines shaped like a
+ * frame survive, so no message text ever leaves the browser — the server keeps
+ * solely the application frames it can prove safe, and the message never becomes
+ * an exception group name.
+ *
+ * @param stack Raw stack text from an `Error`.
+ * @returns Frame lines joined with newlines, bounded, or `undefined` when empty.
+ */
+function frameLines(stack: string | undefined): string | undefined {
+  if (!stack) return undefined;
+  const frames = stack.split("\n").filter((line) => /^\s*at\s/.test(line));
+  if (frames.length === 0) return undefined;
+  return frames.join("\n").slice(0, maximumStackCharacters);
 }
 
 /**
@@ -104,10 +130,12 @@ function boundedHash(hash: string | undefined): string | undefined {
 export function reportFrontendError(error: unknown, context: string): void {
   const message = error instanceof Error ? error.message : String(error);
   const name = error instanceof Error ? error.name : "UnknownError";
+  const stack = error instanceof Error ? frameLines(error.stack) : undefined;
 
   reportFrontendTelemetry({
     field: context,
     kind: "frontend-error",
+    ...(stack ? { stack } : {}),
     valueHash: valueHash(message),
     valueType: name,
   });
@@ -154,6 +182,9 @@ export function reportFrontendTelemetry(detail: FrontendTelemetryDetail): void {
   if (detail.field) redacted.field = safeField(detail.field);
   if (detail.requestId) redacted.requestId = detail.requestId.slice(0, 128);
   if (detail.retryable !== undefined) redacted.retryable = detail.retryable === true;
+  // Already reduced to frame lines by the producer; the ceiling here is a second
+  // bound for a caller that supplies `stack` itself.
+  if (detail.stack) redacted.stack = detail.stack.slice(0, maximumStackCharacters);
   const status = boundedStatus(detail.status);
   if (status !== undefined) redacted.status = status;
   const hash = boundedHash(detail.valueHash);
@@ -169,11 +200,16 @@ export function reportFrontendTelemetry(detail: FrontendTelemetryDetail): void {
   const wireDetail = { ...redacted };
   delete wireDetail.requestId;
   try {
+    // The receiving Worker forwards only authenticated client failures to the
+    // API's consent-gated diagnostics route, so the same in-memory bearer the API
+    // client uses is stamped here. It stays same-origin and never reaches storage.
+    const headers = new Headers({ "Content-Type": "application/json" });
+    applyAuthJwt(headers);
     void globalThis
       .fetch("/__frontend-telemetry", {
         body: JSON.stringify(wireDetail),
         credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
+        headers,
         keepalive: true,
         method: "POST",
       })

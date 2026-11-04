@@ -12,6 +12,13 @@ COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git && rm -rf /var/lib/apt/lists/*
 WORKDIR /source
 ENV WRANGLER_SEND_METRICS=false CI=true
+# Maintainer improvement-reporting destination baked into the released runtime.
+# Both values are publishable deployment configuration, not secrets: the project
+# token authorizes event ingestion only. Supplied by the release workflow from
+# the maintainer's project; empty means the image ships no destination and both
+# reporting categories stay off instead of failing deployment.
+ARG REPORTING_POSTHOG_PROJECT_TOKEN=""
+ARG REPORTING_POSTHOG_HOST=""
 # Preserve isolated workspace links while caching installs independently of source.
 # Keep this manifest list aligned with the root workspace globs.
 COPY package.json bun.lock bunfig.toml ./
@@ -25,6 +32,7 @@ COPY packages/database/package.json ./packages/database/
 COPY packages/domain/package.json ./packages/domain/
 COPY packages/observability/package.json ./packages/observability/
 COPY packages/providers/package.json ./packages/providers/
+COPY packages/reporting/package.json ./packages/reporting/
 COPY packages/secrets/package.json ./packages/secrets/
 COPY packages/storage/package.json ./packages/storage/
 COPY workers/api/package.json ./workers/api/
@@ -41,7 +49,7 @@ RUN node scripts/selfhost/build.mjs && node scripts/selfhost/notices.mjs
 
 FROM runtime-dependencies AS runtime
 COPY --from=build /source/dist/selfhost ./dist/selfhost
-COPY scripts/selfhost/server.mjs scripts/selfhost/control.mjs scripts/selfhost/admin.mjs scripts/selfhost/jobs.mjs scripts/selfhost/configure.mjs ./scripts/selfhost/
+COPY scripts/selfhost/server.mjs scripts/selfhost/control.mjs scripts/selfhost/admin.mjs scripts/selfhost/jobs.mjs scripts/selfhost/configure.mjs scripts/selfhost/reporting.mjs ./scripts/selfhost/
 COPY LICENSE* THIRD_PARTY_NOTICES.md ./
 RUN mkdir /data && chown node:node /data
 USER node

@@ -75,6 +75,15 @@
   "vars": {
     "ENVIRONMENT": "local",
     "APP_URL": "http://localhost:3000",
+    // Acceptance runs point optional reporting at a controlled loopback
+    // receiver started by the journey, never at a real PostHog project. The
+    // token is a fixed non-secret fixture accepted by the configuration
+    // validator, and the root `.env` cannot override these because the
+    // launcher passes them as CLI vars.
+    "REPORTING_POSTHOG_HOST": "http://127.0.0.1:9787",
+    "REPORTING_POSTHOG_PROJECT_TOKEN": "phc_localacceptance0000000000",
+    "REPORTING_FORCED_OFF": "false",
+    "DEPLOYMENT_CATEGORY": "selfhosted",
     "VERSION": "1.0.0-acceptance.0",
   },
 }

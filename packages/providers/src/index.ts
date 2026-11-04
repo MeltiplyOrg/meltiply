@@ -12,6 +12,7 @@ import { createThreadsAdapter, THREADS_MAX_CAPTION_LENGTH } from "./threads";
 import { createTikTokAdapter, TIKTOK_MAX_CAPTION_LENGTH } from "./tiktok";
 import type {
   ProviderAdapter,
+  ProviderAnalyticsMetric,
   ProviderOperationResult,
   ProviderPublicationStatus,
   ProviderRequestContext,
@@ -239,6 +240,19 @@ export class ProviderRegistry {
    */
   get(platform: Platform): ProviderAdapter | undefined {
     return this.#adapters.get(platform);
+  }
+
+  /**
+   * Returns the metrics whose stored zero this Platform's adapter cannot vouch for.
+   *
+   * A missing adapter declares nothing ambiguous: it reports no analytics at all,
+   * which coverage states separately.
+   *
+   * @param platform - Platform whose adapter is consulted.
+   * @returns Ambiguous metric names, empty when the adapter sets none.
+   */
+  ambiguousZeroMetrics(platform: Platform): readonly ProviderAnalyticsMetric[] {
+    return this.#adapters.get(platform)?.ambiguousZeroMetrics ?? [];
   }
 
   /**

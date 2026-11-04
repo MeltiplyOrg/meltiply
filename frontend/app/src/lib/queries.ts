@@ -33,6 +33,7 @@ import type {
   CalendarEvent,
   CreateBrandProfileInput,
   CreatePostInput,
+  DiscoverySource,
   DistributionQueryParams,
   OAuthSelectionConfirmRequest,
   Platform,
@@ -101,6 +102,9 @@ export const queryKeys = {
   installation: () => ["installation"] as const,
   workspaceMembers: () => ["workspace-members"] as const,
   workspaceInvitations: () => ["workspace-invitations"] as const,
+  onboarding: () => ["onboarding"] as const,
+  reportingPolicy: () => ["reporting-policy"] as const,
+  reportingFeedback: () => ["reporting-feedback"] as const,
   workspaceAudit: (params?: AuditQueryParams) =>
     params === undefined
       ? (["workspace-audit"] as const)
@@ -1827,4 +1831,98 @@ export function useInvitationPreview(token: string | null) {
       ),
     enabled: token !== null && token.length >= 16,
   });
+}
+
+/** Reads resumable progress only for a signed-in Installation Owner. */
+export function useOnboarding(scope: SessionScope, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.onboarding(),
+    queryFn: ({ signal }) => runApiQuery(scope, (api) => api.getOnboarding(), signal),
+    enabled: scope.isSignedIn && enabled,
+  });
+}
+
+/** Persists the reached screen with an idempotency key and refreshes progress. */
+export function useSaveOnboarding(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, input: { step: "improvement" | "ready" }, idempotencyKey) =>
+      api.saveOnboarding(input, { idempotencyKey }),
+    () => [queryKeys.onboarding()],
+  );
+}
+
+/** Completes setup before navigation into the chosen Workspace flow. */
+export function useCompleteOnboarding(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, _input: Record<string, never>, idempotencyKey) =>
+      api.completeOnboarding({ idempotencyKey }),
+    () => [queryKeys.onboarding()],
+  );
+}
+
+/**
+ * Reads the installation improvement-reporting policy. Every active member may
+ * read it so the Owner's choice and its effective state stay visible.
+ *
+ * @param scope Session scope gating execution.
+ * @param enabled Whether the query may run.
+ * @returns Query result with the requested and effective policy.
+ */
+export function useReportingPolicy(scope: SessionScope, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.reportingPolicy(),
+    queryFn: ({ signal }) => runApiQuery(scope, (api) => api.getReportingPolicy(), signal),
+    enabled: scope.isSignedIn && enabled,
+  });
+}
+
+/**
+ * Replaces both reporting choices for the current Installation Owner. The
+ * response carries the effective state, so the surface can report a disabled
+ * destination or operator override honestly.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting the independent usage and diagnostics choices.
+ */
+export function useUpdateReportingPreferences(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, input: { diagnostics: boolean; usage: boolean }, idempotencyKey) =>
+      api.updateReportingPreferences(input, { idempotencyKey }),
+    () => [queryKeys.reportingPolicy()],
+  );
+}
+
+/**
+ * Reads the one-time discovery-source answer and its delivery state. Owner
+ * only, because the answer belongs to the installation.
+ *
+ * @param scope Session scope gating execution.
+ * @param enabled Whether the query may run.
+ * @returns Query result with the attribution state.
+ */
+export function useReportingFeedback(scope: SessionScope, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.reportingFeedback(),
+    queryFn: ({ signal }) => runApiQuery(scope, (api) => api.getReportingFeedback(), signal),
+    enabled: scope.isSignedIn && enabled,
+  });
+}
+
+/**
+ * Shares the fixed-enum discovery-source answer as a separate explicit action.
+ * It never changes either reporting switch.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting the fixed discovery-source value.
+ */
+export function useSubmitReportingFeedback(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, input: { discoverySource: DiscoverySource }, idempotencyKey) =>
+      api.submitReportingFeedback({ discovery_source: input.discoverySource }, { idempotencyKey }),
+    () => [queryKeys.reportingFeedback()],
+  );
 }

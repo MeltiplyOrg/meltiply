@@ -26,7 +26,14 @@ import { ReportingSettings } from "@/components/settings/reporting-settings";
 import { PublishingPreferencesSection } from "@/components/settings/publishing-preferences-section";
 import SettingsPage from "@/app/(dashboard)/settings/page";
 
-const SECTION_IDS = ["appearance", "language", "publishing", "account", "privacy", "security"] as const;
+const SECTION_IDS = [
+  "appearance",
+  "language",
+  "publishing",
+  "account",
+  "privacy",
+  "security",
+] as const;
 type SettingsSection = (typeof SECTION_IDS)[number] | "administration";
 const LANGUAGE_CODES = supportedLanguages.map(({ code }) => code);
 

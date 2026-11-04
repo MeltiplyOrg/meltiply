@@ -136,15 +136,6 @@ export interface ReportingServiceOptions {
   readonly now?: () => Date;
 }
 
-const emptySummary: DeliverySummary = {
-  claimed: 0,
-  delivered: 0,
-  discarded: 0,
-  failed: 0,
-  released: 0,
-  skipped: 0,
-};
-
 /**
  * Transaction-scoped advisory lock serializing every reporting mutation.
  *

@@ -3,7 +3,7 @@ import type { EffectTransactionClient } from "@meltiply/database";
 import {
   createPostHogTransport,
   createReportingServiceLive,
-  ReportingService,
+  type ReportingService,
   reportingConfiguration,
   type ReportingTransactionRunner,
 } from "@meltiply/reporting";

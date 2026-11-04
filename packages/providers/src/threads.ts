@@ -293,7 +293,7 @@ function requiredPostId(lookup: ProviderPublicationLookup): string {
 
 /**
  * Instantiates a ProviderAdapter for Threads publishing, replies, comments, and analytics.
- * Configures Graph API endpoints on graph.threads.net, container creation and publication flow,
+ * Configures Graph API endpoints, container creation and publication flow,
  * rate limit extraction, token refreshes, and optional engagement method exclusion.
  * Returns configured ProviderAdapter conforming to Meltiply contracts.
  */

@@ -3,6 +3,8 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+const codeFencePattern = /^\s{0,3}(`{3,}|~{3,})/u;
+
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 /**
@@ -46,8 +48,6 @@ const exempt = [
   /^LICENSE\.md$/u,
   /^THIRD_PARTY_NOTICES\.md$/u,
   /^LICENSES\//u,
-  /^docs\/research\//u,
-  /^docs\/benchmarks\//u,
   /third-party-notices\.txt$/u,
   /^CHANGELOG\.md$/u,
 ];
@@ -76,7 +76,7 @@ function isExempt(path) {
 function markdownLines(content) {
   let fence;
   return content.split("\n").map((line, index) => {
-    const marker = line.match(/^\s{0,3}(`{3,}|~{3,})/u)?.[1];
+    const marker = line.match(codeFencePattern)?.[1];
     if (marker) {
       const isCloser =
         fence !== undefined &&

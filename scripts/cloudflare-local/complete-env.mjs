@@ -5,14 +5,19 @@ import { randomBytes } from "node:crypto";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { parseEnv } from "node:util";
 
+const secretAssignments = [
+  ["BETTER_AUTH_SECRET", /^(?:export[ \t]+)?BETTER_AUTH_SECRET[ \t]*=.*$/m],
+  ["AUTH_SETUP_SECRET", /^(?:export[ \t]+)?AUTH_SETUP_SECRET[ \t]*=.*$/m],
+  ["TOKEN_ENCRYPTION_KEY", /^(?:export[ \t]+)?TOKEN_ENCRYPTION_KEY[ \t]*=.*$/m],
+];
+
 const target = process.argv[2] || ".env";
 let content = await readFile(target, "utf8");
 const environment = parseEnv(content);
 const generated = [];
-for (const name of ["BETTER_AUTH_SECRET", "AUTH_SETUP_SECRET", "TOKEN_ENCRYPTION_KEY"]) {
+for (const [name, existing] of secretAssignments) {
   if (environment[name]?.trim()) continue;
   const assignment = `${name}=${randomBytes(32).toString("base64url")}`;
-  const existing = new RegExp(`^(?:export[ \\t]+)?${name}[ \\t]*=.*$`, "m");
   content = existing.test(content)
     ? content.replace(existing, assignment)
     : `${content.endsWith("\n") ? content : `${content}\n`}${assignment}\n`;

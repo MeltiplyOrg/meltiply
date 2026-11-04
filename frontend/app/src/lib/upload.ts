@@ -24,6 +24,8 @@ import type {
   UploadSessionResponse,
 } from "@/types";
 
+const filenameExtensionPattern = /\.[^.]+$/;
+
 type SignedRequest = NonNullable<UploadSession["single_upload"]>;
 type SignedPart = CreateUploadPartsResponse["parts"][number];
 
@@ -406,7 +408,7 @@ function sessionInput(file: File, brandProfileId: string): CreateUploadSessionIn
     content_type: file.type,
     file_size: file.size,
     filename: file.name,
-    title: file.name.replace(/\.[^.]+$/, "") || file.name,
+    title: file.name.replace(filenameExtensionPattern, "") || file.name,
   };
 }
 

@@ -967,10 +967,9 @@ const posts = [
         );
         const sections = items
           .map((item) => {
-            const url = new URL(item.href, window.location.origin);
-            if (!url.hash) return null;
+            if (!item.hash) return null;
             const target = document.getElementById(
-              decodeURIComponent(url.hash.slice(1)),
+              decodeURIComponent(item.hash.slice(1)),
             );
             return target ? { item, target } : null;
           })

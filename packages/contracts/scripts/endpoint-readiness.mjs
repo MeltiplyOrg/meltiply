@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 
 import YAML from "yaml";
 
+const unsafeEvidenceCharactersPattern = /[\r\n|]/u;
+const headerLineBreakPattern = /[\r\n]/u;
+
 const scriptPath = fileURLToPath(import.meta.url);
 const contractRoot = resolve(dirname(scriptPath), "..");
 
@@ -147,7 +150,7 @@ function validateOperationReadiness(operationId, readiness) {
     typeof readiness.evidenceAndGate !== "string" ||
     readiness.evidenceAndGate.trim() !== readiness.evidenceAndGate ||
     readiness.evidenceAndGate.length === 0 ||
-    /[\r\n|]/u.test(readiness.evidenceAndGate)
+    unsafeEvidenceCharactersPattern.test(readiness.evidenceAndGate)
   ) {
     throw new Error(
       `${subject}.evidenceAndGate must be a non-empty, single-line Markdown table value`,
@@ -236,7 +239,7 @@ export function validateReadinessCatalog(openApi, catalog) {
 function evidenceRequestHeaders(url, environment) {
   const authorization = environment.MELTIPLY_READINESS_EVIDENCE_AUTHORIZATION?.trim();
   if (!authorization) return undefined;
-  if (/[\r\n]/u.test(authorization)) {
+  if (headerLineBreakPattern.test(authorization)) {
     throw new Error("MELTIPLY_READINESS_EVIDENCE_AUTHORIZATION must be one HTTP header value");
   }
 

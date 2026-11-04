@@ -1,3 +1,5 @@
+const nonAlphanumericPattern = /[^a-z0-9]/g;
+
 /**
  * Canonical component ownership tables shared by the `boundaries/*` oxlint
  * plugin and `lint/astro-ui-contract.mjs`, so React and Astro surfaces enforce
@@ -11,7 +13,7 @@
 
 /** Converts platform separators so path matching works under oxlint anywhere. */
 export function normalizePath(path) {
-  return String(path ?? "").replace(/\\/g, "/");
+  return String(path ?? "").replaceAll("\\", "/");
 }
 
 /** Returns a file's stem without its final extension (`foo.test.tsx` → `foo.test`). */
@@ -23,7 +25,7 @@ export function stemOf(path) {
 
 /** Folds stems so `BrandMark`, `brand-mark`, and `brand_mark` all collide. */
 export function normalizeStem(stem) {
-  return stem.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return stem.toLowerCase().replace(nonAlphanumericPattern, "");
 }
 
 /** Flat-export owners: normalized stem → dir under shared/src/components/. */

@@ -49,6 +49,8 @@ import type { OutboxRelayResult } from "./outbox";
 import type { ProviderDueResult } from "./provider-sync";
 import type { RetentionResult } from "./retention";
 
+const publishQueuePattern = /publish-(facebook|instagram|threads|tiktok|youtube)(?:-|$)/;
+
 /**
 
  * Bound on the eager relay a single API request performs. Anything left behind
@@ -384,7 +386,7 @@ function queueJob(body: unknown): string {
  * @returns Extracted provider name string, or undefined if the queue is not provider-specific.
  */
 function queueProvider(queue: string): string | undefined {
-  return /publish-(facebook|instagram|threads|tiktok|youtube)(?:-|$)/.exec(queue)?.[1];
+  return publishQueuePattern.exec(queue)?.[1];
 }
 
 /**

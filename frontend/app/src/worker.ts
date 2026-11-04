@@ -1,5 +1,11 @@
 import { createRequestId, createTraceId, log } from "@meltiply/observability";
 
+const unsafeFieldCharactersPattern = /[^a-zA-Z0-9_.-]/g;
+const hashPattern = /^[0-9a-f]{8,64}$/i;
+const configurationKeyPattern = /^[A-Z][A-Z0-9_]{0,63}$/;
+const sessionCookiePattern = /^(?:__Secure-|__Host-)?better-auth\.session_token$/;
+const integerPattern = /^\d+$/;
+
 interface Env {
   API?: { fetch(request: Request): Promise<Response> };
   API_ORIGIN?: string;
@@ -72,7 +78,7 @@ function invalidTelemetryResponse(status: 400 | 403 | 405 | 413): Response {
  */
 function safeField(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length === 0) return undefined;
-  return value.replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 64);
+  return value.replace(unsafeFieldCharactersPattern, "_").slice(0, 64);
 }
 
 /**
@@ -94,7 +100,7 @@ function safeStatus(value: unknown): number | undefined {
  * @returns Normalized lowercase hash string or `undefined` if invalid.
  */
 function safeHash(value: unknown): string | undefined {
-  return typeof value === "string" && /^[0-9a-f]{8,64}$/i.test(value)
+  return typeof value === "string" && hashPattern.test(value)
     ? value.slice(0, 64).toLowerCase()
     : undefined;
 }
@@ -106,7 +112,7 @@ function safeHash(value: unknown): string | undefined {
  * @returns Validated key name or `undefined` if invalid.
  */
 function safeConfigurationKey(value: unknown): string | undefined {
-  return typeof value === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : undefined;
+  return typeof value === "string" && configurationKeyPattern.test(value) ? value : undefined;
 }
 
 /**
@@ -147,7 +153,7 @@ function stripBetterAuthCookies(cookieHeader: string | null): string | null {
     .filter((part) => {
       if (part.length === 0) return false;
       const name = part.split("=", 1)[0]?.trim() ?? "";
-      return !/^(?:__Secure-|__Host-)?better-auth\.session_token$/.test(name);
+      return !sessionCookiePattern.test(name);
     });
   return kept.length > 0 ? kept.join("; ") : null;
 }
@@ -267,7 +273,7 @@ async function readTelemetryBody(request: Request): Promise<string | 413 | null>
 async function handleTelemetry(request: Request, env: Env): Promise<Response> {
   const contentLength = request.headers.get("Content-Length");
   if (contentLength !== null) {
-    if (!/^\d+$/.test(contentLength)) return invalidTelemetryResponse(400);
+    if (!integerPattern.test(contentLength)) return invalidTelemetryResponse(400);
     if (Number(contentLength) > maximumTelemetryBodyBytes) {
       return invalidTelemetryResponse(413);
     }
@@ -328,7 +334,7 @@ async function handleTelemetry(request: Request, env: Env): Promise<Response> {
   const requestId = createRequestId();
   const traceId = createTraceId();
   const retryClass = payload.retryable === true ? "client_retry" : "none";
-  const errorCode = safeField(payload.code) ?? payload.kind.replace(/-/g, "_");
+  const errorCode = safeField(payload.code) ?? payload.kind.replaceAll("-", "_");
   const status = safeStatus(payload.status);
   const field = safeField(payload.field);
   const hash = safeHash(payload.valueHash);

@@ -95,7 +95,7 @@ function ChartContainer({
   ...props
 }: Readonly<ChartContainerProps>) {
   const uniqueId = React.useId();
-  const chartId = `chart-${id ?? uniqueId.replace(/:/g, "")}`;
+  const chartId = `chart-${id ?? uniqueId.replaceAll(":", "")}`;
 
   // Validate chart config at runtime
   validateChartConfigColors(config);

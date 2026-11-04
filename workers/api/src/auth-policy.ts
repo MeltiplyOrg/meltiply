@@ -10,6 +10,8 @@ import {
 } from "./device-authorization";
 import { requiresEmailVerification, type ApiWorkerEnv } from "./env";
 
+const controlCharactersPattern = /[\x00-\x1F\x7F]/;
+
 /** Reads only the installation's public initialized bit; never returns owner details. */
 async function installationInitialized(env: ApiWorkerEnv): Promise<boolean> {
   // Exception: pg cannot be loaded in workerd unit-test isolates.
@@ -133,7 +135,7 @@ async function profileValidationResponse(request: Request): Promise<Response | n
     (typeof body.name !== "string" ||
       !body.name.trim() ||
       body.name.length > 100 ||
-      /[\x00-\x1F\x7F]/.test(body.name))
+      controlCharactersPattern.test(body.name))
   ) {
     return Response.json(
       { message: "Name must contain 1–100 characters without control characters." },
@@ -145,8 +147,7 @@ async function profileValidationResponse(request: Request): Promise<Response | n
     body.image !== null &&
     (typeof body.image !== "string" ||
       body.image.length > 2048 ||
-      !URL.canParse(body.image) ||
-      new URL(body.image).protocol !== "https:")
+      URL.parse(body.image)?.protocol !== "https:")
   ) {
     return Response.json(
       { message: "Profile image must be an HTTPS URL of at most 2048 characters." },

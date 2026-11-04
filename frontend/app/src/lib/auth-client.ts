@@ -108,9 +108,11 @@ function requestDeviceAuthorization(
   init: RequestInit,
   query?: URLSearchParams,
 ): Promise<Response> {
-  const url = new URL(`/api/auth/${endpoint}`, getApiBaseUrl());
-  if (query) url.search = query.toString();
-  return fetch(url.toString(), { ...init, credentials: "include" });
+  const search = query?.toString();
+  return fetch(`${getApiBaseUrl()}/api/auth/${endpoint}${search ? `?${search}` : ""}`, {
+    ...init,
+    credentials: "include",
+  });
 }
 
 /**

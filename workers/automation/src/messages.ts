@@ -1,3 +1,5 @@
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export interface OutboxMessage {
   attempt?: number;
   aggregate_id: string;
@@ -47,10 +49,7 @@ function record(value: unknown): value is Record<string, unknown> {
  * @returns True if value is a valid UUID string.
  */
 function uuid(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
-  );
+  return typeof value === "string" && uuidPattern.test(value);
 }
 
 /**

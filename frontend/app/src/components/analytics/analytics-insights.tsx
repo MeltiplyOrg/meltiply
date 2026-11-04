@@ -32,6 +32,10 @@ import type {
   Platform,
 } from "@/types";
 
+const pathTokenPattern = /[A-Za-z]|-?\d*\.?\d+(?:e[-+]?\d+)?/gi;
+const pathCommandPattern = /[A-Za-z]/;
+const cssPathPattern = /^path\("(.*)"\)$/;
+
 const GROUPINGS = ["day", "week", "month"] as const;
 
 type Grouping = (typeof GROUPINGS)[number];
@@ -210,14 +214,14 @@ interface PathCommand {
  * sampling the previous shape.
  */
 function readPathCommands(d: string): PathCommand[] {
-  const tokens = d.match(/[A-Za-z]|-?\d*\.?\d+(?:e[-+]?\d+)?/gi) ?? [];
+  const tokens = d.match(pathTokenPattern) ?? [];
   const commands: PathCommand[] = [];
   let index = 0;
   let active = "";
   const number = () => Number(tokens[index++]);
   while (index < tokens.length) {
     const token = tokens[index]!;
-    if (/[A-Za-z]/.test(token)) {
+    if (pathCommandPattern.test(token)) {
       active = token;
       index += 1;
       if (active === "Z") continue;
@@ -247,7 +251,7 @@ function readPathCommands(d: string): PathCommand[] {
 /** Reads a line path's current shape, including an in-flight morph. */
 function readLinePath(path: SVGPathElement): string {
   const computed = path.ownerDocument.defaultView?.getComputedStyle(path).d;
-  const animated = computed?.match(/^path\("(.*)"\)$/)?.[1];
+  const animated = computed?.match(cssPathPattern)?.[1];
   return animated ?? path.getAttribute("d") ?? "";
 }
 

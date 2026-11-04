@@ -6,6 +6,9 @@ import { readJsonFile, sha256, writeEvidence } from "./release-guard.mjs";
 import { readBoundedJsonResponse } from "./release-http.mjs";
 import { normalizeNeonDatabaseHostname, validateDatabaseEnvironment } from "./release-lib.mjs";
 
+const unsafeEnvironmentValuePattern = /[\u0000-\u0020\u007f]/;
+const sha256Pattern = /^[0-9a-f]{64}$/;
+
 const apiBase = "https://console.neon.tech/api/v2";
 const identifierPattern = /^[a-z0-9-]{1,60}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -64,7 +67,7 @@ function protectedEnvironment(environment, spec) {
     token.length < 20 ||
     token.length > 4096 ||
     token.trim() !== token ||
-    /[\u0000-\u0020\u007f]/.test(token)
+    unsafeEnvironmentValuePattern.test(token)
   ) {
     throw new TypeError("NEON_API_KEY is required for restore-point creation");
   }
@@ -491,8 +494,8 @@ function validateRestorePointEvidence(evidence, { approvals, environment, planDi
     throw new TypeError("restore-point snapshot_name is invalid");
   }
   if (
-    !/^[0-9a-f]{64}$/.test(evidence.snapshot_digest) ||
-    !/^[0-9a-f]{64}$/.test(evidence.endpoint_host_digest)
+    !sha256Pattern.test(evidence.snapshot_digest) ||
+    !sha256Pattern.test(evidence.endpoint_host_digest)
   ) {
     throw new TypeError("restore-point snapshot_digest is invalid");
   }

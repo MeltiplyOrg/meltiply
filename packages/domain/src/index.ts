@@ -1,4 +1,7 @@
 import type { components } from "@meltiply/contracts/schema";
+
+const unsafeFilenamePattern = /(^\.{1,2}$)|[\\/\u0000-\u001f\u007f]/;
+
 export {
   analyticsTerminalAgeSeconds,
   demandDrivenCommentsAgeSeconds,
@@ -273,7 +276,7 @@ export function validateUpload(input: {
   filename: string;
 }): ValidatedUpload {
   const filename = input.filename.trim();
-  if (!filename || filename.length > 255 || /(^\.{1,2}$)|[\\/\u0000-\u001f\u007f]/.test(filename)) {
+  if (!filename || filename.length > 255 || unsafeFilenamePattern.test(filename)) {
     throw new AssetPolicyError(
       "invalid_filename",
       "filename must be a safe single path segment of at most 255 characters",

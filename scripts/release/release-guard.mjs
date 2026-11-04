@@ -4,6 +4,10 @@ import path from "node:path";
 
 import { releaseInternals } from "./release-lib.mjs";
 
+const approvalActorPattern = /^[A-Za-z0-9][A-Za-z0-9@._+ -]{0,127}$/;
+const approvalEnvironmentPattern = /^staging-[a-z0-9-]+-approval$/;
+const evidenceFilenamePattern = /^[a-z0-9][a-z0-9.-]*\.json$/;
+
 const gitShaPattern = /^[0-9a-f]{40}$/;
 const planDigestPattern = /^[0-9a-f]{64}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -126,11 +130,11 @@ export function validateApprovalMetadata(input, spec) {
   const job = plainObject(approval.approval_job, "approval metadata approval_job");
   exactKeys(job, approvalJobKeys, "approval metadata approval_job");
   matchedString(job.id, uuidPattern, "approval metadata approval_job.id");
-  matchedString(job.approved_by, /^[A-Za-z0-9][A-Za-z0-9@._+ -]{0,127}$/, "approval operator");
+  matchedString(job.approved_by, approvalActorPattern, "approval operator");
   if (job.status !== "success") {
     throw new TypeError("approval metadata approval_job.status must be success");
   }
-  if (typeof job.name !== "string" || !/^staging-[a-z0-9-]+-approval$/.test(job.name)) {
+  if (typeof job.name !== "string" || !approvalEnvironmentPattern.test(job.name)) {
     throw new TypeError("approval metadata approval_job.name is invalid");
   }
 
@@ -379,7 +383,7 @@ export function assertIacState(iac, phase, spec) {
  * @throws {TypeError} If filename pattern is invalid
  */
 export async function writeEvidence(outDir, filename, value) {
-  if (!/^[a-z0-9][a-z0-9.-]*\.json$/.test(filename)) {
+  if (!evidenceFilenamePattern.test(filename)) {
     throw new TypeError("evidence filename is invalid");
   }
   await mkdir(outDir, { mode: 0o700, recursive: true });

@@ -38,6 +38,13 @@ import type {
   PublishInput,
 } from "./types";
 
+const operationPattern =
+  /^(ab_test|live|finish_submitted|finishing|post|post_draft|reel_draft|story|upload_submitted|uploaded|video|video_draft):(.+)$/;
+const uploadPathPattern = /^\/video-upload\/v\d+\.\d+\/(.+)$/;
+const numericIdPattern = /^\d+$/;
+const vanityHandlePattern = /^[A-Za-z0-9.]{1,255}$/;
+const pageTaskPattern = /^[A-Z][A-Z0-9_]{0,127}$/;
+
 const graphOrigin = "https://graph.facebook.com";
 const uploadOrigin = "https://rupload.facebook.com";
 const authorizationOrigin = "https://www.facebook.com";
@@ -161,9 +168,7 @@ function operationId(phase: FacebookOperationPhase, id: string): string {
  */
 function parseOperationId(value: unknown): FacebookOperation | undefined {
   const normalized = providerIdentifier(value);
-  const match = normalized?.match(
-    /^(ab_test|live|finish_submitted|finishing|post|post_draft|reel_draft|story|upload_submitted|uploaded|video|video_draft):(.+)$/,
-  );
+  const match = normalized?.match(operationPattern);
   const id = providerIdentifier(match?.[2]);
   return match && id ? { id, phase: match[1] as FacebookOperationPhase } : undefined;
 }
@@ -243,14 +248,12 @@ function encodeRefreshSecret(value: RefreshSecret): string {
  * Returns canonical upload URL string. Throws ProviderAdapterError if origin or path is invalid.
  */
 function validateUploadUrl(value: unknown, videoId: string): string {
-  const normalized = secureUrl(value);
-  if (!normalized) throw malformed();
-  const url = new URL(normalized);
-  const escapedId = videoId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const url = secureUrl(value);
+  if (!url) throw malformed();
   if (
     url.origin !== uploadOrigin ||
     url.search ||
-    !new RegExp(`^/video-upload/v\\d+\\.\\d+/${escapedId}$`).test(url.pathname)
+    uploadPathPattern.exec(url.pathname)?.[1] !== videoId
   ) {
     throw malformed();
   }
@@ -281,7 +284,7 @@ function remoteVideoInput(input: PublishInput): {
     );
   }
   const contentType = media.contentType.split(";", 1)[0]!.toLowerCase();
-  const mediaUrl = secureUrl(media.url);
+  const mediaUrl = secureUrl(media.url)?.href;
   if (
     !["video/mp4", "video/quicktime"].includes(contentType) ||
     !Number.isSafeInteger(media.fileSize) ||
@@ -317,7 +320,7 @@ function photoUrl(media: ProviderMedia): string {
       classifyProviderFailure({ code: "facebook_photo_invalid", status: 400 }),
     );
   }
-  return url;
+  return url.href;
 }
 
 /** Accepts string IDs and safe numeric Story IDs without losing integer precision. */
@@ -485,7 +488,7 @@ function facebookVanityHandle(link: unknown): string | undefined {
       return undefined;
     }
     const candidate = segments[0]!;
-    if (/^\d+$/.test(candidate) || !/^[A-Za-z0-9.]{1,255}$/.test(candidate)) {
+    if (numericIdPattern.test(candidate) || !vanityHandlePattern.test(candidate)) {
       return undefined;
     }
     if (RESERVED_FACEBOOK_PATHS[candidate.toLowerCase()]) {
@@ -815,9 +818,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
             if (
               !Array.isArray(tasks) ||
               tasks.length > 32 ||
-              tasks.some(
-                (task) => typeof task !== "string" || !/^[A-Z][A-Z0-9_]{0,127}$/.test(task),
-              )
+              tasks.some((task) => typeof task !== "string" || !pageTaskPattern.test(task))
             ) {
               throw oauthMalformed("page_tasks");
             }
@@ -827,7 +828,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
             const pictureData = record(picture?.data);
             const rawAvatar =
               pictureData?.url ?? (typeof page?.picture === "string" ? page.picture : undefined);
-            const avatarUrl = secureUrl(rawAvatar);
+            const avatarUrl = secureUrl(rawAvatar)?.href;
             const username = facebookVanityHandle(page?.link);
 
             if (tasks.includes("CREATE_CONTENT") || tasks.includes("PROFILE_PLUS_CREATE_CONTENT")) {
@@ -888,7 +889,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
             throw oauthMalformed("page_pagination");
           }
 
-          if (nextUrl.origin !== new URL(graphOrigin).origin) {
+          if (nextUrl.origin !== graphOrigin) {
             throw oauthMalformed("page_pagination");
           }
 
@@ -1240,7 +1241,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
           if (storyPostId(story?.media_id) !== operation.id) continue;
           const id = storyPostId(story?.post_id);
           if (!id || !["PUBLISHED", "ARCHIVED"].includes(String(story?.status))) throw malformed();
-          const permalink = secureUrl(story?.url);
+          const permalink = secureUrl(story?.url)?.href;
           return {
             state: "published",
             result: {

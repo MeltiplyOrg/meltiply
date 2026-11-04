@@ -28,6 +28,9 @@ import {
   stemOf,
 } from "./ui-contract-lib.mjs";
 
+const appComponentPathPattern = /\/frontend\/app\/src\/components\/(ui|atoms|primitives)\//;
+const sharedComponentPathPattern = /\/frontend\/shared\/src\/components\/(ui|atoms|primitives)\//;
+
 /**
  * Color-capable Tailwind utility families shared by both class-name color rules.
  *
@@ -246,9 +249,7 @@ const boundariesPlugin = {
         return {
           Program(node) {
             const stem = stemOf(filename);
-            const retired = filename.match(
-              /\/frontend\/app\/src\/components\/(ui|atoms|primitives)\//,
-            );
+            const retired = filename.match(appComponentPathPattern);
             if (retired) {
               if (SANCTIONED_APP_COMPONENTS[retired[1]]?.[stem] === true) return;
               context.report({
@@ -260,9 +261,7 @@ const boundariesPlugin = {
             }
             if (!filename.includes("/frontend/")) return;
             if (filename.includes("/frontend/shared/")) {
-              const flat = filename.match(
-                /\/frontend\/shared\/src\/components\/(ui|atoms|primitives)\//,
-              );
+              const flat = filename.match(sharedComponentPathPattern);
               const owner = flat && CANONICAL_FLAT_OWNERS[normalizeStem(stem)];
               if (flat && owner && owner !== flat[1]) {
                 context.report({

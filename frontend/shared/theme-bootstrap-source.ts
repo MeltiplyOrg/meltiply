@@ -35,6 +35,6 @@ export function renderThemeBootstrap(runtime: string, settings: ThemeBootstrapSe
     themePreferenceAttribute,
     themeQueryParam,
     themeStorageKey,
-  }).replace(/</g, "\\u003c");
+  }).replaceAll("<", "\\u003c");
   return `window.__meltiplyThemeBootstrapOptions = ${options};\n${runtime}`;
 }

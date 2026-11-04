@@ -176,7 +176,7 @@ export function EvilBarChart<
   loadingBars,
   xDataKey,
 }: EvilBarChartProps<TData, TConfig>) {
-  const chartId = useId().replace(/:/g, ""); // colon-free id keeps CSS/SVG selectors valid
+  const chartId = useId().replaceAll(":", ""); // colon-free id keeps CSS/SVG selectors valid
   // Anchors the grow-in to a fixed moment so it plays exactly once — re-renders
   // and Recharts' bar remounts read elapsed time from here instead of replaying.
   // Lazy useState stamps the time once, on the initial render only.
@@ -345,7 +345,7 @@ function Bar({
     selectDataKey,
     isMouseInChart,
   } = useBarChart();
-  const id = useId().replace(/:/g, ""); // unique id scopes this bar's style defs
+  const id = useId().replaceAll(":", ""); // unique id scopes this bar's style defs
   // Devices set to "reduce motion" skip the grow-in animation entirely
   const shouldReduceMotion = useReducedMotion();
 

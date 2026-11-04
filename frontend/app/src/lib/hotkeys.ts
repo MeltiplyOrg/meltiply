@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 
+const applePlatformPattern = /mac|iphone|ipad|ipod/i;
+
 /**
  * A keyboard shortcut declared once so its handler and its on-screen hint read
  * from the same definition and cannot drift apart.
@@ -34,7 +36,7 @@ export function isApplePlatform(): boolean {
   const agentPlatform = (navigator as Navigator & { userAgentData?: { platform?: string } })
     .userAgentData?.platform;
   const platform = agentPlatform || navigator.platform || navigator.userAgent || "";
-  return /mac|iphone|ipad|ipod/i.test(platform);
+  return applePlatformPattern.test(platform);
 }
 
 /**

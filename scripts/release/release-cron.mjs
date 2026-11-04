@@ -7,6 +7,9 @@ import { readJsonFile, sha256, writeEvidence } from "./release-guard.mjs";
 import { readBoundedResponseBody } from "./release-http.mjs";
 import { releaseInternals } from "./release-lib.mjs";
 
+const controlCharactersPattern = /[\u0000-\u001f\u007f]/;
+const unsafeApiTokenPattern = /[\u0000-\u0020\u007f]/;
+
 const phaseNames = new Set(["cron-activate", "cron-pause"]);
 const maximumResponseBytes = 64 * 1024;
 const rfc3339Pattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -60,7 +63,7 @@ function cronSet(value, name) {
       schedule.length === 0 ||
       schedule.length > 256 ||
       schedule.trim() !== schedule ||
-      /[\u0000-\u001f\u007f]/.test(schedule)
+      controlCharactersPattern.test(schedule)
     ) {
       throw new TypeError(`${name}[${index}] is invalid`);
     }
@@ -152,7 +155,7 @@ function apiToken(environment) {
     token.length < 20 ||
     token.length > 4096 ||
     token.trim() !== token ||
-    /[\u0000-\u0020\u007f]/.test(token)
+    unsafeApiTokenPattern.test(token)
   ) {
     throw new TypeError("CLOUDFLARE_API_TOKEN is required for Cron proof");
   }

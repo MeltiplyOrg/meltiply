@@ -52,13 +52,11 @@ test("accepts current-state prose and ignores code and exempt files", () => {
       "Nothing like `Implementation note (2026-10-19)` belongs in prose.",
     ].join("\n"),
     "LICENSE.md": "Implementation note (2026-10-19): legal text is never scanned.",
-    "docs/research/finding.md": "Measured on 2026-10-19 during the investigation.",
     "THIRD_PARTY_NOTICES.md": "These supersede the statements below.",
   });
   const findings = collectDisciplineFindings(root, [
     "guide.md",
     "LICENSE.md",
-    "docs/research/finding.md",
     "THIRD_PARTY_NOTICES.md",
   ]);
   assert.deepEqual(findings, []);

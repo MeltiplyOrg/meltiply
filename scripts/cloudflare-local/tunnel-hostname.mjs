@@ -32,6 +32,13 @@
 //                             [--coverage] [--shared] [--tunnel-name]
 import { execFileSync } from "node:child_process";
 
+const unsafeLabelCharactersPattern = /[^a-z0-9-]+/g;
+const repeatedHyphensPattern = /-+/g;
+const edgeHyphensPattern = /^-+|-+$/g;
+const trailingHyphensPattern = /-+$/g;
+const hostnamePattern = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+const tunnelNamePattern = /^[a-zA-Z0-9._-]+$/;
+
 /** RFC 1035 label ceiling; a single label cannot exceed it. */
 const maximumLabelLength = 63;
 /** Hostname kinds this script can derive, in the order a human reads them. */
@@ -63,11 +70,11 @@ const maximumBranchLabelLength = 40;
 export function branchLabelFrom(branch) {
   const normalized = branch
     .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "")
+    .replace(unsafeLabelCharactersPattern, "-")
+    .replace(repeatedHyphensPattern, "-")
+    .replace(edgeHyphensPattern, "")
     .slice(0, maximumBranchLabelLength)
-    .replace(/-+$/g, "");
+    .replace(trailingHyphensPattern, "");
   if (!normalized) {
     throw new Error(`branch name ${JSON.stringify(branch)} has no DNS-safe characters`);
   }
@@ -91,7 +98,7 @@ export function assertValidHostname(hostname) {
     if (label.length > maximumLabelLength) {
       throw new Error(`hostname label exceeds ${maximumLabelLength} characters: ${label}`);
     }
-    if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label)) {
+    if (!hostnamePattern.test(label)) {
       throw new Error(`hostname label is not DNS-safe: ${label}`);
     }
   }
@@ -189,7 +196,7 @@ export function tunnelNameFor({ branch, prefix = defaultTunnelNamePrefix }) {
   if (name.length > 100) {
     throw new Error(`tunnel name is too long (${name.length} > 100): ${name}`);
   }
-  if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
+  if (!tunnelNamePattern.test(name)) {
     throw new Error(`tunnel name has unsupported characters: ${name}`);
   }
   return name;

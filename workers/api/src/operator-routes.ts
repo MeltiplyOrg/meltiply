@@ -9,6 +9,8 @@ import { fromPromise } from "./effect/route";
 import { runRouteEffect } from "./effect/runtime";
 import { jsonResponse } from "./responses";
 
+const printableAsciiPattern = /^[\x20-\x7e]+$/;
+
 export interface OperatorRouteDependencies {
   operatorReconciliationService?: OperatorReconciliationService;
 }
@@ -24,7 +26,7 @@ export interface OperatorRouteDependencies {
  */
 function idempotencyKey(c: Context<ApiWorkerEnvironment>): string {
   const key = c.req.header("Idempotency-Key") ?? "";
-  if (key.length < 8 || key.length > 128 || !/^[\x20-\x7e]+$/.test(key)) {
+  if (key.length < 8 || key.length > 128 || !printableAsciiPattern.test(key)) {
     throw new CoreApiError(
       400,
       "idempotency_key_required",

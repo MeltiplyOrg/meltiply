@@ -50,8 +50,7 @@ each request. The dashboard endpoint is not cached by this optimization.
 These caches are neither durable nor shared across isolates or runtime replicas.
 Restart, eviction, capacity bypass, and configuration replacement fall back to
 authoritative reads. No Redis, Valkey, KV, new binding, backup, or operator cache
-configuration is required. Measurements and their runtime limits are recorded in
-the [backend performance report](benchmarks/backend-optimization.md).
+configuration is required.
 
 ## Browser reads and private freshness
 

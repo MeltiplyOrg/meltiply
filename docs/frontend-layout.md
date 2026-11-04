@@ -210,6 +210,3 @@ Verify the actual desktop, phone, and reported user viewport. Cover both palette
 long content, loading, empty/error states, keyboard traversal, nested scrolling, and
 available actions. Every bounded scroller needs shrinkable flex/grid ancestors; only
 the intended table or calendar canvas may overflow.
-
-The production-build measurement method and recorded results are in the
-[frontend layout benchmark](benchmarks/frontend-layout.md).

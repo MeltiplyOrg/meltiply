@@ -41,10 +41,8 @@ import {
   setThrottleLatency,
   uninstallNetworkThrottle,
 } from "./network-throttle";
-import { BenchmarkTab } from "./benchmark-tab";
 import { clearHelpersDom, HelpersTab } from "./helpers-tab";
 import { clearLayoutOverlays } from "./layout-overlays";
-import { stopRenderScanner } from "./render-scanner";
 import { clearViewportFrame } from "./viewport-frame";
 import { SkeletonsTab } from "./skeletons-tab";
 import { TraceTab } from "./trace-tab";
@@ -108,7 +106,6 @@ export function DevBoxClientBridge(): null {
 
 const tabLabels: Record<DevBoxTab, string> = {
   skeletons: "Skeletons",
-  benchmark: "Benchmark",
   trace: "Trace",
   helpers: "Helpers",
   routes: "Routes",
@@ -137,7 +134,7 @@ function clampPosition(position: DevBoxPosition, size: DevBoxSize): DevBoxPositi
 
 /**
  * Removes every page-level mutation the dock can install: layout overlays, the
- * viewport frame, audit highlights, scanner outlines, and pseudo-localization.
+ * viewport frame, audit highlights, and pseudo-localization.
  * Runs when the dock is hidden or unmounted so no inspection state outlives the
  * control surface that owns it.
  */
@@ -145,7 +142,6 @@ function clearPageMutations(): void {
   clearLayoutOverlays();
   clearViewportFrame();
   clearHelpersDom();
-  stopRenderScanner();
   setPseudoLocalization(false);
 }
 
@@ -153,9 +149,9 @@ function clearPageMutations(): void {
  * Unified in-app developer toolbox dock ("Meltiply DevBox").
  *
  * A draggable, collapsible floating dock anchored bottom-left, mounted only in
- * development and isolated UI preview builds. The four standard Radix tabs
- * cover loading-state auditing, render profiling, query/telemetry tracing,
- * and design-system/accessibility helpers. An optional Preview tab hosts the
+ * development and isolated UI preview builds. The standard Radix tabs cover
+ * loading-state auditing, query/telemetry tracing, routes, and design-system/
+ * accessibility helpers. An optional Preview tab hosts the
  * isolated build's scenario controls; the feature owns its browser data.
  * Position, collapsed state, active tab, and latency selection persist across
  * refreshes only after functional consent. The collapsed pill is itself a drag
@@ -474,12 +470,6 @@ export function DevBox({
                   agentation={state.agentation}
                   onAgentationChange={(agentation) => update({ agentation })}
                 />
-              </TabsContent>
-              <TabsContent
-                value="benchmark"
-                className="mt-0 max-h-[420px] overflow-y-auto p-3 focus-visible:ring-0"
-              >
-                <BenchmarkTab />
               </TabsContent>
               <TabsContent
                 value="trace"

@@ -90,6 +90,7 @@ Bun monorepo. Cloudflare Workers provide the API and asynchronous publishing pip
 - **API work:** [`packages/contracts/README.md`](packages/contracts/README.md) for OpenAPI and generated clients.
 - **UI translations:** [`docs/i18n.md`](docs/i18n.md).
 - **Deployment:** [`infra/cloudflare/README.md`](infra/cloudflare/README.md) for infrastructure ownership and release safety.
+- **Release acceptance:** [MVP checklist](docs/release-acceptance.md) for real-account verification, deployment, upgrade, and recovery before production.
 - **CI:** [CI checks](docs/public-ci.md).
 
 ## License

@@ -151,7 +151,12 @@ test("health probe matches the released environment rather than assuming staging
       expectedEnvironment: "production",
       fetchImpl: async () =>
         new Response(
-          JSON.stringify({ contract_version: contractVersion, environment, status: "ok", version: gitSha }),
+          JSON.stringify({
+            contract_version: contractVersion,
+            environment,
+            status: "ok",
+            version: gitSha,
+          }),
         ),
       origin: "https://app.example.com",
       requestBudgetMs: 5000,

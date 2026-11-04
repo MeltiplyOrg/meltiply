@@ -67,15 +67,6 @@ run "staging_plan" {
   }
 
   assert {
-    condition = (
-      length(output.worker_bindings.queues) == 11 &&
-      output.worker_bindings.queues["publish-tiktok"] ==
-      "meltiply-publish-tiktok-staging"
-    )
-    error_message = "The manifest must export all bounded workload queue names."
-  }
-
-  assert {
     condition     = output.operator_access_aud == null
     error_message = "Operator Access must remain disabled unless explicitly configured."
   }

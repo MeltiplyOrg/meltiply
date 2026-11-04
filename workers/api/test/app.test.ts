@@ -206,6 +206,7 @@ describe("API Worker foundation", () => {
       );
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({
+        contract_version: CONTRACT_VERSION,
         environment: ENVIRONMENT,
         status: "ok",
         version: "test",

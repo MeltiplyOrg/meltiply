@@ -44,6 +44,7 @@ for (const environment of ["staging", "production"]) {
           "asset-processing",
           "channel-revocation",
           "comments",
+          "notifications",
           "publish-facebook",
           "publish-instagram",
           "publish-threads",

@@ -306,6 +306,7 @@ test("domain wrapper refuses missing, stale, or config-mismatched frontend evide
       "asset-processing",
       "channel-revocation",
       "comments",
+      "notifications",
       "publish-facebook",
       "publish-instagram",
       "publish-threads",

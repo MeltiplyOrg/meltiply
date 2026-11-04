@@ -5,7 +5,7 @@ import path from "node:path";
 import { releaseInternals } from "./release-lib.mjs";
 
 const approvalActorPattern = /^[A-Za-z0-9][A-Za-z0-9@._+ -]{0,127}$/;
-const approvalEnvironmentPattern = /^staging-[a-z0-9-]+-approval$/;
+const approvalEnvironmentPattern = /^[a-z]+-[a-z0-9-]+-approval$/;
 const evidenceFilenamePattern = /^[a-z0-9][a-z0-9.-]*\.json$/;
 
 const gitShaPattern = /^[0-9a-f]{40}$/;
@@ -134,8 +134,14 @@ export function validateApprovalMetadata(input, spec) {
   if (job.status !== "success") {
     throw new TypeError("approval metadata approval_job.status must be success");
   }
-  if (typeof job.name !== "string" || !approvalEnvironmentPattern.test(job.name)) {
-    throw new TypeError("approval metadata approval_job.name is invalid");
+  if (
+    typeof job.name !== "string" ||
+    !job.name.startsWith(`${spec.environment}-`) ||
+    !approvalEnvironmentPattern.test(job.name)
+  ) {
+    throw new TypeError(
+      "approval metadata approval_job.name is invalid for the release environment",
+    );
   }
 
   return {
@@ -234,7 +240,7 @@ export async function loadApprovalMetadata({
 
 /**
  * Asserts explicit human intent for mutating release commands.
- * Requires `--apply`, exact string confirmation matching `release staging <git_sha>`,
+ * Requires `--apply`, exact string confirmation matching `release <environment> <git_sha>`,
  * valid SHA-256 plan digest, and verifies working tree commit matches release SHA.
  *
  * @param {object} params - Confirmation parameters
@@ -250,7 +256,7 @@ export function assertMutatingIntent({ apply, confirm, currentSha, planDigest, s
   if (apply !== true) {
     throw new TypeError("mutating release commands require --apply");
   }
-  const expected = `release staging ${spec.git_sha}`;
+  const expected = `release ${spec.environment} ${spec.git_sha}`;
   if (confirm !== expected) {
     throw new TypeError(`--confirm must exactly equal ${expected}`);
   }

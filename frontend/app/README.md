@@ -123,6 +123,20 @@ Backend secrets belong only in protected Worker configuration, never browser var
 Local mail is simulated in development output; signup success does not prove
 email delivery. Deployed sign-in requires verified email.
 
+Managed releases deploy this Worker through the release CLI, not a separate manual
+frontend deployment. `frontend-bootstrap --step initialize` builds and activates
+the frontend; updates use `frontend-update --step upload` followed by `--step activate`.
+The release renders the reviewed infrastructure Worker name, `API` service target,
+environment, and commit SHA into its private `wrangler/frontend.json`. Vite selects
+that configuration with `CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH` and `CLOUDFLARE_ENV`
+while building the environment's production bundle. Its stable generated config is
+`dist/frontend/wrangler.json`; release packaging rebases it into private
+`wrangler/frontend-built.json` and uploads that flattened config without `--env`.
+Keep both private configs alongside candidate/deployment evidence until domain
+attachment and manifest validation finish. Built assets stay in `dist/client`,
+outside published release evidence. The `API` binding and SPA/Worker-first asset
+routing are preserved.
+
 ## Verification
 
 Run the app completion gate from the repository root:

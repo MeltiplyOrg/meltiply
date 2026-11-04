@@ -19,6 +19,15 @@ function planFor(
   };
 }
 
+/** A plan uses the same environment model as release input and rejects unreviewed names. */
+test("release plans accept production and reject unknown environments", () => {
+  const plan = planFor();
+  plan.variables.environment.value = "production";
+  assert.equal(verifyReleasePlan(plan, "foundation").environment, "production");
+  plan.variables.environment.value = "preview";
+  assert.throws(() => verifyReleasePlan(plan, "foundation"), /environment/);
+});
+
 function change(address, type, actions, after = {}) {
   return { address, type, change: { actions, after } };
 }
@@ -237,6 +246,33 @@ test("narrow phases reject unrelated non-destructive drift", () => {
       ),
     /pause plan contains a non-Queue transition/,
   );
+});
+
+test("zone security maintenance cannot broaden narrow release phases", () => {
+  for (const resource of ["rate_limit", "managed_waf"]) {
+    const securityUpdate = change(
+      `module.edge.cloudflare_ruleset.${resource}[0]`,
+      "cloudflare_ruleset",
+      ["update"],
+    );
+    for (const phase of ["pause", "paused-consumers", "domain", "unpause"]) {
+      assert.throws(
+        () =>
+          verifyReleasePlan(
+            planFor(
+              {
+                attachAppCustomDomains: phase !== "paused-consumers",
+                attachQueueConsumers: true,
+                queueDeliveryPaused: phase !== "unpause",
+              },
+              [securityUpdate],
+            ),
+            phase,
+          ),
+        /contains a non-(Queue|consumer|domain) transition/,
+      );
+    }
+  }
 });
 
 test("unpause ignores unrelated no-op resources", () => {

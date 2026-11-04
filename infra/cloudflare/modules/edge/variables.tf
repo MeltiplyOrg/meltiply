@@ -23,6 +23,16 @@ variable "attach_custom_domains" {
   type        = bool
 }
 
+variable "manage_zone_security" {
+  description = "Whether this state is the sole owner of zone-level security entrypoints."
+  type        = bool
+}
+
+variable "protected_app_hostnames" {
+  description = "Environment-to-app-hostname coverage declared by the zone owner."
+  type        = map(string)
+}
+
 variable "managed_waf_ruleset_id" {
   description = "Optional Cloudflare managed WAF ruleset ID enabled for the zone."
   type        = string

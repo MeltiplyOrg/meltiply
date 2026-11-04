@@ -55,8 +55,8 @@ capability expiry must not let it outlive the persisted write hold.
 `frontend-full`, `frontend-ui`, `cloudflare-full`, `cloudflare-integration`,
 `cloudflare-extended`, `publishing-flow`, `publishing-browser`, `publishing-queues`,
 `device-authorization`, `object-storage`, `portable-caching`, `portable-caching-smoke`,
-`performance-focused`, `performance-backend`, `performance-media`, and
-`versioned-contract`. They run on
+`performance-focused`, `performance-backend`, `performance-media`,
+`versioned-contract`, and `managed-release`. They run on
 GitHub-hosted machines without deployment secrets. A passing `ci-gate` does not imply
 a manual lane ran.
 
@@ -65,6 +65,12 @@ external Provider responses; they do not certify live credentials, platform audi
 public posting. Playwright retries a failed test twice under `CI` unless the lane
 command overrides it, so treat a retried pass as flaky rather than clean; traces and
 screenshots are retained in the lane artifact before the next journey.
+
+`managed-release` runs the full application, infrastructure, release, staging, and
+documentation checks. It smokes credentials-free preflight and reviewed frontend
+bundles for staging and production, plus role gates, migrations, and installed RLS
+on fresh PostgreSQL. It validates the [managed runbook](../infra/cloudflare/README.md#release-and-rollback),
+not live Cloudflare/Neon resources, email delivery, or external Provider approval.
 
 Wrangler fires no cron triggers locally, so the acceptance API exposes a fixture-only
 route that invokes the Automation Worker's scheduled dispatcher through its existing
@@ -78,7 +84,7 @@ on default-branch history alone can publish. See the
 [release procedure](../packages/contracts/README.md#prepare-and-publish).
 
 Live deployments follow the
-[operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
+[operator-run release path](../infra/cloudflare/README.md#release-and-rollback).
 
 ## Self-hosted release images
 

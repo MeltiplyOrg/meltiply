@@ -44,7 +44,14 @@ The seed also includes a pending invitation and sample Audit entries, so Members
 
 ## Deployment targets
 
-Keep the [managed Cloudflare deployment](infra/cloudflare/README.md), or run the production-built application and Workers on your own host with [one Docker Compose file](docs/self-hosting.md). The self-hosted stack includes PostgreSQL, persistent workerd bindings, durable queues, SMTP delivery, native media processing, and optional TLS.
+Deploy a complete [managed Cloudflare staging or production installation](infra/cloudflare/README.md#release-and-rollback)
+with the operator-run release flow, or run the production-built application and
+Workers on your own host with [one Docker Compose file](docs/self-hosting.md).
+The managed target requires your own Cloudflare/Neon accounts and Email Sending
+domain. The self-hosted stack includes PostgreSQL, persistent workerd bindings,
+durable queues, SMTP delivery, native media processing, and optional TLS.
+Both targets can be installed before Provider app review; connections and
+publishing remain unavailable while their acceptance flags are false.
 
 [`compose.dev.yml`](compose.dev.yml) provides only the development database and optional observability services; it is not the production deployment.
 

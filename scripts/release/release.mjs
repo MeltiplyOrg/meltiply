@@ -54,16 +54,16 @@ async function readSecretStdin(stream) {
  * Maps Worker service and release mode to the expected prerequisite IaC phase.
  *
  * During update releases, all workers require "domains-paused" state.
- * During bootstrap releases, the API worker requires "consumers-paused",
+ * During bootstrap releases, API and frontend require "consumers-paused",
  * while foundation workers (state, automation) require "foundation".
  *
  * @param {object} spec - Release specification with deployment_mode
- * @param {string} worker - Target Worker service ("api", "automation", "state")
+ * @param {string} worker - Target release Worker service
  * @returns {string} Expected IaC state phase name
  */
 function workerIacPhase(spec, worker) {
   if (spec.deployment_mode === "update") return "domains-paused";
-  return worker === "api" ? "consumers-paused" : "foundation";
+  return worker === "api" || worker === "frontend" ? "consumers-paused" : "foundation";
 }
 
 /**
@@ -125,6 +125,7 @@ export async function runReleaseCli(argv, dependencies = {}) {
   if (options.command === "preflight") {
     const spec = await loadReleaseSpec(options.inputPath);
     return preflightRelease({
+      clientFactory: dependencies.clientFactory,
       environment,
       offline: options.offline,
       repoRoot: checkoutRoot,
@@ -139,7 +140,12 @@ export async function runReleaseCli(argv, dependencies = {}) {
     if (!new Set(["bootstrap", "expand"]).has(options.phase)) {
       throw new TypeError("migrate --phase must be bootstrap or expand");
     }
-    const approvals = await authorize(options, dependencies, spec, "staging-foundation-approval");
+    const approvals = await authorize(
+      options,
+      dependencies,
+      spec,
+      `${spec.environment}-foundation-approval`,
+    );
     return migrateDatabase({
       approvals,
       clientFactory: dependencies.clientFactory,
@@ -160,7 +166,12 @@ export async function runReleaseCli(argv, dependencies = {}) {
       spec.deployment_mode === "bootstrap" ? "foundation" : "domains-paused",
       spec,
     );
-    const approvals = await authorize(options, dependencies, spec, "staging-foundation-approval");
+    const approvals = await authorize(
+      options,
+      dependencies,
+      spec,
+      `${spec.environment}-foundation-approval`,
+    );
     return createRestorePoint({
       approvals,
       environment,
@@ -181,7 +192,7 @@ export async function runReleaseCli(argv, dependencies = {}) {
     return {
       config_digest: rendered.config_digest,
       deployment_mode: spec.deployment_mode,
-      environment: "staging",
+      environment: spec.environment,
       paths: Object.fromEntries(
         Object.entries(rendered.paths).map(([worker, outputPath]) => [
           worker,
@@ -211,7 +222,7 @@ export async function runReleaseCli(argv, dependencies = {}) {
       options,
       dependencies,
       spec,
-      activating ? "staging-queue-resume-approval" : "staging-foundation-approval",
+      `${spec.environment}-${activating ? "queue-resume" : "foundation"}-approval`,
     );
     return transitionAutomationCron({
       approvals,
@@ -231,7 +242,12 @@ export async function runReleaseCli(argv, dependencies = {}) {
       if (!options.percentage) throw new TypeError("api-rollout requires --percentage");
       if (options.step) throw new TypeError("api-rollout does not accept --step");
       assertIacState(iac, "domains-paused", spec);
-      const approvals = await authorize(options, dependencies, spec, "staging-traffic-approval");
+      const approvals = await authorize(
+        options,
+        dependencies,
+        spec,
+        `${spec.environment}-traffic-approval`,
+      );
       return deployApiRollout({
         approvals,
         environment,
@@ -246,14 +262,21 @@ export async function runReleaseCli(argv, dependencies = {}) {
     if (options.percentage) throw new TypeError("Worker deploy phases do not accept --percentage");
     const intent = resolveDeployPhase(options.phase, options.step, spec);
     assertIacState(iac, workerIacPhase(spec, intent.worker), spec);
-    const approvals = await authorize(options, dependencies, spec, "staging-foundation-approval");
+    const approvals = await authorize(
+      options,
+      dependencies,
+      spec,
+      `${spec.environment}-foundation-approval`,
+    );
     return deployWorkerStep({
       approvals,
       environment,
+      iac,
       outDir: options.outDir,
       phase: options.phase,
       planDigest: options.planDigest,
       runCommand: commandRunner,
+      repoRoot: checkoutRoot,
       spec,
       step: options.step,
     });
@@ -267,7 +290,12 @@ export async function runReleaseCli(argv, dependencies = {}) {
       throw new TypeError("secrets does not accept --step or --percentage");
     }
     assertIacState(iac, workerIacPhase(spec, options.phase), spec);
-    const approvals = await authorize(options, dependencies, spec, "staging-foundation-approval");
+    const approvals = await authorize(
+      options,
+      dependencies,
+      spec,
+      `${spec.environment}-foundation-approval`,
+    );
     const secretSource =
       dependencies.stdin ?? (await readSecretStdin(dependencies.stdinStream ?? process.stdin));
     return injectWorkerSecrets({

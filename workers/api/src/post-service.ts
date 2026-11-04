@@ -4,6 +4,8 @@ import type { components } from "@meltiply/contracts/schema";
 import { isoDateTime, type DatabaseError } from "@meltiply/domain";
 import {
   composeCaption,
+  facebookOptionsToWire,
+  parseThreadsOptions,
   ProviderRegistry,
   validatePublishInput,
   type ProviderMedia,
@@ -104,6 +106,7 @@ interface TargetRow extends Record<string, unknown> {
   platform_account_id: string;
   post_id?: string;
   provider_options: PostProviderOptions | null;
+  signature_text: string | null;
   title_override: string | null;
 }
 
@@ -222,11 +225,30 @@ function toWirePostProviderOptions(
 ): Schemas["PostProviderOptions"] | null {
   const tiktok = options?.tiktok;
   const youtube = options?.youtube;
-  if (!tiktok && !youtube) return null;
+  const instagram = options?.instagram;
+  const facebook = options?.facebook;
+  const threads = options?.threads;
+  if (!tiktok && !youtube && !instagram && !facebook && !threads) return null;
   return {
+    ...(threads ? { threads } : {}),
+    ...(facebook ? { facebook: facebookOptionsToWire(facebook) } : {}),
+    ...(instagram
+      ? {
+          instagram: {
+            ...(instagram.content ? { content: instagram.content } : {}),
+            ...(instagram.mediaOptions ? { media_options: instagram.mediaOptions } : {}),
+            ...(instagram.postType !== undefined ? { post_type: instagram.postType } : {}),
+            ...(instagram.trialReel !== undefined ? { trial_reel: instagram.trialReel } : {}),
+            ...(instagram.trialGraduation !== undefined
+              ? { trial_graduation: instagram.trialGraduation }
+              : {}),
+          },
+        }
+      : {}),
     ...(tiktok
       ? {
           tiktok: {
+            ...(tiktok.postMode !== undefined ? { post_mode: tiktok.postMode } : {}),
             allow_comment: tiktok.allowComment,
             allow_duet: tiktok.allowDuet,
             allow_stitch: tiktok.allowStitch,
@@ -237,6 +259,7 @@ function toWirePostProviderOptions(
               : {}),
             is_ai_generated: tiktok.isAiGenerated,
             music_usage_confirmed: tiktok.musicUsageConfirmed,
+            ...(tiktok.autoAddMusic !== undefined ? { auto_add_music: tiktok.autoAddMusic } : {}),
             ...(tiktok.privacyLevel !== undefined ? { privacy_level: tiktok.privacyLevel } : {}),
           },
         }
@@ -244,6 +267,7 @@ function toWirePostProviderOptions(
     ...(youtube
       ? {
           youtube: {
+            ...(youtube.postType ? { post_type: youtube.postType } : {}),
             ...(youtube.madeForKids !== undefined ? { made_for_kids: youtube.madeForKids } : {}),
             ...(youtube.privacyStatus ? { privacy_status: youtube.privacyStatus } : {}),
           },
@@ -270,6 +294,7 @@ function mapTarget(row: TargetRow): Schemas["PostTarget"] {
     hashtags: row.hashtags ?? [],
     platform_account_id: row.platform_account_id,
     provider_options: toWirePostProviderOptions(row.provider_options),
+    signature: row.signature_text,
     title_override: row.title_override,
   };
 }
@@ -342,7 +367,7 @@ function loadPostCollectionsEffect(
     if (!preloads.targets) {
       const targetRows = yield* client.query<TargetRow>(
         `SELECT post_id, platform_account_id, title_override,
-                description_override, hashtags, provider_options, attachment_ids
+                description_override, hashtags, provider_options, signature_text, attachment_ids
            FROM post_targets
           WHERE post_id = ANY($1::uuid[])
           ORDER BY post_id, created_at, platform_account_id`,
@@ -782,17 +807,18 @@ function replaceTargetsEffect(
       `INSERT INTO post_targets
          (post_id, platform_account_id, org_id, brand_profile_id,
           title_override, description_override, hashtags, provider_options,
-          attachment_ids)
+          signature_text, attachment_ids)
        SELECT $1::uuid, selected.platform_account_id, $3::uuid, $4::uuid,
               selected.title_override, selected.description_override,
               selected.hashtags, selected.provider_options,
-              selected.attachment_ids
+              selected.signature_text, selected.attachment_ids
          FROM jsonb_to_recordset($2::jsonb) AS selected(
            platform_account_id uuid,
            title_override text,
            description_override text,
            hashtags text[],
            provider_options jsonb,
+           signature_text text,
            attachment_ids uuid[]
          )`,
       [
@@ -804,6 +830,7 @@ function replaceTargetsEffect(
             hashtags: target.hashtags ?? [],
             platform_account_id: target.platformAccountId,
             provider_options: target.providerOptions ?? {},
+            signature_text: target.signature ?? null,
             title_override: target.titleOverride ?? null,
           })),
         ),
@@ -834,7 +861,7 @@ function loadSavedTargetsEffect(
   return client
     .query<TargetRow>(
       `SELECT platform_account_id, title_override, description_override,
-              hashtags, provider_options, attachment_ids
+              hashtags, provider_options, signature_text, attachment_ids
          FROM post_targets
         WHERE post_id = $1
         ORDER BY created_at, platform_account_id`,
@@ -848,6 +875,7 @@ function loadSavedTargetsEffect(
           hashtags: row.hashtags ?? [],
           platformAccountId: row.platform_account_id,
           providerOptions: row.provider_options ?? undefined,
+          signature: row.signature_text,
           titleOverride: row.title_override,
         })),
         rows: result.rows,
@@ -1044,6 +1072,18 @@ function publicationProviderOptions(
 ): ProviderPublishOptions | undefined {
   if (!options && platform !== "youtube") return undefined;
   const result: ProviderPublishOptions = {};
+  if (options?.threads) {
+    if (platform !== "threads")
+      throw new CoreApiError(422, "validation_error", "Threads options require a Threads Channel.");
+    const threads = parseThreadsOptions(options.threads);
+    if (!threads)
+      throw new CoreApiError(
+        422,
+        "validation_error",
+        "Complete the Threads publication choices before sending.",
+      );
+    result.threads = threads;
+  }
   if (platform === "youtube" || options?.youtube) {
     const madeForKids = options?.youtube?.madeForKids;
     const privacyStatus = options?.youtube?.privacyStatus;
@@ -1061,18 +1101,27 @@ function publicationProviderOptions(
         "Choose a YouTube visibility before publishing.",
       );
     }
-    result.youtube = { madeForKids, privacyStatus };
+    result.youtube = {
+      madeForKids,
+      privacyStatus,
+      ...(options?.youtube?.postType ? { postType: options.youtube.postType } : {}),
+    };
   }
   if (options?.tiktok) {
     const { privacyLevel, discloseCommercialContent, ...choices } = options.tiktok;
-    if (privacyLevel === undefined) {
+    if (privacyLevel === undefined && choices.postMode !== "inbox") {
       throw new CoreApiError(
         422,
         "validation_error",
         "Choose a TikTok privacy level before publishing.",
       );
     }
-    if (discloseCommercialContent && !choices.brandContent && !choices.brandOrganic) {
+    if (
+      choices.postMode !== "inbox" &&
+      discloseCommercialContent &&
+      !choices.brandContent &&
+      !choices.brandOrganic
+    ) {
       throw new CoreApiError(
         422,
         "validation_error",
@@ -1080,6 +1129,22 @@ function publicationProviderOptions(
       );
     }
     result.tiktok = { ...choices, privacyLevel };
+  }
+  if (options?.instagram) {
+    if (platform !== "instagram") {
+      throw new CoreApiError(
+        422,
+        "validation_error",
+        "Instagram provider options require an Instagram account.",
+      );
+    }
+    result.instagram = { ...options.instagram };
+  }
+  if (options?.facebook) {
+    if (platform !== "facebook") {
+      throw new CoreApiError(422, "validation_error", "Facebook options require a Facebook Page.");
+    }
+    result.facebook = { ...options.facebook };
   }
   return result;
 }
@@ -1105,41 +1170,84 @@ function validateProviderOptions(
   candidates: ReadonlyMap<string, CandidateRow[]>,
 ): void {
   const tiktok = providerOptions?.tiktok;
-  if (platform !== "tiktok") {
-    if (tiktok) {
+  if (platform !== "tiktok" && tiktok) {
+    throw new CoreApiError(
+      422,
+      "validation_error",
+      "TikTok provider options require a TikTok account.",
+    );
+  }
+  if (platform !== "instagram" && providerOptions?.instagram) {
+    throw new CoreApiError(
+      422,
+      "validation_error",
+      "Instagram provider options require an Instagram account.",
+    );
+  }
+
+  const kinds = selection.map((assetId) => {
+    const available = candidates.get(assetId) ?? [];
+    const candidate = available[0];
+    return candidate?.content_type.startsWith("video/")
+      ? "video"
+      : candidate?.content_type.startsWith("image/")
+        ? "image"
+        : null;
+  });
+  const publishesPhoto = kinds.includes("image");
+  const publishesVideo = kinds.includes("video");
+
+  if (platform === "tiktok") {
+    if (!tiktok || tiktok.musicUsageConfirmed !== true) {
       throw new CoreApiError(
         422,
         "validation_error",
-        "TikTok provider options require a TikTok account.",
+        "TikTok publishing choices and music-usage confirmation are required.",
       );
     }
-    return;
+    if (tiktok.postMode !== "inbox" && publishesPhoto && (tiktok.allowDuet || tiktok.allowStitch)) {
+      throw new CoreApiError(
+        422,
+        "validation_error",
+        "TikTok photo posts do not support Duet or Stitch.",
+      );
+    }
+    if (publishesVideo && tiktok.autoAddMusic === true) {
+      throw new CoreApiError(
+        422,
+        "validation_error",
+        "TikTok automatic music applies to photo posts only.",
+      );
+    }
+    if (tiktok.postMode !== "inbox" && tiktok.brandContent && tiktok.privacyLevel === "SELF_ONLY") {
+      throw new CoreApiError(
+        422,
+        "validation_error",
+        "TikTok branded content cannot use private visibility.",
+      );
+    }
   }
-  if (!tiktok || tiktok.musicUsageConfirmed !== true) {
-    throw new CoreApiError(
-      422,
-      "validation_error",
-      "TikTok publishing choices and music-usage confirmation are required.",
-    );
-  }
-  const publishesPhoto = selection.some((assetId) =>
-    (candidates.get(assetId) ?? []).some((candidate) =>
-      candidate.content_type.startsWith("image/"),
-    ),
-  );
-  if (publishesPhoto && (tiktok.allowDuet || tiktok.allowStitch)) {
-    throw new CoreApiError(
-      422,
-      "validation_error",
-      "TikTok photo posts do not support Duet or Stitch.",
-    );
-  }
-  if (tiktok.brandContent && tiktok.privacyLevel === "SELF_ONLY") {
-    throw new CoreApiError(
-      422,
-      "validation_error",
-      "TikTok branded content cannot use private visibility.",
-    );
+
+  const instagram = providerOptions?.instagram;
+  if (platform === "instagram" && instagram) {
+    const postType =
+      instagram.postType ?? (kinds.length === 1 && kinds[0] === "video" ? "reel" : "feed");
+    const trialReel = instagram.trialReel === true;
+    if (
+      !["feed", "reel", "story"].includes(postType) ||
+      (postType === "reel" && (kinds.length !== 1 || kinds[0] !== "video")) ||
+      (postType === "story" && kinds.length !== 1) ||
+      (trialReel && postType !== "reel") ||
+      (instagram.trialGraduation !== undefined && !trialReel) ||
+      (instagram.trialGraduation !== undefined &&
+        !["manual", "performance"].includes(instagram.trialGraduation))
+    ) {
+      throw new CoreApiError(
+        422,
+        "validation_error",
+        "The selected Instagram post type or trial Reel does not apply to this attachment set.",
+      );
+    }
   }
 }
 
@@ -1250,6 +1358,7 @@ function validateTargetScheduleEffect(
         defaultText: post.default_text,
         descriptionOverride: target.descriptionOverride ?? null,
         hashtags: target.hashtags ?? [],
+        signature: target.signature ?? null,
         title: post.title,
         titleOverride: target.titleOverride ?? null,
       }),
@@ -1301,23 +1410,35 @@ function validatePostText(title: string, defaultText: string): void {
 }
 
 /**
- * Rejects a Post that would carry neither text nor media.
- *
- * Opening a composer must not create an indefinitely retained empty server
- * draft, so a Post needs text or at least one attachment before it persists.
- *
- * @param defaultText - Effective default text after the requested edit.
- * @param attachmentIds - Effective ordered attachment selection.
- * @throws {CoreApiError} 422 `validation_error` when the result would be empty.
+ * Rejects empty editor scaffolding while retaining real provider-hosted content:
+ * link/source identities, configured native text attachments, or a selected
+ * Live/experiment workflow. Those methods need no invented caption or Asset.
+ * Method completeness and Channel compatibility are enforced when scheduling.
  */
-function requireNonEmptyPost(defaultText: string, attachmentIds: readonly string[]): void {
-  if (defaultText.trim().length === 0 && attachmentIds.length === 0) {
-    throw new CoreApiError(
-      422,
-      "validation_error",
-      "A post requires default_text or at least one attachment.",
-    );
-  }
+function requireNonEmptyPost(
+  defaultText: string,
+  attachmentIds: readonly string[],
+  targets: readonly PostTargetInput[],
+): void {
+  if (defaultText.trim() || attachmentIds.length) return;
+  if (
+    targets.some(
+      ({ descriptionOverride, providerOptions: options }) =>
+        descriptionOverride?.trim() ||
+        options?.facebook?.link?.trim() ||
+        ["crosspost", "ab_test", "live"].includes(options?.facebook?.postType ?? "") ||
+        options?.youtube?.postType === "live" ||
+        options?.threads?.repost_id?.trim() ||
+        options?.threads?.gif_attachment?.gif_id?.trim() ||
+        options?.threads?.text_attachment?.plaintext?.trim(),
+    )
+  )
+    return;
+  throw new CoreApiError(
+    422,
+    "validation_error",
+    "A Post requires text, an attachment, or provider-hosted content.",
+  );
 }
 
 /**
@@ -1421,6 +1542,7 @@ function reschedulePendingDistributionsEffect(
               description_override = target.description_override,
               hashtags = target.hashtags,
               provider_options = target.provider_options,
+              signature_text = target.signature_text,
               attachment_ids = target.attachment_ids,
               updated_at = now()
          FROM jsonb_to_recordset($1::jsonb) AS target(
@@ -1430,6 +1552,7 @@ function reschedulePendingDistributionsEffect(
                 description_override text,
                 hashtags text[],
                 provider_options jsonb,
+                signature_text text,
                 attachment_ids uuid[]
               )
         WHERE distribution.post_id = $2::uuid
@@ -1446,6 +1569,7 @@ function reschedulePendingDistributionsEffect(
             hashtags: row.target.hashtags ?? [],
             platform_account_id: row.platformAccountId,
             provider_options: row.target.providerOptions ?? {},
+            signature_text: row.target.signature ?? null,
             title_override: row.target.titleOverride ?? null,
           })),
         ),
@@ -1493,12 +1617,12 @@ function insertPendingDistributionsEffect(
       `INSERT INTO distributions
          (org_id, brand_profile_id, post_id, platform_account_id, platform,
           status, scheduled_at, title_override, description_override, hashtags,
-          provider_options, attachment_ids)
+          provider_options, signature_text, attachment_ids)
        SELECT $1::uuid, $2::uuid, $3::uuid, selected.platform_account_id,
               selected.platform, $5::text, $6::timestamptz,
               selected.title_override, selected.description_override,
               selected.hashtags, selected.provider_options,
-              selected.attachment_ids
+              selected.signature_text, selected.attachment_ids
          FROM jsonb_to_recordset($4::jsonb) AS selected(
                 platform_account_id uuid,
                 platform text,
@@ -1506,6 +1630,7 @@ function insertPendingDistributionsEffect(
                 description_override text,
                 hashtags text[],
                 provider_options jsonb,
+                signature_text text,
                 attachment_ids uuid[]
               )
     ON CONFLICT (post_id, platform_account_id) DO NOTHING
@@ -1522,6 +1647,7 @@ function insertPendingDistributionsEffect(
             platform: row.platform,
             platform_account_id: row.platformAccountId,
             provider_options: row.target.providerOptions ?? {},
+            signature_text: row.target.signature ?? null,
             title_override: row.target.titleOverride ?? null,
           })),
         ),
@@ -1627,7 +1753,7 @@ export function createPostApiService(
             yield* requireActiveBrandProfileEffect(client, organizationId, input.brandProfileId);
             const attachmentIds = input.attachmentIds ?? [];
             const targets = input.targets ?? [];
-            requireNonEmptyPost(input.defaultText ?? "", attachmentIds);
+            requireNonEmptyPost(input.defaultText ?? "", attachmentIds, targets);
             requireTargetAttachmentScope(targets, attachmentIds);
             yield* lockAttachmentAssetsEffect(client, input.brandProfileId, attachmentIds);
             yield* validateTargetScopesEffect(
@@ -1781,12 +1907,17 @@ export function createPostApiService(
             const attachmentIds = input.attachmentIds ?? currentAttachmentIds;
             const attachmentChange = input.attachmentIds !== undefined;
             const targets = input.targets;
+            const effectiveTargets =
+              targets ??
+              (!(input.defaultText ?? post.default_text).trim() && attachmentIds.length === 0
+                ? (yield* loadSavedTargetsEffect(client, postId)).inputs
+                : []);
             yield* Effect.try({
               try: () => {
                 const title = input.title ?? post.title;
                 const defaultText = input.defaultText ?? post.default_text;
                 validatePostText(title, defaultText);
-                requireNonEmptyPost(defaultText, attachmentIds);
+                requireNonEmptyPost(defaultText, attachmentIds, effectiveTargets);
                 if (targets) requireTargetAttachmentScope(targets, attachmentIds);
               },
               catch: validationError,
@@ -1926,7 +2057,7 @@ export function createPostApiService(
                 : undefined;
             yield* Effect.try({
               try: () => {
-                requireNonEmptyPost(post.default_text, attachmentIds);
+                requireNonEmptyPost(post.default_text, attachmentIds, targets);
                 requireTargetAttachmentScope(targets, attachmentIds);
               },
               catch: validationError,
@@ -2190,7 +2321,7 @@ export function createPostApiService(
                    SELECT 1 FROM distributions
                    WHERE post_id = $1
                      AND status IN (
-                       'processing', 'awaiting_provider', 'published', 'needs_reconciliation'
+                       'processing', 'awaiting_provider', 'delivered', 'published', 'needs_reconciliation'
                      )
                  ) AS exists`,
                 [postId],

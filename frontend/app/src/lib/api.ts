@@ -1,5 +1,5 @@
 import { createMeltiplyClient, type MeltiplyClient } from "@meltiply/contracts/client";
-import type { components } from "@meltiply/contracts/schema";
+import type { components, operations } from "@meltiply/contracts/schema";
 import { Effect } from "effect";
 
 import type {
@@ -36,6 +36,8 @@ import type {
   PostListResponse,
   PostQueryParams,
   PublishingRequirements,
+  PublishingPreferences,
+  PublishingPreferencesUpdate,
   SchedulePostInput,
   PublishingQueue,
   QueueListResponse,
@@ -456,6 +458,54 @@ export function listQueues(
       client().GET("/queues", {
         headers: workspaceHeaders(workspaceId),
         params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Reads the Workspace's persistent timezone, signature templates, and
+ * notification choices. An untouched Workspace returns null timezone, no
+ * templates, both events disabled, an empty email recipient list, and
+ * `email_available` reflecting the real mail capability.
+ *
+ * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
+ * @param options Request options with optional abort signal.
+ * @returns Effect resolving to the current publishing preferences.
+ */
+export function getPublishingPreferences(workspaceId: string | null, options?: ApiRequestOptions) {
+  return unwrap<PublishingPreferences>(
+    (signal) =>
+      client().GET("/publishing-preferences", {
+        headers: workspaceHeaders(workspaceId),
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Replaces the complete publishing-preference document. Template create, edit,
+ * reorder, delete, and default selection all travel as one list so the server
+ * can enforce one default and contiguous positions atomically.
+ *
+ * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
+ * @param input Complete replacement document.
+ * @param options Request options with optional idempotency key.
+ * @returns Effect resolving to the stored preferences.
+ */
+export function updatePublishingPreferences(
+  workspaceId: string | null,
+  input: PublishingPreferencesUpdate,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<PublishingPreferences>(
+    (signal) =>
+      client().PUT("/publishing-preferences", {
+        body: input,
+        headers: workspaceHeaders(workspaceId),
+        params: { header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) } },
         signal,
       }),
     options?.signal,
@@ -1105,6 +1155,39 @@ export function disconnectPlatform(
         params: {
           header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
           path: { account_id: id },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+export type BroadcastInfo =
+  operations["getBroadcast"]["responses"][200]["content"]["application/json"];
+
+/** Reads no-store encoder credentials on explicit writer demand; callers must not put the result in a query cache. */
+export function getBroadcast(workspaceId: string | null, id: string, options?: ApiRequestOptions) {
+  return unwrap<BroadcastInfo>(
+    (signal) =>
+      client().GET("/distributions/{distribution_id}/broadcast", {
+        headers: workspaceHeaders(workspaceId),
+        params: { path: { distribution_id: id } },
+        signal,
+        cache: "no-store",
+      }),
+    options?.signal,
+  );
+}
+
+/** Ends an existing broadcast with a stable mutation key; no automatic retry creates or restarts media. */
+export function endBroadcast(workspaceId: string | null, id: string, options?: ApiRequestOptions) {
+  return unwrap<{ ended: true }>(
+    (signal) =>
+      client().POST("/distributions/{distribution_id}/broadcast/end", {
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          path: { distribution_id: id },
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
         },
         signal,
       }),

@@ -1,7 +1,7 @@
 import { Effect, type Layer } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
 import { can, isWorkspaceRole, type DatabaseError, type WorkspaceRole } from "@meltiply/domain";
-import { escapeMailHtml } from "@meltiply/domain/mail-content";
+import { escapeMailHtml, mailSenderConfiguration } from "@meltiply/domain/mail-content";
 import type { Context, Hono } from "hono";
 
 import type { ResolvedActor } from "./actor-resolution";
@@ -22,7 +22,6 @@ import {
   createCloudflareMailSender,
   createMailServiceLive,
   MailService,
-  mailSenderConfiguration,
   type MailMessage,
 } from "./mail";
 import { jsonResponse } from "./responses";

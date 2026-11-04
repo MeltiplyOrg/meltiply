@@ -16,6 +16,7 @@ const queueBindings = {
   "asset-processing": "ASSET_PROCESSING_QUEUE",
   "channel-revocation": "CHANNEL_REVOCATION_QUEUE",
   comments: "COMMENTS_QUEUE",
+  notifications: "NOTIFICATIONS_QUEUE",
   "publish-facebook": "FACEBOOK_PUBLISH_QUEUE",
   "publish-instagram": "INSTAGRAM_PUBLISH_QUEUE",
   "publish-threads": "THREADS_PUBLISH_QUEUE",
@@ -644,7 +645,7 @@ function replaceBinding(entries, identifier, replacement, key = "binding") {
 /**
  * Renders concrete Cloudflare Wrangler configuration trees for the api, automation, and state Workers.
  * Injects staging environment variables, Hyperdrive bindings, the selected object storage settings, queue producers,
- * allowed CORS origins, the sender-restricted send_email MAIL binding, Zero Trust Access bindings,
+ * allowed CORS origins, sender-restricted MAIL bindings on API and Automation, Zero Trust Access bindings,
  * and per-version preview URLs on the API Worker (the stable workers.dev route stays disabled).
  * S3 deployments omit the unused ASSETS binding; omitted provider selection preserves R2.
  *
@@ -672,6 +673,8 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
       : {}),
     REPORTING_FORCED_OFF: String(spec.runtime.reporting_forced_off),
     APP_URL: spec.app_url,
+    MAIL_FROM_ADDRESS: spec.runtime.mail_from_address,
+    ...(spec.runtime.mail_from_name ? { MAIL_FROM_NAME: spec.runtime.mail_from_name } : {}),
     ...(spec.runtime.object_storage_provider === "s3"
       ? {
           OBJECT_STORAGE_PROVIDER: "s3",
@@ -705,8 +708,6 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
   api.vars = {
     ...commonVars,
     ALLOWED_ORIGINS: spec.allowed_origins.join(","),
-    MAIL_FROM_ADDRESS: spec.runtime.mail_from_address,
-    ...(spec.runtime.mail_from_name ? { MAIL_FROM_NAME: spec.runtime.mail_from_name } : {}),
     ...(iac.access_aud
       ? {
           ACCESS_POLICY_AUD: iac.access_aud,
@@ -715,15 +716,17 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
         }
       : {}),
   };
-  api.send_email = replaceBinding(
-    api.send_email,
-    "MAIL",
-    {
-      name: "MAIL",
-      allowed_sender_addresses: [spec.runtime.mail_from_address],
-    },
-    "name",
-  );
+  for (const config of [api, automation]) {
+    config.send_email = replaceBinding(
+      config.send_email,
+      "MAIL",
+      {
+        name: "MAIL",
+        allowed_sender_addresses: [spec.runtime.mail_from_address],
+      },
+      "name",
+    );
+  }
   api.r2_buckets = replaceBinding(api.r2_buckets, "ASSETS", {
     binding: "ASSETS",
     bucket_name: iac.assets_bucket,

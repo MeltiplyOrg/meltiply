@@ -174,6 +174,36 @@ describe("provider publication execution", () => {
     expect(publish).not.toHaveBeenCalled();
   });
 
+  it("publishes the frozen signature as its own caption paragraph", async () => {
+    const publish = vi.fn(async () => ({
+      outcome: "confirmed_success" as const,
+      providerPostId: "post-1",
+    }));
+    const mediaFor = vi.fn(async () => ({
+      contentType: "image/jpeg",
+      fileSize: 100,
+      mode: "remote_ingest" as const,
+      url: "https://r2.example/signed-object",
+    }));
+
+    const result = await runProviderProgram(
+      executeProviderPublishEffect,
+      registry(adapter(publish)),
+      context,
+      target({ signature: "Follow Alpha Studio." }),
+      { decryptToken: async () => "provider-token", mediaFor },
+    );
+
+    expect(result.result).toMatchObject({ outcome: "confirmed_success" });
+    expect(publish).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        caption: "Asset title\n\nAsset description\n\nFollow Alpha Studio.\n\n#launch",
+      }),
+    );
+  });
+
   it("prefers remote ingest and keeps credentials outside the publish payload", async () => {
     const publish = vi.fn(async () => ({
       outcome: "confirmed_success" as const,

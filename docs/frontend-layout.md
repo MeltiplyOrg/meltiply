@@ -134,12 +134,14 @@ render per frame.
 All sections share one layout; Security gets no separate width rule.
 
 - Navigation and content share the surface background. Below 768px section navigation
-  is a horizontally scrollable row; from 768px it is a 220px rail.
+  is a horizontally scrollable row with group separators; from 768px it is a 220px
+  rail with General, Account, and Workspace group labels.
+- Empty groups disappear. Publishing and Administration are administrator-only.
 - The rail centers its `aria-current="page"` section on mount, section change
   (including reload and history navigation), language change, late label growth, and
   rail resize, then clamps to its scroll bounds.
-- Appearance, Language, Account, and Security use one left-aligned 672px content
-  column at full width below that limit.
+- Appearance, Language, Publishing, Account, and Security use one left-aligned 672px
+  content column at full width below that limit.
 - Administration uses the directory composition: a centered 1200px ceiling, a
   content-width tab strip, and shared grid tables for Members and pending
   invitations. Workspace is a 672px settings form with seat counts as a compact

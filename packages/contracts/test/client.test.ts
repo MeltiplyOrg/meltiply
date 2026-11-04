@@ -7,6 +7,7 @@ describe("createMeltiplyClient", () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
         JSON.stringify({
+          contract_version: "1.0.0",
           status: "ok",
           version: "1.0.0-target.0",
           environment: "test",

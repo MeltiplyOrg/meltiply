@@ -5,6 +5,7 @@ import {
   type JwtIdentity,
   type SessionClaims,
 } from "@meltiply/auth";
+import { CONTRACT_VERSION } from "@meltiply/contracts";
 import type { components } from "@meltiply/contracts/schema";
 import {
   createRequestId,
@@ -409,8 +410,6 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
           "Access-Control-Allow-Headers",
           "Authorization, Content-Type, X-Request-ID, X-Workspace-ID, X-Setup-Secret, X-Invitation-Token, Idempotency-Key, If-None-Match",
         );
-        // PUT is the reporting-preference verb; omitting it would fail a
-        // cross-origin preflight for the only PUT operation in the contract.
         c.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
         c.header("Access-Control-Max-Age", "600");
         return c.body(null, 204);
@@ -590,6 +589,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
   app.get("/api/v1/health", (c) =>
     jsonResponse(
       {
+        contract_version: CONTRACT_VERSION,
         environment: c.env.ENVIRONMENT,
         status: "ok",
         version: c.env.VERSION,

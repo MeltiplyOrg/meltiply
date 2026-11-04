@@ -1,4 +1,5 @@
 {
+  "delivered": "Consegnato",
   "awaiting_provider": "In attesa del provider",
   "cancelled": "Annullata",
   "cancel_requested": "Richiesta di annullamento",

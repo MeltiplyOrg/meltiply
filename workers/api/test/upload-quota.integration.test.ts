@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 // Workspace storage Entitlement accounting for issue #284, proven through the
 // consumer-visible seams only: the authenticated API app (upload sessions,
 // finalization, Post drafts and scheduling) and the automation AssetJobProcessor
@@ -121,8 +122,7 @@ const apiEnv = {
   ALLOWED_ORIGINS: "http://localhost:3000",
   DB_AUTHENTICATED: { connectionString } as Hyperdrive,
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   ENVIRONMENT: "test",
   VERSION: "upload-quota-test",
@@ -1796,13 +1796,14 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(before.status).toBe(200);
     const chargedBefore = await chargedBytes(lifecycleStudio.organizationId);
 
-    // A rejected save: emptying the Post of both text and attachments is refused
-    // and leaves the stored composition untouched.
+    // A rejected save removes every content source, including the Channel
+    // caption; text held only in an override is still a real composition.
     const emptied = await api(lifecycleStudio, `/api/v1/posts/${postId}`, {
       body: {
         attachment_ids: [],
         brand_profile_id: lifecycleStudio.profileId,
         default_text: "",
+        targets: [],
       },
       idempotencyKey: nextKey("authoritative-empty"),
       method: "PATCH",

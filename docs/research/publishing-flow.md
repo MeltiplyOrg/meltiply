@@ -1,8 +1,9 @@
 # Publishing flow: source comparison and completion
 
 Research dates: 2026-10-28 (source comparison), 2026-10-29 (official protocol and
-video-workflow audit). Source review is not live-platform acceptance. No third-party
-publishing credentials, platform audit, or real public post was used.
+video-workflow audit), and 2026-11-03 (local five-provider Postiz comparison).
+Source review and local protocol fixtures are not live-platform acceptance.
+No third-party publishing credentials, platform audit, or real public post was used.
 
 ## References inspected
 
@@ -57,9 +58,9 @@ No source code was copied.
 - [Instagram content publishing](https://developers.facebook.com/documentation/instagram-platform/content-publishing)
   separates container creation, readiness (`status_code`), and `media_publish`.
   Images must be JPEG and provider retrieval needs an accessible media URL.
-  The current guide describes up to 20 carousel items; Meltiply deliberately
-  retains its documented, conservative 10-item subset on its configured API version.
-  This is not support for every newer Instagram publishing feature.
+  Meltiply accepts up to 20 carousel items, single-image/video feed containers,
+  Reels/trial Reels, and photo/video Stories. Stories reject captions/signatures.
+  This connection uses Instagram Login, not Facebook Login-only publishing APIs.
 - [Threads posts](https://developers.facebook.com/documentation/threads/posts)
   uses `threads` then `threads_publish`, requires explicit media discriminators
   (including carousel children), and supports up to 20 carousel attachments.
@@ -67,9 +68,9 @@ No source code was copied.
   tests cover readiness, ordered children, and ambiguous final writes.
 - [Facebook Reels publishing](https://developers.facebook.com/documentation/video-api/guides/reels-publishing)
   uses start, hosted-file upload, processing/status lookup, then finish.
-  Pages have implicit Public scope. Meltiply supports Page Reels, not personal
-  profiles, photo/feed posts, Stories, or the entire Facebook publishing API.
-  Existing upload and lookup paths preserve the operation through those phases.
+  Pages have Public scope. Feed text/links/photos, regular video, Reels, Stories,
+  slideshows, crossposts, native drafts, video experiments, and Live each use
+  their own endpoint and completion evidence; none falls back to a Reel.
 
 All three remote-ingest paths require provider-reachable media. Meltiply issues
 signed bearer delivery URLs only when dispatching an attempt and holds its frozen
@@ -104,18 +105,18 @@ incomplete choices and strips the draft-only disclosure gate before delivery.
 
 ## Official video protocol audit
 
-The supported paths are deliberately narrower than each Platform's whole API.
+The publishing model separates public publication from native handoff.
 Now, Schedule, and weekly Queue are Meltiply delivery intents: future work stays
 durable locally and starts the same Provider protocol when due. Containers are not
 created at draft-save time or held until a future publication date.
 
-| Platform  | Supported path and official completion evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Facebook  | [Page Reels](https://developers.facebook.com/documentation/video-api/guides/reels-publishing): start a session, upload the hosted file to `rupload.facebook.com`, finish with `video_state=PUBLISHED`, then poll status. The documented publishing phase `completed` and the guide's example `complete` both prove completion. `expired` and `upload_failed` are terminal video failures. Pages have Public audience only; the composer exposes that sole choice and its sharing consequence.                                                                                                                                                                                                                                                                                               |
-| Instagram | [Reels and ordered mixed carousels](https://developers.facebook.com/documentation/instagram-platform/content-publishing), retaining the application’s 10-item subset. Single videos use `REELS`; carousel videos use unpublished `VIDEO` children. [Container `FINISHED`](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-container/) permits finalization; `PUBLISHED` proves completion even when the final response and media ID were lost. The adapter retains the operation identity rather than inventing a media ID. [The Reel ceiling is 300 MB](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/media/); the adapter conservatively interprets this as 300,000,000 bytes. |
-| Threads   | [Single videos and ordered mixed carousels](https://developers.facebook.com/documentation/threads/posts): create explicitly typed containers, wait for readiness, then call `threads_publish`. [Container status](https://developers.facebook.com/documentation/threads/troubleshooting/) distinguishes readiness, completion, expiry, and failure. Submitted ambiguous final writes are not blindly repeated.                                                                                                                                                                                                                                                                                                                                                                              |
-| TikTok    | [Direct Post](https://developers.tiktok.com/docs/en/content-posting-api-reference-direct-post): query [current creator information](https://developers.tiktok.com/docs/en/content-posting-api-reference-query-creator-info), initialize `PULL_FROM_URL`, and [poll the retained publish ID](https://developers.tiktok.com/docs/en/content-posting-api-reference-get-video-status). `PUBLISH_COMPLETE` proves publication; private/moderated posts may lack a public post ID. Terminal `internal`, `video_pull_failed`, and `photo_pull_failed` permit retry; `auth_removed` requires reconnection, not retry. The UI refreshes creator information on every mount, including immediate draft reopen, and does not authorize sending from cached data before that lookup succeeds.           |
-| YouTube   | Square/portrait Shorts candidates up to the existing 180-second application ceiling. [Resumable upload](https://developers.google.com/youtube/data/guides/using_resumable_upload_protocol) retains the session and probes Google's acknowledged byte Range before resuming; interrupted chunks do not create another upload. [Writable upload metadata](https://developers.google.com/youtube/data/reference/rest/v3/videos/insert) uses `status.selfDeclaredMadeForKids` and selected privacy. [Video processing status](https://developers.google.com/youtube/data/reference/rest/v3/videos) is polled after upload acceptance.                                                                                                                                                           |
+| Platform  | Supported paths and official completion evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Facebook  | [Page feed](https://developers.facebook.com/documentation/pages-api/posts), regular video, [Reels](https://developers.facebook.com/documentation/video-api/guides/reels-publishing), [Stories](https://developers.facebook.com/documentation/video-api/page-stories-api), slideshows, crossposts, experiments, and [Live](https://developers.facebook.com/documentation/live-video-api/guides/streaming). Reels retain their session/upload/finish status evidence. Photo/video Stories use their own endpoints. A native Page draft, created experiment, or prepared broadcast is `delivered`, not public publication. An actual Live/VOD status can prove publication later. |
+| Instagram | [Content publishing](https://developers.facebook.com/documentation/instagram-platform/content-publishing): feed image/video, mixed carousel up to 20, Reel/trial Reel, and Story. `FINISHED` permits finalization; `PUBLISHED` proves completion without inventing a lost media ID. Reels use the 300 MB ceiling and Stories 100 MB; feed videos and carousel children retain the app's 500 MiB upload ceiling. Image alt text/tags stay on the correct child.                                                                                                                                                                                                                 |
+| Threads   | [Posts](https://developers.facebook.com/documentation/threads/posts): standard media/carousels, polls, long text, GIPHY GIFs, ghosts, quotes, replies, and source-ID reposts. Media containers wait for readiness before finalization; ambiguous final writes are not blindly repeated. Optional Instagram Story cross-sharing failure is retained as a warning without erasing the successful Threads Post or retrying it.                                                                                                                                                                                                                                                    |
+| TikTok    | [Direct Post](https://developers.tiktok.com/docs/en/content-posting-api-reference-direct-post) queries current creator information. Video/photo inbox handoffs instead use `video.upload` and native completion. Both ingest through verified HTTPS URLs and [poll the retained ID](https://developers.tiktok.com/docs/en/content-posting-api-reference-get-video-status). `PUBLISH_COMPLETE` proves direct publication; `SEND_TO_USER_INBOX` is terminal `delivered` only for the inbox method, never a public Post ID.                                                                                                                                                       |
+| YouTube   | Ordinary videos and Shorts share [resumable upload](https://developers.google.com/youtube/data/guides/using_resumable_upload_protocol); no portrait/180-second app restriction remains. Processing is polled after acceptance. [Live broadcast creation](https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/insert) creates and binds a separate RTMPS stream for an external encoder. A prepared broadcast is `delivered`; actual provider lifecycle proves live/public state. Ending an unstarted broadcast deletes it without claiming a recording.                                                                                                          |
 
 The audit fixed Facebook completion/failure-state handling, Instagram completion
 after an ambiguous final write and its oversized Reel allowance, TikTok terminal
@@ -153,7 +154,7 @@ Meta's three-second minimum or TikTok's size/frame-rate requirements.
 
 [Facebook's guide](https://developers.facebook.com/documentation/video-api/guides/reels-publishing)
 specifies 3–90 seconds, 9:16, at least 540×960 and 24–60 fps; the application
-retains its narrower 60-second ceiling. Instagram specifies 3–900-second Reels and
+supports that 90-second Reel ceiling. Instagram specifies 3–900-second Reels and
 23–60 fps. Threads allows positive durations up to 300 seconds and 23–60 fps.
 [TikTok's transfer guide](https://developers.tiktok.com/docs/en/content-posting-api-media-transfer-guide)
 requires 360–4096 pixels per dimension and 23–60 fps, plus the creator-specific
@@ -180,3 +181,133 @@ needs a verified HTTPS domain/prefix. See the official guidelines above and the
 Live acceptance flags remain operator controls. Automated checks must not enable
 them or claim that a test double proves credentials, approval, media reachability,
 or real account publication.
+
+## Local Postiz comparison — 2026-11-03
+
+The reference was cloned locally from `https://github.com/gitroomhq/postiz-app.git`
+and pinned to `e424fb587e0ae87a2428a0586cb00af6facd0d1d`.
+The comparison followed container creation, media transfer, finalization,
+provider-side processing, identifiers, and partial-success handling. No reference
+source was copied into Meltiply.
+
+| Provider  | Pinned publishing reference                                                                                                                                                                                                                                                                                                                                                       | Verified result and correction                                                                                                                                                                                                                                                                                                                                                       |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Facebook  | [Page provider](https://github.com/gitroomhq/postiz-app/blob/e424fb587e0ae87a2428a0586cb00af6facd0d1d/libraries/nestjs-libraries/src/integrations/social/facebook.provider.ts)                                                                                                                                                                                                    | Feed-photo staging, regular videos, and Story endpoint order agree. No additional Facebook defect was established. Postiz does not implement all of Meltiply's Reel, slideshow, crosspost, experiment, native-draft, or Live paths, so it cannot validate those methods.                                                                                                             |
+| Instagram | [Shared publishing](https://github.com/gitroomhq/postiz-app/blob/e424fb587e0ae87a2428a0586cb00af6facd0d1d/libraries/nestjs-libraries/src/integrations/social/instagram.provider.ts), [Instagram Login](https://github.com/gitroomhq/postiz-app/blob/e424fb587e0ae87a2428a0586cb00af6facd0d1d/libraries/nestjs-libraries/src/integrations/social/instagram.standalone.provider.ts) | Accept the documented single-account `/me` envelope; enforce three collaborators in the API, adapter, and composer; retain a published media ID with `instagram_publish_partial` when Instagram reports lost caption, tags, or caption add-ons.                                                                                                                                      |
+| Threads   | [Threads provider](https://github.com/gitroomhq/postiz-app/blob/e424fb587e0ae87a2428a0586cb00af6facd0d1d/libraries/nestjs-libraries/src/integrations/social/threads.provider.ts)                                                                                                                                                                                                  | Text and provider-hosted content now use the same durable readiness gate as media. A matching published media ID no longer fails because Meta omits a permalink. Additional literal hashtags are allowed; only the first becomes a native topic tag.                                                                                                                                 |
+| TikTok    | [Content Posting provider](https://github.com/gitroomhq/postiz-app/blob/e424fb587e0ae87a2428a0586cb00af6facd0d1d/libraries/nestjs-libraries/src/integrations/social/tiktok.provider.ts)                                                                                                                                                                                           | Direct/inbox endpoints, current creator choices, AI disclosure, terminal handoff, and exact 64-bit Post IDs agree. Photo resolution uses the reference's 1080p short-side interpretation instead of rejecting every portrait image taller than 1080 pixels. TikTok documents “1080p” without an explicit per-axis photo ceiling; real-account acceptance remains necessary.          |
+| YouTube   | [YouTube provider](https://github.com/gitroomhq/postiz-app/blob/e424fb587e0ae87a2428a0586cb00af6facd0d1d/libraries/nestjs-libraries/src/integrations/social/youtube.provider.ts)                                                                                                                                                                                                  | Preserve Google's complete resumable-session URI through interruption and fresh-adapter recovery; do not reconstruct its opaque query. An expired processing record (`terminated`) is not a failed upload. Live creation uses a future start time rather than an instant already expired in transit. Remove the unsupported `maxResults` parameter from an ID-filtered video lookup. |
+
+Primary documentation resolves disagreements with the reference:
+
+- [Instagram media creation](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/media)
+  specifies three collaborators, despite Postiz accepting five.
+- [Instagram media publishing](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/media_publish)
+  explicitly treats `config_issue` and `caption_add_on_attachment_status` as
+  successful publication with missing content. Migration
+  `030_instagram_partial_publication_warning.sql` extends the existing closed
+  warning vocabulary without permitting arbitrary provider payloads.
+- [Threads retrieval](https://developers.facebook.com/documentation/threads/retrieve-and-manage-replies/replies-and-conversations)
+  documents copyright-related permalink omission; absence is not proof of a
+  failed Post. A present malformed URL still fails validation.
+- [Threads Posts](https://developers.facebook.com/documentation/threads/posts)
+  documents first-valid-tag conversion, not rejection of all additional literal
+  hashtags. Polling retains the same container and never creates a replacement.
+- [YouTube processing details](https://developers.google.com/youtube/v3/docs/videos#processingDetails.processingStatus)
+  defines `terminated` as information no longer available. Publication still
+  requires an independent `processed` upload status.
+- [YouTube Live insertion](https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/insert)
+  requires a future `scheduledStartTime`; a one-minute creation margin does not
+  replace the external encoder or prove that the broadcast is live.
+
+### Deliberate differences and unproven findings
+
+- Retain queue-backed polling and `created`/`submitted` identities instead of
+  Postiz's in-request polling loops. Never substitute a container ID or a profile
+  URL for missing published-media evidence, and never republish an ambiguous
+  final write.
+- Keep each Distribution's single Story outcome. Postiz's sequential multi-Story
+  loop returns only its last media ID and is not a safe model for independently
+  recoverable outcomes.
+- Instagram's documented carousel creation sequence permits collecting child
+  IDs and creating the parent before polling its readiness. A claim that every
+  child must first be `FINISHED` was not established; no speculative blocking
+  loop was added.
+- `enable_fb_login=false` is a sign-in presentation choice. Meta's
+  [Instagram Login guide](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login)
+  documents the enabled option as the default; there is no evidence that leaving
+  it enabled changes this integration into the Facebook Login API product.
+- Album-child permalink limitations do not establish an Instagram bug in a
+  lookup of the published parent. Analytics-only metric/period concerns and the
+  combination of trial Reels with feed sharing were not verified as publishing
+  failures and were not changed.
+- Threads' unversioned resource paths and mixed-script/ZWJ character accounting
+  still need live-account confirmation. The documentation says emoji use UTF-8
+  bytes but links a grapheme counter; no guessed stricter limit was introduced
+  for ordinary non-ASCII text. Carousel-level versus per-item Threads alt text
+  also remains an acceptance question.
+- Postiz is not an option-for-option parity target: TikTok Business API is a
+  separate connection product, FILE_UPLOAD is a transfer alternative to the
+  supported verified-URL path, and custom YouTube thumbnails are optional
+  post-upload metadata not exposed here. WebM remains outside Meltiply's upload
+  contract; existing MP4/MOV video methods are unchanged. The application's
+  upload ceiling and bounded internal operation identity also remain in force.
+
+### Local evidence and limits
+
+- `bun run contract:check` passed, including collaborator boundaries and closed
+  composed Threads schemas.
+- `bun x vp run --filter './packages/*' --filter './workers/*' --concurrency-limit 1 type-check`
+  passed across all 11 projects.
+- The initial serial package/Worker test run had 1,028 passing tests, including
+  all 352 Provider tests, and five opt-in live-Worker skips, but failed the API
+  function-coverage gate at 53.51% versus 55%.
+- After adding broadcast HTTP cases for authorization, connection state, secret
+  handling, upstream failures, and idempotent termination, the API unit stage
+  passed all 299 tests with 56.61% function coverage. The 55% threshold remains
+  unchanged. That exposed missing `getBroadcast`/`endBroadcast` conformance cases;
+  after adding them, `bun run --filter @meltiply/api-worker test:contract` passed
+  all 267 tests.
+- `node --test scripts/ci/integration-database.test.mjs` passed all three routing
+  guard cases. Strict type-aware lint passed on the changed Provider/runtime,
+  contract-test, and routing-helper files.
+- `bun run --filter frontend-app check` passed: 735 tests, formatting, Cloudflare
+  binding generation, TypeScript, lint, and the production build.
+  `bun run --filter frontend-app build:ui-preview` also passed. Chromium exercised
+  the actual collaborator input and Published partial-content warning at
+  1440×1000 and 390×844 in light/dark palettes; the warning did not expose a
+  Retry action, and the phone document had no horizontal overflow.
+- `bun run lint:dead` passed after keeping the internally used `threadsMethod`
+  helper private. `bun run format-check:cloudflare` and the final frontend
+  TypeScript check passed.
+- The initial unresolved `miniflare` and `pg` types came from missing dependencies
+  in the separate self-host npm package. After
+  `npm ci --prefix scripts/selfhost --include=dev`, repository-wide `bun run lint`,
+  `bun run lint:dead`, and API type-checking passed without dependency-manifest,
+  coverage-threshold, or lint-rule changes. The actual `storage:s3:check` script
+  also passed against an isolated local Miniflare S3 gateway.
+- `bun run i18n:check` passed all seven target locales with zero errors/warnings.
+  The worktree's surviving Git registration was reconnected without resetting or
+  checking out source files. `bun run docs:links` then passed across 551 files and
+  1,451 local links.
+- The full `test:integration` gate passed against disposable PostgreSQL on port
+  55483: 27 database, 210 API, and 110 automation tests. The real Instagram
+  adapter's partial-success path persisted Published plus a warning and ignored
+  a later publish trigger; its final upstream write occurred once.
+- A throwaway TCP HTTP smoke exercised the real five adapters in seven scenarios:
+  staged Facebook photos, Instagram partial success, deferred Threads text plus
+  missing permalink, TikTok portrait photo and inbox video, YouTube resumable
+  MP4/expired processing metadata, and future-dated Live handoff. It transferred
+  the real 74,580-byte MP4 and 15,377-byte portrait JPEG and observed exactly one
+  Instagram and one Threads finalizing write. It did not contact those providers.
+- The initial local integration attempt exposed fixtures hard-coding system/admin
+  connections to port 5433 while authenticated queries used the disposable
+  target. Some setup/cleanup operations could reach the existing development
+  database; that run is not product evidence. All fixture roles now derive from
+  the selected loopback database URL, and explicit privileged overrides cannot
+  silently change its host, port, or database. The passing run above used only
+  the disposable target.
+
+Local protocol fixtures do not establish account eligibility, app review, token
+grants, verified public-media reachability, an actual encoder stream, or provider
+acceptance of every method. Operator acceptance flags remain unchanged.

@@ -1,6 +1,8 @@
 import type { JwtIdentity } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
+import type { EffectTransactionClient } from "@meltiply/database";
 import type { PublishingQueueApiService } from "../src/publishing-queue-service";
+import type { PublishingPreferencesApiService } from "../src/publishing-preferences-service";
 import { TokenCipher } from "@meltiply/secrets";
 import { ContractValidator } from "@meltiply/contracts/test-support";
 import { ProviderRegistry } from "@meltiply/providers";
@@ -16,11 +18,13 @@ const {
   registerOnboardingRoutes,
   registerReportingRoutes,
   registerWorkspaceLifecycleRoutes,
+  withTenantTransactionEffect,
 } = vi.hoisted(() => ({
   registerInstallationRoutes: vi.fn(),
   registerOnboardingRoutes: vi.fn(),
   registerReportingRoutes: vi.fn(),
   registerWorkspaceLifecycleRoutes: vi.fn(),
+  withTenantTransactionEffect: vi.fn(),
 }));
 vi.mock("../src/workspace-lifecycle", () => ({
   registerWorkspaceLifecycleRoutes,
@@ -34,6 +38,7 @@ vi.mock("../src/onboarding", () => ({
 vi.mock("../src/reporting-routes", () => ({
   registerReportingRoutes,
 }));
+vi.mock("../src/database", () => ({ withTenantTransactionEffect }));
 
 import { createApiApp } from "../src/app";
 import type { AssetApiService } from "../src/asset-types";
@@ -313,6 +318,16 @@ const cases: ConformanceCase[] = [
     path: "/api/v1/oauth-selections/select_session_alpha_1234567890",
   },
   { method: "GET", operationId: "listPosts", path: "/api/v1/posts" },
+  {
+    method: "GET",
+    operationId: "getPublishingPreferences",
+    path: "/api/v1/publishing-preferences",
+  },
+  {
+    method: "PUT",
+    operationId: "updatePublishingPreferences",
+    path: "/api/v1/publishing-preferences",
+  },
   { method: "POST", operationId: "createPost", path: "/api/v1/posts" },
   {
     method: "GET",
@@ -383,6 +398,16 @@ const cases: ConformanceCase[] = [
     method: "GET",
     operationId: "getDistribution",
     path: "/api/v1/distributions/00000000-0000-4000-8000-000000000301",
+  },
+  {
+    method: "GET",
+    operationId: "getBroadcast",
+    path: "/api/v1/distributions/00000000-0000-4000-8000-000000000301/broadcast",
+  },
+  {
+    method: "POST",
+    operationId: "endBroadcast",
+    path: "/api/v1/distributions/00000000-0000-4000-8000-000000000301/broadcast/end",
   },
   {
     method: "PATCH",
@@ -592,6 +617,15 @@ const publishingQueueService: PublishingQueueApiService = {
     }),
 };
 
+const publishingPreferencesService: PublishingPreferencesApiService = {
+  get: () => Effect.succeed(body("getPublishingPreferences")),
+  replace: () =>
+    Effect.succeed({
+      replayed: false,
+      value: body("updatePublishingPreferences"),
+    }),
+};
+
 // Brand Profile conformance double: every lifecycle method returns the golden
 // fixture for its operation so route responses match the shared catalog.
 const brandProfileService = {
@@ -643,6 +677,26 @@ providerRegistry.register("threads", {
     account: { displayName: "Creator", id: "provider-account" },
     refreshToken: "provider-refresh-token",
     scopes: ["threads_basic", "threads_content_publish"],
+  }),
+  transferModes: [],
+});
+providerRegistry.register("youtube", {
+  capability: {
+    ...capabilities.find((capability) => capability.platform === "youtube")!,
+    connect_available: false,
+    analytics: false,
+    comments: false,
+    publish: false,
+    reply: false,
+  },
+  getBroadcastInfo: async () => ({
+    state: "ready",
+    ingestUrl: "rtmps://example.invalid/live",
+    streamKey: "preview-only-not-a-real-stream-key",
+  }),
+  endBroadcast: async () => ({
+    outcome: "confirmed_success",
+    providerOperationId: "live:contract-broadcast",
   }),
   transferModes: [],
 });
@@ -984,6 +1038,7 @@ const app = createApiApp({
       stitchAllowed: true,
     }),
   postService,
+  publishingPreferencesService,
   publishingQueueService,
   resolveActor: async () => actorFixture,
   revokeOAuthConnection: () => Effect.succeed(undefined),
@@ -1056,6 +1111,10 @@ function errorApp(status: number) {
     providerRegistry: new ProviderRegistry(),
     publicationRequirements: effectFailure,
     postService: throwingPosts,
+    publishingPreferencesService: {
+      get: effectFailure,
+      replace: effectFailure,
+    },
     publishingQueueService: {
       list: effectFailure,
       get: effectFailure,
@@ -1083,6 +1142,54 @@ const errorPathOverrides: Record<string, string> = {
 describe("API Worker OpenAPI conformance", () => {
   beforeEach(() => {
     contractFailureStatus = undefined;
+    // Exercise the actual broadcast program against database outcomes, including
+    // its own role/state failures; do not replace the program with a golden echo.
+    const query = vi
+      .fn<EffectTransactionClient["query"]>()
+      .mockImplementationOnce(() => {
+        const rows =
+          contractFailureStatus === 404
+            ? []
+            : [
+                {
+                  org_id: actorFixture.workspace.id,
+                  platform: "youtube",
+                  platform_user_id: "contract-channel",
+                  provider_operation_id: "live:contract-broadcast",
+                  access_token: "test-only-provider-token",
+                  token_expires_at: null,
+                  revoked_at: null,
+                  connection_status: contractFailureStatus === 409 ? "disconnected" : "connected",
+                  role: contractFailureStatus === 403 ? "viewer" : "admin",
+                },
+              ];
+        return Effect.succeed({
+          rows,
+          rowCount: rows.length,
+          command: "SELECT",
+          fields: [],
+          oid: 0,
+        });
+      })
+      .mockReturnValueOnce(
+        Effect.succeed({
+          rows: [{ idempotency_key: "broadcast-end" }],
+          rowCount: 1,
+          command: "INSERT",
+          fields: [],
+          oid: 0,
+        }),
+      )
+      .mockReturnValue(
+        Effect.succeed({ rows: [], rowCount: 0, command: "UPDATE", fields: [], oid: 0 }),
+      );
+    withTenantTransactionEffect.mockImplementation(
+      (
+        _env: ApiWorkerEnv,
+        _session: typeof actorFixture.claims,
+        operation: (client: { query: typeof query }) => Effect.Effect<unknown, unknown>,
+      ) => operation({ query }),
+    );
   });
   let validator: ContractValidator;
 

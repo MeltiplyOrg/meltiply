@@ -31,6 +31,8 @@ const allowedDynamicTranslationExpressions: Record<string, true> = {
   'grouping === "day" ? "Day" : grouping === "week" ? "Week" : "Month"': true,
   "FORMAT_LABELS[format]": true,
   "card.label": true,
+  // Settings rail groups own a finite reviewed label roster in `SECTION_GROUPS`.
+  "group.label": true,
   genericErrorMessage: true,
   error: true,
   "item.label": true,

@@ -1,6 +1,5 @@
 import { Context, Effect, Layer } from "effect";
 import { MailSubmissionError, type MailSubmissionClassification } from "@meltiply/domain";
-import { isMailSenderAddress, isMailSenderName } from "@meltiply/domain/mail-content";
 
 /**
  * Structured sender or recipient identity. `email` is a bare address and
@@ -176,34 +175,6 @@ export function createCloudflareMailSender(
       return { submissionId: messageId };
     },
   };
-}
-
-/**
- * Trims Worker variables, then applies the shared address/display-name policy.
- * `MAIL_FROM_ADDRESS` must be a bare dot-atom email address; malformed values
- * yield `undefined` so production fails closed as `unavailable` rather than
- * dispatching an invalid sender. `MAIL_FROM_NAME` is optional; a nonblank unsafe
- * name also fails closed instead of silently dropping it. Blank names are omitted.
- *
- * @param env - Worker environment exposing the neutral mail variables.
- * @returns The validated `MailAddress`, or undefined when unusable.
- */
-export function mailSenderConfiguration(env: {
-  MAIL_FROM_ADDRESS?: string;
-  MAIL_FROM_NAME?: string;
-}): MailAddress | undefined {
-  const email = env.MAIL_FROM_ADDRESS?.trim();
-  if (email === undefined || !isMailSenderAddress(email)) {
-    return undefined;
-  }
-  const name = env.MAIL_FROM_NAME?.trim();
-  if (name !== undefined && name.length > 0) {
-    if (!isMailSenderName(name)) {
-      return undefined;
-    }
-    return { email, name };
-  }
-  return { email };
 }
 
 /**

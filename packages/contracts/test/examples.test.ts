@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import YAML from "yaml";
+import Ajv2020 from "ajv/dist/2020";
+import addFormats from "ajv-formats";
 
 import {
   ContractValidator,
@@ -103,5 +105,36 @@ describe("operation examples", async () => {
         ).toBeUndefined();
       }
     }
+  });
+
+  it.each([
+    { poll_attachment: { option_a: "First", option_b: "Second" } },
+    { gif_attachment: { provider: "GIPHY", gif_id: "gif-123" } },
+    { text_attachment: { plaintext: "Long text", link_attachment_url: "https://example.com" } },
+  ])("keeps composed Threads publication schemas complete and closed: %j", (options) => {
+    const publishSchema = openApi.components?.schemas?.ThreadsPublishOptions;
+    const draftSchema = openApi.components?.schemas?.ThreadsPostOptions;
+    if (!publishSchema || !draftSchema) throw new Error("Threads option schemas are missing");
+    const ajv = new Ajv2020({ strict: false });
+    const publish = ajv.compile(publishSchema);
+    const draft = ajv.compile(draftSchema);
+    expect(publish(options)).toBe(true);
+    expect(publish({ ...options, unknown_option: true })).toBe(false);
+    const [key, attachment] = Object.entries(options)[0]!;
+    expect(publish({ [key]: { ...attachment, unknown_option: true } })).toBe(false);
+    const incomplete = { [key]: key === "gif_attachment" ? { provider: "GIPHY" } : {} };
+    expect(draft(incomplete)).toBe(true);
+    expect(publish(incomplete)).toBe(false);
+  });
+
+  it("permits three Instagram collaborators but rejects a fourth at the public API boundary", () => {
+    const schema = openApi.components?.schemas?.InstagramContentOptions;
+    if (!schema) throw new Error("Instagram content options schema is missing");
+    const ajv = new Ajv2020({ strict: false });
+    addFormats(ajv);
+    const validate = ajv.compile(schema);
+    const collaborators = ["first", "second", "third"];
+    expect(validate({ collaborators })).toBe(true);
+    expect(validate({ collaborators: [...collaborators, "fourth"] })).toBe(false);
   });
 });

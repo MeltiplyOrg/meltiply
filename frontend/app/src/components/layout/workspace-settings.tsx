@@ -6,6 +6,7 @@ import {
   Monitor,
   Moon,
   Palette,
+  Send,
   ShieldCheck,
   Sun,
   UserRound,
@@ -22,11 +23,27 @@ import { useTheme } from "@/lib/theme";
 import { supportedLanguages, useI18n } from "@/lib/i18n";
 import { AccountSecurity } from "@/components/auth/account-security";
 import { ReportingSettings } from "@/components/settings/reporting-settings";
+import { PublishingPreferencesSection } from "@/components/settings/publishing-preferences-section";
 import SettingsPage from "@/app/(dashboard)/settings/page";
 
-const SECTION_IDS = ["appearance", "language", "account", "privacy", "security"] as const;
+const SECTION_IDS = ["appearance", "language", "publishing", "account", "privacy", "security"] as const;
 type SettingsSection = (typeof SECTION_IDS)[number] | "administration";
 const LANGUAGE_CODES = supportedLanguages.map(({ code }) => code);
+
+/**
+ * Section rail groups. General and Account are personal surfaces; Workspace
+ * carries the admin-only directory. A group with no visible section disappears
+ * with its last member, so a member never sees an empty heading.
+ */
+const SECTION_GROUPS = [
+  { id: "general", label: "General", sections: ["appearance", "language", "publishing"] },
+  { id: "account", label: "Account", sections: ["account", "security"] },
+  { id: "workspace", label: "Workspace", sections: ["administration"] },
+] as const satisfies readonly {
+  id: string;
+  label: string;
+  sections: readonly SettingsSection[];
+}[];
 
 /** Decorative miniature lines shared by both halves of every theme preview; no palette values are copied. */
 function PreviewLines() {
@@ -81,6 +98,14 @@ export default function WorkspaceSettings() {
       description: t("Choose the language used throughout your workspace."),
       icon: Languages,
     },
+    publishing: {
+      label: t("Publishing"),
+      navLabel: t("Publishing"),
+      description: t(
+        "Choose the publishing timezone, reusable signatures, and notification choices.",
+      ),
+      icon: Send,
+    },
     account: {
       label: t("Account and workspace"),
       navLabel: t("Account"),
@@ -106,9 +131,15 @@ export default function WorkspaceSettings() {
   };
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSection = searchParams.get("section");
-  const sectionIds: readonly SettingsSection[] = canManageSettings
-    ? ["administration", ...SECTION_IDS]
-    : SECTION_IDS;
+  // Publishing and Administration are admin-managed, so their groups shrink or
+  // disappear for everyone else before the route resolves its active section.
+  const visibleGroups = SECTION_GROUPS.map((group) => ({
+    ...group,
+    sections: group.sections.filter(
+      (id) => canManageSettings || (id !== "publishing" && id !== "administration"),
+    ),
+  })).filter((group) => group.sections.length > 0);
+  const sectionIds: readonly SettingsSection[] = visibleGroups.flatMap((group) => group.sections);
   const section = sectionIds.find((id) => id === requestedSection) ?? "appearance";
   const current = sections[section];
   const handleSignOut = useWorkspaceSignOut();
@@ -204,26 +235,44 @@ export default function WorkspaceSettings() {
         <span className="hidden px-2 pb-2 text-(length:--font-size-micro) font-semibold uppercase tracking-wide text-ink-3 md:block">
           {t("Settings")}
         </span>
-        {sectionIds.map((id) => {
-          const Icon = sections[id].icon;
-          const isCurrent = section === id;
-          return (
-            <Button
-              key={id}
-              variant={isCurrent ? "secondary" : "ghost"}
-              data-sidebar-item=""
-              className={cn(
-                "relative z-10 h-8 shrink-0 justify-start px-2 text-(length:--font-size-control) font-normal",
-                isCurrent ? "hover:bg-secondary" : "hover:bg-transparent",
-              )}
-              aria-current={isCurrent ? "page" : undefined}
-              onClick={() => setSearchParams({ section: id })}
-            >
-              <Icon className="size-3.5" />
-              {sections[id].navLabel}
-            </Button>
-          );
-        })}
+        {visibleGroups.map((group, groupIndex) => (
+          <div
+            key={group.id}
+            role="group"
+            aria-label={t(group.label)}
+            className="contents md:flex md:flex-col md:gap-1"
+          >
+            {groupIndex > 0 && (
+              <span
+                aria-hidden="true"
+                className="mx-1 my-1 h-5 w-px shrink-0 self-center bg-line md:hidden"
+              />
+            )}
+            <span className="hidden px-2 pb-1 pt-2 text-(length:--font-size-micro) font-semibold uppercase tracking-wide text-ink-3 md:block">
+              {t(group.label)}
+            </span>
+            {group.sections.map((id) => {
+              const Icon = sections[id].icon;
+              const isCurrent = section === id;
+              return (
+                <Button
+                  key={id}
+                  variant={isCurrent ? "secondary" : "ghost"}
+                  data-sidebar-item=""
+                  className={cn(
+                    "relative z-10 h-8 shrink-0 justify-start px-2 text-(length:--font-size-control) font-normal",
+                    isCurrent ? "hover:bg-secondary" : "hover:bg-transparent",
+                  )}
+                  aria-current={isCurrent ? "page" : undefined}
+                  onClick={() => setSearchParams({ section: id })}
+                >
+                  <Icon className="size-3.5" />
+                  {sections[id].navLabel}
+                </Button>
+              );
+            })}
+          </div>
+        ))}
       </nav>
       <div
         ref={contentRef}
@@ -339,6 +388,7 @@ export default function WorkspaceSettings() {
           )}
           {section === "security" && <AccountSecurity />}
           {section === "privacy" && <ReportingSettings />}
+          {section === "publishing" && <PublishingPreferencesSection />}
           {section === "administration" && <SettingsPage embedded />}
         </div>
       </div>

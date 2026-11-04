@@ -140,13 +140,13 @@ export function createOperatorReconciliationService(): OperatorReconciliationSer
      * Resolves an ambiguous or failed distribution requiring manual operator reconciliation.
      *
      * Locks the distribution row with `FOR UPDATE`, validates it is in `awaiting_provider` or
-     * `needs_reconciliation`, updates its status to `published`, `failed`, or `cancelled` with verified
+     * `needs_reconciliation`, updates its status to `published`, `delivered`, `failed`, or `cancelled` with verified
      * external evidence, and logs the action and before/after diff in `operator_actions`.
      *
      * @param env - Worker environment bindings.
      * @param actor - Authenticated operator access claims.
      * @param distributionId - UUID of the target distribution.
-     * @param input - Validated resolution input (`published`, `failed`, or `cancelled` with evidence).
+     * @param input - Validated terminal resolution with externally verified evidence and a reason.
      * @param idempotencyKey - Operator client idempotency key.
      * @param requestId - HTTP request trace identifier.
      * @returns Resolution summary with audit ID, status, and replay flag.

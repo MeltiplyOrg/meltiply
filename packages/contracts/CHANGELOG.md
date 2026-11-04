@@ -27,12 +27,50 @@
   bootstrap data for the canonical shared Workspace, not an account field, and
   is applied once when that Workspace is created so it survives verification.
   Omitting it keeps the existing derived default.
+## 1.0.0 - 2026-11-03
+
+- Add method-specific Facebook Page, Threads, Instagram content, TikTok inbox,
+  and YouTube Live options. Incomplete Post options remain saveable; scheduling
+  refines them into publication options without dropping the selected method.
+- Add terminal `DistributionStatus.delivered` for native drafts, inbox handoffs,
+  experiments, and prepared broadcasts, plus opaque `provider_reference` and
+  `provider_warnings` for successful Threads publications with a failed secondary
+  Instagram Story share. These never fabricate a public Post ID.
+- Add writer-only, no-store `GET /distributions/{distribution_id}/broadcast`
+  and idempotent `POST /distributions/{distribution_id}/broadcast/end`.
+  Encoder secrets are never part of the general Distribution or Post projection.
+- Accept Instagram carousels up to 20 items and ordinary YouTube videos, not
+  only Shorts-shaped uploads. Keep the existing app Asset upload ceiling.
+
+- Exclude every occurrence of required review tokens from the breaking-change
+  description length check; repeated tokens cannot replace migration prose.
+
+- Require breaking PR review to acknowledge both merge-base and cumulative
+  release scopes in one entry. Reject release artifacts whose machine-readable
+  changes differ from the versioned changelog, using immutable tagged notes
+  when the release tag exists.
+
+- Align public health examples with the prepared contract version, recognize
+  wrapped breaking-review bullets without crossing bullet/heading boundaries, and
+  retain strict candidate/full-rollout health checks while recording legacy
+  previous-version responses only during verified partial rollouts.
 
 - Separate saved `PostProviderOptions` from complete `ProviderPublishOptions`.
   Post targets retain YouTube visibility with an unanswered audience and TikTok
   privacy/disclosure choices before completion. Scheduling rejects unanswered
   choices or an enabled disclosure without a subtype; draft-only
   `disclose_commercial_content` never enters Distribution publication options.
+
+- Publish source-bound, automatically versioned contract release artifacts with
+  JSON/YAML, checksums, and machine-readable change notes. Gate PR and release
+  compatibility against their real bases; intentional breaks require a fresh
+  exact-change changelog review. Public health consumers retain Git-SHA deployment
+  checks while validating the distinct contract version. Promote only `getHealth`
+  to `worker-preview` with immutable hosted release/conformance evidence.
+
+- Add required `Health.contract_version` to unauthenticated `GET /health`, distinct
+  from the application `version`. Clients compare this machine-readable contract
+  version before login or mutation; the server does not reject older clients.
 
 - **Breaking:** `POST /oauth-selections/{selection_id}/confirm`
   (`OAuthSelectionConfirmRequest`) now requires `brand_profile_id` alongside

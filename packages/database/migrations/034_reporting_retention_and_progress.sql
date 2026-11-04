@@ -43,7 +43,7 @@ CREATE INDEX idx_distributions_usage_published_cohort_order
 
 -- The daily producer bounds the Post marks by a raw timestamp window before it
 -- groups by UTC date. This index serves that window directly; the plain
--- `first_confirmed_at` index from migration 029 already covers it, so the
+-- `first_confirmed_at` index from migration 033 already covers it, so the
 -- expression/`GROUP BY` form has no reason to scan an unbounded interval.
 
 -- Minimal durable delivery facts. They outlive the payload and keep logical

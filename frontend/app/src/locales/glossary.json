@@ -28,6 +28,7 @@
     "ID: {id}": "Identifier label with a placeholder",
     "sk_live_…": "Example secret; never a real credential",
     "#viral #shorts": "Hashtag example",
+    "name@example.com": "Email address example",
     "{start}–{end}": "Time range placeholder"
   },
   "preferredTranslations": {

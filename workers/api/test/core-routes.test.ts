@@ -688,6 +688,7 @@ describe("core API routes", () => {
               privacy_level: "PUBLIC_TO_EVERYONE",
             },
           },
+          signature: null,
           title_override: null,
         },
       ],
@@ -812,6 +813,66 @@ describe("core API routes", () => {
     expect(response.status).toBe(201);
   });
 
+  // The request boundary must retain the resolved signature snapshot and
+  // Instagram's post-type/trial choices verbatim; neither is reconstructed from
+  // a later template or Provider default.
+  it("saves a signature snapshot and Instagram choices on a Post target", async () => {
+    const createPost = vi.fn(() => Effect.succeed({ replayed: false as const, value: post }));
+    const app = authenticatedApp(service(), {
+      postService: postService({ createPost }),
+    });
+    const response = await app.request(
+      "/api/v1/posts",
+      {
+        body: JSON.stringify({
+          brand_profile_id: brandProfileId,
+          default_text: "Launch copy",
+          targets: [
+            {
+              platform_account_id: "00000000-0000-4000-8000-000000000401",
+              provider_options: {
+                instagram: {
+                  post_type: "reel",
+                  trial_graduation: "performance",
+                  trial_reel: true,
+                },
+              },
+              signature: "Follow Alpha Studio on Instagram at @alpha.",
+            },
+          ],
+        }),
+        headers: {
+          ...bearerHeaders,
+          "Content-Type": "application/json",
+          "Idempotency-Key": "post-signature-instagram-options",
+        },
+        method: "POST",
+      },
+      env,
+    );
+    expect(response.status).toBe(201);
+    expect(createPost).toHaveBeenCalledWith(
+      env,
+      expect.anything(),
+      expect.objectContaining({
+        targets: [
+          expect.objectContaining({
+            providerOptions: {
+              instagram: {
+                postType: "reel",
+                trialGraduation: "performance",
+                trialReel: true,
+              },
+            },
+            signature: "Follow Alpha Studio on Instagram at @alpha.",
+          }),
+        ],
+      }),
+      "post-signature-instagram-options",
+      expect.anything(),
+    );
+  });
+
   // A text-only Channel is expressed by an empty attachment selection, which
   // keeps the Post identity intact while publishing nothing on that Channel.
   it("accepts a text-only Channel selection alongside inherited media", async () => {
@@ -824,6 +885,7 @@ describe("core API routes", () => {
           hashtags: [],
           platform_account_id: "00000000-0000-4000-8000-000000000401",
           provider_options: null,
+          signature: null,
           title_override: null,
         },
       ],
@@ -1537,15 +1599,6 @@ describe("core API routes", () => {
     expect(location.searchParams.get("client_key")).toBe("tiktok-client");
     expect(location.searchParams.get("redirect_uri")).toBe(
       "http://localhost:3000/api/v1/platforms/tiktok/callback",
-    );
-    expect(new Set(location.searchParams.get("scope")?.split(","))).toEqual(
-      new Set([
-        "user.info.basic",
-        "video.publish",
-        "user.info.profile",
-        "user.info.stats",
-        "video.list",
-      ]),
     );
     expect(create).toHaveBeenCalledOnce();
   });

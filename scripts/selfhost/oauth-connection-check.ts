@@ -100,6 +100,14 @@ const providerFetch: typeof fetch = async (input, init = {}) => {
     }
     if (url.pathname === "/me")
       return Response.json({ id: expectedIds.threads, username: "threads_creator" });
+    if (url.pathname === "/v1.0/debug_token")
+      return Response.json({
+        data: {
+          is_valid: true,
+          user_id: expectedIds.threads,
+          scopes: ["threads_basic", "threads_content_publish"],
+        },
+      });
   }
   if (url.origin === "https://open.tiktokapis.com") {
     if (url.pathname === "/v2/oauth/token/") {

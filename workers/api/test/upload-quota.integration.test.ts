@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 // Workspace storage Entitlement accounting for issue #284, proven through the
 // consumer-visible seams only: the authenticated API app (upload sessions,
 // finalization, Post drafts and scheduling) and the automation AssetJobProcessor
@@ -121,8 +122,7 @@ const apiEnv = {
   ALLOWED_ORIGINS: "http://localhost:3000",
   DB_AUTHENTICATED: { connectionString } as Hyperdrive,
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   ENVIRONMENT: "test",
   VERSION: "upload-quota-test",
@@ -1501,7 +1501,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     });
     expect(refused.status).toBe(422);
     expect(errorOf(refused.body).code).toBe("quota_exceeded");
-    expect(errorOf(refused.body).message).toMatch(/storage limit/i);
 
     // The refusal is stable: repeating it grants nothing and changes nothing.
     const repeated = await requestUpload(reservationStudio, {
@@ -1750,7 +1749,7 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(engineOutputDeadlines).toHaveLength(1);
     expect(heldRow.write_hold_until).not.toBeNull();
     const outputGrantDeadline = engineOutputDeadlines[0]!;
-    expect(outputGrantDeadline).toBeLessThanOrEqual(heldRow.write_hold_until!.getTime() + 1_000);
+    expect(outputGrantDeadline).toBeLessThanOrEqual(heldRow.write_hold_until!.getTime());
     expect(heldRow.write_hold_until!.getTime() - outputGrantDeadline).toBeLessThan(10_000);
 
     // The loser carries the creator-actionable reason instead of retrying
@@ -1797,18 +1796,20 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(before.status).toBe(200);
     const chargedBefore = await chargedBytes(lifecycleStudio.organizationId);
 
-    // A rejected save: emptying the Post of both text and attachments is refused
-    // and leaves the stored composition untouched.
+    // A rejected save removes every content source, including the Channel
+    // caption; text held only in an override is still a real composition.
     const emptied = await api(lifecycleStudio, `/api/v1/posts/${postId}`, {
       body: {
         attachment_ids: [],
         brand_profile_id: lifecycleStudio.profileId,
         default_text: "",
+        targets: [],
       },
       idempotencyKey: nextKey("authoritative-empty"),
       method: "PATCH",
     });
-    expect(emptied.status).toBeGreaterThanOrEqual(400);
+    expect(emptied.status).toBe(422);
+    expect(errorOf(emptied.body).code).toBe("validation_error");
     expect(await chargedBytes(lifecycleStudio.organizationId)).toBe(chargedBefore);
 
     // A rejected finalization: bytes that do not match the reserved size are
@@ -2048,7 +2049,7 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
       // land ~1.2s beyond the declared expiry.
       expect(refreshed).not.toBeNull();
       expect(signedUrlDeadlineMs(refreshed!.url)).toBeLessThanOrEqual(
-        Date.parse(refreshed!.expires_at) + 1_000,
+        Date.parse(refreshed!.expires_at),
       );
       expect(Date.parse(refreshed!.expires_at)).toBeLessThan(sessionEnds.getTime() - 60_000);
     }
@@ -2062,7 +2063,7 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(stagedRow.write_hold_until!.getTime()).toBeLessThan(sessionEnds.getTime() - 60_000);
     if (refreshed) {
       expect(signedUrlDeadlineMs(refreshed.url)).toBeLessThanOrEqual(
-        stagedRow.write_hold_until!.getTime() + 1_000,
+        stagedRow.write_hold_until!.getTime(),
       );
     }
     expect(await chargedBytes(lifecycleStudio.organizationId)).toBe(BigInt(probeBytes));
@@ -2281,21 +2282,22 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     await runMaintenance();
     expect(await recordedUsage(lifecycleStudio)).toBe(storageCap - probeBytes);
 
-    // Then model the rollover: the new period starts with nothing recorded while
-    // the very same bytes are still stored.
+    // Model a fresh period with no recorded usage. Reconciliation also counts
+    // seeded Assets as uploads when their dates fall in this month, so clear
+    // that independent quota to ensure only resident storage can refuse this probe.
     await systemTransaction(async (client) => {
       await client.query(
-        `UPDATE usage_records SET storage_bytes = 0
-         WHERE org_id = $1 AND period = to_char(now(), 'YYYY-MM')`,
+        `UPDATE usage_records SET storage_bytes = 0, uploads = 0
+         WHERE org_id = $1 AND period = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM')`,
         [lifecycleStudio.organizationId],
       );
     });
     expect(await recordedUsage(lifecycleStudio)).toBe(0);
 
-    // A workspace that just rolled over must not look empty: an upload the reset
-    // counter would happily accept is still refused.
+    // Exceed the remaining storage by one byte: a request that merely fills the
+    // limit is valid and cannot prove resident inventory survives a rollover.
     const refused = await requestUpload(lifecycleStudio, {
-      fileSize: probeBytes,
+      fileSize: probeBytes + 1,
       title: "Rollover attempt",
     });
     expect(refused.status).toBe(422);

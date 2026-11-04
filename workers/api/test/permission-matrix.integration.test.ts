@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { createHash } from "node:crypto";
 
 import { Effect } from "effect";
@@ -18,8 +19,7 @@ const env = {
   ALLOWED_ORIGINS: "http://localhost:3000",
   DB_AUTHENTICATED: { connectionString } as Hyperdrive,
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   ENVIRONMENT: "test",
   APP_URL: "http://localhost:3000",
@@ -278,50 +278,92 @@ describe("role permission matrix", () => {
     }
   });
 
-  it("denies every Viewer mutation with a stable forbidden code", async () => {
+  // Each mutation names the exact error code its own guard produces, derived
+  // from the capability map and the route's guard order. A set of acceptable
+  // codes would let a denial produced by the wrong guard pass, and a Viewer
+  // missing one capability would be indistinguishable from missing another.
+  it("denies every Viewer mutation with the exact forbidden code of its guard", async () => {
     const mutations = [
+      // Authorization guard: viewer lacks content:write.
       {
         body: JSON.stringify({ brand_profile_id: seededProfileId }),
+        code: "forbidden_role",
         method: "POST",
         path: "/api/v1/posts",
       },
       {
         body: JSON.stringify({ brand_profile_id: seededProfileId }),
+        code: "forbidden_role",
         method: "PATCH",
         path: `/api/v1/posts/${unknownId}`,
       },
-      { method: "DELETE", path: `/api/v1/posts/${unknownId}` },
+      {
+        code: "forbidden_role",
+        method: "DELETE",
+        path: `/api/v1/posts/${unknownId}`,
+      },
+      // Authorization guard: viewer lacks brand-profile:manage.
       {
         body: JSON.stringify({ color: "#1d4ed8", name: "viewer-forbidden" }),
+        code: "workspace_admin_required",
         method: "POST",
         path: "/api/v1/brand-profiles",
       },
-      { method: "DELETE", path: `/api/v1/brand-profiles/${seededProfileId}` },
       {
+        code: "workspace_admin_required",
+        method: "DELETE",
+        path: `/api/v1/brand-profiles/${seededProfileId}`,
+      },
+      // A GET connect is the one read-shaped route the guard gates.
+      {
+        code: "forbidden_role",
         method: "GET",
         path: `/api/v1/platforms/tiktok/connect?brand_profile_id=${seededProfileId}`,
       },
-      { method: "DELETE", path: `/api/v1/platforms/${unknownId}` },
+      {
+        code: "workspace_admin_required",
+        method: "DELETE",
+        path: `/api/v1/platforms/${unknownId}`,
+      },
       {
         body: JSON.stringify({ account_id: unknownId }),
+        code: "workspace_admin_required",
         method: "POST",
         path: `/api/v1/oauth-selections/${unknownId}/confirm`,
       },
+      // Role assignment is refused at the route boundary before the admin
+      // check: a Viewer cannot assign member:assign-editor.
       {
         body: JSON.stringify({ email: "viewer-invite@example.test", role: "editor" }),
+        code: "forbidden_role_assignment",
         method: "POST",
         path: `/api/v1/workspaces/${sharedWorkspaceId}/invitations`,
       },
       {
         body: JSON.stringify({ role: "editor" }),
+        code: "forbidden_role_assignment",
         method: "PATCH",
         path: `/api/v1/workspaces/${sharedWorkspaceId}/members/${editorId}`,
       },
-      { method: "DELETE", path: `/api/v1/workspaces/${sharedWorkspaceId}/members/${editorId}` },
-      { method: "GET", path: `/api/v1/workspaces/${sharedWorkspaceId}/audit` },
-      { method: "GET", path: "/api/v1/installation" },
+      // Removal carries no assignable role, so this reaches requireAdmin.
+      {
+        code: "workspace_admin_required",
+        method: "DELETE",
+        path: `/api/v1/workspaces/${sharedWorkspaceId}/members/${editorId}`,
+      },
+      {
+        code: "workspace_admin_required",
+        method: "GET",
+        path: `/api/v1/workspaces/${sharedWorkspaceId}/audit`,
+      },
+      {
+        code: "workspace_admin_required",
+        method: "GET",
+        path: "/api/v1/installation",
+      },
       {
         body: JSON.stringify({ reason: "nope" }),
+        code: "installation_owner_required",
         method: "POST",
         path: `/api/v1/installation/members/${editorId}/suspend`,
       },
@@ -337,13 +379,9 @@ describe("role permission matrix", () => {
         "viewer",
       );
       expect(response.status, `${mutation.method} ${mutation.path}`).toBe(403);
-      const body = await response.json();
-      expect([
-        "forbidden_role",
-        "forbidden_role_assignment",
-        "workspace_admin_required",
-        "installation_owner_required",
-      ]).toContain(errorCode(body));
+      expect(errorCode(await response.json()), `${mutation.method} ${mutation.path}`).toBe(
+        mutation.code,
+      );
     }
   });
 
@@ -374,24 +412,42 @@ describe("role permission matrix", () => {
     );
     expect(deleted.status).toBe(200);
 
+    // An Editor holds content:write but no configuration capability, so each
+    // refusal names its own guard: the same code for every row would hide an
+    // Editor gaining or losing a specific capability.
     const forbidden = [
       {
         body: JSON.stringify({ color: "#1d4ed8", name: "editor-forbidden" }),
+        code: "workspace_admin_required",
         method: "POST",
         path: "/api/v1/brand-profiles",
       },
       {
+        code: "forbidden_role",
         method: "GET",
         path: `/api/v1/platforms/tiktok/connect?brand_profile_id=${seededProfileId}`,
       },
-      { method: "DELETE", path: `/api/v1/platforms/${unknownId}` },
+      {
+        code: "workspace_admin_required",
+        method: "DELETE",
+        path: `/api/v1/platforms/${unknownId}`,
+      },
       {
         body: JSON.stringify({ email: "editor-invite@example.test", role: "viewer" }),
+        code: "forbidden_role_assignment",
         method: "POST",
         path: `/api/v1/workspaces/${sharedWorkspaceId}/invitations`,
       },
-      { method: "GET", path: `/api/v1/workspaces/${sharedWorkspaceId}/audit` },
-      { method: "GET", path: "/api/v1/installation" },
+      {
+        code: "workspace_admin_required",
+        method: "GET",
+        path: `/api/v1/workspaces/${sharedWorkspaceId}/audit`,
+      },
+      {
+        code: "workspace_admin_required",
+        method: "GET",
+        path: "/api/v1/installation",
+      },
     ] as const;
     for (const mutation of forbidden) {
       const response = await request(
@@ -404,6 +460,9 @@ describe("role permission matrix", () => {
         "editor",
       );
       expect(response.status, `${mutation.method} ${mutation.path}`).toBe(403);
+      expect(errorCode(await response.json()), `${mutation.method} ${mutation.path}`).toBe(
+        mutation.code,
+      );
     }
   });
 
@@ -492,35 +551,49 @@ describe("role permission matrix", () => {
     ).toBe(200);
     expect((await request("/api/v1/installation", { method: "GET" }, "admin")).status).toBe(200);
 
+    // Admins hold member:assign-editor but not member:assign-admin, and not
+    // installation:manage. Two distinct guards produce these refusals, so each
+    // row pins its own code instead of accepting any 403.
     const forbidden = [
       {
         body: JSON.stringify({ email: "admin-cannot-invite-admin@example.test", role: "admin" }),
+        code: "forbidden_role_assignment",
         method: "POST",
         path: `/api/v1/workspaces/${sharedWorkspaceId}/invitations`,
       },
+      // Peer-admin mutation is refused even though the assigned role is legal.
       {
         body: JSON.stringify({ role: "editor" }),
+        code: "forbidden_role_assignment",
         method: "PATCH",
         path: `/api/v1/workspaces/${sharedWorkspaceId}/members/${adminId}`,
       },
       {
         body: JSON.stringify({ role: "viewer" }),
+        code: "forbidden_role_assignment",
         method: "PATCH",
         path: `/api/v1/workspaces/${sharedWorkspaceId}/members/${ownerId}`,
       },
       {
         body: JSON.stringify({ reason: "nope" }),
+        code: "installation_owner_required",
         method: "POST",
         path: `/api/v1/installation/members/${editorId}/suspend`,
       },
-      { method: "POST", path: `/api/v1/installation/members/${editorId}/reactivate` },
+      {
+        code: "installation_owner_required",
+        method: "POST",
+        path: `/api/v1/installation/members/${editorId}/reactivate`,
+      },
       {
         body: JSON.stringify({ confirm_email: "gamma@meltiply.local" }),
+        code: "installation_owner_required",
         method: "DELETE",
         path: `/api/v1/installation/members/${editorId}`,
       },
       {
         body: JSON.stringify({ password: "wrong", target_user_id: editorId }),
+        code: "installation_owner_required",
         method: "POST",
         path: "/api/v1/installation/ownership-transfer",
       },
@@ -536,6 +609,9 @@ describe("role permission matrix", () => {
         "admin",
       );
       expect(response.status, `${mutation.method} ${mutation.path}`).toBe(403);
+      expect(errorCode(await response.json()), `${mutation.method} ${mutation.path}`).toBe(
+        mutation.code,
+      );
     }
   });
 

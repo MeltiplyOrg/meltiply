@@ -510,9 +510,8 @@ export function createBrandProfileService(): BrandProfileApiService {
           Effect.gen(function* () {
             yield* requireWorkspaceAdminEffect(client);
             yield* lockOrganizationEffect(client, organizationId);
-            const existing = yield* client.query<BrandProfileRow>(
-              `SELECT id, org_id, name, description, color, deleted_at, purge_at,
-                      created_at, updated_at
+            const existing = yield* client.query<Pick<BrandProfileRow, "id">>(
+              `SELECT id
                FROM brand_profiles
                WHERE id = $1 AND org_id = $2
                FOR UPDATE`,
@@ -564,9 +563,8 @@ export function createBrandProfileService(): BrandProfileApiService {
         (client, organizationId) =>
           Effect.gen(function* () {
             yield* requireWorkspaceAdminEffect(client);
-            const existing = yield* client.query<BrandProfileRow>(
-              `SELECT id, org_id, name, description, color, deleted_at, purge_at,
-                      created_at, updated_at
+            const existing = yield* client.query<Pick<BrandProfileRow, "deleted_at" | "purge_at">>(
+              `SELECT deleted_at, purge_at
                FROM brand_profiles
                WHERE id = $1 AND org_id = $2
                FOR UPDATE`,

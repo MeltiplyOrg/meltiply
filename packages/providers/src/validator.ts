@@ -1,5 +1,8 @@
 import type { PlatformCapability, ValidationIssue } from "@meltiply/contracts";
 
+import { resolveInstagramOptions } from "./instagram-options";
+import { resolveFacebookPostType } from "./facebook-options";
+import { parseThreadsOptions, threadsOptionsIssue } from "./threads-options";
 import type { PublishInput } from "./types";
 
 export type { ValidationIssue } from "@meltiply/contracts";
@@ -22,22 +25,25 @@ export interface CaptionSource {
   defaultText: string | null;
   descriptionOverride: string | null;
   hashtags: readonly string[];
+  signature?: string | null;
   title: string;
   titleOverride: string | null;
 }
 
 /**
  * Composes the normalized caption sent to a provider from Post title/body, the
- * target's overrides, and hashtags.
- * Deduplicates title and body when identical and appends space-separated hashtags.
- * Pure function reused across pre-flight validation and publishing to guarantee character count parity.
- * @param source - Post title/default text, optional target overrides, and hashtags.
+ * target's overrides, the resolved signature snapshot, and hashtags.
+ * Deduplicates title and body when identical, appends the signature as its own
+ * paragraph, and appends space-separated hashtags. Pure function reused across
+ * pre-flight validation and publishing to guarantee character count parity.
+ * @param source - Post title/default text, optional target overrides, signature, and hashtags.
  * @returns The formatted multi-line caption string, empty when nothing is set.
  */
 export function composeCaption(source: CaptionSource): string {
   const title = (source.titleOverride ?? source.title).trim();
   const body = (source.descriptionOverride ?? source.defaultText ?? "").trim();
-  const content = [title, body]
+  const signature = (source.signature ?? "").trim();
+  const content = [title, body, signature]
     .filter((value, index, values) => value && values.indexOf(value) === index)
     .join("\n\n");
   const tags = source.hashtags.map((tag) => `#${tag}`).join(" ");
@@ -156,7 +162,10 @@ function attachmentSetIssues(
   const issues: ValidationIssue[] = [];
   // null means the capability carries no usable bound, which only happens for
   // unconfigured adapters that cannot publish at all.
-  const minimum = capability.min_media_count ?? 0;
+  const minimum =
+    capability.platform === "youtube" && input.providerOptions?.youtube?.postType === "live"
+      ? 0
+      : (capability.min_media_count ?? 0);
 
   if (count === 0 && minimum > 0) {
     issues.push({
@@ -220,7 +229,35 @@ export function validatePublishInput(
     ...input.media.flatMap((_, index) => attachmentIssues(capability, input, index)),
   ];
 
-  if (input.media.length === 0 && !input.caption.trim() && input.hashtags.length === 0) {
+  const story =
+    (capability.platform === "instagram" &&
+      input.providerOptions?.instagram?.postType === "story") ||
+    (capability.platform === "facebook" && input.providerOptions?.facebook?.postType === "story");
+  if (story && (input.caption.trim() || input.hashtags.length)) {
+    issues.push({
+      constraint: "story_caption_unsupported",
+      field: "caption",
+      message:
+        "Stories do not accept captions or signatures; remove this Channel's text before publishing.",
+    });
+  }
+  const facebook = input.providerOptions?.facebook;
+  const externalContent =
+    (capability.platform === "facebook" &&
+      (facebook?.link || ["crosspost", "ab_test", "live"].includes(facebook?.postType ?? ""))) ||
+    (capability.platform === "youtube" && input.providerOptions?.youtube?.postType === "live") ||
+    (capability.platform === "threads" &&
+      !!(
+        input.providerOptions?.threads?.repost_id ||
+        input.providerOptions?.threads?.gif_attachment?.gif_id ||
+        input.providerOptions?.threads?.text_attachment?.plaintext
+      ));
+  if (
+    input.media.length === 0 &&
+    !input.caption.trim() &&
+    input.hashtags.length === 0 &&
+    !externalContent
+  ) {
     issues.push({
       constraint: "provider_empty_publish",
       field: "caption",
@@ -228,15 +265,21 @@ export function validatePublishInput(
     });
   }
 
-  if (capability.max_caption_length !== null) {
+  const maximumCaption =
+    capability.platform === "tiktok" &&
+    input.providerOptions?.tiktok?.postMode !== "inbox" &&
+    input.media.some((media) => mediaKind(media.contentType) === "video")
+      ? Math.min(capability.max_caption_length ?? 2_200, 2_200)
+      : capability.max_caption_length;
+  if (maximumCaption !== null) {
     const length = captionLength(input.caption);
-    if (length > capability.max_caption_length) {
+    if (length > maximumCaption) {
       issues.push({
         actual: length,
         constraint: "provider_caption_limit",
         field: "caption",
-        limit: capability.max_caption_length,
-        message: `caption exceeds the ${capability.platform} limit of ${capability.max_caption_length} characters`,
+        limit: maximumCaption,
+        message: `caption exceeds the ${capability.platform} limit of ${maximumCaption} characters`,
       });
     }
   }
@@ -273,6 +316,142 @@ export function validatePublishInput(
       field: "providerOptions.tiktok",
       message: `${capability.platform} does not accept TikTok publish options`,
     });
+  }
+
+  if (capability.platform !== "instagram" && input.providerOptions?.instagram) {
+    issues.push({
+      constraint: "unsupported_provider_options",
+      field: "providerOptions.instagram",
+      message: `${capability.platform} does not accept Instagram publish options`,
+    });
+  }
+
+  if (capability.platform !== "facebook" && facebook) {
+    issues.push({
+      constraint: "unsupported_provider_options",
+      field: "providerOptions.facebook",
+      message: `${capability.platform} does not accept Facebook publish options`,
+    });
+  }
+  if (capability.platform === "facebook") {
+    const method = resolveFacebookPostType(
+      facebook,
+      input.media.map((media) => mediaKind(media.contentType)),
+    );
+    if (!method) {
+      issues.push({
+        constraint: "facebook_post_options_invalid",
+        field: "providerOptions.facebook",
+        message: "The selected Facebook method does not apply to this content.",
+      });
+    }
+    for (let index = 0; index < input.media.length; index += 1) {
+      const media = input.media[index]!;
+      const kind = mediaKind(media.contentType);
+      if (kind === "image" && media.fileSize > 10_000_000) {
+        issues.push({
+          constraint: "provider_file_size_limit",
+          field: `media[${index}].fileSize`,
+          actual: media.fileSize,
+          limit: 10_000_000,
+          message: "Facebook photos cannot exceed 10 MB.",
+        });
+      }
+      if (kind === "video" && (method === "reel" || method === "story")) {
+        const duration = media.metadata?.durationSeconds;
+        const maximum = method === "story" ? 60 : 90;
+        if (
+          duration === undefined ||
+          !Number.isFinite(duration) ||
+          duration < 3 ||
+          duration > maximum
+        ) {
+          issues.push({
+            constraint: "provider_video_duration_limit",
+            field: "providerOptions.facebook.postType",
+            ...(duration !== undefined ? { actual: duration } : {}),
+            limit: maximum,
+            message: `Facebook ${method} videos require a duration from 3 to ${maximum} seconds.`,
+          });
+        }
+      }
+    }
+  }
+
+  if (input.providerOptions?.threads) {
+    const options = parseThreadsOptions(input.providerOptions.threads);
+    const message =
+      capability.platform !== "threads"
+        ? "Threads options require a Threads Channel."
+        : !options
+          ? "Threads options are invalid."
+          : threadsOptionsIssue(options, input.caption, input.media.length);
+    if (message)
+      issues.push({
+        constraint: "threads_post_options_invalid",
+        field: "providerOptions.threads",
+        message,
+      });
+  }
+  if (capability.platform === "instagram") {
+    const method =
+      input.providerOptions?.instagram?.postType ??
+      (input.media.length === 1 && mediaKind(input.media[0]!.contentType) === "video"
+        ? "reel"
+        : "feed");
+    for (let index = 0; index < input.media.length; index += 1) {
+      const item = input.media[index]!;
+      const kind = mediaKind(item.contentType);
+      const maximum =
+        kind === "image"
+          ? 8 * 1024 * 1024
+          : method === "story"
+            ? 100_000_000
+            : method === "reel"
+              ? 300_000_000
+              : null;
+      if (maximum !== null && item.fileSize > maximum) {
+        issues.push({
+          constraint: "provider_file_size_limit",
+          field: "providerOptions.instagram.postType",
+          actual: item.fileSize,
+          limit: maximum,
+          message: "The Asset exceeds this Instagram method's size limit.",
+        });
+      }
+      if (kind === "video" && (method === "story" || method === "reel")) {
+        const duration = item.metadata?.durationSeconds;
+        const limit = method === "story" ? 60 : 900;
+        if (
+          duration === undefined ||
+          duration < 3 ||
+          duration > limit ||
+          !Number.isFinite(duration)
+        ) {
+          issues.push({
+            constraint: "provider_video_duration_limit",
+            field: "providerOptions.instagram.postType",
+            ...(duration !== undefined ? { actual: duration } : {}),
+            limit,
+            message: `Instagram ${method} requires video from 3 to ${limit} seconds.`,
+          });
+        }
+      }
+    }
+    const options = input.providerOptions?.instagram;
+    if (options) {
+      const kinds = input.media.map((media) =>
+        mediaKind(media.contentType.split(";", 1)[0]!.trim().toLowerCase()),
+      );
+      if (!resolveInstagramOptions(options, kinds)) {
+        issues.push({
+          constraint: "instagram_post_options_invalid",
+          field: "providerOptions.instagram",
+          message:
+            "The selected Instagram post type or trial Reel does not apply to this attachment set",
+        });
+      }
+    }
   }
 
   return issues;

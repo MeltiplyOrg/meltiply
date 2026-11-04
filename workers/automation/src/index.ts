@@ -45,9 +45,19 @@ import {
   type ProviderSyncMessage,
 } from "./messages";
 import { flowDatabaseAvailable, flowExplorerEnabled, flowRecorderFor } from "./flow-observability";
+import {
+  queueDiagnosticReport,
+  registerDiagnostic,
+  scheduledDiagnosticReport,
+  workflowDiagnosticReport,
+} from "./diagnostic-reporting";
 import type { OutboxRelayResult } from "./outbox";
 import type { ProviderDueResult } from "./provider-sync";
+import type { DeliverySummary } from "@meltiply/reporting";
 import type { RetentionResult } from "./retention";
+import type { UsageReportResult } from "./usage-reporting";
+
+const publishQueuePattern = /publish-(facebook|instagram|threads|tiktok|youtube)(?:-|$)/;
 
 /**
 
@@ -177,6 +187,20 @@ export class ReplyWorkflow extends WorkflowEntrypoint<AutomationEnv, ReplyWorkfl
           );
           return { outcome: "rejected" as const };
         }
+        // The step body executes after the queue producer already returned, so
+        // this is where a later reply failure actually happens. Reporting here
+        // is additive: the same cause is rethrown below, so the workflow's own
+        // retry backoff and DLQ handling are unchanged.
+        registerDiagnostic(
+          this.ctx,
+          env,
+          workflowDiagnosticReport(cause, { outcome: "retry" }),
+          context(this.env, traceId, {
+            jobId: event.payload.event_id,
+            requestId: event.payload.request_id ?? undefined,
+            workflowId: event.instanceId,
+          }),
+        );
         log(
           "error",
           context(this.env, traceId, {
@@ -225,6 +249,10 @@ export interface AutomationDependencies {
   sweepProviderDue?: (env: AutomationEnv) => Effect.Effect<ProviderDueResult, unknown>;
   enqueueDueReplyReconciliations?: (env: AutomationEnv) => Effect.Effect<number, unknown>;
   runRetention?: (env: AutomationEnv) => Effect.Effect<RetentionResult, unknown>;
+  /** Overrides the daily bounded improvement-reporting delivery pass for tests. */
+  deliverImprovementReports?: (env: AutomationEnv) => Effect.Effect<DeliverySummary, unknown>;
+  /** Overrides the daily bounded usage-summary producer for tests. */
+  enqueueDailyUsageReport?: (env: AutomationEnv) => Effect.Effect<UsageReportResult, unknown>;
   providerSyncProcessor?: (
     env: AutomationEnv,
     message: ProviderSyncMessage,
@@ -254,6 +282,8 @@ type ScheduledWorkName =
   | "outbox-relay"
   | "provider-sync-sweep"
   | "reply-reconciliation"
+  | "improvement-reporting-delivery"
+  | "usage-reporting"
   | "retention";
 
 interface ScheduledWorkUnit {
@@ -351,6 +381,9 @@ function queueEvent(body: unknown): string {
     if (body.topic === "comment.reply.requested") {
       return "reply_job";
     }
+    if (body.topic === "notification.delivery.requested") {
+      return "notification_job";
+    }
     return "asset_job";
   }
   return "unsupported_queue_message";
@@ -381,7 +414,7 @@ function queueJob(body: unknown): string {
  * @returns Extracted provider name string, or undefined if the queue is not provider-specific.
  */
 function queueProvider(queue: string): string | undefined {
-  return /publish-(facebook|instagram|threads|tiktok|youtube)(?:-|$)/.exec(queue)?.[1];
+  return publishQueuePattern.exec(queue)?.[1];
 }
 
 /**
@@ -598,6 +631,15 @@ function dispatchQueueMessage(
   if (isOutboxMessage(body) && body.topic === "comment.reply.requested") {
     return input.enqueueReplyWorkflow(env, body);
   }
+  if (isOutboxMessage(body) && body.topic === "notification.delivery.requested") {
+    return Effect.flatMap(
+      Effect.tryPromise({
+        catch: (cause) => classifyJobError(cause),
+        try: () => import("./notifications"),
+      }),
+      (module) => module.processNotificationMessage(env, body),
+    );
+  }
   if (isOutboxMessage(body)) {
     return Effect.flatMap(
       Effect.tryPromise({
@@ -789,6 +831,51 @@ export function createAutomationHandler(
             ),
       tier: "daily",
     },
+    {
+      // The producer runs immediately before the delivery pass it feeds: it only
+      // freezes and queues measurements, and the delivery unit that follows in
+      // array order drains the same queue. A measurement failure therefore cannot
+      // suppress an already-queued report, and vice versa.
+      empty: { considered: 0, queued: 0 },
+      field: "usage",
+      name: "usage-reporting",
+      run: dependencies.enqueueDailyUsageReport
+        ? (env) =>
+            Effect.suspend(() => dependencies.enqueueDailyUsageReport!(env)).pipe(
+              Effect.mapError((cause) => classifyJobError(cause)),
+            )
+        : (env) =>
+            Effect.flatMap(
+              Effect.tryPromise({
+                catch: (cause) => classifyJobError(cause),
+                try: () => import("./usage-reporting"),
+              }),
+              (module) => module.enqueueDailyUsageReport(env),
+            ),
+      tier: "daily",
+    },
+    {
+      // Best-effort maintainer reporting drains its own bounded queue. It never
+      // computes measurements and never touches publishing, so a PostHog outage
+      // or a disabled category leaves domain retry/DLQ behavior untouched.
+      empty: { claimed: 0, delivered: 0, discarded: 0, failed: 0, released: 0, skipped: 0 },
+      field: "reporting",
+      name: "improvement-reporting-delivery",
+      run: dependencies.deliverImprovementReports
+        ? (env) =>
+            Effect.suspend(() => dependencies.deliverImprovementReports!(env)).pipe(
+              Effect.mapError((cause) => classifyJobError(cause)),
+            )
+        : (env) =>
+            Effect.flatMap(
+              Effect.tryPromise({
+                catch: (cause) => classifyJobError(cause),
+                try: () => import("./improvement-reporting"),
+              }),
+              (module) => module.deliverImprovementReports(env),
+            ),
+      tier: "daily",
+    },
   ];
   const providerSyncOverride = dependencies.providerSyncProcessor;
   const processProviderSync: QueueDispatchInput["processProviderSync"] = providerSyncOverride
@@ -869,7 +956,7 @@ export function createAutomationHandler(
      * @param batch - Batch of incoming queue messages with delivery attempt metadata and queue name.
      * @param bindings - Automation worker bindings, copied into this invocation's ownership scope.
      */
-    async queue(batch, bindings) {
+    async queue(batch, bindings, executionCtx) {
       const env = { ...bindings };
       configureJobLogging(env);
       // One asset processor per batch: construction builds the configured
@@ -923,7 +1010,7 @@ export function createAutomationHandler(
           processorFor: () => (assetProcessor ??= Promise.resolve(processorFor(env))),
         });
         const exit = await runJobProgram(Effect.provide(program, scope.runtimeLayer));
-        const { diagnostic, outcome } = exitToJobOutcome(exit);
+        const { diagnostic, failure, outcome } = exitToJobOutcome(exit);
         const latencyMs = elapsedMilliseconds(startedAt);
         if (outcome === "processed") {
           message.ack();
@@ -964,6 +1051,16 @@ export function createAutomationHandler(
             queue: batch.queue,
             retry_class: "none",
           });
+          registerDiagnostic(
+            executionCtx,
+            env,
+            queueDiagnosticReport(failure, {
+              outcome: "rejected",
+              ...(provider ? { provider } : {}),
+              ...(isOutboxMessage(body) ? { topic: body.topic } : {}),
+            }),
+            context(env, correlation.traceId, correlation),
+          );
           return;
         }
         if (outcome === "ambiguous") {
@@ -984,6 +1081,16 @@ export function createAutomationHandler(
             queue: batch.queue,
             retry_class: "reconciliation",
           });
+          registerDiagnostic(
+            executionCtx,
+            env,
+            queueDiagnosticReport(failure, {
+              outcome: "ambiguous",
+              ...(provider ? { provider } : {}),
+              ...(isOutboxMessage(body) ? { topic: body.topic } : {}),
+            }),
+            context(env, correlation.traceId, correlation),
+          );
           return;
         }
         await flow?.finish("failed");
@@ -1007,6 +1114,16 @@ export function createAutomationHandler(
           queue: batch.queue,
           retry_class: "queue_backoff",
         });
+        registerDiagnostic(
+          executionCtx,
+          env,
+          queueDiagnosticReport(failure, {
+            outcome: "retry",
+            ...(provider ? { provider } : {}),
+            ...(isOutboxMessage(body) ? { topic: body.topic } : {}),
+          }),
+          context(env, correlation.traceId, correlation),
+        );
       };
       if (provider && env.PUBLISH_BATCH_CONCURRENCY === "2") {
         const { consumePublishPartitions, partitionPublishBatch } = await import("./publish-batch");
@@ -1028,7 +1145,7 @@ export function createAutomationHandler(
      * @param bindings - Automation worker bindings, copied into this invocation's ownership scope.
      * @throws Rethrows the first encountered scheduled task failure after all due units have finished.
      */
-    async scheduled(_controller, bindings) {
+    async scheduled(_controller, bindings, executionCtx) {
       const env = { ...bindings };
       configureJobLogging(env);
       const startedAt = performance.now();
@@ -1091,6 +1208,15 @@ export function createAutomationHandler(
             ...errorDiagnostic(failure.cause),
             retry_class: "platform_retry",
           });
+          // Additive and lifecycle-registered: the local log above and the
+          // rethrow below are unchanged, and the reporting unit never reports
+          // its own failure.
+          registerDiagnostic(
+            executionCtx,
+            env,
+            scheduledDiagnosticReport(failure.cause, failure.unit),
+            scheduledContext,
+          );
         }
         throw firstFailure.cause;
       }

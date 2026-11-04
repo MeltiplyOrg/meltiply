@@ -11,6 +11,7 @@ import {
 } from "./adapter-helpers";
 import { classifyProviderFailure, ProviderAdapterError } from "./failures";
 import { ProviderHttpClient } from "./http";
+import { resolveFacebookPostType } from "./facebook-options";
 import {
   assertConfiguredRedirectUri,
   bearer,
@@ -31,10 +32,18 @@ import type {
   ProviderAdapter,
   ProviderCredentials,
   ProviderOperationResult,
+  ProviderMedia,
   ProviderRequestContext,
   ProviderTokenSet,
   PublishInput,
 } from "./types";
+
+const operationPattern =
+  /^(ab_test|live|finish_submitted|finishing|post|post_draft|reel_draft|story|upload_submitted|uploaded|video|video_draft):(.+)$/;
+const uploadPathPattern = /^\/video-upload\/v\d+\.\d+\/(.+)$/;
+const numericIdPattern = /^\d+$/;
+const vanityHandlePattern = /^[A-Za-z0-9.]{1,255}$/;
+const pageTaskPattern = /^[A-Z][A-Z0-9_]{0,127}$/;
 
 const graphOrigin = "https://graph.facebook.com";
 const uploadOrigin = "https://rupload.facebook.com";
@@ -51,30 +60,42 @@ const publishingScopes = [
 ] as const;
 /** Additional permissions required by Reels analytics; requested but not required to connect. */
 const analyticsScopes = ["pages_manage_engagement", "read_insights"] as const;
-const configuredScopes = [...publishingScopes, ...analyticsScopes] as const;
+const configuredScopes = [
+  ...publishingScopes,
+  ...analyticsScopes,
+  "pages_read_user_content",
+] as const;
 const businessDiscoveryScope = "business_management";
 
-/** Facebook's caption ceiling remains known even before live publishing is configured. */
-export const FACEBOOK_MAX_CAPTION_LENGTH = 2_200;
-
 const capability: PlatformCapability = {
-  accepted_mime_types: ["video/mp4", "video/quicktime"],
+  accepted_mime_types: [
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/bmp",
+    "image/tiff",
+    "video/mp4",
+    "video/quicktime",
+  ],
   analytics: true,
-  asset_types: ["video"],
+  asset_types: ["image", "video"],
   comments: false,
   connect_available: true,
-  max_caption_length: FACEBOOK_MAX_CAPTION_LENGTH,
+  max_caption_length: null,
   max_file_size: videoMaximumBytes,
-  max_hashtags: 30,
-  max_media_count: 1,
-  max_video_duration_sec: 60,
-  min_media_count: 1,
-  multi_asset_types: [],
+  max_hashtags: null,
+  max_media_count: null,
+  max_video_duration_sec: null,
+  min_media_count: 0,
+  multi_asset_types: ["image"],
   notes: [
     "Facebook Pages use an explicit Page access token; personal profiles are unsupported.",
     "Page Reels use a hosted HTTPS video and the documented remote-ingest flow.",
-    "One video publishes one Reel; carousels and photo posts are not supported.",
-    "Reels are limited to 500 MiB and 60 seconds.",
+    "Text, links, photos, and ordered multi-photo posts publish to the Page feed.",
+    "Reels accept one video up to 90 seconds; photo uploads accept up to 10 MB.",
+    "Regular videos, photo/video Stories, 3–7-image slideshows, authorized video crossposts, unpublished video experiments, and encoder-backed Live use their own endpoints.",
+    "Native Page drafts, experiments, and created broadcasts are delivered handoffs, not published Posts.",
+    "Stories do not accept captions or signatures; native experiments require existing unpublished video IDs and engagement permissions.",
     "Analytics reads Reel plays from Video Insights and likes/comments from the Video edges; shares come from the documented comments-plus-shares social-actions metric.",
     "Video Insights requires read_insights and pages_manage_engagement; old connections must reconnect to grant them.",
   ],
@@ -83,7 +104,19 @@ const capability: PlatformCapability = {
   reply: false,
 };
 
-type FacebookOperationPhase = "finish_submitted" | "finishing" | "upload_submitted" | "uploaded";
+type FacebookOperationPhase =
+  | "ab_test"
+  | "live"
+  | "finish_submitted"
+  | "finishing"
+  | "post"
+  | "post_draft"
+  | "reel_draft"
+  | "story"
+  | "upload_submitted"
+  | "uploaded"
+  | "video"
+  | "video_draft";
 
 interface FacebookOperation {
   id: string;
@@ -121,24 +154,50 @@ function accountId(credentials: ProviderCredentials): string {
 }
 
 /**
- * Formats a composite Facebook operation identifier encoding lifecycle phase and video ID.
- * Produces deterministic tracking strings such as 'finishing:123456789'.
- * Returns formatted operation identifier string.
+ * Encodes the publication kind or video lifecycle phase with its provider ID.
+ * Post identities distinguish ordinary feed posts from asynchronous Reels
+ * during subsequent reconciliation and analytics reads.
  */
 function operationId(phase: FacebookOperationPhase, id: string): string {
   return `${phase}:${id}`;
 }
 
 /**
- * Parses and validates an opaque Facebook operation identifier string into its phase and video ID.
- * Matches allowed phases ('finish_submitted', 'finishing', 'upload_submitted', 'uploaded').
- * Returns structured FacebookOperation object, or undefined if malformed or unrecognized.
+ * Parses an ordinary Page post or asynchronous video operation identity.
+ * Unknown phases and invalid provider IDs fail closed.
  */
 function parseOperationId(value: unknown): FacebookOperation | undefined {
   const normalized = providerIdentifier(value);
-  const match = normalized?.match(/^(finish_submitted|finishing|upload_submitted|uploaded):(.+)$/);
+  const match = normalized?.match(operationPattern);
   const id = providerIdentifier(match?.[2]);
   return match && id ? { id, phase: match[1] as FacebookOperationPhase } : undefined;
+}
+
+/**
+ * Returns a confirmed Page feed publication using Meta's page_post_id.
+ * The query-free permalink remains intact through delivery URL sanitization.
+ */
+function publishedPost(
+  id: string,
+): Extract<ProviderOperationResult, { outcome: "confirmed_success" }> {
+  return {
+    outcome: "confirmed_success",
+    providerOperationId: operationId("post", id),
+    providerPostId: id,
+    providerUrl: `https://www.facebook.com/${encodeURIComponent(id)}`,
+  };
+}
+
+/** Records a terminal native draft without manufacturing a public Post ID. */
+function nativeDraft(
+  phase: "post_draft" | "video_draft" | "reel_draft",
+  id: string,
+): Extract<ProviderOperationResult, { outcome: "confirmed_success" }> {
+  return {
+    outcome: "confirmed_success",
+    delivery: "draft",
+    providerOperationId: operationId(phase, id),
+  };
 }
 
 /**
@@ -189,14 +248,12 @@ function encodeRefreshSecret(value: RefreshSecret): string {
  * Returns canonical upload URL string. Throws ProviderAdapterError if origin or path is invalid.
  */
 function validateUploadUrl(value: unknown, videoId: string): string {
-  const normalized = secureUrl(value);
-  if (!normalized) throw malformed();
-  const url = new URL(normalized);
-  const escapedId = videoId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const url = secureUrl(value);
+  if (!url) throw malformed();
   if (
     url.origin !== uploadOrigin ||
     url.search ||
-    !new RegExp(`^/video-upload/v\\d+\\.\\d+/${escapedId}$`).test(url.pathname)
+    uploadPathPattern.exec(url.pathname)?.[1] !== videoId
   ) {
     throw malformed();
   }
@@ -204,30 +261,21 @@ function validateUploadUrl(value: unknown, videoId: string): string {
 }
 
 /**
- * Validates and extracts Reel publication parameters from a PublishInput
- * descriptor.
- * Facebook publishes exactly one video as one Reel, so a post carrying zero or
- * multiple attachments fails closed rather than silently publishing only the
- * first. Enforces remote_ingest mode, caption length <= 2200, hashtag count
- * <= 30, valid MP4/MOV MIME types, and file size within 500 MiB.
+ * Validates a single remotely ingested Reel or video Story.
+ * Zero/multiple attachments fail closed instead of dropping media. Enforces
+ * HTTPS, MP4/MOV MIME types, and Meltiply's 500 MiB Asset upload ceiling.
  * @param input - Composed caption plus the Post's ordered attachments.
- * @returns `{ description, mediaUrl }` for the single Reel attachment.
+ * @returns `{ description, mediaUrl }` for the single video attachment.
  * @throws ProviderAdapterError when the post is not a single publishable video.
  */
-function reelInput(input: PublishInput): {
+function remoteVideoInput(input: PublishInput): {
   description: string;
   mediaUrl: string;
 } {
   required("idempotencyKey", input.idempotencyKey, 255);
   const description = input.caption.trim();
   const [media] = input.media;
-  if (
-    input.media.length !== 1 ||
-    !media ||
-    media.mode !== "remote_ingest" ||
-    [...description].length > FACEBOOK_MAX_CAPTION_LENGTH ||
-    input.hashtags.length > 30
-  ) {
+  if (input.media.length !== 1 || !media || media.mode !== "remote_ingest") {
     throw new ProviderAdapterError(
       classifyProviderFailure({
         code: "facebook_reel_invalid",
@@ -236,7 +284,7 @@ function reelInput(input: PublishInput): {
     );
   }
   const contentType = media.contentType.split(";", 1)[0]!.toLowerCase();
-  const mediaUrl = secureUrl(media.url);
+  const mediaUrl = secureUrl(media.url)?.href;
   if (
     !["video/mp4", "video/quicktime"].includes(contentType) ||
     !Number.isSafeInteger(media.fileSize) ||
@@ -255,11 +303,57 @@ function reelInput(input: PublishInput): {
 }
 
 /**
+ * Validates a Page photo before any upload. The same 10 MB image contract
+ * applies to feed photos and fresh Story uploads; transfer URLs require HTTPS.
+ */
+function photoUrl(media: ProviderMedia): string {
+  const contentType = media.contentType.split(";", 1)[0]!.toLowerCase();
+  const url = media.mode === "remote_ingest" ? secureUrl(media.url) : undefined;
+  if (
+    !url ||
+    !["image/jpeg", "image/png", "image/gif", "image/bmp", "image/tiff"].includes(contentType) ||
+    !Number.isSafeInteger(media.fileSize) ||
+    media.fileSize < 1 ||
+    media.fileSize > 10_000_000
+  ) {
+    throw new ProviderAdapterError(
+      classifyProviderFailure({ code: "facebook_photo_invalid", status: 400 }),
+    );
+  }
+  return url.href;
+}
+
+/** Accepts string IDs and safe numeric Story IDs without losing integer precision. */
+function storyPostId(value: unknown): string | undefined {
+  return providerIdentifier(
+    typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? String(value) : value,
+  );
+}
+
+/**
  * Safely extracts and lowercases a phase status string from a Reel status response field.
  * Returns normalized status string (e.g. 'complete', 'error'), or undefined if absent or malformed.
  */
 function phaseStatus(value: unknown): string | undefined {
   return boundedString(record(value)?.status, 64)?.toLowerCase();
+}
+
+/**
+ * Reads only explicitly granted permissions from Meta's permissions envelope.
+ * Requested scopes are never evidence of consent, including during refresh.
+ */
+function grantedPermissions(value: unknown): string[] {
+  const data = record(value)?.data;
+  if (!Array.isArray(data)) throw oauthMalformed("permissions");
+  const granted: string[] = [];
+  for (const item of data) {
+    const entry = record(item);
+    const permission = boundedString(entry?.permission, 128);
+    const status = boundedString(entry?.status, 32)?.toLowerCase();
+    if (!permission || !status) throw oauthMalformed("permissions");
+    if (status === "granted" && !granted.includes(permission)) granted.push(permission);
+  }
+  return granted;
 }
 
 /**
@@ -394,7 +488,7 @@ function facebookVanityHandle(link: unknown): string | undefined {
       return undefined;
     }
     const candidate = segments[0]!;
-    if (/^\d+$/.test(candidate) || !/^[A-Za-z0-9.]{1,255}$/.test(candidate)) {
+    if (numericIdPattern.test(candidate) || !vanityHandlePattern.test(candidate)) {
       return undefined;
     }
     if (RESERVED_FACEBOOK_PATHS[candidate.toLowerCase()]) {
@@ -407,9 +501,9 @@ function facebookVanityHandle(link: unknown): string | undefined {
 }
 
 /**
- * Instantiates a ProviderAdapter for Facebook Pages Reel publishing and OAuth authentication.
+ * Instantiates a ProviderAdapter for Facebook Page feed publishing, Reels, and OAuth.
  * Configures Graph API v25.0 endpoints, remote ingest flow, rate limit budget extraction,
- * Page token derivation, and multi-phase asynchronous video reconciliation.
+ * Page token derivation, and publication-kind-aware reconciliation.
  * OAuth validation failures identify invalid fields without exposing credentials;
  * inspected zero expiry is represented by the token contract's absent expiry.
  * Returns configured ProviderAdapter conforming to Meltiply provider contracts.
@@ -528,20 +622,28 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
     }
   };
 
+  /**
+   * Finishes a Reel or Story exactly once, retaining the known media identity
+   * on ambiguous writes. Confirmed Reel drafts remain pollable until ready.
+   */
   const submitFinish = async (
     context: ProviderRequestContext,
     credentials: ProviderCredentials,
     videoId: string,
     description: string,
+    kind: "reel" | "story",
+    draft: boolean,
   ): Promise<ProviderOperationResult> => {
     const url = new URL(
-      `/${apiVersion}/${encodeURIComponent(accountId(credentials))}/video_reels`,
+      `/${apiVersion}/${encodeURIComponent(accountId(credentials))}/${kind === "story" ? "video_stories" : "video_reels"}`,
       graphOrigin,
     );
     url.searchParams.set("video_id", videoId);
     url.searchParams.set("upload_phase", "finish");
-    url.searchParams.set("video_state", "PUBLISHED");
-    if (description) url.searchParams.set("description", description);
+    if (kind === "reel") {
+      url.searchParams.set("video_state", draft ? "DRAFT" : "PUBLISHED");
+      if (description) url.searchParams.set("description", description);
+    }
     try {
       const response = await http.request<unknown>(context, {
         headers: bearer(credentials.accessToken),
@@ -549,10 +651,20 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
         sideEffectPossible: true,
         url: url.toString(),
       });
-      if (record(response.body)?.success !== true) throw malformed(true);
+      const body = record(response.body);
+      if (body?.success !== true) throw malformed(true);
+      if (kind === "story") {
+        const id = storyPostId(body.post_id);
+        if (!id) throw malformed(true);
+        return {
+          outcome: "confirmed_success",
+          providerOperationId: operationId("story", videoId),
+          providerPostId: id,
+        };
+      }
       return {
         outcome: "confirmed_success",
-        providerOperationId: operationId("finishing", videoId),
+        providerOperationId: operationId(draft ? "reel_draft" : "finishing", videoId),
       };
     } catch (cause) {
       if (!(cause instanceof ProviderAdapterError)) throw cause;
@@ -561,12 +673,15 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
         cause.failure.classification === "timeout" ||
         cause.failure.classification === "transient"
       ) {
-        return unknownResult(cause.failure, operationId("finish_submitted", videoId));
+        return unknownResult(
+          cause.failure,
+          operationId(kind === "story" ? "story" : "finish_submitted", videoId),
+        );
       }
       return {
         failure: cause.failure,
         outcome: "confirmed_failure",
-        providerOperationId: operationId("uploaded", videoId),
+        providerOperationId: operationId(kind === "story" ? "story" : "uploaded", videoId),
       };
     }
   };
@@ -623,22 +738,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
         method: "GET",
         url: permissionsUrl.toString(),
       });
-      const permissionsBody = record(permissionsResponse.body);
-      if (!Array.isArray(permissionsBody?.data)) {
-        throw oauthMalformed("permissions");
-      }
-      const grantedScopes: string[] = [];
-      for (const item of permissionsBody.data) {
-        const entry = record(item);
-        const permission = boundedString(entry?.permission, 128);
-        const status = boundedString(entry?.status, 32)?.toLowerCase();
-        if (!permission || !status) {
-          throw oauthMalformed("permissions");
-        }
-        if (status === "granted" && !grantedScopes.includes(permission)) {
-          grantedScopes.push(permission);
-        }
-      }
+      const grantedScopes = grantedPermissions(permissionsResponse.body);
 
       const hasRequiredPublishingScopes = publishingScopes.every((scope) =>
         grantedScopes.includes(scope),
@@ -718,9 +818,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
             if (
               !Array.isArray(tasks) ||
               tasks.length > 32 ||
-              tasks.some(
-                (task) => typeof task !== "string" || !/^[A-Z][A-Z0-9_]{0,127}$/.test(task),
-              )
+              tasks.some((task) => typeof task !== "string" || !pageTaskPattern.test(task))
             ) {
               throw oauthMalformed("page_tasks");
             }
@@ -730,7 +828,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
             const pictureData = record(picture?.data);
             const rawAvatar =
               pictureData?.url ?? (typeof page?.picture === "string" ? page.picture : undefined);
-            const avatarUrl = secureUrl(rawAvatar);
+            const avatarUrl = secureUrl(rawAvatar)?.href;
             const username = facebookVanityHandle(page?.link);
 
             if (tasks.includes("CREATE_CONTENT") || tasks.includes("PROFILE_PLUS_CREATE_CONTENT")) {
@@ -791,7 +889,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
             throw oauthMalformed("page_pagination");
           }
 
-          if (nextUrl.origin !== new URL(graphOrigin).origin) {
+          if (nextUrl.origin !== graphOrigin) {
             throw oauthMalformed("page_pagination");
           }
 
@@ -862,6 +960,100 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
       return { accounts: eligible };
     },
 
+    /**
+     * Reads an encoder URL on demand. It is never retained in operation results
+     * or publication snapshots; callers must authorize writers and disable caching.
+     */
+    async getBroadcastInfo(context, credentials, lookup) {
+      accountId(credentials);
+      const operation = parseOperationId(lookup.providerOperationId);
+      if (operation?.phase !== "live") throw malformed();
+      const url = new URL(`/${apiVersion}/${encodeURIComponent(operation.id)}`, graphOrigin);
+      url.searchParams.set("fields", "id,status,secure_stream_url");
+      const response = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: url.toString(),
+      });
+      const body = record(response.body);
+      if (storyPostId(body?.id) !== operation.id) throw malformed();
+      const status = body?.status;
+      if (
+        ![
+          "LIVE",
+          "LIVE_NOW",
+          "UNPUBLISHED",
+          "SCHEDULED_UNPUBLISHED",
+          "SCHEDULED_LIVE",
+          "PREVIEW",
+          "VOD",
+          "SCHEDULED_CANCELED",
+        ].includes(String(status))
+      )
+        throw malformed();
+      if (status === "VOD" || status === "SCHEDULED_CANCELED")
+        return {
+          state: "ended",
+          ...(status === "VOD"
+            ? {
+                providerPostId: operation.id,
+                providerUrl: `https://www.facebook.com/${encodeURIComponent(operation.id)}`,
+              }
+            : {}),
+        };
+      const stream = boundedString(body?.secure_stream_url, 4096);
+      if (!stream || !URL.canParse(stream) || new URL(stream).protocol !== "rtmps:")
+        throw malformed();
+      return {
+        state:
+          status === "LIVE" || status === "LIVE_NOW"
+            ? "live"
+            : status === "PREVIEW"
+              ? "testing"
+              : "ready",
+        ...(status === "LIVE" || status === "LIVE_NOW" ? { providerPostId: operation.id } : {}),
+        ingestUrl: stream,
+        providerUrl: `https://www.facebook.com/${encodeURIComponent(operation.id)}`,
+      };
+    },
+
+    /** Ends the known broadcast once; uncertain responses must not create another broadcast. */
+    async endBroadcast(context, credentials, lookup) {
+      accountId(credentials);
+      const operation = parseOperationId(lookup.providerOperationId);
+      if (operation?.phase !== "live") throw malformed();
+      const url = new URL(`/${apiVersion}/${encodeURIComponent(operation.id)}`, graphOrigin);
+      url.searchParams.set("end_live_video", "true");
+      const response = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "POST",
+        sideEffectPossible: true,
+        url: url.toString(),
+      });
+      if (storyPostId(record(response.body)?.id) !== operation.id) throw malformed(true);
+      const statusUrl = new URL(`/${apiVersion}/${encodeURIComponent(operation.id)}`, graphOrigin);
+      statusUrl.searchParams.set("fields", "id,status");
+      const statusResponse = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: statusUrl.toString(),
+      });
+      const ended = record(statusResponse.body);
+      if (storyPostId(ended?.id) !== operation.id) throw malformed();
+      if (ended?.status !== "VOD")
+        return {
+          outcome: "confirmed_success",
+          delivery: "broadcast",
+          providerOperationId: `ended_live:${operation.id}`,
+        };
+      return {
+        outcome: "confirmed_success",
+        providerOperationId: `ended_live:${operation.id}`,
+        providerPostId: operation.id,
+        providerUrl: `https://www.facebook.com/${encodeURIComponent(operation.id)}`,
+      };
+    },
+
     /** Reads Page followers only; Page likes (`fan_count`) are not accounts the Page follows. */
     async getAccountAnalytics(context, credentials) {
       const url = new URL(
@@ -903,6 +1095,21 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
      *   Insights response, or missing requested counter.
      */
     async listAnalytics(context, credentials, lookup, page) {
+      const phase = parseOperationId(lookup.providerOperationId)?.phase;
+      if (
+        (phase &&
+          ["post", "post_draft", "video", "video_draft", "story", "live", "ab_test"].includes(
+            phase,
+          )) ||
+        lookup.providerOperationId?.startsWith("ended_live:")
+      ) {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({
+            code: "facebook_format_analytics_unavailable",
+            status: 422,
+          }),
+        );
+      }
       validatePageInput("facebook", page);
       if (page.cursor) {
         throw new ProviderAdapterError(
@@ -987,6 +1194,144 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
       if (lookup.providerPostId && !providerPostId) throw malformed();
       const operation = parseOperationId(lookup.providerOperationId);
       if (lookup.providerOperationId && !operation) throw malformed();
+      if (operation?.phase === "live") {
+        return {
+          state: "delivered",
+          result: {
+            outcome: "confirmed_success",
+            delivery: "broadcast",
+            providerOperationId: operationId("live", operation.id),
+          },
+        };
+      }
+      if (operation?.phase === "ab_test") {
+        const response = await http.request<unknown>(context, {
+          headers: bearer(credentials.accessToken),
+          method: "GET",
+          url: new URL(
+            `/${apiVersion}/${encodeURIComponent(operation.id)}`,
+            graphOrigin,
+          ).toString(),
+        });
+        if (storyPostId(record(response.body)?.id) !== operation.id) throw malformed();
+        return {
+          state: "delivered",
+          result: {
+            outcome: "confirmed_success",
+            delivery: "experiment",
+            providerOperationId: operationId("ab_test", operation.id),
+          },
+        };
+      }
+      if (operation?.phase === "story") {
+        const url = new URL(
+          `/${apiVersion}/${encodeURIComponent(accountId(credentials))}/stories`,
+          graphOrigin,
+        );
+        url.searchParams.set("limit", "100");
+        const response = await http.request<unknown>(context, {
+          headers: bearer(credentials.accessToken),
+          method: "GET",
+          url: url.toString(),
+        });
+        const data = record(response.body)?.data;
+        if (!Array.isArray(data)) throw malformed();
+        for (const value of data) {
+          const story = record(value);
+          if (storyPostId(story?.media_id) !== operation.id) continue;
+          const id = storyPostId(story?.post_id);
+          if (!id || !["PUBLISHED", "ARCHIVED"].includes(String(story?.status))) throw malformed();
+          const permalink = secureUrl(story?.url)?.href;
+          return {
+            state: "published",
+            result: {
+              outcome: "confirmed_success",
+              providerOperationId: operationId("story", operation.id),
+              providerPostId: id,
+              ...(permalink ? { providerUrl: permalink } : {}),
+            },
+          };
+        }
+        // A bounded list's absence is not proof that an uncertain Story failed.
+        return {
+          state: "unknown",
+          result: unknownResult(
+            classifyProviderFailure({
+              code: "facebook_story_evidence_pending",
+              sideEffectPossible: true,
+            }),
+            operationId("story", operation.id),
+          ),
+        };
+      }
+      if (operation?.phase === "video" || operation?.phase === "video_draft") {
+        const url = new URL(`/${apiVersion}/${encodeURIComponent(operation.id)}`, graphOrigin);
+        url.searchParams.set("fields", "id,status");
+        try {
+          const response = await http.request<unknown>(context, {
+            headers: bearer(credentials.accessToken),
+            method: "GET",
+            url: url.toString(),
+          });
+          const body = record(response.body);
+          const status = record(body?.status)?.video_status;
+          if (body?.id !== operation.id || typeof status !== "string") throw malformed();
+          if (["error", "expired", "upload_failed"].includes(status)) {
+            return {
+              state: "failed",
+              result: confirmedFailure(
+                "facebook_video_processing_failed",
+                422,
+                operationId(operation.phase, operation.id),
+              ),
+            };
+          }
+          if (status === "ready") {
+            if (operation.phase === "video_draft") {
+              return { state: "delivered", result: nativeDraft("video_draft", operation.id) };
+            }
+            return {
+              state: "published",
+              result: {
+                outcome: "confirmed_success",
+                providerOperationId: operationId("video", operation.id),
+                providerPostId: operation.id,
+                providerUrl: `https://www.facebook.com/${encodeURIComponent(operation.id)}`,
+              },
+            };
+          }
+          return {
+            state: "processing",
+            providerOperationId: operationId(operation.phase, operation.id),
+          };
+        } catch (cause) {
+          if (isHttp404(cause)) return { state: "not_found" };
+          throw cause;
+        }
+      }
+      if (operation?.phase === "post" || operation?.phase === "post_draft") {
+        const postId = providerPostId ?? operation.id;
+        if (!postId.startsWith(`${accountId(credentials)}_`)) throw malformed();
+        const url = new URL(`/${apiVersion}/${encodeURIComponent(postId)}`, graphOrigin);
+        url.searchParams.set("fields", "id,is_published");
+        try {
+          const response = await http.request<unknown>(context, {
+            headers: bearer(credentials.accessToken),
+            method: "GET",
+            url: url.toString(),
+          });
+          const post = record(response.body);
+          if (post?.id !== postId || typeof post.is_published !== "boolean") throw malformed();
+          if (post.is_published) return { result: publishedPost(postId), state: "published" };
+          if (operation.phase === "post_draft") {
+            return { state: "delivered", result: nativeDraft("post_draft", postId) };
+          }
+          return { providerOperationId: operationId("post", postId), state: "processing" };
+        } catch (cause) {
+          if (isHttp404(cause)) return { state: "not_found" };
+          throw cause;
+        }
+      }
       const videoId = providerPostId ?? operation?.id;
       if (!videoId) throw malformed();
       const status = await getReelStatus(context, credentials.accessToken, videoId);
@@ -1010,6 +1355,11 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
           state: "published",
         };
       }
+      if (operation?.phase === "reel_draft") {
+        return status.video === "ready"
+          ? { state: "delivered", result: nativeDraft("reel_draft", videoId) }
+          : { state: "processing", providerOperationId: retainedOperationId };
+      }
       if (operation && operation.phase !== "finishing") {
         return {
           result: unknownResult(
@@ -1030,9 +1380,233 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
 
     async publish(context, credentials, input) {
       const pageId = accountId(credentials);
-      const { description, mediaUrl } = reelInput(input);
+      const draft = input.providerOptions?.facebook?.deliveryMode === "draft";
+      required("idempotencyKey", input.idempotencyKey, 255);
+      const postType = resolveFacebookPostType(
+        input.providerOptions?.facebook,
+        input.media.map((media) =>
+          media.contentType.startsWith("image/")
+            ? "image"
+            : media.contentType.startsWith("video/")
+              ? "video"
+              : null,
+        ),
+      );
+      if (!postType) {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({
+            code: "facebook_post_options_invalid",
+            status: 400,
+          }),
+        );
+      }
+      if (postType === "story" && (input.caption.trim() || input.hashtags.length)) {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({ code: "facebook_story_caption_unsupported", status: 400 }),
+        );
+      }
+      if (postType === "live") {
+        const response = await http.request<unknown>(context, {
+          body: JSON.stringify({
+            status: "LIVE_NOW",
+            title: input.caption.trim().split(/\r?\n/, 1)[0] ?? "",
+            description: input.caption.trim(),
+          }),
+          headers: { ...bearer(credentials.accessToken), "Content-Type": "application/json" },
+          method: "POST",
+          sideEffectPossible: true,
+          url: new URL(
+            `/${apiVersion}/${encodeURIComponent(pageId)}/live_videos`,
+            graphOrigin,
+          ).toString(),
+        });
+        const id = storyPostId(record(response.body)?.id);
+        if (!id) throw malformed(true);
+        return {
+          outcome: "confirmed_success",
+          delivery: "broadcast",
+          providerOperationId: operationId("live", id),
+        };
+      }
+      if (postType === "ab_test") {
+        const test = input.providerOptions?.facebook?.abTest;
+        const response = await http.request<unknown>(context, {
+          body: JSON.stringify({
+            name: required("experimentName", test?.name ?? "", 200),
+            description: input.caption.trim(),
+            control_video_id: requiredIdentifier(
+              test?.controlVideoId,
+              "facebook_experiment_control_required",
+            ),
+            experiment_video_ids: test?.experimentVideoIds,
+            optimization_goal: test?.optimizationGoal,
+            ...(test?.durationSeconds !== undefined ? { duration: test.durationSeconds } : {}),
+          }),
+          headers: { ...bearer(credentials.accessToken), "Content-Type": "application/json" },
+          method: "POST",
+          sideEffectPossible: true,
+          url: new URL(
+            `/${apiVersion}/${encodeURIComponent(pageId)}/ab_tests`,
+            graphOrigin,
+          ).toString(),
+        });
+        const id = storyPostId(record(response.body)?.id);
+        if (!id) throw malformed(true);
+        return {
+          outcome: "confirmed_success",
+          delivery: "experiment",
+          providerOperationId: operationId("ab_test", id),
+        };
+      }
+      if (postType === "feed") {
+        const caption = input.caption.trim();
+        const options = input.providerOptions?.facebook;
+        if (!caption && input.media.length === 0 && !options?.link) {
+          throw new ProviderAdapterError(
+            classifyProviderFailure({
+              code: "facebook_feed_invalid",
+              status: 400,
+            }),
+          );
+        }
+        // Validate the complete photo set before creating any remote object.
+        const photos = input.media.map(photoUrl);
+        const attached: { media_fbid: string }[] = [];
+        for (const url of photos) {
+          const staged = await http.request<unknown>(context, {
+            body: JSON.stringify({ url, published: false }),
+            headers: { ...bearer(credentials.accessToken), "Content-Type": "application/json" },
+            method: "POST",
+            url: new URL(
+              `/${apiVersion}/${encodeURIComponent(pageId)}/photos`,
+              graphOrigin,
+            ).toString(),
+          });
+          const id = providerIdentifier(record(staged.body)?.id);
+          if (!id) throw malformed();
+          attached.push({ media_fbid: id });
+        }
+        const response = await http.request<unknown>(context, {
+          body: JSON.stringify({
+            message: caption,
+            published: !draft,
+            ...(attached.length ? { attached_media: attached } : {}),
+            ...(options?.link ? { link: options.link } : {}),
+            ...(options?.linkCards
+              ? {
+                  child_attachments: options.linkCards,
+                  multi_share_optimized: false,
+                }
+              : {}),
+          }),
+          headers: { ...bearer(credentials.accessToken), "Content-Type": "application/json" },
+          method: "POST",
+          sideEffectPossible: true,
+          url: new URL(`/${apiVersion}/${encodeURIComponent(pageId)}/feed`, graphOrigin).toString(),
+        });
+        const id = providerIdentifier(record(response.body)?.id);
+        if (!id || !id.startsWith(`${pageId}_`)) throw malformed(true);
+        return draft ? nativeDraft("post_draft", id) : publishedPost(id);
+      }
+      if (postType === "video" || postType === "slideshow" || postType === "crosspost") {
+        let source:
+          | { file_url: string }
+          | { slideshow_spec: { images_urls: string[] } }
+          | { crossposted_video_id: string };
+        if (postType === "crosspost") {
+          source = {
+            crossposted_video_id: requiredIdentifier(
+              input.providerOptions?.facebook?.crosspostedVideoId,
+              "facebook_source_video_required",
+            ),
+          };
+        } else if (postType === "slideshow") {
+          if (
+            input.media.some(
+              (media) =>
+                !["image/jpeg", "image/png", "image/bmp"].includes(
+                  media.contentType.split(";", 1)[0]!.toLowerCase(),
+                ),
+            )
+          ) {
+            throw new ProviderAdapterError(
+              classifyProviderFailure({ code: "facebook_slideshow_invalid", status: 400 }),
+            );
+          }
+          source = { slideshow_spec: { images_urls: input.media.map(photoUrl) } };
+        } else {
+          const { mediaUrl } = remoteVideoInput(input);
+          source = { file_url: mediaUrl };
+        }
+        const response = await http.request<unknown>(context, {
+          body: JSON.stringify({ description: input.caption.trim(), ...source, published: !draft }),
+          headers: { ...bearer(credentials.accessToken), "Content-Type": "application/json" },
+          method: "POST",
+          sideEffectPossible: true,
+          url: new URL(
+            `/${apiVersion}/${encodeURIComponent(pageId)}/videos`,
+            graphOrigin,
+          ).toString(),
+        });
+        const id = providerIdentifier(record(response.body)?.id);
+        if (!id) throw malformed(true);
+        return {
+          outcome: "confirmed_success",
+          providerOperationId: operationId(draft ? "video_draft" : "video", id),
+        };
+      }
+      if (postType === "story" && input.media[0]!.contentType.startsWith("image/")) {
+        const url = photoUrl(input.media[0]!);
+        const uploaded = await http.request<unknown>(context, {
+          body: JSON.stringify({ url, published: false }),
+          headers: { ...bearer(credentials.accessToken), "Content-Type": "application/json" },
+          method: "POST",
+          url: new URL(
+            `/${apiVersion}/${encodeURIComponent(pageId)}/photos`,
+            graphOrigin,
+          ).toString(),
+        });
+        const photoId = providerIdentifier(record(uploaded.body)?.id);
+        if (!photoId) throw malformed();
+        const retainedId = operationId("story", photoId);
+        try {
+          const response = await http.request<unknown>(context, {
+            body: JSON.stringify({ photo_id: photoId }),
+            headers: { ...bearer(credentials.accessToken), "Content-Type": "application/json" },
+            method: "POST",
+            sideEffectPossible: true,
+            url: new URL(
+              `/${apiVersion}/${encodeURIComponent(pageId)}/photo_stories`,
+              graphOrigin,
+            ).toString(),
+          });
+          const body = record(response.body);
+          const id = storyPostId(body?.post_id);
+          if (body?.success !== true || !id) throw malformed(true);
+          return {
+            outcome: "confirmed_success",
+            providerOperationId: retainedId,
+            providerPostId: id,
+          };
+        } catch (cause) {
+          if (!(cause instanceof ProviderAdapterError)) throw cause;
+          return cause.failure.classification === "ambiguous"
+            ? unknownResult(cause.failure, retainedId)
+            : {
+                outcome: "confirmed_failure",
+                failure: cause.failure,
+                providerOperationId: retainedId,
+              };
+        }
+      }
+      if (postType !== "reel" && postType !== "story") {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({ code: "facebook_post_options_invalid", status: 400 }),
+        );
+      }
+      const { description, mediaUrl } = remoteVideoInput(input);
       const createUrl = new URL(
-        `/${apiVersion}/${encodeURIComponent(pageId)}/video_reels`,
+        `/${apiVersion}/${encodeURIComponent(pageId)}/${postType === "story" ? "video_stories" : "video_reels"}`,
         graphOrigin,
       );
       createUrl.searchParams.set("upload_phase", "start");
@@ -1059,7 +1633,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
         if (record(uploadResponse.body)?.success !== true) {
           throw malformed(true);
         }
-        return submitFinish(context, credentials, videoId, description);
+        return submitFinish(context, credentials, videoId, description, postType, draft);
       } catch (cause) {
         if (!(cause instanceof ProviderAdapterError)) throw cause;
         if (
@@ -1067,12 +1641,15 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
           cause.failure.classification === "timeout" ||
           cause.failure.classification === "transient"
         ) {
-          return unknownResult(cause.failure, operationId("upload_submitted", videoId));
+          return unknownResult(
+            cause.failure,
+            operationId(postType === "story" ? "story" : "upload_submitted", videoId),
+          );
         }
         return {
           failure: cause.failure,
           outcome: "confirmed_failure",
-          providerOperationId: operationId("uploaded", videoId),
+          providerOperationId: operationId(postType === "story" ? "story" : "uploaded", videoId),
         };
       }
     },
@@ -1080,7 +1657,8 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
     /**
      * Rotates the user token and derives a token for the same Page.
      * Preserves absent expiry for inspected zero-expiry tokens; finite lifetimes
-     * remain bounded. A changed Page identity or missing Page token fails closed.
+     * remain bounded. Page identity and grants are re-read; requested permissions
+     * are never substituted for granted permissions.
      */
     async refreshAccessToken(context, value): Promise<ProviderTokenSet> {
       const current = refreshSecret(value);
@@ -1096,6 +1674,11 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
       const id = providerIdentifier(page?.id);
       const accessToken = boundedString(page?.access_token, 16_000);
       if (id !== current.pageId || !accessToken) throw malformed();
+      const permissions = await http.request<unknown>(context, {
+        headers: bearer(longToken.accessToken),
+        method: "GET",
+        url: new URL(`/${apiVersion}/me/permissions`, graphOrigin).toString(),
+      });
       return {
         accessToken,
         ...(longToken.expiresAt === undefined ? {} : { expiresAt: longToken.expiresAt }),
@@ -1103,7 +1686,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
           pageId: current.pageId,
           userAccessToken: longToken.accessToken,
         }),
-        scopes: [...configuredScopes],
+        scopes: grantedPermissions(permissions.body),
       };
     },
 

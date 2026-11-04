@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { createServer } from "node:http";
 import { afterAll, beforeAll, expect, it } from "vite-plus/test";
@@ -28,8 +29,7 @@ const env: ApiWorkerEnv = {
   APP_URL: issuer,
   DB_AUTHENTICATED: { connectionString: process.env.MELTIPLY_DATABASE_TEST_URL! } as Hyperdrive,
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
 };
 const app = createApiApp();

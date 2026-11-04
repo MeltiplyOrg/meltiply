@@ -170,19 +170,23 @@ test("approval loading enforces expected job and reviewed plan", async (context)
     }),
     /missing required jobs/,
   );
-  assert.equal(
-    (
-      await loadApprovalMetadata({
-        expectedNames: new Set(["staging-release-approval", "staging-traffic-approval"]),
-        paths: [file, trafficFile],
-        planDigests: new Map([
-          ["staging-release-approval", planDigest],
-          ["staging-traffic-approval", trafficDigest],
-        ]),
-        spec,
-      })
-    ).length,
-    2,
+  // The loader returns the decoded, name-sorted records — not just any two
+  // entries — so a mutant that returned placeholders could not pass.
+  const loadedPair = await loadApprovalMetadata({
+    expectedNames: new Set(["staging-release-approval", "staging-traffic-approval"]),
+    paths: [file, trafficFile],
+    planDigests: new Map([
+      ["staging-release-approval", planDigest],
+      ["staging-traffic-approval", trafficDigest],
+    ]),
+    spec,
+  });
+  assert.deepEqual(
+    loadedPair.map((entry) => [entry.approval_job.name, entry.plan_digest]),
+    [
+      ["staging-release-approval", planDigest],
+      ["staging-traffic-approval", trafficDigest],
+    ],
   );
   const otherWorkflowFile = path.join(directory, "other-workflow.json");
   await writeFile(

@@ -20,6 +20,12 @@ import { CoreApiError } from "./core-types";
 import { RFC4122_UUID_PATTERN as uuid } from "./crypto";
 import type { ApiWorkerEnvironment } from "./env";
 
+const timezoneOffsetPattern = /^[+-]/;
+const controlCharactersPattern = /[\x00-\x1F\x7F]/;
+const unsafePostTextPattern = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
+const integerPattern = /^\d+$/;
+const nonBlankTextPattern = /^(?=.*\S)[^\x00-\x1F\x7F]+$/;
+
 type Schemas = components["schemas"];
 type ReplyStatus = Schemas["ReplyStatus"];
 type AssetStatus = Schemas["AssetStatus"];
@@ -38,7 +44,7 @@ export const queueConfigurationSchema = z.strictObject({
     .refine((value) => {
       try {
         new Intl.DateTimeFormat("en", { timeZone: value });
-        return !/^[+-]/.test(value);
+        return !timezoneOffsetPattern.test(value);
       } catch {
         return false;
       }
@@ -118,7 +124,7 @@ export function uuidArrayField(
 export function postTitleField(body: Record<string, unknown>, name: string): string | undefined {
   const value = body[name];
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.length > 200 || /[\x00-\x1F\x7F]/.test(value)) {
+  if (typeof value !== "string" || value.length > 200 || controlCharactersPattern.test(value)) {
     throw new CoreApiError(
       400,
       "validation_error",
@@ -147,7 +153,7 @@ export function postTextField(body: Record<string, unknown>, name: string): stri
   if (
     typeof value !== "string" ||
     [...value].length > 10_000 ||
-    /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(value)
+    unsafePostTextPattern.test(value)
   ) {
     throw new CoreApiError(
       400,
@@ -349,7 +355,7 @@ export function integerParam(
   maximum: number,
 ): number {
   if (value === undefined || value === "") return fallback;
-  if (!/^\d+$/.test(value)) {
+  if (!integerPattern.test(value)) {
     throw new CoreApiError(400, "invalid_request", `${name} must be an integer.`);
   }
   const parsed = Number(value);
@@ -630,7 +636,7 @@ export function stringField(body: Record<string, unknown>, name: string): string
  */
 export function brandProfileNameField(body: Record<string, unknown>, name: string): string {
   const value = stringField(body, name);
-  if (value.length < 1 || value.length > 100 || !/^(?=.*\S)[^\x00-\x1F\x7F]+$/.test(value)) {
+  if (value.length < 1 || value.length > 100 || !nonBlankTextPattern.test(value)) {
     throw new CoreApiError(
       400,
       "validation_error",
@@ -657,7 +663,7 @@ export function brandProfileDescriptionField(
 ): string | null | undefined {
   const value = optionalStringField(body, name);
   if (value === undefined || value === null) return value;
-  if (value.length < 1 || value.length > 280 || !/^(?=.*\S)[^\x00-\x1F\x7F]+$/.test(value)) {
+  if (value.length < 1 || value.length > 280 || !nonBlankTextPattern.test(value)) {
     throw new CoreApiError(
       400,
       "validation_error",
@@ -687,6 +693,33 @@ export function brandProfileColorField(
     throw new CoreApiError(400, "validation_error", `${name} is invalid.`);
   }
   return value as BrandProfileColor;
+}
+
+/**
+ * Validates a Workspace display name supplied at the HTTP boundary.
+ *
+ * Shared by Workspace settings, the setup form's `workspace_name`, and the
+ * onboarding save so one rule governs the stored name: trimmed, 1–200
+ * characters, no control characters.
+ *
+ * @param value - Candidate name as received on the wire.
+ * @param field - Field name used in the validation message.
+ * @returns The trimmed name.
+ * @throws {CoreApiError} 400 when the value is blank, overlong, or carries control characters.
+ */
+export function workspaceNameValue(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new CoreApiError(400, "validation_error", `${field} must be a string.`);
+  }
+  const trimmed = value.trim();
+  if (trimmed.length < 1 || trimmed.length > 200 || /[\x00-\x1F\x7F]/.test(trimmed)) {
+    throw new CoreApiError(
+      400,
+      "validation_error",
+      `${field} must contain 1 to 200 characters without control characters.`,
+    );
+  }
+  return trimmed;
 }
 
 /**
@@ -850,7 +883,7 @@ export function textParam(
   if (value === undefined) return undefined;
   const trimmed = value.trim();
   if (trimmed === "") return undefined;
-  if (trimmed.length > maximumLength || /[\x00-\x1F\x7F]/.test(trimmed)) {
+  if (trimmed.length > maximumLength || controlCharactersPattern.test(trimmed)) {
     throw new CoreApiError(
       400,
       "invalid_request",

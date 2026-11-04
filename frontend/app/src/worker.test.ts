@@ -279,3 +279,117 @@ describe("frontend Worker API proxy", () => {
     expect(assets.fetch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("frontend Worker diagnostic relay", () => {
+  it("forwards an authenticated client exception to the consent-gated route", async () => {
+    const logger = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    const api = {
+      fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })),
+    };
+
+    const response = await worker.fetch(
+      telemetryRequest(
+        {
+          field: "react-render",
+          kind: "frontend-error",
+          stack: "    at Composer (src/components/composer/composer.tsx:42:7)",
+          valueType: "TypeError",
+        },
+        { Authorization: "Bearer session-jwt" },
+      ),
+      { ...environment, API: api },
+    );
+
+    expect(response.status).toBe(204);
+    expect(logger).toHaveBeenCalledTimes(1);
+    expect(api.fetch).toHaveBeenCalledTimes(1);
+    const relayed = api.fetch.mock.calls[0]?.[0] as Request;
+    expect(new URL(relayed.url).pathname).toBe("/api/v1/installation/reporting/diagnostics");
+    expect(relayed.headers.get("Authorization")).toBe("Bearer session-jwt");
+    expect(JSON.parse(await relayed.text())).toEqual({
+      category: "client_exception",
+      error_name: "TypeError",
+      error_stack: "    at Composer (src/components/composer/composer.tsx:42:7)",
+      operation: "other",
+    });
+  });
+
+  it("forwards nothing without a bearer, so pre-sign-in failures stay local", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const api = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })) };
+
+    const response = await worker.fetch(
+      telemetryRequest({ field: "window-error", kind: "frontend-error", valueType: "Error" }),
+      { ...environment, API: api },
+    );
+
+    expect(response.status).toBe(204);
+    expect(api.fetch).not.toHaveBeenCalled();
+  });
+
+  it("forwards nothing for an API error the API Worker already reported itself", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const api = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })) };
+
+    const response = await worker.fetch(
+      telemetryRequest(
+        { code: "internal_error", kind: "api-error", status: 500 },
+        { Authorization: "Bearer session-jwt" },
+      ),
+      { ...environment, API: api },
+    );
+
+    expect(response.status).toBe(204);
+    expect(api.fetch).not.toHaveBeenCalled();
+  });
+
+  it("never lets a relay failure change the local telemetry outcome", async () => {
+    const logger = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    const api = { fetch: vi.fn().mockRejectedValue(new Error("api unreachable")) };
+
+    const response = await worker.fetch(
+      telemetryRequest(
+        { field: "window-error", kind: "frontend-error", valueType: "Error" },
+        { Authorization: "Bearer session-jwt" },
+      ),
+      { ...environment, API: api },
+    );
+
+    expect(response.status).toBe(204);
+    expect(logger).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a malformed or cross-origin telemetry request before any relay", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const api = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })) };
+
+    const crossOrigin = await worker.fetch(
+      new Request("https://frontend.test/__frontend-telemetry", {
+        body: JSON.stringify({ kind: "frontend-error" }),
+        headers: {
+          Authorization: "Bearer session-jwt",
+          "Content-Type": "application/json",
+          Origin: "https://evil.test",
+        },
+        method: "POST",
+      }),
+      { ...environment, API: api },
+    );
+    expect(crossOrigin.status).toBe(403);
+
+    // A payload that parses but violates the approved schema is a 400: the stack
+    // is within the request-size limit and only exceeds the relayed-stack bound.
+    // (An oversized body is a separate 413 case covered above.)
+    const malformed = await worker.fetch(
+      telemetryRequest(
+        { kind: "frontend-error", stack: "x".repeat(2_000) },
+        { Authorization: "Bearer session-jwt" },
+      ),
+      { ...environment, API: api },
+    );
+    expect(malformed.status).toBe(400);
+    expect(api.fetch).not.toHaveBeenCalled();
+  });
+});

@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import type { JwtIdentity } from "@meltiply/auth";
 import type { TransactionClient } from "@meltiply/database";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
@@ -27,8 +28,7 @@ const env = {
   ALLOWED_ORIGINS: "http://localhost:3000",
   DB_AUTHENTICATED: { connectionString } as Hyperdrive,
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   ENVIRONMENT: "test",
   TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
@@ -1374,8 +1374,11 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       }
 
       const summarize = async () => {
+        // Each observation owns a fresh cache so the history query, not a warm
+        // summary-cache hit, is subject to the statement and latency budgets.
+        const coldService = createCoreApiService(configuredCapabilities);
         const body = await Effect.runPromise(
-          coreService.summaryAnalytics(env, rangeClaims, {
+          coldService.summaryAnalytics(env, rangeClaims, {
             end: rangeEnd,
             start: rangeStart,
           }),
@@ -1422,13 +1425,13 @@ describeIntegration("core API PostgreSQL query budgets", () => {
         new Date(rangeStart.getTime() + 8_378 * 60 * 60 * 1_000).toISOString(),
       );
 
-      // One statement per read, every sample comfortably inside the 10s
-      // authenticated statement timeout, and a row bound independent of
-      // the seeded history size.
-      await summarize();
+      // One authorization query and one aggregation query per cold read. Every
+      // sample must remain within the authenticated 10s statement timeout,
+      // independently of the seeded history size.
       for (let sample = 0; sample < 5; sample += 1) {
         const measurement = await measure(summarize);
-        expect(measurement.applicationStatements).toBeLessThanOrEqual(1);
+        expect(measurement.applicationStatements).toBeLessThanOrEqual(2);
+        expect(measurement.result.body).toEqual(summary);
         expect(measurement.result.rows).toBe(2);
         const slowest = Math.max(
           0,

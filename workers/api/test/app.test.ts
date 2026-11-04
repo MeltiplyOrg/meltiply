@@ -1,4 +1,5 @@
 import type { JwtIdentity } from "@meltiply/auth";
+import { CONTRACT_VERSION } from "@meltiply/contracts";
 import type { components } from "@meltiply/contracts/schema";
 import { createExecutionContext } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
@@ -134,6 +135,7 @@ describe("API Worker foundation", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("X-Request-ID")).toBe("request-health-1");
     await expect(response.json()).resolves.toEqual({
+      contract_version: CONTRACT_VERSION,
       environment: "local",
       status: "ok",
       version: "1.0.0-target.0",
@@ -802,6 +804,26 @@ describe("API Worker foundation", () => {
     expect(normal.status).toBe(200);
     expect(normal.headers.get("Access-Control-Allow-Origin")).toBe(origin);
     expect(normal.headers.get("Vary")).toBe("Origin");
+  });
+
+  it("permits cross-origin publishing preference replacements", async () => {
+    const app = createApiApp();
+    const origin = stagingEnv.APP_URL;
+    const response = await app.fetch(
+      new Request("http://example.test/api/v1/publishing-preferences", {
+        method: "OPTIONS",
+        headers: {
+          Origin: origin,
+          "Access-Control-Request-Method": "PUT",
+          "Access-Control-Request-Headers": "Content-Type, Idempotency-Key",
+        },
+      }),
+      stagingEnv,
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe(origin);
+    expect(response.headers.get("Access-Control-Allow-Methods")?.split(/,\s*/)).toContain("PUT");
   });
 
   it("serves credentials-aware CORS preflights for the Better Auth surface", async () => {

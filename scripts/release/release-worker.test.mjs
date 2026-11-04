@@ -379,10 +379,19 @@ for (const environment of ["staging", "production"]) {
     });
 
     assert.equal(deployed.version_id, secretVersion);
-    assert.equal(
-      JSON.parse(await readFile(path.join(outDir, "worker-automation-secrets.json"), "utf8"))
-        .secret_names.length,
-      3,
+    // Evidence must name exactly the secrets written from the reviewed bundle, and
+    // never their values: a count alone would accept any three names.
+    const secretsEvidence = await readFile(
+      path.join(outDir, "worker-automation-secrets.json"),
+      "utf8",
     );
+    assert.deepEqual(JSON.parse(secretsEvidence).secret_names, [
+      "R2_ACCESS_KEY_ID",
+      "R2_SECRET_ACCESS_KEY",
+      "TOKEN_ENCRYPTION_KEY",
+    ]);
+    for (const value of ["access-key", "secret-key", "encryption-key"]) {
+      assert.ok(!secretsEvidence.includes(value), `${value} leaked into secret evidence`);
+    }
   });
 }

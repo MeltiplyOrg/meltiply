@@ -90,16 +90,27 @@ describe("extractRateLimitBudget", () => {
   });
 
   it("ignores malformed Meta usage headers", () => {
-    for (const value of [
-      "not-json",
-      "[1,2,3]",
-      '"25"',
-      "null",
-      "",
-      `{"call_count":${"9".repeat(8_200)}}`,
-    ]) {
+    for (const value of ["not-json", "[1,2,3]", '"25"', "null", ""]) {
       expect(extractRateLimitBudget("facebook", headers({ "x-app-usage": value }))).toBeNull();
     }
+  });
+
+  it("ignores an oversized but otherwise valid Meta usage header", () => {
+    // The 8 KiB header bound is the only thing rejecting this one: the JSON is
+    // well formed and its `call_count` is a valid percentage, so a parser
+    // without the length guard would report 27 here. (An oversized number
+    // literal would instead fail the finiteness check and prove nothing.)
+    const oversized = JSON.stringify({ call_count: 27, padding: "x".repeat(8_200) });
+    expect(oversized.length).toBeGreaterThan(8_192);
+    expect(extractRateLimitBudget("facebook", headers({ "x-app-usage": oversized }))).toBeNull();
+
+    // Same document just inside the bound is accepted, so the case above fails
+    // only because of size.
+    const printable = JSON.stringify({ call_count: 27, padding: "x".repeat(8_000) });
+    expect(printable.length).toBeLessThanOrEqual(8_192);
+    expect(extractRateLimitBudget("facebook", headers({ "x-app-usage": printable }))).toEqual(
+      budget({ percentUsed: 27 }),
+    );
   });
 
   it("ignores non-numeric and non-finite Meta usage metrics", () => {
@@ -161,25 +172,25 @@ describe("extractRateLimitBudget", () => {
 
   it("ignores invalid, fractional, signed, and over-range header values", () => {
     for (const value of ["", "  ", "NaN", "12.5", "-4", "1e3", "many", "0x10"]) {
+      // Each header is exercised alone, so a parser that still accepted one of
+      // them could not hide behind the other header's rejection.
       expect(
-        extractRateLimitBudget(
-          "tiktok",
-          headers({
-            "x-ratelimit-remaining": value,
-            "x-ratelimit-reset": value,
-          }),
-        ),
+        extractRateLimitBudget("tiktok", headers({ "x-ratelimit-remaining": value })),
       ).toBeNull();
+      expect(extractRateLimitBudget("tiktok", headers({ "x-ratelimit-reset": value }))).toBeNull();
     }
+
+    // Each documented ceiling is checked on its own header, at and past the bound.
     expect(
       extractRateLimitBudget(
         "youtube",
-        headers({
-          "x-ratelimit-remaining": "1000000001",
-          "x-ratelimit-reset": "86401",
-        }),
+        headers({ "x-ratelimit-remaining": "1000000000", "x-ratelimit-reset": "86400" }),
       ),
+    ).toEqual(budget({ remaining: 1_000_000_000, resetsInSeconds: 86_400 }));
+    expect(
+      extractRateLimitBudget("youtube", headers({ "x-ratelimit-remaining": "1000000001" })),
     ).toBeNull();
+    expect(extractRateLimitBudget("youtube", headers({ "x-ratelimit-reset": "86401" }))).toBeNull();
   });
 
   it("ignores Meta usage headers on standard-header platforms", () => {

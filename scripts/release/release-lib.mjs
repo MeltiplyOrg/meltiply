@@ -7,6 +7,23 @@ import { assertDatabaseRoles } from "../lib/database-roles.mjs";
 import { parseJsonc } from "../lib/jsonc.mjs";
 import { releaseEnvironments } from "../lib/release-environments.mjs";
 
+const controlCharactersPattern = /[\u0000-\u001f\u007f]/;
+const configurationTokenPattern = /^[A-Za-z0-9._:-]+$/;
+const trailingSlashPattern = /\/$/;
+const gitShaPattern = /^[0-9a-f]{40}$/;
+const nonEmptyTextPattern = /^.+$/s;
+const cloudflareIdPattern = /^[0-9a-f]{32}$/;
+const bucketNamePattern = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
+const regionPattern = /^[a-z0-9-]+$/;
+const neonIdPattern = /^[a-z0-9-]{1,60}$/;
+const utcTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+const utcSuffixPattern = /Z$/;
+const hostnamePattern = /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])$/;
+const trailingDotPattern = /\.$/;
+const neonEndpointPattern = /^ep-[a-z0-9-]+(?:-pooler)?$/;
+const poolerSuffixPattern = /-pooler$/;
+const wranglerVersionPattern = /^4\.148\.0(?:\s|$)/;
+
 const workerConfigs = {
   api: "workers/api/wrangler.jsonc",
   automation: "workers/automation/wrangler.jsonc",
@@ -19,6 +36,7 @@ const queueBindings = {
   "asset-processing": "ASSET_PROCESSING_QUEUE",
   "channel-revocation": "CHANNEL_REVOCATION_QUEUE",
   comments: "COMMENTS_QUEUE",
+  notifications: "NOTIFICATIONS_QUEUE",
   "publish-facebook": "FACEBOOK_PUBLISH_QUEUE",
   "publish-instagram": "INSTAGRAM_PUBLISH_QUEUE",
   "publish-threads": "THREADS_PUBLISH_QUEUE",
@@ -93,6 +111,9 @@ const exactRuntimeKeys = new Set([
   "instagram_client_id",
   "r2_account_id",
   "object_storage_provider",
+  "reporting_forced_off",
+  "reporting_posthog_host",
+  "reporting_posthog_project_token",
   "s3_bucket",
   "s3_endpoint",
   "s3_force_path_style",
@@ -152,7 +173,7 @@ function requiredString(value, name, pattern, maximum = 512) {
     value.trim() !== value ||
     value.length === 0 ||
     value.length > maximum ||
-    /[\u0000-\u001f\u007f]/.test(value) ||
+    controlCharactersPattern.test(value) ||
     (pattern && !pattern.test(value))
   ) {
     throw new TypeError(`${name} is invalid`);
@@ -171,7 +192,7 @@ function requiredString(value, name, pattern, maximum = 512) {
  */
 function optionalString(value, name, pattern, maximum = 512) {
   if (value === undefined) return undefined;
-  return requiredString(value, name, pattern ?? /^[A-Za-z0-9._:-]+$/, maximum);
+  return requiredString(value, name, pattern ?? configurationTokenPattern, maximum);
 }
 
 /**
@@ -202,7 +223,7 @@ function httpsUrl(value, name, { originOnly = false } = {}) {
   ) {
     throw new TypeError(`${name} must be a credential-free HTTPS ${originOnly ? "origin" : "URL"}`);
   }
-  return originOnly ? parsed.origin : parsed.toString().replace(/\/$/, "");
+  return originOnly ? parsed.origin : parsed.toString().replace(trailingSlashPattern, "");
 }
 
 /**
@@ -283,6 +304,53 @@ export function containsCredentialMaterial(serialized) {
   return credentialMaterialPattern.test(serialized);
 }
 
+/** Publishable PostHog project tokens are `phc_`-prefixed, url-safe, and bounded. */
+const posthogProjectTokenPattern = /^phc_[A-Za-z0-9_-]{8,200}$/;
+
+/**
+ * Validates the optional improvement-reporting settings of a staging release.
+ *
+ * Reporting is optional deployment configuration, never a release prerequisite:
+ * a release without a maintainer destination deploys normally and simply fails
+ * closed for both categories. When a destination is supplied the publishable
+ * project token and the matching ingestion origin must both be present and
+ * usable, so a half-configured release cannot claim reporting works. The token
+ * authorizes event ingestion only; it is not a personal API key and carries no
+ * project administration.
+ *
+ * @param {object} runtime - Raw `runtime` section of the release input
+ * @returns {object} Reporting keys to merge into the validated runtime section
+ * @throws {TypeError} If the destination is half-configured or invalid
+ */
+function reportingRuntime(runtime) {
+  const token = optionalString(
+    runtime.reporting_posthog_project_token,
+    "runtime.reporting_posthog_project_token",
+    posthogProjectTokenPattern,
+    210,
+  );
+  const host =
+    runtime.reporting_posthog_host === undefined
+      ? undefined
+      : httpsUrl(runtime.reporting_posthog_host, "runtime.reporting_posthog_host", {
+          originOnly: true,
+        });
+  if ((token === undefined) !== (host === undefined)) {
+    throw new TypeError(
+      "runtime.reporting_posthog_project_token and runtime.reporting_posthog_host must be set together",
+    );
+  }
+  return {
+    ...(host === undefined ? {} : { reporting_posthog_host: host }),
+    ...(token === undefined ? {} : { reporting_posthog_project_token: token }),
+    // Normalized so the rendered Workers always declare one string value.
+    reporting_forced_off:
+      runtime.reporting_forced_off === undefined
+        ? false
+        : boolean(runtime.reporting_forced_off, "runtime.reporting_forced_off"),
+  };
+}
+
 /**
  * Validates a non-secret release specification against structural and security invariants.
  * Enforces schema version 1, an allowed deployed environment, deployment mode ('bootstrap' or 'update'),
@@ -311,7 +379,7 @@ export function validateReleaseSpec(input) {
   if (!new Set(["bootstrap", "update"]).has(spec.deployment_mode)) {
     throw new TypeError("deployment_mode must be bootstrap or update");
   }
-  const gitSha = requiredString(spec.git_sha, "git_sha", /^[0-9a-f]{40}$/);
+  const gitSha = requiredString(spec.git_sha, "git_sha", gitShaPattern);
   const releaseId = requiredString(spec.release_id, "release_id");
   if (releaseId !== `${spec.environment}-${gitSha.slice(0, 12)}`) {
     throw new TypeError("release_id must match environment and the first 12 characters of git_sha");
@@ -357,7 +425,11 @@ export function validateReleaseSpec(input) {
   if (!isMailSenderAddress(mailFromAddress, true)) {
     throw new TypeError("runtime.mail_from_address is invalid");
   }
-  const mailFromName = optionalString(runtime.mail_from_name, "runtime.mail_from_name", /^.+$/s);
+  const mailFromName = optionalString(
+    runtime.mail_from_name,
+    "runtime.mail_from_name",
+    nonEmptyTextPattern,
+  );
   if (mailFromName !== undefined && !isMailSenderName(mailFromName)) {
     throw new TypeError("runtime.mail_from_name is invalid");
   }
@@ -370,7 +442,12 @@ export function validateReleaseSpec(input) {
     mail_from_name: mailFromName,
     facebook_client_id: optionalString(runtime.facebook_client_id, "runtime.facebook_client_id"),
     instagram_client_id: optionalString(runtime.instagram_client_id, "runtime.instagram_client_id"),
-    r2_account_id: requiredString(runtime.r2_account_id, "runtime.r2_account_id", /^[0-9a-f]{32}$/),
+    r2_account_id: requiredString(
+      runtime.r2_account_id,
+      "runtime.r2_account_id",
+      cloudflareIdPattern,
+    ),
+    ...reportingRuntime(runtime),
     threads_client_id: optionalString(runtime.threads_client_id, "runtime.threads_client_id"),
     tiktok_client_key: optionalString(runtime.tiktok_client_key, "runtime.tiktok_client_key"),
     tiktok_media_url_prefix:
@@ -384,11 +461,7 @@ export function validateReleaseSpec(input) {
     ...(storageProvider === "s3"
       ? {
           object_storage_provider: "s3",
-          s3_bucket: requiredString(
-            runtime.s3_bucket,
-            "runtime.s3_bucket",
-            /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/,
-          ),
+          s3_bucket: requiredString(runtime.s3_bucket, "runtime.s3_bucket", bucketNamePattern),
           s3_endpoint: httpsUrl(runtime.s3_endpoint, "runtime.s3_endpoint", { originOnly: true }),
           s3_force_path_style:
             runtime.s3_force_path_style === undefined
@@ -397,7 +470,7 @@ export function validateReleaseSpec(input) {
           s3_region:
             runtime.s3_region === undefined
               ? "us-east-1"
-              : requiredString(runtime.s3_region, "runtime.s3_region", /^[a-z0-9-]+$/),
+              : requiredString(runtime.s3_region, "runtime.s3_region", regionPattern),
         }
       : {}),
   };
@@ -416,16 +489,12 @@ export function validateReleaseSpec(input) {
     throw new TypeError("automation consumers must be paused and Cron must be safe before release");
   }
 
-  const neonBranchId = requiredString(spec.neon_branch_id, "neon_branch_id", /^[a-z0-9-]{1,60}$/);
-  const neonProjectId = requiredString(
-    spec.neon_project_id,
-    "neon_project_id",
-    /^[a-z0-9-]{1,60}$/,
-  );
+  const neonBranchId = requiredString(spec.neon_branch_id, "neon_branch_id", neonIdPattern);
+  const neonProjectId = requiredString(spec.neon_project_id, "neon_project_id", neonIdPattern);
   const restorePointExpiresAt = requiredString(
     spec.restore_point_expires_at,
     "restore_point_expires_at",
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/,
+    utcTimestampPattern,
   );
   const restorePointExpiry = Date.parse(restorePointExpiresAt);
   const canonicalRestorePointExpiry = Number.isFinite(restorePointExpiry)
@@ -433,7 +502,7 @@ export function validateReleaseSpec(input) {
     : "";
   if (
     canonicalRestorePointExpiry !== restorePointExpiresAt &&
-    canonicalRestorePointExpiry !== restorePointExpiresAt.replace(/Z$/, ".000Z")
+    canonicalRestorePointExpiry !== restorePointExpiresAt.replace(utcSuffixPattern, ".000Z")
   ) {
     throw new TypeError("restore_point_expires_at is invalid");
   }
@@ -481,7 +550,7 @@ export function validateIacOutputs(input, spec) {
   const hostname = requiredString(
     resources.app_hostname,
     "release_resources.app_hostname",
-    /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])$/,
+    hostnamePattern,
   );
   if (spec.app_url !== `https://${hostname}`) {
     throw new TypeError("app_url must match the IaC API hostname");
@@ -522,12 +591,12 @@ export function validateIacOutputs(input, spec) {
   const authenticatedId = requiredString(
     bindings.DB_AUTHENTICATED,
     "worker_bindings.DB_AUTHENTICATED",
-    /^[0-9a-f]{32}$/,
+    cloudflareIdPattern,
   );
   const systemId = requiredString(
     bindings.DB_SYSTEM,
     "worker_bindings.DB_SYSTEM",
-    /^[0-9a-f]{32}$/,
+    cloudflareIdPattern,
   );
   if (
     authenticatedId === systemId ||
@@ -635,7 +704,7 @@ function replaceBinding(entries, identifier, replacement, key = "binding") {
 /**
  * Renders concrete Cloudflare Wrangler configuration trees for all four release Workers.
  * Injects selected environment variables, Hyperdrive bindings, the selected object storage settings, queue producers,
- * allowed CORS origins, the sender-restricted send_email MAIL binding, Zero Trust Access bindings,
+ * allowed CORS origins, sender-restricted MAIL bindings on API and Automation, Zero Trust Access bindings,
  * and per-version preview URLs on the API Worker (the stable workers.dev route stays disabled).
  * S3 deployments omit the unused ASSETS binding; omitted provider selection preserves R2.
  *
@@ -694,7 +763,21 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
   }
   const commonVars = {
     ENVIRONMENT: spec.environment,
+    // Coarse deployment label; managed releases are always the maintainer's own
+    // Cloudflare deployment, so the same value reaches API and Automation.
+    DEPLOYMENT_CATEGORY: "managed",
+    // Optional improvement reporting. Absent settings leave both categories
+    // reporting `destination_unavailable` instead of failing deployment.
+    ...(spec.runtime.reporting_posthog_host
+      ? {
+          REPORTING_POSTHOG_HOST: spec.runtime.reporting_posthog_host,
+          REPORTING_POSTHOG_PROJECT_TOKEN: spec.runtime.reporting_posthog_project_token,
+        }
+      : {}),
+    REPORTING_FORCED_OFF: String(spec.runtime.reporting_forced_off),
     APP_URL: spec.app_url,
+    MAIL_FROM_ADDRESS: spec.runtime.mail_from_address,
+    ...(spec.runtime.mail_from_name ? { MAIL_FROM_NAME: spec.runtime.mail_from_name } : {}),
     ...(spec.runtime.object_storage_provider === "s3"
       ? {
           OBJECT_STORAGE_PROVIDER: "s3",
@@ -728,8 +811,6 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
   api.vars = {
     ...commonVars,
     ALLOWED_ORIGINS: spec.allowed_origins.join(","),
-    MAIL_FROM_ADDRESS: spec.runtime.mail_from_address,
-    ...(spec.runtime.mail_from_name ? { MAIL_FROM_NAME: spec.runtime.mail_from_name } : {}),
     ...(iac.access_aud
       ? {
           ACCESS_POLICY_AUD: iac.access_aud,
@@ -738,15 +819,17 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
         }
       : {}),
   };
-  api.send_email = replaceBinding(
-    api.send_email,
-    "MAIL",
-    {
-      name: "MAIL",
-      allowed_sender_addresses: [spec.runtime.mail_from_address],
-    },
-    "name",
-  );
+  for (const config of [api, automation]) {
+    config.send_email = replaceBinding(
+      config.send_email,
+      "MAIL",
+      {
+        name: "MAIL",
+        allowed_sender_addresses: [spec.runtime.mail_from_address],
+      },
+      "name",
+    );
+  }
   api.r2_buckets = replaceBinding(api.r2_buckets, "ASSETS", {
     binding: "ASSETS",
     bucket_name: iac.assets_bucket,
@@ -913,16 +996,16 @@ export async function writeRenderedConfigs({ outDir, repoRoot, spec, iac }) {
  * @throws {Error} If hostname does not target a valid Neon endpoint
  */
 export function normalizeNeonDatabaseHostname(hostname) {
-  const labels = hostname.toLowerCase().replace(/\.$/, "").split(".");
+  const labels = hostname.toLowerCase().replace(trailingDotPattern, "").split(".");
   if (
     labels.length < 4 ||
     labels.at(-2) !== "neon" ||
     labels.at(-1) !== "tech" ||
-    !/^ep-[a-z0-9-]+(?:-pooler)?$/.test(labels[0])
+    !neonEndpointPattern.test(labels[0])
   ) {
     throw new Error("database URL must target a Neon endpoint hostname");
   }
-  labels[0] = labels[0].replace(/-pooler$/, "");
+  labels[0] = labels[0].replace(poolerSuffixPattern, "");
   return labels.join(".");
 }
 
@@ -1048,7 +1131,7 @@ export async function preflightRelease({
     throw new Error("release git_sha does not match the checked-out commit");
   }
   if (status.stdout.trim()) throw new Error("tracked working tree changes are not releasable");
-  if (!/^4\.148\.0(?:\s|$)/.test(wranglerVersion.stdout.trim())) {
+  if (!wranglerVersionPattern.test(wranglerVersion.stdout.trim())) {
     throw new Error("release requires Wrangler 4.148.0");
   }
   const requiredSecrets = requiredRemoteSecrets(spec);

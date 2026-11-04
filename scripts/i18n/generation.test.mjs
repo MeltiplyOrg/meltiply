@@ -137,7 +137,8 @@ test("aborts with placeholder drift instead of returning a partial catalog", asy
 
 test("retries transient provider failures with backoff", async () => {
   const rateLimited = Object.assign(new Error("rate limited"), { status: 429 });
-  const provider = scriptedProvider([rateLimited, ["Hola"]]);
+  const overloaded = Object.assign(new Error("overloaded"), { status: 503 });
+  const provider = scriptedProvider([rateLimited, overloaded, ["Hola"]]);
   const delays = [];
 
   const { result } = await generateNamespace({
@@ -150,8 +151,35 @@ test("retries transient provider failures with backoff", async () => {
   });
 
   assert.deepEqual(result, { Hello: "Hola" });
-  assert.equal(provider.prompts.length, 2);
-  assert.deepEqual(delays, [5]);
+  assert.equal(provider.prompts.length, 3);
+  // Two failures, so the second wait must double the first: a constant-delay
+  // implementation would emit [5, 5].
+  assert.deepEqual(delays, [5, 10]);
+});
+
+test("surfaces the provider failure once retries are exhausted", async () => {
+  const rateLimited = Object.assign(new Error("rate limited"), { status: 429 });
+  const provider = scriptedProvider([rateLimited, rateLimited, rateLimited]);
+  const delays = [];
+
+  await assert.rejects(
+    generateNamespace({
+      source: { Hello: "Hello" },
+      provider,
+      to: "es",
+      retries: 2,
+      baseDelayMs: 5,
+      sleep: async (milliseconds) => delays.push(milliseconds),
+    }),
+    (error) => {
+      assert.equal(error.status, 429);
+      assert.match(error.message, /rate limited/);
+      return true;
+    },
+  );
+  // retries: 2 means the first attempt plus two retries, and two waits.
+  assert.equal(provider.prompts.length, 3);
+  assert.deepEqual(delays, [5, 10]);
 });
 
 test("fails fast on authentication errors", async () => {

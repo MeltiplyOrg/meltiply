@@ -3,6 +3,13 @@ import { EffectObjectStore } from "./object-store";
 import type { SigV4Signer } from "./sigv4";
 import { SigV4UrlSigner } from "./sigv4";
 
+const weakEtagPrefixPattern = /^W\//;
+const etagQuotesPattern = /^"|"$/g;
+const xmlTextPatterns = {
+  Code: /<Code>([\s\S]*?)<\/Code>/,
+  UploadId: /<UploadId>([\s\S]*?)<\/UploadId>/,
+};
+
 /**
  * Generic S3-compatible object storage.
  *
@@ -30,7 +37,7 @@ const preconditionStatuses = new Set([404, 409, 412]);
  * @returns The ETag without its surrounding double quotes.
  */
 function unquoteEtag(value: string | null): string {
-  return (value ?? "").replace(/^W\//, "").replace(/^"|"$/g, "");
+  return (value ?? "").replace(weakEtagPrefixPattern, "").replace(etagQuotesPattern, "");
 }
 
 /**
@@ -41,7 +48,7 @@ function unquoteEtag(value: string | null): string {
  * @returns Text safe to embed in XML element content.
  */
 function xmlEscape(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
 /**
@@ -52,20 +59,20 @@ function xmlEscape(value: string): string {
  * the five predefined entities.
  *
  * @param xml - Response body text.
- * @param tag - Element name to read.
+ * @param tag - Supported S3 result element name.
  * @returns Decoded element text, or null when the element is absent.
  */
-function xmlText(xml: string, tag: string): string | null {
-  const match = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(xml);
+function xmlText(xml: string, tag: keyof typeof xmlTextPatterns): string | null {
+  const match = xmlTextPatterns[tag].exec(xml);
   const text = match?.[1];
   return text === undefined
     ? null
     : text
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&apos;/g, "'")
-        .replace(/&amp;/g, "&");
+        .replaceAll("&lt;", "<")
+        .replaceAll("&gt;", ">")
+        .replaceAll("&quot;", '"')
+        .replaceAll("&apos;", "'")
+        .replaceAll("&amp;", "&");
 }
 
 /**

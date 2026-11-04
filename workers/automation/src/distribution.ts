@@ -16,8 +16,15 @@ import {
   type PlatformCapability,
 } from "@meltiply/domain";
 import type { EffectTransactionClient } from "@meltiply/database";
+import {
+  isPlatform,
+  isProviderFailureClass,
+  recordPublicationUsage,
+  reportingConfiguration,
+} from "@meltiply/reporting";
 
 import { withSystemTransactionEffect } from "./database";
+import { recordDiagnostic } from "./diagnostic-reporting";
 import { classifyJobError, RetryableJobError, type AutomationJobError } from "./effect/index";
 import {
   executeProviderCancelEffect,
@@ -96,6 +103,7 @@ interface DistributionRow extends Record<string, unknown> {
   reconciliation_attempt_count: number;
   refresh_token: string | null;
   scheduled_at: Date | string | null;
+  signature_text: string | null;
   status: string;
   attempt_count: number;
   title_override: string | null;
@@ -373,6 +381,7 @@ interface PublicationSnapshot {
   content: {
     hashtags: string[];
     provider_options?: ProviderPublishOptions;
+    signature?: string | null;
     text: string;
     title: string;
   };
@@ -410,6 +419,7 @@ function publicationSnapshot(
     content: {
       title: row.title_override ?? row.post_title,
       text: row.description_override ?? row.post_default_text,
+      signature: row.signature_text ?? null,
       hashtags: row.hashtags ?? [],
       ...(row.provider_options ? { provider_options: row.provider_options } : {}),
     },
@@ -569,6 +579,7 @@ function prepare(
                 distribution.platform_post_id,
                 distribution.title_override,
                 distribution.description_override,
+                distribution.signature_text,
                 distribution.hashtags, distribution.provider_options,
                 post.title AS post_title, post.default_text AS post_default_text,
                 composition.media,
@@ -876,7 +887,7 @@ function prepare(
              error_message = 'The provider outcome requires reconciliation.',
              next_attempt_at = now(),
              updated_at = now()
-         WHERE id = $1 AND status NOT IN ('published', 'cancelled')`,
+         WHERE id = $1 AND status NOT IN ('delivered', 'published', 'cancelled')`,
           [distribution.id],
         );
         yield* client.query(
@@ -917,7 +928,7 @@ function prepare(
  * Maps a provider operation result into database lifecycle and operation statuses.
  *
  * Distinguishes confirmed failures, ambiguous unknown results, asynchronous started operations
- * ('awaiting_provider'), and confirmed publications ('published').
+ * ('awaiting_provider'), terminal native handoffs ('delivered'), and publications ('published').
  *
  * @param result - Provider operation result.
  * @returns Status descriptors for the distribution and provider operation records.
@@ -928,7 +939,7 @@ function failureState(result: ProviderOperationResult): {
   message: string | null;
   operationStatus: "failed" | "needs_reconciliation" | "started" | "succeeded";
   retryable: boolean | null;
-  status: "awaiting_provider" | "failed" | "needs_reconciliation" | "published";
+  status: "awaiting_provider" | "delivered" | "failed" | "needs_reconciliation" | "published";
 } {
   if (result.outcome === "unknown") {
     return {
@@ -948,6 +959,16 @@ function failureState(result: ProviderOperationResult): {
       operationStatus: "failed",
       retryable: result.failure.retryable,
       status: "failed",
+    };
+  }
+  if (result.delivery) {
+    return {
+      code: null,
+      errorClass: null,
+      message: null,
+      operationStatus: "succeeded",
+      retryable: null,
+      status: "delivered",
     };
   }
   if (!result.providerPostId) {
@@ -1086,6 +1107,46 @@ async function dispatchInitialEngagementTriggers(
 }
 
 /**
+ * Reports one normalized Provider failure that was actually committed.
+ *
+ * The publish executor catches adapter errors into `confirmed_failure`/`unknown`
+ * result values, so the queue boundary sees a successful Effect and its
+ * rejected/retry reporting branches never run for these ordinary conditions.
+ * Reading the committed result here — after the outcome transaction, once per
+ * message rather than once per Provider attempt — is what makes "expired
+ * authorization" and "rate limited" countable without counting failed Posts.
+ *
+ * Confirmed successes and skipped work produce nothing. The call is
+ * fire-and-forget on the job's own lifecycle: it never fails the program it
+ * instruments, and it cannot change the retry/DLQ decision already recorded.
+ *
+ * @param env - Automation worker environment bindings.
+ * @param row - Distribution the attempt belonged to; supplies the Platform.
+ * @param execution - Normalized Provider outcome that was just persisted.
+ * @returns Effect that never fails.
+ */
+function reportCommittedProviderFailure(
+  env: AutomationEnv,
+  row: { platform: string },
+  execution: DistributionPublishExecution,
+): Effect.Effect<void> {
+  const { result } = execution;
+  if (result.outcome === "confirmed_success") return Effect.void;
+  const classification = result.failure.classification;
+  if (!isProviderFailureClass(classification)) return Effect.void;
+  const platform = isPlatform(row.platform) ? row.platform : undefined;
+  return recordDiagnostic(env, {
+    category: "provider_failure",
+    failureClass: classification,
+    error: { name: "ProviderAdapterError" },
+    handled: true,
+    occurredAt: new Date().toISOString(),
+    operation: "publish",
+    ...(platform === undefined ? {} : { platform }),
+  }).pipe(Effect.asVoid);
+}
+
+/**
  * Records the results of a publication attempt in provider operations and distributions tables.
  *
  * Updates distribution status (published, awaiting_provider, failed, or needs_reconciliation),
@@ -1169,6 +1230,7 @@ function recordPublishOutcome(
           `UPDATE distributions
        SET status = CASE
              WHEN $2 = 'published' THEN 'published'
+             WHEN $2 = 'delivered' THEN 'delivered'
              WHEN status = 'processing' THEN $2
              ELSE status
            END,
@@ -1221,8 +1283,9 @@ function recordPublishOutcome(
              WHEN $2 = 'awaiting_provider' AND status = 'processing' THEN 0
              ELSE provider_poll_attempts
            END,
+           provider_warnings = COALESCE($11::jsonb, provider_warnings),
            next_attempt_at = CASE
-             WHEN $2 = 'published' THEN NULL
+             WHEN $2 IN ('published', 'delivered') THEN NULL
              WHEN status = 'processing' AND $9::integer IS NULL THEN NULL
              WHEN status = 'processing' THEN now() + ($9 * INTERVAL '1 second')
              ELSE next_attempt_at
@@ -1244,11 +1307,29 @@ function recordPublishOutcome(
             state.message,
             nextAttemptDelay,
             env.RECURRING_COMMENTS_ENABLED === "true",
+            result.outcome === "confirmed_success" && result.warnings
+              ? JSON.stringify(result.warnings)
+              : null,
           ],
         );
         analyticsEventId = updated.rows[0]?.analytics_event_id;
         commentsEventId = updated.rows[0]?.comments_event_id;
         const updatedRow = updated.rows[0];
+        // A confirmed publication is measured inside the transaction that
+        // recorded it, so the counter and the domain commit are atomic and a
+        // later deletion cannot reduce what was already counted. The hook is a
+        // savepoint-scoped no-op for any other outcome.
+        if (updatedRow?.status === "published") {
+          yield* recordPublicationUsage(
+            client,
+            {
+              distributionId: row.id,
+              platform: row.platform,
+              postId: row.post_id,
+            },
+            reportingConfiguration(env),
+          );
+        }
         if (row.platform_user_id !== null) {
           const budget =
             result.metadata?.rateLimitBudget ??
@@ -1475,7 +1556,7 @@ function reconciliationState(execution: DistributionLookupExecution): {
   providerUrl: string | null;
   retryable: boolean | null;
   shouldPoll: boolean;
-  status: "awaiting_provider" | "failed" | "needs_reconciliation" | "published";
+  status: "awaiting_provider" | "delivered" | "failed" | "needs_reconciliation" | "published";
 } {
   if (execution.result.kind === "lookup_failure") {
     const { failure } = execution.result;
@@ -1511,6 +1592,19 @@ function reconciliationState(execution: DistributionLookupExecution): {
         retryable: null,
         shouldPoll: true,
         status: "awaiting_provider",
+      };
+    case "delivered":
+      return {
+        code: null,
+        errorClass: null,
+        message: null,
+        operationStatus: "succeeded",
+        providerOperationId: status.result.providerOperationId ?? null,
+        providerPostId: null,
+        providerUrl: null,
+        retryable: null,
+        shouldPoll: false,
+        status: "delivered",
       };
     case "published":
       return {
@@ -1685,7 +1779,7 @@ function recordReconciliationOutcome(
           status: string;
         }>(
           `UPDATE distributions
-         SET status = CASE WHEN status = 'cancel_requested' THEN status ELSE $2 END,
+         SET status = CASE WHEN $2 = 'delivered' THEN 'delivered' WHEN status = 'cancel_requested' THEN status ELSE $2 END,
              provider_operation_id = COALESCE($3, provider_operation_id),
              platform_post_id = COALESCE($4, platform_post_id),
              platform_url = COALESCE($5, platform_url),
@@ -1721,6 +1815,7 @@ function recordReconciliationOutcome(
                WHEN status = 'cancel_requested' OR $9::integer IS NULL THEN NULL
                ELSE now() + ($9 * INTERVAL '1 second')
              END,
+             provider_warnings = COALESCE($12::jsonb, provider_warnings),
              updated_at = now()
          WHERE id = $1
            AND status IN ('awaiting_provider', 'needs_reconciliation', 'cancel_requested')
@@ -1739,11 +1834,31 @@ function recordReconciliationOutcome(
             nextAttemptDelay,
             providerStillProcessing,
             env.RECURRING_COMMENTS_ENABLED === "true",
+            execution.result.kind === "publication" &&
+            (execution.result.status.state === "published" ||
+              execution.result.status.state === "delivered") &&
+            execution.result.status.result.warnings
+              ? JSON.stringify(execution.result.status.result.warnings)
+              : null,
           ],
         );
         analyticsEventId = updated.rows[0]?.analytics_event_id;
         commentsEventId = updated.rows[0]?.comments_event_id;
         const updatedRow = updated.rows[0];
+        // Reconciliation that establishes success is a confirmed publication,
+        // and the durable per-Post/per-Distribution marks make a second
+        // observation of the same `published` row advance nothing.
+        if (updatedRow?.status === "published") {
+          yield* recordPublicationUsage(
+            client,
+            {
+              distributionId: row.id,
+              platform: row.platform,
+              postId: row.post_id,
+            },
+            reportingConfiguration(env),
+          );
+        }
         if (row.platform_user_id !== null && execution.metadata?.rateLimitBudget) {
           yield* recordRateLimitBudget(
             client,
@@ -2012,6 +2127,7 @@ export function processDistributionMessage(
           postId: row.post_id,
           providerAccountId: row.platform_user_id ?? undefined,
           providerOptions: snapshot.content.provider_options,
+          signature: snapshot.content.signature ?? null,
           storedAccessToken: row.access_token ?? "",
           storedRefreshToken: row.refresh_token,
           textContent: snapshot.content.text,
@@ -2038,6 +2154,13 @@ export function processDistributionMessage(
       dependencies.random ?? Math.random,
       transaction,
     ).pipe(Effect.mapError(classifyJobError));
+    // The publish executor normalizes Provider failures into result *values*:
+    // `executeProviderPublishEffect` never fails, so the queue boundary's Exit is
+    // a success and its rejected/retry reporting branches are never reached for
+    // an ordinary expired authorization or rate limit. This is the canonical
+    // outcome seam, so that is where a categorized fact is produced — once per
+    // committed outcome, not once per Provider attempt.
+    yield* reportCommittedProviderFailure(env, row, execution);
     return "processed" as const;
   });
 }

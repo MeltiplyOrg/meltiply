@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { createOllamaProvider } from "./ollama.mjs";
 import { ProviderError } from "./provider.mjs";
+import { withRetry } from "./retry.mjs";
 
 /**
  * Builds a fetch Response-compatible object with JSON text.
@@ -114,23 +115,52 @@ test("explains how to start Ollama when the server is not running", async () => 
 });
 
 test("retries local timeouts and server faults", async () => {
+  // A retryable classification is only meaningful if the shared retry wrapper
+  // acts on it, so each failure is driven through withRetry: one retry must
+  // produce exactly two provider calls and one backoff wait.
+  const timeoutCalls = [];
   const timeout = createOllamaProvider({
     model: "qwen3:8b",
     fetchImpl: async () => {
+      timeoutCalls.push(1);
       throw Object.assign(new Error("timed out"), { name: "TimeoutError" });
     },
   });
-  await assert.rejects(timeout.complete("prompt"), (error) => {
-    assert.equal(error.retryable, true);
-    return true;
-  });
+  const timeoutDelays = [];
+  await assert.rejects(
+    withRetry(timeout, {
+      retries: 1,
+      baseDelayMs: 5,
+      sleep: async (milliseconds) => timeoutDelays.push(milliseconds),
+    }).complete("prompt"),
+    (error) => {
+      assert.equal(error.retryable, true);
+      return true;
+    },
+  );
+  assert.equal(timeoutCalls.length, 2);
+  assert.deepEqual(timeoutDelays, [5]);
 
+  const faultCalls = [];
   const unavailable = createOllamaProvider({
     model: "qwen3:8b",
-    fetchImpl: async () => jsonResponse({ error: "overloaded" }, 503),
+    fetchImpl: async () => {
+      faultCalls.push(1);
+      return jsonResponse({ error: "overloaded" }, 503);
+    },
   });
-  await assert.rejects(unavailable.complete("prompt"), (error) => {
-    assert.equal(error.retryable, true);
-    return true;
-  });
+  const faultDelays = [];
+  await assert.rejects(
+    withRetry(unavailable, {
+      retries: 1,
+      baseDelayMs: 5,
+      sleep: async (milliseconds) => faultDelays.push(milliseconds),
+    }).complete("prompt"),
+    (error) => {
+      assert.equal(error.retryable, true);
+      return true;
+    },
+  );
+  assert.equal(faultCalls.length, 2);
+  assert.deepEqual(faultDelays, [5]);
 });

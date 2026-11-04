@@ -10,11 +10,11 @@ Compose social posts, organize connected accounts, schedule publishing, and trac
 - Organize accounts into Brand Profiles.
 - Monitor publishing outcomes and retry eligible failures.
 
-The current app focuses on **Posts**, **Analytics**, **Channels**, and named weekly **Queues**. Inbox and a standalone media library are not available app surfaces. See the [capability inventory](docs/frontend-capabilities.md) for current scope and restoration prerequisites. Provider features depend on each platform's APIs and account permissions.
+The app focuses on **Posts**, **Analytics**, **Channels**, and named weekly **Queues**. Inbox and a standalone media library are not app surfaces. See the [capability inventory](docs/frontend-capabilities.md). Provider features depend on each platform's APIs and account permissions.
 
 ## Get started
 
-The devcontainer uses the VibeCode Essential image declared in [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json) for the full coding toolchain. That config also mounts host OMP and Wrangler state plus GitHub and WakaTime config. For manual setup, use the Node.js version in [`.node-version`](.node-version) and Bun version declared in [`package.json`](package.json); Docker Compose and Make are also required.
+The devcontainer uses the VibeCode Essential image declared in [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json) with Docker-in-Docker and a masked host socket. For manual setup use the Node.js version in [`.node-version`](.node-version) and Bun from [`package.json`](package.json); Docker Compose and Make are also required.
 
 ```bash
 make setup
@@ -22,68 +22,38 @@ make doctor
 make dev
 ```
 
-`make setup` installs dependencies, creates the ignored root `.env` from [`.env.example`](.env.example), fills blank auth/bootstrap/encryption secrets with private random values, starts PostgreSQL, applies migrations, and seeds local fixtures. Existing secret values are preserved on subsequent runs. Open the URLs printed by `make dev`.
+`make setup` installs dependencies, creates the ignored root `.env` from [`.env.example`](.env.example), fills blank secrets with private random values, starts PostgreSQL, applies migrations, and seeds local fixtures. Existing secrets are preserved. Open the URLs printed by `make dev`.
 
-Development stays on loopback by default. Set `MELTIPLY_DEV_TUNNEL=1 make dev` only when OAuth or webhook callbacks need a public URL. Tunnel settings and an explicit network-host override are documented in [`.env.example`](.env.example).
+Development stays on loopback. Set `MELTIPLY_DEV_TUNNEL=1 make dev` only when OAuth or webhook callbacks need a public URL; tunnel settings are in [`.env.example`](.env.example).
 
-There is one application address: `APP_URL` serves the dashboard and `/api/*`.
-Local host/port and public tunnel values are derived automatically. Set it only
-when overriding that origin; `PUBLIC_SITE_URL` is for the separate landing/docs
-site. CORS trusts the app origin automatically, and provider callback/media URLs
-are derived from it. Credentials, provider approvals, and activation flags remain
-explicit.
-
-For existing configurations, replace `FRONTEND_URL`, `PUBLIC_API_URL`,
-`API_BASE_URL`, `BETTER_AUTH_URL`, and `SELFHOST_ORIGIN` with one `APP_URL`.
-The removed keys are not aliases. Restart the stack after migrating; if the
-public host changes, update the registered provider callbacks and verified media
-domain too. The TLS gateway derives its hostname from `APP_URL`.
+One `APP_URL` serves the dashboard and `/api/*`. Local host/port and tunnel values derive automatically; `PUBLIC_SITE_URL` covers the separate landing/docs site. CORS trusts the app origin, and provider callback/media URLs derive from it. Credentials, provider approvals, and activation flags stay explicit.
 
 Seeded local accounts all use `MeltiplyLocal1!` and share the single Workspace:
 
-| Email                    | Workspace role | Notes                                                     |
-| ------------------------ | -------------- | --------------------------------------------------------- |
-| `alpha@meltiply.local`   | Admin          | Installation Owner                                        |
-| `beta@meltiply.local`    | Admin          | Can invite/manage Editors and Viewers                     |
-| `gamma@meltiply.local`   | Editor         | Can create and publish content                            |
-| `delta@meltiply.local`   | Viewer         | Read-only                                                 |
-| `epsilon@meltiply.local` | Viewer         | Suspended; sign-in is blocked until the Owner reactivates |
+| Email                    | Workspace role | Notes                                 |
+| ------------------------ | -------------- | ------------------------------------- |
+| `alpha@meltiply.local`   | Admin          | Installation Owner                    |
+| `beta@meltiply.local`    | Admin          | Can invite/manage Editors and Viewers |
+| `gamma@meltiply.local`   | Editor         | Can create and publish content        |
+| `delta@meltiply.local`   | Viewer         | Read-only                             |
+| `epsilon@meltiply.local` | Viewer         | Suspended until the Owner reactivates |
 
-The seed also includes a pending invitation for `pending.invitee@meltiply.local` and
-sample Audit entries, so the Members, Workspace, and Audit tabs are populated on
-first sign-in. These credentials are for local development only. While the app runs
-in Vite development mode (`make dev` or `make frontend-boot`), the sign-in form
-prefills the Installation Owner's email and password; production and preview builds
-never do. Production installations create their own owner through the protected
-first-run setup described in
-[self-hosting](docs/self-hosting.md#authentication-invitations-and-owner-recovery).
+The seed also includes a pending invitation and sample Audit entries, so Members, Workspace, and Audit are populated on first sign-in. These credentials are for local development only. Under Vite development mode the sign-in form prefills the Owner; production and preview builds never do. Production installations create their own owner through the protected first-run setup in [self-hosting](docs/self-hosting.md#authentication-invitations-and-owner-recovery).
 
-For visual Analytics development, the personal demo workspace includes 252 campaign
-publications across all three Brand Profiles and all five Platforms, with text,
-image, carousel, and video formats. Ninety days of dense publication history,
-older campaign checkpoints, three cumulative metric readings per publication,
-and daily/weekly follower history populate every range and filter without
-replacing the existing failure or awaiting-sync examples. Run `bun run db:seed`
-to refresh these deterministic fixtures in an existing local database; it does
-not reset the database. These historical imports do not consume the current
-period's publishing budget.
+`bun run db:seed` refreshes the deterministic Analytics fixtures in an existing local database without resetting it, including 252 campaign publications across three Brand Profiles and five Platforms so every range and filter is populated.
 
 ## Deployment targets
 
 Deploy a complete [managed Cloudflare staging or production installation](infra/cloudflare/README.md#release-and-rollback)
-with the shared operator-run release flow, or run the production-built application
-and Workers on your own host with [one Docker Compose file](docs/self-hosting.md).
-The managed flow deploys State, Automation, API, and frontend with environment-bound
-evidence; it requires your own Cloudflare/Neon accounts and Email Sending domain.
-The self-hosted stack includes PostgreSQL, persistent workerd bindings, durable
-queues, SMTP delivery, native media processing, and optional TLS. Its GitHub Actions
-workflow builds and verifies three GHCR release images; it does not require remote
-Cloudflare Workers. Both targets can be installed before Provider app review;
-connections and publishing remain unavailable while their acceptance flags are false.
+with the operator-run release flow, or run the production-built application and
+Workers on your own host with [one Docker Compose file](docs/self-hosting.md).
+The managed target requires your own Cloudflare/Neon accounts and Email Sending
+domain. The self-hosted stack includes PostgreSQL, persistent workerd bindings,
+durable queues, SMTP delivery, native media processing, and optional TLS.
+Both targets can be installed before Provider app review; connections and
+publishing remain unavailable while their acceptance flags are false.
 
-[`compose.dev.yml`](compose.dev.yml) provides only the development database and
-optional observability services used by `make dev`; it is not the self-hosted
-production deployment.
+[`compose.dev.yml`](compose.dev.yml) provides only the development database and optional observability services; it is not the production deployment.
 
 ## Common commands
 
@@ -96,37 +66,34 @@ production deployment.
 | Run the main validation workflow | `make check`          |
 | Build the public site and docs   | `make public-build`   |
 
-Use `bun run local:teardown` only when the local database and volumes can be discarded. `make help` lists daily workflows; `bun run` lists package checks and operational commands. Change-scoped verification is defined once in [`AGENTS.md`](AGENTS.md).
+`bun run local:teardown` discards the local database and volumes. Change-scoped verification is defined once in [`AGENTS.md`](AGENTS.md).
 
 ## Architecture
 
-Meltiply is a Bun monorepo. Cloudflare Workers provide the API and asynchronous publishing pipeline; PostgreSQL runs through Hyperdrive, and media is stored in R2 or any S3-compatible object store.
+Bun monorepo. Cloudflare Workers provide the API and asynchronous publishing pipeline; PostgreSQL runs through Hyperdrive, and media is stored in R2 or any S3-compatible object store.
 
-| Directory            | Responsibility                                                                        |
-| -------------------- | ------------------------------------------------------------------------------------- |
-| `frontend/app`       | Authenticated React application                                                       |
-| `frontend/public`    | Astro landing page and user documentation                                             |
-| `frontend/shared`    | Canonical UI controls, fonts/palette, icons, dialogs, feedback, and animation recipes |
-| `workers/api`        | HTTP API and provider webhooks                                                        |
-| `workers/automation` | Scheduled publishing and background jobs                                              |
-| `workers/state`      | OAuth coordination                                                                    |
-| `packages`           | Shared domain, database, provider, storage, auth, and API-contract code               |
+| Directory            | Responsibility                                                              |
+| -------------------- | --------------------------------------------------------------------------- |
+| `frontend/app`       | Authenticated React application                                             |
+| `frontend/public`    | Astro landing page and user documentation                                   |
+| `frontend/shared`    | Canonical UI controls, palette, icons, dialogs, feedback, animation recipes |
+| `workers/api`        | HTTP API and provider webhooks                                              |
+| `workers/automation` | Scheduled publishing and background jobs                                    |
+| `workers/state`      | OAuth coordination                                                          |
+| `packages`           | Shared domain, database, provider, storage, auth, contract code             |
 
 ## Contributors and coding agents
 
-- **Contributors:** Read [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, development workflow, and pull requests.
-- **Coding agents:** Follow [`AGENTS.md`](AGENTS.md) for repository rules and verification. Read [`CONTEXT.md`](CONTEXT.md) for domain terms, [`PRODUCT.md`](PRODUCT.md) for product intent, and [`STATE.md`](STATE.md) before refactors, schema changes, or data resets.
-- **UI work:** Read [shared UI ownership](docs/frontend-ui.md), [layout](docs/frontend-layout.md), and the [capability inventory](docs/frontend-capabilities.md). App components use the current shared TypeScript/React/Tailwind system; public Astro adapters share its tokens.
-- **API work:** See [`packages/contracts/README.md`](packages/contracts/README.md) for OpenAPI and generated-client workflow.
-- **UI translations:** See [`docs/i18n.md`](docs/i18n.md) for the catalog layout, offline generation, and the CI check.
-- **Deployment:** See [`infra/cloudflare/README.md`](infra/cloudflare/README.md) for infrastructure ownership and release safety.
-
-## CI
-
-This repository uses GitHub Actions. See [CI checks](docs/public-ci.md).
+- **Contributors:** [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, workflow, and pull requests.
+- **Coding agents:** [`AGENTS.md`](AGENTS.md) for repository rules and verification; [`CONTEXT.md`](CONTEXT.md) for domain terms, [`PRODUCT.md`](PRODUCT.md) for product intent, [`STATE.md`](STATE.md) before refactors, schema changes, or data resets.
+- **UI work:** [shared UI ownership](docs/frontend-ui.md), [layout](docs/frontend-layout.md), [capability inventory](docs/frontend-capabilities.md).
+- **API work:** [`packages/contracts/README.md`](packages/contracts/README.md) for OpenAPI and generated clients.
+- **UI translations:** [`docs/i18n.md`](docs/i18n.md).
+- **Deployment:** [`infra/cloudflare/README.md`](infra/cloudflare/README.md) for infrastructure ownership and release safety.
+- **CI:** [CI checks](docs/public-ci.md).
 
 ## License
 
-Meltiply is source-available under the [Sustainable Use License](LICENSE.md), based on [n8n's SUL](https://docs.n8n.io/n8n-community-license/). It permits personal/non-commercial and internal business use; paid hosting requires separate permission. It is not OSI-approved open source.
+Meltiply is free software under the [GNU Affero General Public License, version 3 or later](LICENSE.md). It is OSI-approved open source: you may run it, modify it, and redistribute it. Running a modified version as a network service requires offering its Corresponding Source to that service's users. Hosting requires no fee or separate permission.
 
-Third-party material retains its own terms; see [third-party notices](THIRD_PARTY_NOTICES.md). Before publishing source, history, compiled bundles, or native images, follow the [licensing and publication guide](docs/licensing.md). The dependency license gate does not establish contributor ownership or certify binary redistribution.
+Third-party material keeps its own terms; see [third-party notices](THIRD_PARTY_NOTICES.md) and the [licensing and publication guide](docs/licensing.md). The dependency license gate does not establish contributor ownership or certify binary redistribution.

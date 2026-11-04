@@ -86,6 +86,35 @@ for migration, password, and authenticator policies. Managed Workers trust
 Cloudflare's `CF-Connecting-IP` for shared rate limits, not caller-supplied
 `X-Forwarded-For`; the self-hosted ingress instead uses its socket peer.
 
+## Improvement reporting
+
+Usage statistics and diagnostic reports are optional and start off. A release is
+not required to configure them: without a destination both categories report
+`destination_unavailable` and nothing is transmitted. Enable maintainer reporting
+by adding the publishable project token and its matching ingestion origin to
+`runtime` in the release input:
+
+```json
+{
+  "reporting_posthog_project_token": "phc_…",
+  "reporting_posthog_host": "https://us.i.posthog.com",
+  "reporting_forced_off": false
+}
+```
+
+Set both destination fields or neither; the renderer rejects a half-configured
+destination, so a release cannot ship a token without a usable origin. The token
+is publishable rather than secret — it authorizes event ingestion only and grants
+no project administration — so keep it in the reviewed release input, not in a
+Worker secret bundle. `reporting_forced_off: true` disables both categories over
+any saved Owner choice. The rendered Workers always receive
+`DEPLOYMENT_CATEGORY=managed` and `REPORTING_FORCED_OFF`.
+
+The receiving project itself must discard client IP data, keep IP enrichment,
+autocapture, pageviews, session replay, and person profiles off, and set billing
+limits. Event fields, dashboard definitions, and the synthetic verification
+procedure are in [improvement reporting operations](../../docs/improvement-reporting.md).
+
 ## Object storage selection
 
 Releases default to the IaC-managed R2 bucket. To select an S3-compatible service,
@@ -784,54 +813,8 @@ batch. Account identity comes from PostgreSQL, not the Queue payload; messages
 for the same account stay ordered. Keep OpenTofu's consumer-concurrency limit at
 one invocation per Provider Queue. Asset jobs and other queues remain serial.
 Do not raise consumer concurrency without a separate cross-invocation account
-coordination design. Existing persisted rate budgets, leases, Ambiguous outcome
-reconciliation, backoff, Outbox and DLQ rules are unchanged.
-
-The hosted `performance-backend` lane runs the real Queue handler in workerd
-with PostgreSQL and a controlled slow Provider. Its `queue-capacity.json` records
-serial/bounded timing, head-of-line delay, maximum active calls and redelivery
-outcomes. This is a capacity experiment, not a live Provider quota measurement.
-Enable the bounded mode only after its latency/throughput gain is observed and
-the installation's Provider budget supports it.
-
-[Run 40192396395](https://github.com/MeltiplyOrg/meltiply/actions/runs/40192396395)
-at `316c93e` exercised five publications across four external accounts, one
-500 ms controlled call and four 50 ms calls. Three alternating samples per mode
-produced these rounded observed ranges:
-
-| Mode        | Whole batch ms | First independent account completion ms | Maximum simultaneous calls |
-| ----------- | -------------: | --------------------------------------: | -------------------------: |
-| Serial      |        905–938 |                                 630–661 |                          1 |
-| Bounded two |        657–665 |                                 106–114 |                          2 |
-
-Every sample persisted five published outcomes, kept same-account concurrency
-at one, and acknowledged redelivery without another Provider write.
-[Raw observations](../../docs/benchmarks/results/2026-10-25-authenticated/queue-capacity.json)
-demonstrate reduced head-of-line blocking under this controlled latency skew,
-not a production throughput or quota guarantee. Serial remains the default.
-
-### Controlled API placement experiment
-
-Leave deployment placement unchanged until measured. Prepare two isolated API
-versions with identical code/data/authentication; vary only placement. Supply a
-live test session through `MELTIPLY_BENCHMARK_TOKEN`, never a command-line token:
-
-```bash
-bun run benchmark:placement \
-  --baseline https://baseline-api.example.com \
-  --candidate https://candidate-api.example.com \
-  --workspace 20000000-0000-4000-8000-000000000005 \
-  --start 2026-07-01T00:00:00Z --end 2026-10-01T00:00:00Z \
-  --location actual-client-region --samples 30
-```
-
-The read-only experiment alternates paired requests, discards warm-up, consumes
-responses, and records p50/p95/p99, bytes, `cf-placement` and `cf-ray` without
-private bodies. Run from representative client regions after placement learning;
-compare complete forwarding-inclusive user latency, not only origin duration.
-[Smart Placement](https://developers.cloudflare.com/workers/configuration/placement/)
-affects fetch handlers, not named-entrypoint RPC. A local workerd/PostgreSQL
-benchmark cannot establish managed placement gains.
+coordination design. Preserve persisted rate budgets, leases, Ambiguous outcome
+reconciliation, backoff, Outbox and DLQ handling.
 
 ### Acceptance targets and scaling decisions
 

@@ -33,6 +33,11 @@ vi.mock("@/context/workspace.context", () => ({
   useWorkspace: () => mocks.workspace,
 }));
 
+vi.mock("@/context/publishing-timezone.context", () => ({
+  PublishingTimeZoneProvider: ({ children }: { children: React.ReactNode }) => children,
+  usePublishingTimeZone: () => "UTC",
+}));
+
 vi.mock("@/lib/theme", () => ({
   useTheme: () => ({ requestedTheme: "light", setTheme: mocks.setTheme }),
 }));
@@ -43,6 +48,25 @@ vi.mock("@/hooks/use-workspace-sign-out", () => ({
 
 vi.mock("@/lib/preload-routes", () => ({
   preloadDashboardRoute: vi.fn(),
+}));
+
+// The dashboard layout renders the onboarding gate, which reads the session scope
+// and the Owner's progress. Both are data providers here, mocked to a resolved
+// non-applicable read exactly as the settings and brand-profile suites do, so the
+// shell under test never depends on an ambient auth provider.
+vi.mock("@/hooks/use-session-scope", () => ({
+  useSessionScope: () => ({
+    brandProfileId: null,
+    isSignedIn: true,
+    workspaceId: null,
+  }),
+}));
+
+vi.mock("@/lib/queries", () => ({
+  useOnboarding: () => ({
+    data: { status: "not_applicable" },
+    isPending: false,
+  }),
 }));
 
 /**

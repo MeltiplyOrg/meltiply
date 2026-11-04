@@ -77,6 +77,13 @@
     "POLAR_ENV": "production",
     "FACEBOOK_LIVE_ACCEPTED": "false",
     "APP_URL": "https://staging.meltiply.com",
+    // Optional improvement reporting. The destination pair is added by
+    // scripts/release from the reviewed release input only when the maintainer
+    // project is provisioned; the release never requires it, and both
+    // categories stay off without it. The operator override is a plain
+    // configuration switch, never a saved-preference default.
+    "DEPLOYMENT_CATEGORY": "managed",
+    "REPORTING_FORCED_OFF": "false",
     "INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED": "false",
     "INSTAGRAM_LIVE_ACCEPTED": "false",
     "OPERATOR_HOSTNAME": "ops.staging.meltiply.com",

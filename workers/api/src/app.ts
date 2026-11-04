@@ -5,6 +5,7 @@ import {
   type JwtIdentity,
   type SessionClaims,
 } from "@meltiply/auth";
+import { CONTRACT_VERSION } from "@meltiply/contracts";
 import type { components } from "@meltiply/contracts/schema";
 import {
   createRequestId,
@@ -42,6 +43,9 @@ import {
   registerFlowRoutes,
 } from "./flow-observability";
 import { registerInstallationRoutes } from "./installation-routes";
+import { registerOnboardingRoutes } from "./onboarding";
+import { registerReportingRoutes } from "./reporting-routes";
+import type { ReportingDependencies } from "./reporting-layer";
 import { registerOperatorRoutes, type OperatorRouteDependencies } from "./operator-routes";
 import { scheduleEagerOutboxRelay } from "./outbox-relay";
 import { Effect, type Layer } from "effect";
@@ -49,6 +53,9 @@ import { Effect, type Layer } from "effect";
 import { CurrentUserService, createCurrentUserServiceLive } from "./effect/services/current-user";
 import { runWorkerEffect } from "./effect/runtime";
 import { errorResponse, jsonResponse } from "./responses";
+
+const invitationPathPattern = /^\/api\/v1\/workspace-invitations\/[^/]+$/;
+const oauthCallbackPathPattern = /^\/api\/v1\/platforms\/[^/]+\/callback$/;
 
 type UserProfile = components["schemas"]["UserProfile"];
 
@@ -60,6 +67,8 @@ export interface ApiDependencies extends CoreRouteDependencies, OperatorRouteDep
   ) => Promise<AuthRateLimitResult>;
   betterAuth?: BetterAuthInstance | ((env: ApiWorkerEnv) => BetterAuthInstance);
   currentUserServiceLayer?: Layer.Layer<CurrentUserService, never, never>;
+  /** Overrides the live improvement-reporting layer (tests, alternate transports). */
+  reportingServiceLayer?: ReportingDependencies["reportingServiceLayer"];
   loadCurrentUser?: (env: ApiWorkerEnv, claims: SessionClaims) => Promise<UserProfile | null>;
   resolveActor?: (
     env: ApiWorkerEnv,
@@ -405,7 +414,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
           "Access-Control-Allow-Headers",
           "Authorization, Content-Type, X-Request-ID, X-Workspace-ID, X-Setup-Secret, X-Invitation-Token, Idempotency-Key, If-None-Match",
         );
-        c.header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
+        c.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
         c.header("Access-Control-Max-Age", "600");
         return c.body(null, 204);
       }
@@ -528,11 +537,11 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
       c.req.path === "/api/v1/ready" ||
       // The invitation acceptance page inspects a token before the visitor
       // has an account or session. Token possession is the credential.
-      (c.req.method === "GET" && /^\/api\/v1\/workspace-invitations\/[^/]+$/.test(c.req.path)) ||
+      (c.req.method === "GET" && invitationPathPattern.test(c.req.path)) ||
       // Provider-media URLs carry their own HMAC bearer credential; the route
       // verifies it before touching R2, so no user session is required.
       c.req.path.startsWith(providerMediaRoutePrefix) ||
-      /^\/api\/v1\/platforms\/[^/]+\/callback$/.test(c.req.path);
+      oauthCallbackPathPattern.test(c.req.path);
     if (publicPath || c.req.method === "OPTIONS") {
       await next();
       return;
@@ -584,6 +593,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
   app.get("/api/v1/health", (c) =>
     jsonResponse(
       {
+        contract_version: CONTRACT_VERSION,
         environment: c.env.ENVIRONMENT,
         status: "ok",
         version: c.env.VERSION,
@@ -799,6 +809,10 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
 
   registerCoreRoutes(app, dependencies);
   registerInstallationRoutes(app);
+  registerOnboardingRoutes(app);
+  registerReportingRoutes(app, {
+    reportingServiceLayer: dependencies.reportingServiceLayer,
+  });
   registerOperatorRoutes(app, dependencies);
   registerFlowRoutes(app);
 

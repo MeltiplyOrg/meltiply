@@ -63,7 +63,7 @@ function queueNames() {
 }
 
 function iacOutput(overrides = {}) {
-  const queues = queueNames();
+  const queues = { ...queueNames(), notifications: "meltiply-notifications-staging" };
   const resources = {
     app_hostname: "staging.meltiply.com",
     app_custom_domains_attached: false,
@@ -128,6 +128,22 @@ function successfulPreflightCommand(command, args) {
 test("command runner does not open stdin for read-only commands", async () => {
   const result = await runCommand("git", ["rev-parse", "HEAD"]);
   assert.match(result.stdout, /^[0-9a-f]{40}\n$/);
+
+  // The observable contract is the child's stdin descriptor. A command that
+  // reports whether fd 0 is a pipe distinguishes `ignore` from `pipe`; asking
+  // `git rev-parse` cannot, because it never reads stdin either way.
+  const stdinKind = await runCommand(process.execPath, [
+    "-e",
+    'const fs = require("node:fs"); process.stdout.write(fs.fstatSync(0).isFIFO() ? "pipe" : "ignored");',
+  ]);
+  assert.equal(stdinKind.stdout, "ignored");
+
+  const piped = await runCommand(
+    process.execPath,
+    ["-e", 'process.stdin.on("data", (chunk) => process.stdout.write(chunk))'],
+    { stdin: "payload" },
+  );
+  assert.equal(piped.stdout, "payload");
 
   const stress = spawnSync(
     process.execPath,
@@ -402,6 +418,98 @@ test("IaC outputs must be non-sensitive, staging-scoped, and internally consiste
   );
 });
 
+test("optional improvement reporting renders only a complete destination", () => {
+  const plain = validateReleaseSpec(releaseInput());
+  assert.equal(plain.runtime.reporting_forced_off, false);
+  assert.equal(plain.runtime.reporting_posthog_host, undefined);
+
+  const configured = validateReleaseSpec({
+    ...releaseInput(),
+    runtime: {
+      ...releaseInput().runtime,
+      reporting_posthog_project_token: "phc_maintainer000000000000",
+      reporting_posthog_host: "https://us.i.posthog.com/",
+    },
+  });
+  assert.equal(configured.runtime.reporting_posthog_host, "https://us.i.posthog.com");
+  assert.equal(configured.runtime.reporting_posthog_project_token, "phc_maintainer000000000000");
+
+  // A destination is never half-configured: the token authorizes ingestion for
+  // the matching origin, so shipping one without the other would silently
+  // disable reporting while looking configured.
+  assert.throws(
+    () =>
+      validateReleaseSpec({
+        ...releaseInput(),
+        runtime: {
+          ...releaseInput().runtime,
+          reporting_posthog_project_token: "phc_maintainer000000000000",
+        },
+      }),
+    /must be set together/,
+  );
+  assert.throws(
+    () =>
+      validateReleaseSpec({
+        ...releaseInput(),
+        runtime: { ...releaseInput().runtime, reporting_posthog_host: "https://us.i.posthog.com" },
+      }),
+    /must be set together/,
+  );
+  assert.throws(
+    () =>
+      validateReleaseSpec({
+        ...releaseInput(),
+        runtime: {
+          ...releaseInput().runtime,
+          reporting_posthog_project_token: "personal-api-key",
+          reporting_posthog_host: "https://us.i.posthog.com",
+        },
+      }),
+    /reporting_posthog_project_token is invalid/,
+  );
+
+  const iac = validateIacOutputs(iacOutput(), validateReleaseSpec(releaseInput()));
+  const withoutDestination = renderWranglerConfigs(
+    {
+      api: { name: "meltiply-api" },
+      automation: { name: "meltiply-automation", queues: { producers: [] } },
+      state: { name: "meltiply-state" },
+    },
+    plain,
+    iac,
+  );
+  for (const worker of [withoutDestination.api, withoutDestination.automation]) {
+    assert.equal(worker.vars.DEPLOYMENT_CATEGORY, "managed");
+    assert.equal(worker.vars.REPORTING_FORCED_OFF, "false");
+    assert.ok(!("REPORTING_POSTHOG_PROJECT_TOKEN" in worker.vars));
+    assert.ok(!("REPORTING_POSTHOG_HOST" in worker.vars));
+  }
+
+  const withDestination = renderWranglerConfigs(
+    {
+      api: { name: "meltiply-api" },
+      automation: { name: "meltiply-automation", queues: { producers: [] } },
+      state: { name: "meltiply-state" },
+    },
+    validateReleaseSpec({
+      ...releaseInput(),
+      runtime: {
+        ...releaseInput().runtime,
+        reporting_posthog_project_token: "phc_maintainer000000000000",
+        reporting_posthog_host: "https://eu.i.posthog.com",
+        reporting_forced_off: true,
+      },
+    }),
+    iac,
+  );
+  for (const worker of [withDestination.api, withDestination.automation]) {
+    assert.equal(worker.vars.REPORTING_POSTHOG_HOST, "https://eu.i.posthog.com");
+    assert.equal(worker.vars.REPORTING_POSTHOG_PROJECT_TOKEN, "phc_maintainer000000000000");
+    assert.equal(worker.vars.REPORTING_FORCED_OFF, "true");
+  }
+});
+
 test("rendering replaces placeholders with reviewed non-secret bindings", () => {
   const spec = validateReleaseSpec(releaseInput());
   const iac = validateIacOutputs(iacOutput(), spec);
@@ -487,14 +595,6 @@ test("rendered files are deterministic and private", async (context) => {
     path.resolve(path.dirname(first.paths.api), apiConfig.$schema),
     path.join(repoRoot, "node_modules/wrangler/config-schema.json"),
   );
-  // The source wrangler.jsonc carries a placeholder MAIL entry; rendering must replace it
-  // in place, leaving exactly one binding restricted to the configured sender.
-  assert.deepEqual(apiConfig.send_email, [
-    {
-      name: "MAIL",
-      allowed_sender_addresses: ["auth@staging.meltiply.com"],
-    },
-  ]);
   const frontend = JSON.parse(await readFile(first.paths.frontend, "utf8"));
   assert.equal(
     path.resolve(path.dirname(first.paths.frontend), frontend.main),
@@ -516,6 +616,19 @@ test("rendered files are deterministic and private", async (context) => {
     first.config_digest,
     "frontend identity participates in the review digest",
   );
+  // Both mail-sending Workers must deploy with one sender-restricted binding
+  // and the matching identity, rather than inheriting template placeholders.
+  for (const worker of ["api", "automation"]) {
+    const config = JSON.parse(await readFile(first.paths[worker], "utf8"));
+    assert.equal(config.vars.MAIL_FROM_ADDRESS, "auth@staging.meltiply.com");
+    assert.equal(config.vars.MAIL_FROM_NAME, "Meltiply");
+    assert.deepEqual(config.send_email, [
+      {
+        name: "MAIL",
+        allowed_sender_addresses: ["auth@staging.meltiply.com"],
+      },
+    ]);
+  }
 });
 
 test("connected preflight requires matching Cloudflare and TLS database credentials", async () => {
@@ -736,6 +849,7 @@ test("preflight fails closed on checkout and toolchain drift", async () => {
       },
       spec,
     }),
+    /tracked working tree changes are not releasable/,
   );
   await assert.rejects(
     preflightRelease({
@@ -750,6 +864,37 @@ test("preflight fails closed on checkout and toolchain drift", async () => {
       },
       spec,
     }),
+    /release requires Wrangler 4\.148\.0/,
+  );
+  // A checkout at a different commit must be rejected for that reason, not by
+  // an incidental failure elsewhere in preflight.
+  await assert.rejects(
+    preflightRelease({
+      environment: {},
+      offline: true,
+      repoRoot: "/repo",
+      runCommand(command, args) {
+        if (command === "git" && args[0] === "rev-parse") {
+          return Promise.resolve({ code: 0, stderr: "", stdout: `${"f".repeat(40)}\n` });
+        }
+        return successfulPreflightCommand(command, args);
+      },
+      spec,
+    }),
+    /release git_sha does not match the checked-out commit/,
+  );
+  // The clean, matching checkout is the control: it must resolve to "ready".
+  assert.equal(
+    (
+      await preflightRelease({
+        environment: {},
+        offline: true,
+        repoRoot: "/repo",
+        runCommand: successfulPreflightCommand,
+        spec,
+      })
+    ).status,
+    "ready",
   );
 });
 

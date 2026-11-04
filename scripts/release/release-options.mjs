@@ -1,5 +1,7 @@
 import path from "node:path";
 
+const rolloutPercentPattern = /^(?:5|25|50|100)$/;
+
 const definitions = {
   cron: {
     boolean: new Set(["apply", "help"]),
@@ -160,7 +162,7 @@ export function parseReleaseArguments(argv, environment) {
   const percentageSource = values.get("percentage");
   let percentage;
   if (percentageSource !== undefined) {
-    if (!/^(?:5|25|50|100)$/.test(percentageSource)) {
+    if (!rolloutPercentPattern.test(percentageSource)) {
       throw new TypeError("--percentage must be 5, 25, 50, or 100");
     }
     percentage = Number(percentageSource);

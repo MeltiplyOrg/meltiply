@@ -1,33 +1,8 @@
 import { defineConfig } from "vite-plus";
 
-// Vite+ lint (Oxlint) configuration.
-//
-// `vp lint`/`vp check` only ever read THIS lint block — nested package configs
-// cannot override it — so the policies that used to live in the deleted root
-// `eslint.config.mjs` (packages/workers) and `frontend/eslint.config.mjs`
-// (frontend/app + frontend/shared) are consolidated here:
-//
-// - Baseline `rules` + the TypeScript/JS `overrides` mirror the generated
-//   migration of the old root config (eslint:recommended + tseslint
-//   recommended + the packages/workers hardening rules), with two scoping
-//   corrections: `no-unused-expressions` and `no-array-constructor` were
-//   generated globally but only ran on TS files before (eslint-recommended
-//   disables both under the TS parser), so they are re-scoped to TS files
-//   below. The `no-var`/`prefer-const`/`prefer-rest-params`/`prefer-spread`
-//   additions the migrator emitted were never enabled by the old configs and
-//   are dropped to keep the policy identical.
-// - The `frontend/**` entries carry over everything `frontend/eslint.config.mjs`
-//   enforced, one override per former config block (ordered like ESLint:
-//   later matching overrides win). That includes the custom `boundaries/*`
-//   plugin, the `@shadcn/lint` design-system rules, and the
-//   `eslint-plugin-react-hooks` recommended set — all via `jsPlugins` so the
-//   rule semantics are the upstream implementations, not approximations.
-//
-// `eslint-plugin-react-hooks` is aliased `react-hooks-js` because Oxlint
-// reserves the `react`/`react-hooks` namespaces for its own built-in rules.
-// Loading the real plugin (a conformance-tested JS plugin) keeps the two
-// compiler-era rules Oxlint has no native equivalent for (`config`, `gating`)
-// and the exact upstream behavior for the rest.
+// Root lint policy for every workspace; nested configs cannot override it.
+// TypeScript/Worker hardening and frontend ownership rules share this entry.
+// The upstream React Hooks plugin supplies rules Oxlint does not implement.
 
 // Keeps UI imports on shared data boundaries, icon primitives, and the single
 // Sileo notification store. Both no-restricted-imports overrides reference

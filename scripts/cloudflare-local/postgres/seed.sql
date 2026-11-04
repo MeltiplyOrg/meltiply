@@ -2897,4 +2897,36 @@ SET status = 'scheduled',
     published_at = NULL,
     updated_at = now();
 
+-- Publishing outcomes distinguish native handoffs from published copies with
+-- partial-success warnings. Demo references contain no tokens or encoder
+-- credentials; preview controls never contact a live Provider.
+INSERT INTO posts (id, org_id, brand_profile_id, title, default_text, status, created_at)
+VALUES
+  ('4d000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Native Page draft', 'A native Page draft waiting for review in Facebook.', 'active', now()),
+  ('4d000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Finish in TikTok', 'Complete this handed-off draft in the TikTok app.', 'active', now()),
+  ('4d000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Prepared Live broadcast', 'Connect an external encoder to start this broadcast.', 'active', now()),
+  ('4d000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Published with a secondary-share warning', 'The Threads Post succeeded; its secondary Instagram Story share did not.', 'active', now()),
+  ('4d000000-0000-4000-8000-000000000005', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Instagram published without all requested content', 'This caption was requested, but Instagram published the media without attaching it.', 'active', now())
+ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, default_text = EXCLUDED.default_text;
+
+INSERT INTO distributions (id, org_id, brand_profile_id, post_id, platform_account_id, platform,
+  status, provider_options, provider_operation_id, provider_warnings, platform_post_id, published_at, attachment_ids)
+VALUES
+  ('4d100000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', '4d000000-0000-4000-8000-000000000001', 'e3000000-0000-4000-8000-000000000001', 'facebook', 'delivered', '{"facebook":{"postType":"feed","deliveryMode":"draft"}}', 'post_draft:99801', '[]', NULL, NULL, '{}'),
+  ('4d100000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', '4d000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000002', 'tiktok', 'delivered', '{"tiktok":{"postMode":"inbox","allowComment":false,"allowDuet":false,"allowStitch":false,"brandContent":false,"brandOrganic":false,"isAiGenerated":false,"musicUsageConfirmed":true}}', 'inbox:preview-only-publish-id', '[]', NULL, NULL, '{}'),
+  ('4d100000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', '4d000000-0000-4000-8000-000000000003', 'e3000000-0000-4000-8000-000000000001', 'facebook', 'delivered', '{"facebook":{"postType":"live"}}', 'live:99803', '[]', NULL, NULL, '{}'),
+  ('4d100000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', '4d000000-0000-4000-8000-000000000004', 'e3000000-0000-4000-8000-000000000003', 'threads', 'published', '{"threads":{"crossreshare_to_ig":true}}', 'created:99804', '["instagram_crossshare_failed"]', 'preview-only-threads-post', now(), '{}'),
+  ('4d100000-0000-4000-8000-000000000005', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', '4d000000-0000-4000-8000-000000000005', 'e3000000-0000-4000-8000-000000000002', 'instagram', 'published', '{"instagram":{"postType":"feed"}}', 'created:99805', '["instagram_publish_partial"]', 'preview-only-instagram-post', now(), '{}')
+ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, provider_options = EXCLUDED.provider_options,
+  provider_operation_id = EXCLUDED.provider_operation_id, provider_warnings = EXCLUDED.provider_warnings,
+  platform_post_id = EXCLUDED.platform_post_id, published_at = EXCLUDED.published_at;
+
+INSERT INTO post_targets (post_id, platform_account_id, org_id, brand_profile_id, provider_options, attachment_ids)
+SELECT post_id, platform_account_id, org_id, brand_profile_id, provider_options, attachment_ids
+FROM distributions
+WHERE id IN ('4d100000-0000-4000-8000-000000000001', '4d100000-0000-4000-8000-000000000002',
+  '4d100000-0000-4000-8000-000000000003', '4d100000-0000-4000-8000-000000000004',
+  '4d100000-0000-4000-8000-000000000005')
+ON CONFLICT (post_id, platform_account_id) DO UPDATE SET provider_options = EXCLUDED.provider_options;
+
 COMMIT;

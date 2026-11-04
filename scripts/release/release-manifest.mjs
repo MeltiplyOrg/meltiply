@@ -16,6 +16,17 @@ import {
 import { validateWorkerVersionId } from "./release-worker.mjs";
 import { assertFrontendReleaseEvidence } from "./release-frontend.mjs";
 
+const httpsUrlPattern = /^https:\/\/[^\s]+$/;
+const rolloutEvidencePattern = /^api-rollout-(?:5|25|50|100)\.json$/;
+const smokeEvidencePattern = /^smoke-live(?:-(?:5|25|50|100))?\.json$/;
+const openapiInfoPattern = /^info:\s*\n((?:[ \t]+[^\n]*\n)+)/m;
+const openapiVersionPattern = /^[ \t]+version:[ \t]*(.+?)[ \t]*$/m;
+const edgeQuotesPattern = /^["']|["']$/g;
+const contractVersionPattern = /^[0-9A-Za-z][0-9A-Za-z.-]{0,127}$/;
+const evidenceLogPattern = /^(?:wrangler-)?[a-z0-9-]+\.jsonl?$/;
+const wranglerLogPattern = /^wrangler-[a-z0-9-]+\.jsonl$/;
+const deploymentPhasePattern = /^(foundation|traffic|queue-resume)$/;
+
 const manifestName = "release-manifest.json";
 const maximumFileBytes = 512 * 1024;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -340,22 +351,38 @@ function validatePhaseOutputs(outputs, phase, spec) {
 }
 
 /**
- * Validates the health sub-record embedded in smoke evidence.
+ * Validates deployment and contract identities in the health sub-record embedded in smoke evidence.
  *
+ * A null contract version denotes legacy health only for a matching proven previous
+ * Worker in a partial live rollout; missing metadata and all pinned probes remain invalid.
  * @param {object} evidence - Parsed smoke evidence record
  * @param {string} url - Expected probe URL (version URL or live hostname + path)
  * @param {string} name - Contextual label for error reporting
  * @param {boolean} versionPinned - Whether the served version must equal the release SHA
  * @param {object} spec - Validated release specification
+ * @param {string} [previousVersionId] - Previous Worker ID from the candidate/rollout evidence
  * @throws {TypeError} If the health record fails URL, status, or version checks
  */
-function validateSmokeHealth(evidence, url, name, versionPinned, spec) {
+function validateSmokeHealth(evidence, url, name, versionPinned, spec, previousVersionId) {
   const health = plainObject(evidence.health, `${name} health`);
-  matchedString(health.url, /^https:\/\/[^\s]+$/, `${name} health.url`);
+  matchedString(health.url, httpsUrlPattern, `${name} health.url`);
   if (health.url !== url) {
     throw new TypeError(`${name} health probes the wrong URL`);
   }
+  const previous = evidence.previous_version;
+  const legacy =
+    !versionPinned &&
+    spec.deployment_mode === "update" &&
+    health.contract_version === null &&
+    previousVersionId !== undefined &&
+    previous?.version_id === previousVersionId &&
+    typeof previous.git_sha === "string" &&
+    gitShaPattern.test(previous.git_sha) &&
+    previous.git_sha !== spec.git_sha &&
+    health.version === previous.git_sha;
   if (
+    (!legacy &&
+      (typeof health.contract_version !== "string" || health.contract_version.length === 0)) ||
     health.environment !== spec.environment ||
     health.status !== "ok" ||
     !gitShaPattern.test(health.version)
@@ -541,7 +568,7 @@ function validateEvidenceDocument({ content, context, name, spec }) {
     return;
   }
 
-  if (/^api-rollout-(?:5|25|50|100)\.json$/.test(name)) {
+  if (rolloutEvidencePattern.test(name)) {
     const percentage = Number(name.slice(12, -5));
     const traffic = validTraffic(evidence.traffic, name);
     const candidateEntry = traffic.find((entry) => entry.version_id === context.secretsVersionId);
@@ -587,7 +614,7 @@ function validateEvidenceDocument({ content, context, name, spec }) {
     return;
   }
 
-  if (/^smoke-live(?:-(?:5|25|50|100))?\.json$/.test(name)) {
+  if (smokeEvidencePattern.test(name)) {
     const suffix = name === "smoke-live.json" ? null : name.slice(11, -5);
     const percentage = suffix === null ? 100 : Number(suffix);
     if (
@@ -606,7 +633,14 @@ function validateEvidenceDocument({ content, context, name, spec }) {
     // The live hostname legitimately serves the previous version during a
     // partial rollout; only a full (or bootstrap) deployment must serve the
     // release SHA deterministically.
-    validateSmokeHealth(evidence, `${spec.app_url}/api/v1/health`, name, percentage === 100, spec);
+    validateSmokeHealth(
+      evidence,
+      `${spec.app_url}/api/v1/health`,
+      name,
+      percentage === 100,
+      spec,
+      percentage !== 100 ? context.candidate.api_previous : undefined,
+    );
     return;
   }
 
@@ -678,10 +712,10 @@ async function openapiContract(repoRoot) {
     throw new TypeError("the OpenAPI contract is missing or too large");
   }
   const content = await readFile(filePath, "utf8");
-  const infoBlock = content.match(/^info:\s*\n((?:[ \t]+[^\n]*\n)+)/m);
-  const version = infoBlock?.[1]?.match(/^[ \t]+version:[ \t]*(.+?)[ \t]*$/m);
-  const value = version?.[1]?.replace(/^["']|["']$/g, "");
-  if (typeof value !== "string" || !/^[0-9A-Za-z][0-9A-Za-z.-]{0,127}$/.test(value)) {
+  const infoBlock = content.match(openapiInfoPattern);
+  const version = infoBlock?.[1]?.match(openapiVersionPattern);
+  const value = version?.[1]?.replace(edgeQuotesPattern, "");
+  if (typeof value !== "string" || !contractVersionPattern.test(value)) {
     throw new TypeError("the OpenAPI contract lacks a valid info.version");
   }
   return { path: relativePath, sha256: sha256(content), version: value };
@@ -754,7 +788,7 @@ export async function buildReleaseManifest({
         withFileTypes: true,
       });
       for (const child of children) {
-        if (!child.isFile() || !/^(?:wrangler-)?[a-z0-9-]+\.jsonl?$/.test(child.name)) {
+        if (!child.isFile() || !evidenceLogPattern.test(child.name)) {
           throw new TypeError(`unclassified rendered artifact: wrangler/${child.name}`);
         }
         wranglerEntries.push(child.name);
@@ -763,7 +797,7 @@ export async function buildReleaseManifest({
     }
     if (publishable.has(entry.name)) {
       publishFiles.push(entry.name);
-    } else if (/^wrangler-[a-z0-9-]+\.jsonl$/.test(entry.name)) {
+    } else if (wranglerLogPattern.test(entry.name)) {
       // Wrangler NDJSON output logs are private scratch: scanned for
       // credential material below but never publishable.
       wranglerLogFiles.push(entry.name);
@@ -815,10 +849,7 @@ export async function buildReleaseManifest({
           approval.approval_job.name !==
           name
             .slice(9, -5)
-            .replace(
-              /^(foundation|traffic|queue-resume)$/,
-              (part) => `${spec.environment}-${part}-approval`,
-            )
+            .replace(deploymentPhasePattern, (part) => `${spec.environment}-${part}-approval`)
         ) {
           throw new TypeError(`${name} holds an unexpected approval job`);
         }

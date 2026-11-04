@@ -394,8 +394,17 @@ describe("core API routes", () => {
       body: { brand_profile_id: brandProfileId, default_text: 42 },
     },
     {
+      // A malformed field (file_size must be a positive safe integer) so the
+      // case fails on the typed boundary rather than on a merely absent field.
       path: "/api/v1/asset-upload-sessions",
-      body: { asset_type: "image", brand_profile_id: brandProfileId },
+      body: {
+        asset_type: "image",
+        brand_profile_id: brandProfileId,
+        content_type: "image/png",
+        file_size: "1024",
+        filename: "launch.png",
+        title: "Launch image",
+      },
     },
   ])("keeps malformed $path fields on the typed 400 boundary", async ({ path, body }) => {
     const app = authenticatedApp(service(), {
@@ -539,9 +548,12 @@ describe("core API routes", () => {
   it("creates a text-only Post draft with no Channel selection", async () => {
     const app = authenticatedApp(service(), {
       postService: postService({
+        // A first create is a fresh outcome. Replay is proven by the service's
+        // own idempotency ledger in the integration suites; asserting a header
+        // whose value this double supplies would prove nothing about replay.
         createPost: () =>
           Effect.succeed({
-            replayed: true,
+            replayed: false,
             value: { ...post, attachments: [], targets: [] },
           }),
       }),
@@ -565,7 +577,7 @@ describe("core API routes", () => {
     );
 
     expect(response.status).toBe(201);
-    expect(response.headers.get("Idempotency-Replayed")).toBe("true");
+    expect(response.headers.get("Idempotency-Replayed")).toBeNull();
     await expect(response.json()).resolves.toEqual({
       ...post,
       attachments: [],
@@ -652,8 +664,9 @@ describe("core API routes", () => {
   });
 
   // Explicit TikTok publishing choices are saved on a Post target before any
-  // scheduling, so an accepted payload must survive as durable target
-  // settings while a contradictory combination is refused at the boundary.
+  // scheduling. The boundary rule under test is the mandatory music-usage
+  // confirmation: it is the one field the negative case below leaves false, so
+  // a refusal there is attributable to that rule and not to an unrelated field.
   it("saves explicit TikTok publishing choices on a Post target", async () => {
     const saved: components["schemas"]["Post"] = {
       ...post,
@@ -675,6 +688,7 @@ describe("core API routes", () => {
               privacy_level: "PUBLIC_TO_EVERYONE",
             },
           },
+          signature: null,
           title_override: null,
         },
       ],
@@ -799,6 +813,66 @@ describe("core API routes", () => {
     expect(response.status).toBe(201);
   });
 
+  // The request boundary must retain the resolved signature snapshot and
+  // Instagram's post-type/trial choices verbatim; neither is reconstructed from
+  // a later template or Provider default.
+  it("saves a signature snapshot and Instagram choices on a Post target", async () => {
+    const createPost = vi.fn(() => Effect.succeed({ replayed: false as const, value: post }));
+    const app = authenticatedApp(service(), {
+      postService: postService({ createPost }),
+    });
+    const response = await app.request(
+      "/api/v1/posts",
+      {
+        body: JSON.stringify({
+          brand_profile_id: brandProfileId,
+          default_text: "Launch copy",
+          targets: [
+            {
+              platform_account_id: "00000000-0000-4000-8000-000000000401",
+              provider_options: {
+                instagram: {
+                  post_type: "reel",
+                  trial_graduation: "performance",
+                  trial_reel: true,
+                },
+              },
+              signature: "Follow Alpha Studio on Instagram at @alpha.",
+            },
+          ],
+        }),
+        headers: {
+          ...bearerHeaders,
+          "Content-Type": "application/json",
+          "Idempotency-Key": "post-signature-instagram-options",
+        },
+        method: "POST",
+      },
+      env,
+    );
+    expect(response.status).toBe(201);
+    expect(createPost).toHaveBeenCalledWith(
+      env,
+      expect.anything(),
+      expect.objectContaining({
+        targets: [
+          expect.objectContaining({
+            providerOptions: {
+              instagram: {
+                postType: "reel",
+                trialGraduation: "performance",
+                trialReel: true,
+              },
+            },
+            signature: "Follow Alpha Studio on Instagram at @alpha.",
+          }),
+        ],
+      }),
+      "post-signature-instagram-options",
+      expect.anything(),
+    );
+  });
+
   // A text-only Channel is expressed by an empty attachment selection, which
   // keeps the Post identity intact while publishing nothing on that Channel.
   it("accepts a text-only Channel selection alongside inherited media", async () => {
@@ -811,6 +885,7 @@ describe("core API routes", () => {
           hashtags: [],
           platform_account_id: "00000000-0000-4000-8000-000000000401",
           provider_options: null,
+          signature: null,
           title_override: null,
         },
       ],
@@ -1525,15 +1600,6 @@ describe("core API routes", () => {
     expect(location.searchParams.get("redirect_uri")).toBe(
       "http://localhost:3000/api/v1/platforms/tiktok/callback",
     );
-    expect(new Set(location.searchParams.get("scope")?.split(","))).toEqual(
-      new Set([
-        "user.info.basic",
-        "video.publish",
-        "user.info.profile",
-        "user.info.stats",
-        "video.list",
-      ]),
-    );
     expect(create).toHaveBeenCalledOnce();
   });
 
@@ -1908,7 +1974,7 @@ describe("core API routes", () => {
     });
   });
 
-  it("requires idempotency and exposes replay for accepted replies", async () => {
+  it("requires an Idempotency-Key and accepts one reply", async () => {
     const comment = {
       author_avatar: null,
       author_name: "Viewer",
@@ -1926,9 +1992,12 @@ describe("core API routes", () => {
       synced_at: "2026-01-01T00:00:00.000Z",
       updated_at: "2026-01-01T00:00:00.000Z",
     };
+    // A fresh accepted reply, not a replay: the replayed flag is owned by the
+    // service's idempotency ledger, so a value supplied by this double would
+    // assert nothing about replay behavior.
     const replyToComment = vi.fn(() =>
       Effect.succeed({
-        replayed: true,
+        replayed: false,
         value: comment,
       }),
     );
@@ -1965,7 +2034,7 @@ describe("core API routes", () => {
       env,
     );
     expect(accepted.status).toBe(202);
-    expect(accepted.headers.get("Idempotency-Replayed")).toBe("true");
+    expect(accepted.headers.get("Idempotency-Replayed")).toBeNull();
     expect(replyToComment).toHaveBeenCalledWith(
       env,
       session,
@@ -2142,10 +2211,14 @@ describe("core API routes", () => {
       path: "/api/v1/asset-upload-sessions",
     },
     {
+      // asset_type is present so the earlier asset_type guard cannot satisfy
+      // this case; the missing brand_profile_id is the only remaining refusal.
       body: {
+        asset_type: "image",
         content_type: "image/png",
         file_size: 1024,
         filename: "launch.png",
+        title: "Launch image",
       },
       method: "POST",
       path: "/api/v1/asset-upload-sessions",
@@ -2318,9 +2391,21 @@ describe("core API routes", () => {
       redirect_path: "/channels",
       user_id: actor.userId,
     });
+    // The challenge must be the S256 digest of the verifier handed to the
+    // Provider, not just any 43-character string: recomputing it here rejects a
+    // mutant that mints an unrelated challenge, which would break the token
+    // exchange while two independent wildcards would still have passed.
+    const verifierDigest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(record.pkce_verifier),
+    );
+    const expectedChallenge = btoa(String.fromCharCode(...new Uint8Array(verifierDigest)))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
     expect(record.expires_at).toBeGreaterThan(Date.now());
     expect(authorizationUrl).toHaveBeenCalledWith({
-      codeChallenge: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+      codeChallenge: expectedChallenge,
       redirectUri: "http://localhost:3000/api/v1/platforms/threads/callback",
       state,
     });
@@ -2989,7 +3074,9 @@ describe("OAuth Page selection flow", () => {
 
   it("GET /api/v1/oauth-selections/:selectionId returns 404 for wrong, foreign, or expired tickets", async () => {
     const routingKey = await oauthStateRoutingKey(actor.workspace.id);
-    const foreignKey = "foreignroutingkey";
+    // Keep the foreign key canonical so syntax rejection cannot mask tenant
+    // isolation. A foreign ticket must be refused without reading the DO.
+    const foreignKey = "foreign-routing-key-01";
     const getSelection = vi.fn(async () => null);
     const oauthEnv: ApiWorkerEnv = {
       ...env,
@@ -3005,6 +3092,7 @@ describe("OAuth Page selection flow", () => {
       oauthEnv,
     );
     expect(foreignRes.status).toBe(404);
+    expect(getSelection).not.toHaveBeenCalled();
 
     const missingRes = await app.request(
       `/api/v1/oauth-selections/${routingKey}.nonexistentnonce12345`,
@@ -3012,6 +3100,7 @@ describe("OAuth Page selection flow", () => {
       oauthEnv,
     );
     expect(missingRes.status).toBe(404);
+    expect(getSelection).toHaveBeenCalledOnce();
   });
 
   it("POST /api/v1/oauth-selections/:selectionId/confirm connects chosen Page only and saves connection", async () => {
@@ -3087,7 +3176,11 @@ describe("OAuth Page selection flow", () => {
     );
   });
 
-  it("POST /api/v1/oauth-selections/:selectionId/confirm replays 204 on identical idempotency key and account without re-saving", async () => {
+  // Replay is decided by the OAuth-state Durable Object, and it reports it by
+  // claiming without returning a connection. This route's own responsibility is
+  // the mapping: a replay claim must answer 204, mark the header, and never
+  // re-save. The DO's ledger itself is exercised in the automation suites.
+  it("maps a replayed selection claim to 204 without re-saving the connection", async () => {
     const routingKey = await oauthStateRoutingKey(actor.workspace.id);
     const selectionId = `${routingKey}.validnonce1234567890`;
     const claimSelection = vi.fn(async () => ({
@@ -3549,7 +3642,12 @@ describe("provider media delivery route", () => {
     const unsigned = `/api/v1/provider-media/${mediaKey}?expires=${future}`;
     for (const url of [tampered, expired, unsigned]) {
       const response = await app.request(url, {}, providerMediaEnv(get));
+      // Pinning the machine code keeps this insensitive to an unrelated 403
+      // (auth middleware, origin policy) standing in for signature rejection.
       expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "media_url_invalid" },
+      });
     }
     expect(get).not.toHaveBeenCalled();
   });

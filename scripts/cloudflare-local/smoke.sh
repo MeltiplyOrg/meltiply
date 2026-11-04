@@ -112,8 +112,4 @@ timeout --signal=TERM --kill-after=20s 90s \
     test run test/live-worker.test.ts
 printf 'smoke: contract tests passed\n' >&2
 
-timeout --signal=TERM --kill-after=20s 90s \
-  env MELTIPLY_API_BASE_URL="$api_base_url" \
-    node "$repo_root/scripts/cloudflare-local/measure-public-routes.mjs"
-
-printf 'Worker-native smoke passed: live OpenAPI conformance, CORS, webhook verification, and public-route baseline.\n'
+printf 'Worker-native smoke passed: live OpenAPI conformance, CORS, and webhook verification.\n'

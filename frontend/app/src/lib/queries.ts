@@ -33,6 +33,7 @@ import type {
   CalendarEvent,
   CreateBrandProfileInput,
   CreatePostInput,
+  DiscoverySource,
   DistributionQueryParams,
   OAuthSelectionConfirmRequest,
   Platform,
@@ -40,6 +41,7 @@ import type {
   PostQueryParams,
   Post,
   PostListResponse,
+  PublishingPreferencesUpdate,
   SchedulePostInput,
   CreateQueueInput,
   UpdateQueueInput,
@@ -95,10 +97,14 @@ function withBrandProfile<T extends object>(
 /** Cache identities for reads; assets() is only an invalidation prefix, not a library query. */
 export const queryKeys = {
   currentUser: () => ["current-user"] as const,
+  publishingPreferences: () => ["publishing-preferences"] as const,
   analytics: () => ["analytics"] as const,
   installation: () => ["installation"] as const,
   workspaceMembers: () => ["workspace-members"] as const,
   workspaceInvitations: () => ["workspace-invitations"] as const,
+  onboarding: () => ["onboarding"] as const,
+  reportingPolicy: () => ["reporting-policy"] as const,
+  reportingFeedback: () => ["reporting-feedback"] as const,
   workspaceAudit: (params?: AuditQueryParams) =>
     params === undefined
       ? (["workspace-audit"] as const)
@@ -206,6 +212,7 @@ function postResourceInvalidations(): QueryKey[] {
 
 export const mutationInvalidations = {
   queueConfiguration: () => [queryKeys.queues()],
+  publishingPreferences: () => [queryKeys.publishingPreferences()],
   removePostFromQueue: () => [...postResourceInvalidations(), queryKeys.queues()],
   createPost: () => postResourceInvalidations(),
   updatePost: () => postResourceInvalidations(),
@@ -940,6 +947,37 @@ export function useQueueCalendarPosts(scope: SessionScope, params: PostQueryPara
   return { ...query, error: query.error ?? progressError };
 }
 
+/**
+ * Reads the Workspace's persistent publishing preferences. The timezone and
+ * signature list are shared by every member; the composer and scheduling
+ * surfaces use the same read so their interpretation cannot drift. Successful
+ * data is reused for five minutes, and the preference mutation invalidates it
+ * immediately, so the dashboard provider does not refetch on every focus or
+ * route mount.
+ *
+ * @param scope Session scope gating execution.
+ * @param enabled Whether the query is active; defaults to true.
+ * @returns Query result with the current preferences.
+ */
+export function usePublishingPreferences(scope: SessionScope, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.publishingPreferences(),
+    queryFn: ({ signal }) => runApiQuery(scope, (api) => api.getPublishingPreferences(), signal),
+    enabled: scope.isSignedIn && enabled,
+    staleTime: referenceFreshnessMs,
+  });
+}
+
+/** Replaces the complete preference document and refreshes its single cache entry. */
+export function useUpdatePublishingPreferences(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, input: PublishingPreferencesUpdate, idempotencyKey) =>
+      api.updatePublishingPreferences(input, { idempotencyKey }),
+    mutationInvalidations.publishingPreferences,
+  );
+}
+
 /** Creates a recurring plan with the shared stable-key mutation lifecycle. */
 export function useCreateQueue(scope: SessionScope) {
   return useIdempotentMutation(
@@ -1084,6 +1122,25 @@ export function usePlatformCapabilities(scope: SessionScope) {
     staleTime: Infinity,
     gcTime: Infinity,
   });
+}
+
+/**
+ * Supplies explicit broadcast actions without caching encoder credentials.
+ * Only the end action enters the mutation cache, containing a boolean result.
+ * The read result belongs to the mounted writer-only control and is discarded
+ * when hidden/unmounted. Existing collection invalidation follows confirmed end.
+ */
+export function useBroadcastControls(scope: SessionScope) {
+  const end = useIdempotentMutation(
+    scope,
+    (api, id: string, key) => api.endBroadcast(id, { idempotencyKey: key }),
+    () => [queryKeys.posts(), queryKeys.distributions(), queryKeys.calendar()],
+  );
+  return {
+    read: (id: string, signal?: AbortSignal) =>
+      runApiQuery(scope, (api) => api.getBroadcast(id, { signal }), signal),
+    end,
+  };
 }
 
 /**
@@ -1774,4 +1831,98 @@ export function useInvitationPreview(token: string | null) {
       ),
     enabled: token !== null && token.length >= 16,
   });
+}
+
+/** Reads resumable progress only for a signed-in Installation Owner. */
+export function useOnboarding(scope: SessionScope, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.onboarding(),
+    queryFn: ({ signal }) => runApiQuery(scope, (api) => api.getOnboarding(), signal),
+    enabled: scope.isSignedIn && enabled,
+  });
+}
+
+/** Persists the reached screen with an idempotency key and refreshes progress. */
+export function useSaveOnboarding(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, input: { step: "improvement" | "ready" }, idempotencyKey) =>
+      api.saveOnboarding(input, { idempotencyKey }),
+    () => [queryKeys.onboarding()],
+  );
+}
+
+/** Completes setup before navigation into the chosen Workspace flow. */
+export function useCompleteOnboarding(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, _input: Record<string, never>, idempotencyKey) =>
+      api.completeOnboarding({ idempotencyKey }),
+    () => [queryKeys.onboarding()],
+  );
+}
+
+/**
+ * Reads the installation improvement-reporting policy. Every active member may
+ * read it so the Owner's choice and its effective state stay visible.
+ *
+ * @param scope Session scope gating execution.
+ * @param enabled Whether the query may run.
+ * @returns Query result with the requested and effective policy.
+ */
+export function useReportingPolicy(scope: SessionScope, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.reportingPolicy(),
+    queryFn: ({ signal }) => runApiQuery(scope, (api) => api.getReportingPolicy(), signal),
+    enabled: scope.isSignedIn && enabled,
+  });
+}
+
+/**
+ * Replaces both reporting choices for the current Installation Owner. The
+ * response carries the effective state, so the surface can report a disabled
+ * destination or operator override honestly.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting the independent usage and diagnostics choices.
+ */
+export function useUpdateReportingPreferences(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, input: { diagnostics: boolean; usage: boolean }, idempotencyKey) =>
+      api.updateReportingPreferences(input, { idempotencyKey }),
+    () => [queryKeys.reportingPolicy()],
+  );
+}
+
+/**
+ * Reads the one-time discovery-source answer and its delivery state. Owner
+ * only, because the answer belongs to the installation.
+ *
+ * @param scope Session scope gating execution.
+ * @param enabled Whether the query may run.
+ * @returns Query result with the attribution state.
+ */
+export function useReportingFeedback(scope: SessionScope, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.reportingFeedback(),
+    queryFn: ({ signal }) => runApiQuery(scope, (api) => api.getReportingFeedback(), signal),
+    enabled: scope.isSignedIn && enabled,
+  });
+}
+
+/**
+ * Shares the fixed-enum discovery-source answer as a separate explicit action.
+ * It never changes either reporting switch.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting the fixed discovery-source value.
+ */
+export function useSubmitReportingFeedback(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, input: { discoverySource: DiscoverySource }, idempotencyKey) =>
+      api.submitReportingFeedback({ discovery_source: input.discoverySource }, { idempotencyKey }),
+    () => [queryKeys.reportingFeedback()],
+  );
 }

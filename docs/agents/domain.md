@@ -2,7 +2,7 @@
 
 How the engineering skills should consume this repo's domain documentation when exploring the codebase.
 
-The repository uses a single-context layout. The existing `wiki/` remains separate and authoritative for current repository behavior documentation.
+The repository uses a single-context layout.
 
 ## Before exploring, read these
 
@@ -13,15 +13,10 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 
 ## File structure
 
-Single-context repo:
-
 ```text
 /
 ├── CONTEXT.md
-├── docs/adr/
-│   ├── 0001-event-sourced-orders.md
-│   └── 0002-postgres-for-write-model.md
-└── src/
+└── docs/adr/          created lazily by /domain-modeling
 ```
 
 ## Use the glossary's vocabulary

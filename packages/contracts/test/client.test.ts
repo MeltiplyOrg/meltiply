@@ -7,6 +7,7 @@ describe("createMeltiplyClient", () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
         JSON.stringify({
+          contract_version: "1.0.0",
           status: "ok",
           version: "1.0.0-target.0",
           environment: "test",
@@ -23,6 +24,9 @@ describe("createMeltiplyClient", () => {
     const client = createMeltiplyClient("https://api.example.test", fetchImpl);
     await client.GET("/health");
 
+    // Independent literal: the spec's `servers[].url` entries all end in
+    // `/api/v1` (openapi.yaml:13-17), so a client that drifts from the version
+    // segment fails here rather than only in the generated types.
     expect(apiVersionPath).toBe("/api/v1");
     expect(fetchImpl).toHaveBeenCalledOnce();
     const [request] = fetchImpl.mock.calls[0] ?? [];
@@ -35,6 +39,13 @@ describe("createMeltiplyClient", () => {
     "https://api.example.test?tenant=one",
     "https://api.example.test#fragment",
   ])("rejects a non-origin base URL: %s", (baseUrl) => {
-    expect(() => createMeltiplyClient(baseUrl)).toThrow(TypeError);
+    // Keeping the TypeError class *and* the guard's own message makes this a
+    // per-branch control: a TypeError raised anywhere else in the factory (URL
+    // parsing, createClient) can no longer satisfy the case.
+    const create = () => createMeltiplyClient(baseUrl);
+    expect(create).toThrow(TypeError);
+    expect(create).toThrow(
+      /^Meltiply API base URL must be an origin without a path, query, or hash$/,
+    );
   });
 });

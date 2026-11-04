@@ -1,7 +1,7 @@
 import { Effect, type Layer } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
 import { can, isWorkspaceRole, type DatabaseError, type WorkspaceRole } from "@meltiply/domain";
-import { escapeMailHtml } from "@meltiply/domain/mail-content";
+import { escapeMailHtml, mailSenderConfiguration } from "@meltiply/domain/mail-content";
 import type { Context, Hono } from "hono";
 
 import type { ResolvedActor } from "./actor-resolution";
@@ -22,7 +22,6 @@ import {
   createCloudflareMailSender,
   createMailServiceLive,
   MailService,
-  mailSenderConfiguration,
   type MailMessage,
 } from "./mail";
 import { jsonResponse } from "./responses";
@@ -34,7 +33,10 @@ import {
   optionalStringField,
   stringField,
   uuidParam,
+  workspaceNameValue,
 } from "./validation";
+
+const unsafeSubjectCharactersPattern = /[\p{Cc}\p{Cf}]+/gu;
 
 /**
  * Workspace lifecycle REST surface implemented natively on the resolved actor.
@@ -452,7 +454,7 @@ function resolveMailServiceLayer(
  * @returns Control-free name, or "your team" when nothing printable remains.
  */
 function invitationSubjectWorkspaceName(name: string): string {
-  const sanitized = name.replace(/[\p{Cc}\p{Cf}]+/gu, " ").trim();
+  const sanitized = name.replace(unsafeSubjectCharactersPattern, " ").trim();
   return sanitized.length > 0 ? sanitized : "your team";
 }
 
@@ -669,17 +671,7 @@ export function registerWorkspaceLifecycleRoutes(
         const nextName =
           name === undefined
             ? undefined
-            : yield* fromPromise(() => {
-                const value = stringField(body, "name");
-                if (value.length > 200) {
-                  throw new CoreApiError(
-                    400,
-                    "validation_error",
-                    "name must be at most 200 characters.",
-                  );
-                }
-                return value;
-              });
+            : yield* fromPromise(() => workspaceNameValue(stringField(body, "name"), "name"));
         const nextSlug =
           slug === undefined
             ? undefined
@@ -767,7 +759,7 @@ export function registerWorkspaceLifecycleRoutes(
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ email, role }));
         const rawToken =
-          crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+          crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
         const tokenHash = yield* Effect.promise(() => sha256Hex(rawToken));
         const result = yield* idempotentMutation(
           c.env,
@@ -890,7 +882,7 @@ export function registerWorkspaceLifecycleRoutes(
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ invitationId }));
         const rawToken =
-          crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+          crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
         const tokenHash = yield* Effect.promise(() => sha256Hex(rawToken));
         const result = yield* idempotentMutation(
           c.env,

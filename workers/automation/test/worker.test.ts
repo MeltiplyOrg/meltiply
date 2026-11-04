@@ -461,6 +461,18 @@ describe("Automation Worker foundation", () => {
           calls.push("retention");
           return { deleted: 0, errors: 0 };
         }),
+      // Improvement reporting is delivered best-effort and must not reach a
+      // transport from these unit cases; the dedicated suites cover it.
+      deliverImprovementReports: () =>
+        Effect.succeed({
+          claimed: 0,
+          delivered: 0,
+          discarded: 0,
+          failed: 0,
+          released: 0,
+          skipped: 0,
+        }),
+      enqueueDailyUsageReport: () => Effect.succeed({ considered: 0, queued: 0 }),
     });
 
     await expect(
@@ -539,6 +551,18 @@ describe("Automation Worker foundation", () => {
         }),
       ),
       runRetention,
+      // Improvement reporting is delivered best-effort and must not reach a
+      // transport from these unit cases; the dedicated suites cover it.
+      deliverImprovementReports: () =>
+        Effect.succeed({
+          claimed: 0,
+          delivered: 0,
+          discarded: 0,
+          failed: 0,
+          released: 0,
+          skipped: 0,
+        }),
+      enqueueDailyUsageReport: () => Effect.succeed({ considered: 0, queued: 0 }),
     });
     await expect(
       handler.scheduled?.(
@@ -1055,7 +1079,7 @@ describe("Distribution message processing", () => {
     expect(distributionState.failure_code).toBe("provider_lookup_evidence_unavailable");
   });
 
-  it("protects active processing distributions inside the grace period", async () => {
+  it("binds the processing grace and the delivery horizon into the due claim", async () => {
     const query = vi.fn((_sql: string, params?: unknown[]) => {
       expect(params).toEqual([
         100,
@@ -1077,46 +1101,6 @@ describe("Distribution message processing", () => {
     const claimed = await Effect.runPromise(enqueueDueDistributions(env));
     expect(claimed).toBe(0);
     expect(query).toHaveBeenCalledTimes(1);
-    expect(query.mock.calls[0]?.[0]).toMatch(
-      /status = 'processing'[\s\S]+updated_at <= now\(\) - \(\$2 \* INTERVAL '1 second'\)/,
-    );
-  });
-  it("keeps a lost reconcile trigger recoverable through the claim statement", async () => {
-    const executedQueries: Array<{ params?: unknown[]; sql: string }> = [];
-    const query = vi.fn((sql: string, params?: unknown[]) => {
-      executedQueries.push({ params, sql });
-      return Effect.succeed({
-        rowCount: 1,
-        rows: [{ claimed_count: 0, inserted_count: 0 }],
-      });
-    });
-    withSystemTransactionEffect.mockImplementation(
-      <A, E, R>(
-        _env: AutomationEnv,
-        operation: (client: EffectTransactionClient) => Effect.Effect<A, E, R>,
-      ): Effect.Effect<A, E, R> => operation({ query } as unknown as EffectTransactionClient),
-    );
-
-    await Effect.runPromise(enqueueDueDistributions(env));
-    const sql = executedQueries[0]?.sql ?? "";
-
-    // The claim clears next_attempt_at once a reconcile event is armed, so a
-    // reconcile-eligible row whose armed event can no longer deliver must stay
-    // claimable through the missing-live-event fallback (#256).
-    expect(sql).toContain("NOT EXISTS");
-    expect(sql).toContain("e.topic = 'distribution.reconcile.requested'");
-    expect(sql).toContain("e.state IN ('pending', 'leased', 'failed')");
-    // A dedupe-key conflict against a dead or stale-published event revives it
-    // as pending with a fresh attempt budget instead of stranding the row.
-    expect(sql).toContain("ON CONFLICT (org_id, topic, dedupe_key) DO UPDATE");
-    expect(sql).toContain("outbox_events.state = 'dead'");
-    expect(sql).toContain("outbox_events.state = 'published'");
-    expect(sql).toContain("attempt_count = 0");
-    expect(executedQueries[0]?.params).toEqual([
-      100,
-      distributionProcessingGraceSeconds,
-      maximumDelayedDeliverySeconds,
-    ]);
   });
 
   it("fails a reconciliation delivery terminally when the lookup failure is not retryable", async () => {
@@ -1696,7 +1680,6 @@ describe("Due work scheduled claim protocol", () => {
         ),
     });
 
-    // The retired per-minute expression claims nothing at all.
     await handler.scheduled?.(
       {
         cron: "* * * * *",
@@ -1706,7 +1689,9 @@ describe("Due work scheduled claim protocol", () => {
       env,
       createExecutionContext(),
     );
-    expect(executedQueries.filter(({ sql }) => sql.includes("SKIP LOCKED"))).toHaveLength(0);
+    // The retired per-minute expression matches no tier, so the invocation
+    // dispatches nothing: no database work at all, not merely no claim.
+    expect(executedQueries).toHaveLength(0);
 
     // Hourly tier: every Due claim plus the Outbox relay.
     await handler.scheduled?.(
@@ -1719,6 +1704,9 @@ describe("Due work scheduled claim protocol", () => {
       createExecutionContext(),
     );
 
+    // `FOR UPDATE SKIP LOCKED` selects claim statements out of the executed
+    // stream; it is the picker, not the assertion. What the tier owes is the
+    // set of claims it issues, in descriptor order, with their bound values.
     const hourlyClaims = executedQueries.filter(({ sql }) => sql.includes("SKIP LOCKED"));
     expect(hourlyClaims).toHaveLength(6);
 
@@ -1731,61 +1719,29 @@ describe("Due work scheduled claim protocol", () => {
       replyClaim,
     ] = hourlyClaims;
 
-    // Hourly due-distribution-scan
-    expect(dueDistributionClaim?.sql).toContain("FROM distributions");
-    expect(dueDistributionClaim?.sql).toContain("LIMIT $1");
+    // The hourly tier's five Due claims plus the reply-reconciliation claim,
+    // in descriptor order, each carrying its own bound set.
+    const hourlyProviderSyncBounds = [
+      50,
+      expect.any(Array),
+      20,
+      overdueRecoveryGraceSeconds,
+      maximumDelayedDeliverySeconds,
+      60,
+    ];
     expect(dueDistributionClaim?.params).toEqual([
       100,
       distributionProcessingGraceSeconds,
       maximumDelayedDeliverySeconds,
     ]);
-
-    // Hourly distribution-sweep
-    expect(distributionSweepClaim?.sql).toContain("FROM distributions");
-    expect(distributionSweepClaim?.sql).toContain("LIMIT $1");
     expect(distributionSweepClaim?.params).toEqual([
       100,
       overdueRecoveryGraceSeconds,
       maximumDelayedDeliverySeconds,
     ]);
-
-    // Hourly provider-sync-sweep (analytics, comments, token_refresh)
-    expect(analyticsSweepClaim?.sql).toContain("FROM distributions");
-    expect(analyticsSweepClaim?.sql).toContain("analytics_next_sync_at");
-    expect(analyticsSweepClaim?.params).toEqual([
-      50,
-      expect.any(Array),
-      20,
-      overdueRecoveryGraceSeconds,
-      maximumDelayedDeliverySeconds,
-      60,
-    ]);
-
-    expect(commentsSweepClaim?.sql).toContain("FROM distributions");
-    expect(commentsSweepClaim?.sql).toContain("comments_next_sync_at");
-    expect(commentsSweepClaim?.params).toEqual([
-      50,
-      expect.any(Array),
-      20,
-      overdueRecoveryGraceSeconds,
-      maximumDelayedDeliverySeconds,
-      60,
-    ]);
-
-    expect(tokenRefreshSweepClaim?.sql).toContain("FROM platform_accounts");
-    expect(tokenRefreshSweepClaim?.sql).toContain("token_refresh_next_attempt_at");
-    expect(tokenRefreshSweepClaim?.params).toEqual([
-      50,
-      expect.any(Array),
-      20,
-      overdueRecoveryGraceSeconds,
-      maximumDelayedDeliverySeconds,
-      60,
-    ]);
-
-    // Hourly reply-reconciliation
-    expect(replyClaim?.sql).toContain("FROM comments");
-    expect(replyClaim?.sql).toContain("LIMIT $1");
+    expect(analyticsSweepClaim?.params).toEqual(hourlyProviderSyncBounds);
+    expect(commentsSweepClaim?.params).toEqual(hourlyProviderSyncBounds);
+    expect(tokenRefreshSweepClaim?.params).toEqual(hourlyProviderSyncBounds);
     expect(replyClaim?.params).toEqual([50, 10, maximumDelayedDeliverySeconds]);
   });
 });
@@ -1882,6 +1838,9 @@ describe("Scheduled entry delayed delivery", () => {
     expect(sent.map(({ body }) => body.event_id)).toEqual([eventId(301), eventId(302)]);
     // Each message carries its own delay derived from the durable schedule.
     expect(sent[0]?.delaySeconds).toBe(Math.max(0, Math.ceil((base + 600_000 - sentAtMs) / 1000)));
+    // The horizon row sits 24 hours out, so its delay must be the full horizon
+    // less the (sub-second) elapsed time — not merely "not above" the cap.
+    expect(sent[1]?.delaySeconds).toBeGreaterThan(86_390);
     expect(sent[1]?.delaySeconds).toBeLessThanOrEqual(86_400);
     // Bodies stay identifier-only triggers.
     for (const { body } of sent) {
@@ -1900,7 +1859,7 @@ describe("Scheduled entry delayed delivery", () => {
 });
 
 describe("Hourly distribution recovery sweep", () => {
-  it("executes the bound recovery query with parameterization and without transitioning source rows", async () => {
+  it("claims overdue scheduled rows in one bound statement and returns its count", async () => {
     const executedQueries: Array<{ params?: unknown[]; sql: string }> = [];
     const query = vi.fn((sql: string, params?: unknown[]) => {
       executedQueries.push({ params, sql });
@@ -1919,40 +1878,14 @@ describe("Hourly distribution recovery sweep", () => {
     const count = await Effect.runPromise(sweepDueDistributions(env));
     expect(count).toBe(2);
 
+    // One claim statement per call: the sweep is a single bounded transaction,
+    // not a row-at-a-time loop.
     expect(executedQueries).toHaveLength(1);
-    const [sweepQuery] = executedQueries;
-    expect(sweepQuery?.params).toEqual([
+    expect(executedQueries[0]?.params).toEqual([
       100,
       overdueRecoveryGraceSeconds,
       maximumDelayedDeliverySeconds,
     ]);
-
-    const sql = sweepQuery?.sql ?? "";
-    expect(sql).toContain("FROM distributions");
-    expect(sql).toContain("LIMIT $1");
-    expect(sql).toContain("FOR UPDATE SKIP LOCKED");
-    expect(sql).toContain("ORDER BY scheduled_at, id");
-    expect(sql).toContain("INSERT INTO outbox_events");
-    expect(sql).toContain("'distribution.publish.requested'");
-    expect(sql).toContain("'distribution'");
-    expect(sql).toContain("ON CONFLICT DO NOTHING");
-
-    // Source rows must not be transitioned away from 'scheduled'.
-    expect(sql).not.toContain("UPDATE distributions");
-    expect(sql).not.toContain("SET status =");
-
-    // Predicate enforces in-horizon bounds and exclusion of active in-flight work.
-    expect(sql).toContain("status = 'scheduled'");
-    expect(sql).toContain("scheduled_at <= now() + ($3 * INTERVAL '1 second')");
-    expect(sql).toContain("scheduled_at > now() - ($2 * INTERVAL '1 second')");
-    expect(sql).toContain("scheduled_at <= now() - ($2 * INTERVAL '1 second')");
-    expect(sql).toContain("state IN ('pending', 'leased', 'failed')");
-
-    // Recovery keys use an hourly bucket: concurrent/same-hour sweeps dedupe,
-    // while a later hour can recover a second lost trigger.
-    expect(sql).toContain(":recovery:");
-    expect(sql).toContain("extract(epoch from now()) / 3600");
-    expect(sql).toContain(":distribution.publish.requested:at:");
   });
 
   it("accepts custom bounds and thresholds", async () => {

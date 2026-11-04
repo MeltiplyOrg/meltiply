@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { Effect } from "effect";
+import { Effect, Layer, Tracer } from "effect";
 
 import { effectTracerLayer, type LogContext, type OtlpSpanInput } from "../src";
 
@@ -64,25 +64,44 @@ describe("Effect Observability Tracer Integration", () => {
   });
 
   it("omits export when span is unsampled via sampled: false", async () => {
-    const mockExporter = vi.fn(async () => undefined);
+    const exported: OtlpSpanInput[] = [];
+    const mockExporter = vi.fn(async (_env: unknown, span: OtlpSpanInput) => {
+      exported.push(span);
+    });
     const context: LogContext = {
       environment: "test",
       service: "api",
       trace_id: "trace_unsampled",
       version: "1.0.0",
     };
+    const layer = effectTracerLayer(context, mockExporter);
 
-    const program = Effect.gen(function* () {
-      return yield* Effect.withSpan("unsampled_span", { sampled: false })(Effect.succeed(42));
-    }).pipe(Effect.provide(effectTracerLayer(context, mockExporter)));
+    const unsampled = await Effect.runPromise(
+      Effect.gen(function* () {
+        return yield* Effect.withSpan("unsampled_span", { sampled: false })(Effect.succeed(42));
+      }).pipe(Effect.provide(layer)),
+    );
 
-    const result = await Effect.runPromise(program);
-    expect(result).toBe(42);
+    expect(unsampled).toBe(42);
     expect(mockExporter).not.toHaveBeenCalled();
+
+    // Positive control: the same layer and exporter do export a sampled span,
+    // so the empty call count above proves the sampling decision rather than a
+    // tracer that never exports anything.
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        return yield* Effect.withSpan("sampled_span")(Effect.succeed(43));
+      }).pipe(Effect.provide(layer)),
+    );
+    expect(mockExporter).toHaveBeenCalledTimes(1);
+    expect(exported[0]?.name).toBe("sampled_span");
   });
 
   it("omits export when MinimumTraceLevel suppresses spans to unsampled", async () => {
-    const mockExporter = vi.fn(async () => undefined);
+    const exported: OtlpSpanInput[] = [];
+    const mockExporter = vi.fn(async (_env: unknown, span: OtlpSpanInput) => {
+      exported.push(span);
+    });
     const context: LogContext = {
       environment: "test",
       service: "api",
@@ -90,17 +109,28 @@ describe("Effect Observability Tracer Integration", () => {
       version: "1.0.0",
     };
 
-    const { Layer, Tracer } = await import("effect");
-    const program = Effect.gen(function* () {
-      return yield* Effect.withSpan("suppressed_span")(Effect.succeed("hidden"));
-    }).pipe(
-      Effect.provide(effectTracerLayer(context, mockExporter)),
-      Effect.provide(Layer.succeed(Tracer.MinimumTraceLevel, "None")),
+    const suppressed = await Effect.runPromise(
+      Effect.gen(function* () {
+        return yield* Effect.withSpan("suppressed_span")(Effect.succeed("hidden"));
+      }).pipe(
+        Effect.provide(effectTracerLayer(context, mockExporter)),
+        Effect.provide(Layer.succeed(Tracer.MinimumTraceLevel, "None")),
+      ),
     );
 
-    const result = await Effect.runPromise(program);
-    expect(result).toBe("hidden");
+    expect(suppressed).toBe("hidden");
     expect(mockExporter).not.toHaveBeenCalled();
+
+    // Positive control: without the threshold the identical program exports,
+    // so the suppression above comes from MinimumTraceLevel and not from an
+    // unrelated wiring mistake.
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        return yield* Effect.withSpan("suppressed_span")(Effect.succeed("hidden"));
+      }).pipe(Effect.provide(effectTracerLayer(context, mockExporter))),
+    );
+    expect(mockExporter).toHaveBeenCalledTimes(1);
+    expect(exported[0]?.name).toBe("suppressed_span");
   });
 
   it("forwards export promise to onExportPromise callback", async () => {

@@ -88,6 +88,93 @@ describe("contract-driven UI preview HTTP boundary", () => {
     );
   });
 
+  it("retains independent native publishing choices across a reordered multi-Channel draft update", async () => {
+    const targets = [
+      {
+        platform_account_id: "e3000000-0000-4000-8000-000000000001",
+        signature: null,
+        provider_options: {
+          facebook: {
+            post_type: "ab_test",
+            ab_test: { name: "Incomplete experiment", experiment_video_ids: [""] },
+          },
+        },
+      },
+      {
+        platform_account_id: "e3000000-0000-4000-8000-000000000003",
+        signature: "Saved footer",
+        provider_options: {
+          threads: { post_type: "poll", poll_attachment: { option_a: "First", option_b: "" } },
+        },
+      },
+    ];
+    await fetch(postPath, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ brand_profile_id: profileId, targets }),
+    });
+    const reordered = [
+      targets[1]!,
+      { ...targets[0]!, provider_options: { facebook: { post_type: "live" } } },
+    ];
+    const changed = await fetch(postPath, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ brand_profile_id: profileId, targets: reordered }),
+    });
+    expect(changed.status).toBe(200);
+    const reopened = await fetch(postPath).then((response) => response.json());
+    expect(
+      reopened.targets.map((target: (typeof targets)[number]) => ({
+        platform_account_id: target.platform_account_id,
+        provider_options: target.provider_options,
+        signature: target.signature,
+      })),
+    ).toEqual(reordered);
+  });
+
+  it("returns a usable Asset after uploading bytes so the composer can attach and poll it", async () => {
+    const session = await fetch(`${origin}/api/v1/asset-upload-sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        brand_profile_id: profileId,
+        asset_type: "image",
+        title: "Inbox photo",
+        filename: "photo.jpg",
+        content_type: "image/jpeg",
+        file_size: 5,
+      }),
+    }).then((response) => response.json());
+    const uploaded = await fetch(session.upload_session.single_upload.url, {
+      method: "PUT",
+      body: new Blob(["photo"], { type: "image/jpeg" }),
+    });
+    expect(uploaded.status).toBe(200);
+    const completion = await fetch(
+      `${origin}/api/v1/asset-upload-sessions/${session.upload_session.id}/complete`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+    );
+    expect(completion.status).toBe(202);
+    const asset = await completion.json();
+    expect(asset).toMatchObject({
+      id: session.asset.id,
+      asset_type: "image",
+      mime_type: "image/jpeg",
+      status: "ready",
+    });
+    const polled = await fetch(`${origin}/api/v1/assets/${asset.id}`);
+    expect(polled.status).toBe(200);
+    const attached = await fetch(postPath, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ brand_profile_id: profileId, attachment_ids: [asset.id] }),
+    }).then((response) => response.json());
+    expect(
+      attached.attachments.map((attachment: Post["attachments"][number]) => attachment.asset.id),
+    ).toEqual([session.asset.id]);
+  });
+
   it("serves the device consent preview without a backend", async () => {
     const issued = await fetch(`${origin}/api/auth/device/code`, {
       method: "POST",
@@ -169,6 +256,47 @@ describe("contract-driven UI preview HTTP boundary", () => {
     ).toBe(profile.email);
   });
 
+  it("keeps first-run progress until completion and resets it with the preview", async () => {
+    server.resetHandlers(...createPreviewHandlers({ scenario: "first-run" }));
+    expect((await fetch(`${origin}/api/v1/onboarding`)).status).toBe(401);
+    await fetch(`${origin}/api/auth/sign-up/email`, { method: "POST" });
+    expect(
+      await fetch(`${origin}/api/v1/onboarding`).then((response) => response.json()),
+    ).toMatchObject({
+      status: "in_progress",
+      completed_at: null,
+    });
+    await fetch(`${origin}/api/v1/onboarding`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ step: "ready" }),
+    });
+    expect(
+      await fetch(`${origin}/api/v1/onboarding`).then((response) => response.json()),
+    ).toMatchObject({
+      status: "in_progress",
+      step: "ready",
+    });
+    await fetch(`${origin}/api/v1/onboarding/complete`, { method: "POST" });
+    const completed = await fetch(`${origin}/api/v1/onboarding`).then((response) =>
+      response.json(),
+    );
+    expect(completed).toMatchObject({ status: "completed", step: "ready" });
+    await fetch(`${origin}/api/v1/onboarding/complete`, { method: "POST" });
+    expect(await fetch(`${origin}/api/v1/onboarding`).then((response) => response.json())).toEqual(
+      completed,
+    );
+    server.resetHandlers(...createPreviewHandlers({ scenario: "first-run" }));
+    await fetch(`${origin}/api/auth/sign-up/email`, { method: "POST" });
+    expect(
+      await fetch(`${origin}/api/v1/onboarding`).then((response) => response.json()),
+    ).toMatchObject({
+      status: "in_progress",
+      step: "improvement",
+      completed_at: null,
+    });
+  });
+
   it("exposes failed publication and expired Channel recovery states from the shared examples", async () => {
     server.resetHandlers(...createPreviewHandlers({ scenario: "publication-failed" }));
     const post = await fetch(`${origin}/api/v1/posts`)
@@ -228,9 +356,13 @@ describe("contract-driven UI preview HTTP boundary", () => {
     for (const event of calendar.events) {
       const post = posts.find((post) => post.id === event.post_id);
       expect(post).toBeDefined();
-      expect(
-        post?.distributions.find((distribution) => distribution.id === event.id)?.scheduled_at,
-      ).toBe(event.scheduled_at);
+      // The calendar event must fold back onto a real Distribution; comparing two
+      // optional values would also pass when the Distribution is missing.
+      const distribution = post?.distributions.find(
+        (distribution: { id: string }) => distribution.id === event.id,
+      );
+      expect(distribution).toBeDefined();
+      expect(distribution?.scheduled_at).toBe(event.scheduled_at);
     }
   });
 });

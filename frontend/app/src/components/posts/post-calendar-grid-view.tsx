@@ -8,6 +8,7 @@ import { Skeleton } from "@meltiply/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
 import { cn } from "@meltiply/ui/utils";
 import { useI18n } from "@/lib/i18n";
+import { usePublishingTimeZone } from "@/context/publishing-timezone.context";
 import { normalizePostStatus, resolveRowCaption, toLocalDateKey } from "./posts-helpers";
 import { StatusBadge } from "./status-badge";
 import { publicationStatusPresentation, PUBLICATION_ICON_TONE } from "./status-presentation";
@@ -174,7 +175,8 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
     if (timeline) transitionViewEffect(commit);
     else commit();
   }
-  const timeZone = timeline?.timeZone;
+  const publishingTimeZone = usePublishingTimeZone();
+  const timeZone = timeline?.timeZone ?? publishingTimeZone;
   const dateLabel = useMemo(
     () => new Intl.DateTimeFormat(language, { dateStyle: "full" }),
     [language],

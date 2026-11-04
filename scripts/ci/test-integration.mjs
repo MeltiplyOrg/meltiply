@@ -14,6 +14,9 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 
 import { loadMigrations } from "../release/release-migrate.mjs";
+import { integrationDatabaseUrl } from "../lib/integration-database.ts";
+
+const leadingSlashPattern = /^\//;
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const seedSqlPath = join(repositoryRoot, "scripts/cloudflare-local/postgres/seed.sql");
@@ -23,11 +26,13 @@ const seedSqlPath = join(repositoryRoot, "scripts/cloudflare-local/postgres/seed
 // the optional observability profile is not needed for integration tests.
 const defaultTestUrl =
   "postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable";
-const defaultAdminUrl =
-  "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
 
 const testUrl = process.env.MELTIPLY_DATABASE_TEST_URL ?? defaultTestUrl;
-const adminUrl = process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ?? defaultAdminUrl;
+const adminUrl = integrationDatabaseUrl(
+  testUrl,
+  "admin",
+  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL,
+);
 
 // Serial order matches package.json's historical suite list: tenant isolation
 // first, then each Worker's integration suite.
@@ -74,7 +79,7 @@ function assertLocalTestDatabase(urlString, label) {
     parsed.hostname === "localhost" ||
     parsed.hostname === "::1" ||
     parsed.hostname === "[::1]";
-  const dbName = parsed.pathname.replace(/^\//, "");
+  const dbName = parsed.pathname.replace(leadingSlashPattern, "");
   const isDedicatedTestDb = dbName === "meltiply";
   if (!isLocalHost || !isDedicatedTestDb) {
     fail(
@@ -251,7 +256,11 @@ function runSuites() {
     const result = spawnSync("bun", ["run", "--filter", filter, "test:integration"], {
       cwd: repositoryRoot,
       stdio: "inherit",
-      env: { ...process.env, MELTIPLY_DATABASE_TEST_URL: testUrl },
+      env: {
+        ...process.env,
+        MELTIPLY_DATABASE_TEST_URL: testUrl,
+        MELTIPLY_DATABASE_TEST_ADMIN_URL: adminUrl,
+      },
     });
     if (result.error) {
       fail(`could not run ${filter} integration suite: ${result.error}`);

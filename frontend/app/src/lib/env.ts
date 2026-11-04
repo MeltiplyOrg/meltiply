@@ -1,3 +1,5 @@
+const trailingSlashesPattern = /\/+$/;
+
 const localApiBaseUrl = "http://localhost:8787";
 
 /**
@@ -32,7 +34,7 @@ function validateAndNormalizeApiBaseUrl(value: unknown): string {
   ) {
     throw new Error("Invalid public environment: APP_URL must be a valid URL");
   }
-  return raw.replace(/\/+$/, "");
+  return raw.replace(trailingSlashesPattern, "");
 }
 
 /**

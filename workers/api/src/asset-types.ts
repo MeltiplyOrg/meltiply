@@ -26,12 +26,10 @@ export interface AssetRow extends Record<string, unknown> {
   failure_message: string | null;
   failure_retryable: boolean | null;
   file_size: number | string | null;
-  has_live_session?: boolean;
   height: number | string | null;
   id: string;
   mime_type: string | null;
   org_id: string;
-  original_filename: string | null;
   status: Schemas["AssetStatus"];
   title: string;
   updated_at: Date | string;

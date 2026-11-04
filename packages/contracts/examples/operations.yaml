@@ -125,6 +125,32 @@ fixtures:
     members_active: 3
     invitations_pending: 1
     workspace: *workspace
+  onboarding_progress: &onboarding_progress
+    status: in_progress
+    step: improvement
+    workspace_name: Alpha Studio
+    workspace_named: true
+    completed_at: null
+  reporting_category_off: &reporting_category_off
+    requested: false
+    effective: false
+    reason: not_requested
+    decision_at: null
+    interval_started_at: null
+  reporting_policy: &reporting_policy
+    disclosure_version: 1
+    destination_configured: true
+    operator_forced_off: false
+    owner_can_change: true
+    installation_reporting_id: 00000000-0000-4000-8000-000000000041
+    categories:
+      usage: *reporting_category_off
+      diagnostics: *reporting_category_off
+  reporting_feedback: &reporting_feedback
+    shared: true
+    discovery_source: github
+    submitted_at: "2026-01-02T03:04:05.000Z"
+    delivery_status: pending
   audit_entry: &audit_entry
     id: 00000000-0000-4000-8000-000000000701
     actor:
@@ -323,6 +349,7 @@ fixtures:
     description_override: null
     hashtags: [launch]
     provider_options: null
+    signature: null
     attachment_ids: null
   post: &post
     id: 00000000-0000-4000-8000-000000000701
@@ -434,6 +461,7 @@ operations:
       body:
         status: ok
         version: 1.0.0-target.0
+        contract_version: 1.0.0
         environment: staging
     errors: []
   getReadiness:
@@ -805,6 +833,136 @@ operations:
         body: *forbidden_error
       - status: 409
         body: *invalid_state_error
+  getOnboarding:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: *onboarding_progress
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+  saveOnboarding:
+    headers: *bearer_authorization
+    request:
+      step: improvement
+    success:
+      status: 200
+      body: *onboarding_progress
+    errors:
+      - status: 400
+        body: *validation_error
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 409
+        body: *invalid_state_error
+  completeOnboarding:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        <<: *onboarding_progress
+        status: completed
+        completed_at: 2026-01-01T00:10:00Z
+    errors:
+      - status: 400
+        body: *invalid_request_error
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+  getReportingPolicy:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: *reporting_policy
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+  updateReportingPreferences:
+    headers: *bearer_authorization
+    request:
+      usage: true
+      diagnostics: false
+    success:
+      status: 200
+      body:
+        <<: *reporting_policy
+        categories:
+          usage:
+            requested: true
+            effective: true
+            reason: enabled
+            decision_at: "2026-01-02T03:04:05.000Z"
+            interval_started_at: "2026-01-02T03:04:05.000Z"
+          diagnostics:
+            <<: *reporting_category_off
+    errors:
+      - status: 400
+        body: *invalid_request_error
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 409
+        body: *invalid_state_error
+      - status: 429
+        body: *rate_limited_error
+  getReportingFeedback:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: *reporting_feedback
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+  submitReportingFeedback:
+    headers: *bearer_authorization
+    request:
+      discovery_source: github
+    success:
+      status: 200
+      body: *reporting_feedback
+    errors:
+      - status: 400
+        body: *invalid_request_error
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 409
+        body: *invalid_state_error
+      - status: 429
+        body: *rate_limited_error
+  ingestDiagnosticReport:
+    headers: *bearer_authorization
+    request:
+      category: provider_failure
+      operation: publish
+      platform: threads
+      provider_failure_class: rate_limit
+      error_name: ProviderAdapterError
+      error_stack: |
+        at publishDistributions (workers/automation/src/distribution.ts:42:7)
+    success:
+      status: 202
+      body:
+        accepted: true
+        reason: queued
+    errors:
+      - status: 400
+        body: *invalid_request_error
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
   listWorkspaceAudit:
     headers: *bearer_authorization
     success:
@@ -1073,6 +1231,59 @@ operations:
     errors:
       - status: 409
         body: *invalid_state_error
+  getPublishingPreferences:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: &publishing_preferences
+        timezone: America/New_York
+        signature_templates:
+          - id: 00000000-0000-4000-8000-000000000901
+            name: Launch footer
+            body: "Follow {brand_profile} on {platform}."
+            is_default: true
+            position: 0
+        notifications:
+          events:
+            publication_failed: true
+            channel_disconnected: false
+          channels:
+            email:
+              enabled: true
+              recipients:
+                - alpha@meltiply.local
+                - ops@meltiply.local
+        email_available: true
+        updated_at: 2026-01-01T00:00:00Z
+    errors:
+      - status: 401
+        body: *authentication_error
+  updatePublishingPreferences:
+    headers: *bearer_authorization
+    request:
+      timezone: America/New_York
+      signature_templates:
+        - id: 00000000-0000-4000-8000-000000000901
+          name: Launch footer
+          body: "Follow {brand_profile} on {platform}."
+          is_default: true
+          position: 0
+      notifications:
+        events:
+          publication_failed: true
+          channel_disconnected: false
+        channels:
+          email:
+            enabled: true
+            recipients:
+              - alpha@meltiply.local
+              - ops@meltiply.local
+    success:
+      status: 200
+      body: *publishing_preferences
+    errors:
+      - status: 422
+        body: *validation_error
   listPosts:
     headers: *bearer_authorization
     success:
@@ -1095,6 +1306,7 @@ operations:
       targets:
         - platform_account_id: 00000000-0000-4000-8000-000000000201
           hashtags: [launch]
+          signature: null
           attachment_ids: null
     success:
       status: 201
@@ -1144,6 +1356,7 @@ operations:
       targets:
         - platform_account_id: 00000000-0000-4000-8000-000000000201
           hashtags: [launch]
+          signature: null
           attachment_ids: null
     success:
       status: 200
@@ -1277,6 +1490,7 @@ operations:
         publication:
           title: Launch note
           text: Hello world
+          signature: null
           hashtags: [launch]
           provider_options: null
           media:
@@ -1545,3 +1759,27 @@ operations:
     errors:
       - status: 422
         body: *validation_error
+  getBroadcast:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        state: ready
+        ingestUrl: rtmps://example.invalid/live
+        streamKey: preview-only-not-a-real-stream-key
+    errors:
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
+  endBroadcast:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        ended: true
+    errors:
+      - status: 403
+        body: *forbidden_error
+      - status: 409
+        body: *invalid_state_error

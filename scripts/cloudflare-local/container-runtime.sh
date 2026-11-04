@@ -160,9 +160,8 @@ require_container_cgroup_limits() {
 
 # Prints this namespace's listener address on the route to Docker's gateway.
 #
-# Native hosts use their bridge interface; devcontainers use their own address
-# so sibling processor containers can reach the signed R2 listener. The daemon's
-# gateway is a route target, not necessarily an address this process can bind.
+# Native hosts and Docker-in-Docker use their local bridge interface so processor
+# containers can reach the signed R2 listener without exposing management APIs.
 #
 # @return 0 and print the local address, or 1 when it cannot be determined.
 docker_host_address() {

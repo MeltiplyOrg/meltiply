@@ -463,6 +463,9 @@ function acceptanceFetch({
       const objectPath = url.pathname.replace(`/${bucketName}`, "");
       if (method === "OPTIONS") {
         assert.equal(headers.get("origin"), browserOrigin);
+        // R2 only answers the preflight the browser sends; a probe that omits
+        // these headers exercises nothing on the live service.
+        assert.equal(headers.get("access-control-request-method"), "PUT");
         return new Response(null, {
           headers: {
             "Access-Control-Allow-Headers": "Content-Type",
@@ -629,8 +632,14 @@ describe("signed R2 requests", () => {
         });
       },
     );
-    assert.equal(observed.init.headers.Origin, browserOrigin);
-    assert.equal(observed.init.headers.Authorization, undefined);
+    assert.equal(observed.init.method, "OPTIONS");
+    const preflight = new Headers(observed.init.headers);
+    assert.equal(preflight.get("origin"), browserOrigin);
+    // A preflight that omits the requested method or headers asks R2 nothing;
+    // the browser then blocks the PUT that the probe is meant to prove.
+    assert.equal(preflight.get("access-control-request-method"), "PUT");
+    assert.equal(preflight.get("access-control-request-headers"), "content-type");
+    assert.equal(preflight.get("authorization"), null);
     assert.match(observed.url, /X-Amz-Signature=/);
   });
 
@@ -753,8 +762,10 @@ it("runs the credential-gated lifecycle and emits redacted mode-0600 evidence", 
   );
   assert.ok([...harness.assets.values()].every((asset) => asset.deleted));
   assert.equal(harness.objects.size, 0);
-  assert.ok(sleeps.length >= 5);
-  assert.ok(sleeps.every((milliseconds) => milliseconds === 1_000));
+  // Each asset poll and each deletion poll sleeps exactly once in this harness:
+  // single upload (ready + deleted), multipart complete (ready + deleted), and
+  // multipart abort (deleted).
+  assert.deepEqual(sleeps, [1_000, 1_000, 1_000, 1_000, 1_000]);
   assert.ok(result.api_request_ids.every((value) => /^api-\d+$/.test(value)));
   assert.ok(result.r2_request_ids.every((value) => /^r2-\d+$/.test(value)));
 
@@ -866,7 +877,9 @@ it("polls cleanup and writes failed evidence when verification fails", async () 
   );
   assert.ok([...harness.assets.values()].every((asset) => asset.deleted));
   assert.equal(harness.objects.size, 0);
-  assert.ok(sleeps.length >= 2);
+  // One poll before the corrupted download is detected, one before cleanup
+  // confirms deletion.
+  assert.deepEqual(sleeps, [1_000, 1_000]);
 
   const evidenceText = await readFile(options.outputPath, "utf8");
   const evidence = JSON.parse(evidenceText);
@@ -928,7 +941,7 @@ it("replaces stale success with unresolved-resource failure evidence", async () 
   const evidence = JSON.parse(await readFile(options.outputPath, "utf8"));
   assert.equal(evidence.status, "failed");
   assert.equal(evidence.probe_id, identifier(994));
-  assert.ok(evidence.cleanup_error_count >= 1);
+  assert.equal(evidence.cleanup_error_count, 1);
   assert.equal(evidence.unresolved_resources.length, 1);
   assert.ok(evidence.unresolved_resources[0].asset_id);
   assert.ok(evidence.unresolved_resources[0].session_id);

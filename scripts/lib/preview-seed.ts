@@ -107,7 +107,7 @@ async function compileSeedSnapshot(): Promise<SeedSnapshot> {
       tenantTransaction: (_env, _claims, operation) => operation(client),
     });
     const postRows = await db.query<Parameters<typeof assemblePostsEffect>[1][number]>(
-      `SELECT posts.*,
+      `SELECT id, org_id, brand_profile_id, title, default_text, status, revision, created_at, updated_at,
       (SELECT jsonb_build_object('queue_id', membership.queue_id, 'queue_name', membership.queue_name, 'assigned_at', membership.assigned_at)
        FROM publishing_queue_memberships membership WHERE membership.post_id = posts.id AND membership.released_at IS NULL) AS queue_membership
       FROM posts WHERE org_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC, id DESC`,
@@ -115,7 +115,10 @@ async function compileSeedSnapshot(): Promise<SeedSnapshot> {
     );
     const posts = await Effect.runPromise(assemblePostsEffect(client, postRows.rows));
     const assetRows = await db.query<Parameters<typeof mapAsset>[0]>(
-      "SELECT * FROM assets WHERE org_id = $1 ORDER BY id",
+      `SELECT id, org_id, brand_profile_id, uploaded_by, asset_type, title, duration_sec,
+              file_size, mime_type, width, height, status, failure_code,
+              failure_message, failure_retryable, failure_at, created_at, updated_at
+       FROM assets WHERE org_id = $1 ORDER BY id`,
       [orgId],
     );
     const assets = assetRows.rows.map(mapAsset);
@@ -125,12 +128,14 @@ async function compileSeedSnapshot(): Promise<SeedSnapshot> {
       [orgId],
     );
     const queueRows = await db.query<Parameters<typeof mapQueue>[0]>(
-      "SELECT * FROM publishing_queues WHERE org_id = $1 AND deleted_at IS NULL ORDER BY created_at, id",
+      "SELECT id, brand_profile_id, name, timezone, slots, created_at, updated_at FROM publishing_queues WHERE org_id = $1 AND deleted_at IS NULL ORDER BY created_at, id",
       [orgId],
     );
     const queues = queueRows.rows.map(mapQueue);
     const snapshotRows = await db.query<Parameters<typeof mapSnapshot>[0]>(
-      `SELECT snapshot.*, distribution.post_id
+      `SELECT snapshot.id, snapshot.distribution_id, snapshot.views, snapshot.likes,
+              snapshot.comments, snapshot.shares, snapshot.watch_time_sec, snapshot.reach,
+              snapshot.impressions, snapshot.snapshot_at, distribution.post_id
       FROM analytics_snapshots snapshot JOIN distributions distribution ON distribution.id = snapshot.distribution_id
       WHERE snapshot.org_id = $1 ORDER BY snapshot.snapshot_at, snapshot.id`,
       [orgId],

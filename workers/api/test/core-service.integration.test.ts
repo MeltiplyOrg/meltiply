@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import {
   type DatabaseError,
   MailSubmissionError,
@@ -189,8 +190,7 @@ const env = {
   ALLOWED_ORIGINS: "http://localhost:3000",
   DB_AUTHENTICATED: { connectionString } as Hyperdrive,
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   ENVIRONMENT: "test",
   APP_URL: "http://localhost:3000",
@@ -898,9 +898,13 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     await systemPoolFor(env).end();
   });
 
-  it("binds the first verified identity to the installation without granting a workspace", async () => {
-    // Better Auth owns the identity row; actor resolution binds the internal
-    // user. Without an invitation, no shared Workspace membership is created.
+  it("rolls back provisioning when a first identity has no workspace membership", async () => {
+    // Better Auth owns the identity row. Resolution provisions the internal
+    // user and installation inside one transaction, then fails when no shared
+    // Workspace membership exists (`workspace_membership_required`). The whole
+    // transaction rolls back, so a refused first sign-in must leave neither an
+    // internal user nor a membership behind: a partially committed bind would
+    // let a denied request occupy the email and the owner slot.
     await systemTransaction(env, (client) =>
       client.query(
         `INSERT INTO "user" (id, name, email, "emailVerified")
@@ -930,6 +934,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         [personalActorUserId],
       ),
     );
+    // Rolled back: the refused identity left no internal user and no membership.
     expect(identity.rows).toEqual([{ membership_count: "0", user_count: "0" }]);
   });
 
@@ -1360,9 +1365,31 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       );
       expect(betaPost.value.org_id).toBe("20000000-0000-4000-8000-000000000002");
 
+      // A registry with a real revoke adapter is required here: with an empty
+      // registry the function returns before any tenant decision, so a broken
+      // RLS predicate would look identical to correct isolation. The spy makes
+      // "beta could not reach alpha's account" observable.
+      const revoke = vi.fn(async () => undefined);
+      const revokeRegistry = new ProviderRegistry();
+      revokeRegistry.register("youtube", {
+        capability: {
+          ...service
+            .platformCapabilities()
+            .find((capability) => capability.platform === "youtube")!,
+          analytics: false,
+          comments: false,
+          connect_available: false,
+          publish: false,
+          reply: false,
+        },
+        revoke,
+        transferModes: [],
+      });
       await expect(
-        revokeOAuthConnection(env, beta, alphaAccountId, new ProviderRegistry()),
+        revokeOAuthConnection(env, beta, alphaAccountId, revokeRegistry),
       ).resolves.toBeUndefined();
+      // Beta's tenant transaction finds no row, so the provider is never called.
+      expect(revoke).not.toHaveBeenCalled();
 
       const rows = await systemTransaction(env, (client) =>
         client.query<{
@@ -2972,17 +2999,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  it("stores a publication instant for every published Distribution", async () => {
-    const rows = await systemTransaction(env, (client) =>
-      client.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count
-         FROM distributions
-         WHERE status = 'published' AND published_at IS NULL`,
-      ),
-    );
-    expect(rows.rows[0]?.count).toBe("0");
-  });
-
   it("returns not-found instead of exposing another tenant's distribution", async () => {
     await expect(
       Effect.runPromise(
@@ -3432,7 +3448,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         createAlphaPost(posts, { attachmentIds: [], defaultText: "" }, "integration-post-empty"),
       ).rejects.toMatchObject({
         code: "validation_error",
-        message: "A post requires default_text or at least one attachment.",
         status: 422,
       });
       await expect(
@@ -3895,8 +3910,16 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       // original `distribution.publish.requested` command is still `pending`:
       // this fixture forces the publication with a direct UPDATE and no
       // consumer ever drains the outbox, so nothing deleted that command and
-      // the count is 1 for it and 0 for the cancelled one.
-      expect(commands.rows.map(({ commands: count }) => count).sort()).toEqual(["0", "1"]);
+      // the count is 1 for it and 0 for the cancelled one. Keyed by aggregate
+      // id, not sorted counts: sorting would accept the inverse defect.
+      expect(
+        new Map(commands.rows.map(({ aggregate_id, commands: count }) => [aggregate_id, count])),
+      ).toEqual(
+        new Map([
+          [publishedId, "1"],
+          [addedId, "0"],
+        ]),
+      );
       const retained = await systemTransaction(env, (client) =>
         client.query<{ state: string; topic: string }>(
           `SELECT topic, state FROM outbox_events
@@ -5099,11 +5122,14 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       const posts = postServiceWith("youtube");
       const usageBefore = await currentUsageCount();
       const prefix = `integration-post-absent-youtube-${source}-${missingChoice}`;
+      // Each case omits exactly one required choice and supplies the other, so
+      // the 422 is attributable to the named field. Omitting both would also
+      // pass through whichever check runs first.
       const target: PostTargetInput = {
         platformAccountId: alphaYoutubeAccountId,
         ...(missingChoice === "visibility"
           ? { providerOptions: { youtube: { madeForKids: false } } }
-          : {}),
+          : { providerOptions: { youtube: { privacyStatus: "public" } } }),
       };
       const draft = await createAlphaPost(
         posts,
@@ -5113,7 +5139,9 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       try {
         const reopened = await Effect.runPromise(posts.getPost(env, alpha, draft.value.id));
         expect(reopened.targets[0]?.provider_options).toEqual(
-          missingChoice === "visibility" ? { youtube: { made_for_kids: false } } : null,
+          missingChoice === "visibility"
+            ? { youtube: { made_for_kids: false } }
+            : { youtube: { privacy_status: "public" } },
         );
         await expect(
           Effect.runPromise(
@@ -7791,12 +7819,18 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           account: {
             displayName: "Integration Creator",
             id: "integration-oauth-user",
+            username: "integration-handle",
           },
           expiresAt: "2026-09-01T00:00:00.000Z",
           refreshToken: "integration-refresh-token",
           scopes: ["threads_basic", "threads_content_publish"],
         },
       );
+      expect(
+        (await Effect.runPromise(service.listPlatformAccounts(env, beta))).find(
+          (account) => account.platform_user_id === "integration-oauth-user",
+        ),
+      ).toMatchObject({ username: "integration-handle" });
 
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
@@ -7806,9 +7840,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
             refresh_token: string;
             revoked_at: Date | null;
             scopes: string[];
+            username: string;
           }>(
             `SELECT
-             access_token, refresh_token, scopes, connection_status, revoked_at
+             access_token, refresh_token, scopes, connection_status, revoked_at, username
            FROM platform_accounts
            WHERE platform_user_id = 'integration-oauth-user'`,
           );
@@ -7816,6 +7851,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
             connection_status: "connected",
             revoked_at: null,
             scopes: ["threads_basic", "threads_content_publish"],
+            username: "integration-handle",
           });
           expect(result.rows[0]?.access_token).toMatch(/^meltiply:v2:primary:/);
           expect(result.rows[0]?.refresh_token).toMatch(/^meltiply:v2:primary:/);

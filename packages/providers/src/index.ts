@@ -6,12 +6,13 @@ import {
 } from "@meltiply/domain";
 
 import { assertHttpsOrLoopbackUrl } from "./meta-common";
-import { createFacebookAdapter, FACEBOOK_MAX_CAPTION_LENGTH } from "./facebook";
+import { createFacebookAdapter } from "./facebook";
 import { createInstagramAdapter, INSTAGRAM_MAX_CAPTION_LENGTH } from "./instagram";
 import { createThreadsAdapter, THREADS_MAX_CAPTION_LENGTH } from "./threads";
 import { createTikTokAdapter, TIKTOK_MAX_CAPTION_LENGTH } from "./tiktok";
 import type {
   ProviderAdapter,
+  ProviderAnalyticsMetric,
   ProviderOperationResult,
   ProviderPublicationStatus,
   ProviderRequestContext,
@@ -19,8 +20,8 @@ import type {
 import { createYouTubeAdapter, YOUTUBE_MAX_CAPTION_LENGTH } from "./youtube";
 
 /** Draft caption constraints are independent of credentials and runtime activation. */
-const captionLimits: Readonly<Record<Platform, number>> = {
-  facebook: FACEBOOK_MAX_CAPTION_LENGTH,
+const captionLimits: Readonly<Record<Platform, number | null>> = {
+  facebook: null,
   instagram: INSTAGRAM_MAX_CAPTION_LENGTH,
   threads: THREADS_MAX_CAPTION_LENGTH,
   tiktok: TIKTOK_MAX_CAPTION_LENGTH,
@@ -30,8 +31,12 @@ const captionLimits: Readonly<Record<Platform, number>> = {
 export * from "./effect";
 export * from "./failures";
 export * from "./facebook";
+export * from "./facebook-options";
+export * from "./threads-options";
+export * from "./instagram-content";
 export * from "./http";
 export * from "./instagram";
+export * from "./instagram-options";
 export * from "./rate-limit";
 export * from "./threads";
 export * from "./tiktok";
@@ -238,6 +243,19 @@ export class ProviderRegistry {
   }
 
   /**
+   * Returns the metrics whose stored zero this Platform's adapter cannot vouch for.
+   *
+   * A missing adapter declares nothing ambiguous: it reports no analytics at all,
+   * which coverage states separately.
+   *
+   * @param platform - Platform whose adapter is consulted.
+   * @returns Ambiguous metric names, empty when the adapter sets none.
+   */
+  ambiguousZeroMetrics(platform: Platform): readonly ProviderAnalyticsMetric[] {
+    return this.#adapters.get(platform)?.ambiguousZeroMetrics ?? [];
+  }
+
+  /**
    * Returns capability descriptors for all platforms defined in PLATFORM_IDS.
    * Registered adapters supply their active descriptors. Unconfigured providers
    * retain their declared caption ceilings while every runtime operation remains
@@ -396,7 +414,7 @@ export function createProviderRegistryFromEnvironment(
       createFacebookAdapter({
         clientId: facebookClientId!,
         clientSecret: facebookClientSecret!,
-        redirectUri: new URL(oauthCallbackPath("facebook"), publicUrl).toString(),
+        redirectUri: `${publicUrl.origin}${oauthCallbackPath("facebook")}`,
         ...commonOptions,
       }),
     );
@@ -408,7 +426,7 @@ export function createProviderRegistryFromEnvironment(
         clientId: instagramClientId!,
         clientSecret: instagramClientSecret!,
         engagementEnabled: instagramEngagementAccepted,
-        redirectUri: new URL(oauthCallbackPath("instagram"), publicUrl).toString(),
+        redirectUri: `${publicUrl.origin}${oauthCallbackPath("instagram")}`,
         ...commonOptions,
       }),
     );
@@ -420,7 +438,7 @@ export function createProviderRegistryFromEnvironment(
         clientId: threadsClientId!,
         clientSecret: threadsClientSecret!,
         engagementEnabled: threadsEngagementAccepted,
-        redirectUri: new URL(oauthCallbackPath("threads"), publicUrl).toString(),
+        redirectUri: `${publicUrl.origin}${oauthCallbackPath("threads")}`,
         ...commonOptions,
       }),
     );
@@ -431,9 +449,8 @@ export function createProviderRegistryFromEnvironment(
       createTikTokAdapter({
         clientKey: tiktokClientKey!,
         clientSecret: tiktokClientSecret!,
-        mediaUrlPrefix:
-          tiktokMediaUrlPrefix || new URL("/api/v1/provider-media/", publicUrl).toString(),
-        redirectUri: new URL(oauthCallbackPath("tiktok"), publicUrl).toString(),
+        mediaUrlPrefix: tiktokMediaUrlPrefix || `${publicUrl.origin}/api/v1/provider-media/`,
+        redirectUri: `${publicUrl.origin}${oauthCallbackPath("tiktok")}`,
         ...commonOptions,
       }),
     );
@@ -444,7 +461,7 @@ export function createProviderRegistryFromEnvironment(
       createYouTubeAdapter({
         clientId: youtubeClientId!,
         clientSecret: youtubeClientSecret!,
-        redirectUri: new URL(oauthCallbackPath("youtube"), publicUrl).toString(),
+        redirectUri: `${publicUrl.origin}${oauthCallbackPath("youtube")}`,
         ...commonOptions,
       }),
     );

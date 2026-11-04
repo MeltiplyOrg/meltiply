@@ -1,5 +1,8 @@
 import { authClient } from "./auth-client";
 
+const nonAlphanumericPattern = /[^a-zA-Z0-9]/g;
+const integerPattern = /^\d+$/;
+
 /**
  * Verification state reported by Better Auth's device-authorization plugin.
  * `pending` still allows a decision; `approved` and `denied` are terminal.
@@ -83,7 +86,7 @@ const DEVICE_ERROR_CODES: Record<string, true> = {
  * @returns Uppercase alphanumeric code.
  */
 export function normalizeDeviceUserCode(value: string): string {
-  return value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  return value.replace(nonAlphanumericPattern, "").toUpperCase();
 }
 
 /**
@@ -94,7 +97,7 @@ export function normalizeDeviceUserCode(value: string): string {
  */
 function retryAfterSecondsFor(response: Response): number | undefined {
   const value = response.headers.get("Retry-After")?.trim();
-  if (!value || !/^\d+$/.test(value)) return undefined;
+  if (!value || !integerPattern.test(value)) return undefined;
   const seconds = Number(value);
   return Number.isSafeInteger(seconds) && seconds >= 0 ? seconds : undefined;
 }

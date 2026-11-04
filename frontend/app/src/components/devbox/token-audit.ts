@@ -15,6 +15,15 @@
 
 import { elementSelector, ensureStyleTag } from "./dom";
 
+const cssVariablePattern = /var\(\s*(--[\w-]+)\s*(?:,\s*([^)]*))?\)/g;
+const fractionalNumberPattern = /-?\d*\.\d+(?:e[-+]?\d+)?/gi;
+const textColorDeclarationPattern = /(?:^|;)\s*color\s*:/i;
+const backgroundDeclarationPattern = /(?:^|;)\s*background(?:-color)?\s*:/i;
+const borderDeclarationPattern =
+  /(?:^|;)\s*border(?:-(?:top|right|bottom|left|inline|block|inline-start|inline-end|block-start|block-end|x|y))?(?:-color)?\s*:/i;
+const leadingImportantPattern = /^!/;
+const trailingImportantPattern = /!$/;
+
 /**
  * Color-valued CSS custom properties that form the approved token ramp.
  * Mirrors every color entry in `frontend/shared/tokens.css` and the `@theme`
@@ -104,13 +113,10 @@ const canonicalColorCache = new Map<string, string>();
  */
 function resolveCssVariables(value: string, styles: CSSStyleDeclaration, depth = 0): string {
   if (depth >= 8 || !value.includes("var(")) return value;
-  return value.replace(
-    /var\(\s*(--[\w-]+)\s*(?:,\s*([^)]*))?\)/g,
-    (_match, name: string, fallback: string | undefined) => {
-      const replacement = styles.getPropertyValue(name).trim() || fallback?.trim() || "";
-      return replacement ? resolveCssVariables(replacement, styles, depth + 1) : "";
-    },
-  );
+  return value.replace(cssVariablePattern, (_match, name: string, fallback: string | undefined) => {
+    const replacement = styles.getPropertyValue(name).trim() || fallback?.trim() || "";
+    return replacement ? resolveCssVariables(replacement, styles, depth + 1) : "";
+  });
 }
 
 /**
@@ -120,7 +126,7 @@ function resolveCssVariables(value: string, styles: CSSStyleDeclaration, depth =
  * four-decimal components keeps those forms equal.
  */
 function normalizeColorSerialization(value: string): string {
-  return value.replace(/-?\d*\.\d+(?:e[-+]?\d+)?/gi, (match) => {
+  return value.replace(fractionalNumberPattern, (match) => {
     const rounded = Math.round(Number(match) * 10_000) / 10_000;
     return Number.isFinite(rounded) ? String(rounded) : match;
   });
@@ -362,10 +368,10 @@ function setsColorInline(element: Element, property: ColorProperty): boolean {
   if (!style) return false;
   const declaration =
     property === "color"
-      ? /(?:^|;)\s*color\s*:/i
+      ? textColorDeclarationPattern
       : property === "backgroundColor"
-        ? /(?:^|;)\s*background(?:-color)?\s*:/i
-        : /(?:^|;)\s*border(?:-(?:top|right|bottom|left|inline|block|inline-start|inline-end|block-start|block-end|x|y))?(?:-color)?\s*:/i;
+        ? backgroundDeclarationPattern
+        : borderDeclarationPattern;
   return declaration.test(style);
 }
 
@@ -376,7 +382,9 @@ function setsColorInline(element: Element, property: ColorProperty): boolean {
 function activeUtilityBase(className: string, element: Element): string | null {
   const parts = splitClassParts(className);
   const base = parts.pop() ?? "";
-  const normalized = base.replace(/^!/, "").replace(/!$/, "");
+  const normalized = base
+    .replace(leadingImportantPattern, "")
+    .replace(trailingImportantPattern, "");
   return parts.every((variant) => variantApplies(variant, element)) ? normalized : null;
 }
 

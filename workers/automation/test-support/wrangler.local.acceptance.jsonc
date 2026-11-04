@@ -23,6 +23,12 @@
   },
   "vars": {
     "ENVIRONMENT": "local",
+    // Same controlled loopback destination as the acceptance API entry, so a
+    // scheduled drain in acceptance can never reach a real project either.
+    "REPORTING_POSTHOG_HOST": "http://127.0.0.1:9787",
+    "REPORTING_POSTHOG_PROJECT_TOKEN": "phc_localacceptance0000000000",
+    "REPORTING_FORCED_OFF": "false",
+    "DEPLOYMENT_CATEGORY": "selfhosted",
     "VERSION": "1.0.0-acceptance.0",
   },
   // Same bucket and pinned local S3 credentials as the acceptance API entry: the

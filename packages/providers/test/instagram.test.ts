@@ -69,6 +69,167 @@ function publishInput(patch: Partial<PublishInput> = {}): PublishInput {
 }
 
 describe("createInstagramAdapter", () => {
+  it("reads a zero follower count from Instagram Login's single-account data envelope", async () => {
+    const calls = sequence(() =>
+      json({
+        data: [{ followers_count: 0, follows_count: 4, media_count: 2 }],
+      }),
+    );
+    await expect(
+      adapter(calls.fetcher).getAccountAnalytics!(context, credentials),
+    ).resolves.toEqual({
+      followers: 0,
+      following: 4,
+      posts: 2,
+      recordedAt: "2026-07-19T00:00:00.000Z",
+    });
+  });
+
+  it("accepts three collaborators and rejects a fourth before calling Instagram", async () => {
+    const calls = sequence(() => json({ id: "collaboration-container" }));
+    const provider = adapter(calls.fetcher);
+    const collaborators = ["first", "second", "third"];
+    await expect(
+      provider.publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: { instagram: { content: { collaborators } } },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      outcome: "confirmed_success",
+      providerOperationId: "created:collaboration-container",
+    });
+    await expect(
+      provider.publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: {
+            instagram: { content: { collaborators: [...collaborators, "fourth"] } },
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ failure: { classification: "deterministic" } });
+    expect(calls.calls).toHaveLength(1);
+  });
+
+  it.each([
+    { config_issue: "CAPTION_NOT_ATTACHED" },
+    { caption_add_on_attachment_status: "POLL_CREATION_FAILURE" },
+  ])("retains publication and reports Instagram partial success: %j", async (issue) => {
+    const calls = sequence(
+      () => json({ id: "partial-container", status_code: "FINISHED" }),
+      () => json({ id: "partial-post", ...issue }),
+    );
+    await expect(
+      adapter(calls.fetcher).lookupPublication!(context, credentials, {
+        providerOperationId: "created:partial-container",
+      }),
+    ).resolves.toMatchObject({
+      state: "published",
+      result: {
+        outcome: "confirmed_success",
+        providerPostId: "partial-post",
+        warnings: ["instagram_publish_partial"],
+      },
+    });
+  });
+
+  it("keeps carousel accessibility on each image and AI/collaborators on the parent", async () => {
+    const calls = sequence(
+      (url) => {
+        expect(url.searchParams.get("alt_text")).toBe("First image");
+        expect(url.searchParams.has("is_ai_generated")).toBe(false);
+        return json({ id: "image-one" });
+      },
+      (url) => {
+        expect(url.searchParams.get("alt_text")).toBe("Second image");
+        return json({ id: "image-two" });
+      },
+      (url) => {
+        expect(url.searchParams.get("children")).toBe("image-one,image-two");
+        expect(url.searchParams.get("is_ai_generated")).toBe("true");
+        expect(url.searchParams.get("collaborators")).toBe('["collaborator"]');
+        expect(url.searchParams.has("alt_text")).toBe(false);
+        return json({ id: "carousel-one" });
+      },
+    );
+    await expect(
+      adapter(calls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          media: [1, 2].map((number) => ({
+            contentType: "image/jpeg",
+            fileSize: 100,
+            mode: "remote_ingest" as const,
+            url: `https://assets.example/${number}.jpg`,
+          })),
+          providerOptions: {
+            instagram: {
+              postType: "feed",
+              content: { is_ai_generated: true, collaborators: ["collaborator"] },
+              mediaOptions: [{ alt_text: "First image" }, { alt_text: "Second image" }],
+            },
+          },
+        }),
+      ),
+    ).resolves.toMatchObject({ providerOperationId: "created:carousel-one" });
+  });
+
+  it("preserves Reel cover, original audio name, thumbnail offset, and feed sharing", async () => {
+    const calls = sequence((url) => {
+      expect(Object.fromEntries(url.searchParams)).toMatchObject({
+        cover_url: "https://assets.example/cover.jpg",
+        audio_name: "Original tutorial",
+        thumb_offset: "1500",
+        share_to_feed: "false",
+      });
+      return json({ id: "reel-one" });
+    });
+    await adapter(calls.fetcher).publish!(
+      context,
+      credentials,
+      publishInput({
+        media: [
+          {
+            contentType: "video/mp4",
+            fileSize: 100,
+            mode: "remote_ingest",
+            url: "https://assets.example/reel.mp4",
+          },
+        ],
+        providerOptions: {
+          instagram: {
+            postType: "reel",
+            content: {
+              cover_url: "https://assets.example/cover.jpg",
+              audio_name: "Original tutorial",
+              thumb_offset: 1500,
+              share_to_feed: false,
+            },
+          },
+        },
+      }),
+    );
+  });
+
+  it("rejects Story captions instead of silently omitting the user's text", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    await expect(
+      adapter(fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: { instagram: { postType: "story" } },
+        }),
+      ),
+    ).rejects.toMatchObject({ failure: { code: "instagram_story_caption_unsupported" } });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("builds a state-bound Instagram Login URL and pins the callback", () => {
     const provider = adapter(vi.fn<typeof fetch>());
     const value = provider.authorizationUrl!({
@@ -309,6 +470,77 @@ describe("createInstagramAdapter", () => {
     });
   });
 
+  it("publishes a feed video, a Story, and a trial Reel with explicit shapes", async () => {
+    const video = {
+      contentType: "video/mp4",
+      fileSize: 50 * 1024 * 1024,
+      mode: "remote_ingest" as const,
+      url: "https://assets.example/video.mp4",
+    };
+    const feed = sequence(() => json({ id: "feed-container" }));
+    await adapter(feed.fetcher).publish!(
+      context,
+      credentials,
+      publishInput({
+        media: [video],
+        providerOptions: { instagram: { postType: "feed" } },
+      }),
+    );
+    expect(Object.fromEntries(feed.calls[0]!.url.searchParams)).toMatchObject({
+      media_type: "VIDEO",
+      video_url: "https://assets.example/video.mp4",
+    });
+
+    const story = sequence(() => json({ id: "story-container" }));
+    await adapter(story.fetcher).publish!(
+      context,
+      credentials,
+      publishInput({
+        caption: "",
+        hashtags: [],
+        media: [video],
+        providerOptions: { instagram: { postType: "story" } },
+      }),
+    );
+    expect(Object.fromEntries(story.calls[0]!.url.searchParams)).toMatchObject({
+      media_type: "STORIES",
+      video_url: "https://assets.example/video.mp4",
+    });
+
+    const trial = sequence(() => json({ id: "trial-container" }));
+    await adapter(trial.fetcher).publish!(
+      context,
+      credentials,
+      publishInput({
+        media: [video],
+        providerOptions: {
+          instagram: {
+            postType: "reel",
+            trialGraduation: "performance",
+            trialReel: true,
+          },
+        },
+      }),
+    );
+    expect(trial.calls[0]!.url.searchParams.get("trial_params")).toBe(
+      JSON.stringify({ graduation_strategy: "SS_PERFORMANCE" }),
+    );
+  });
+
+  it("rejects a trial Reel that is not a single video Reel", async () => {
+    const providerCalls = sequence();
+    await expect(
+      adapter(providerCalls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: { instagram: { postType: "feed", trialReel: true } },
+        }),
+      ),
+    ).rejects.toMatchObject({ failure: { code: "instagram_post_options_invalid" } });
+    expect(providerCalls.calls).toHaveLength(0);
+  });
+
   // Observe the actual mixed-carousel protocol: unpublished VIDEO children,
   // one parent caption, and ordered child ids rather than standalone Reels.
   it("creates one child container per attachment and binds them in creator order", async () => {
@@ -362,6 +594,11 @@ describe("createInstagramAdapter", () => {
       image_url: "https://assets.example/three.jpg",
       is_carousel_item: "true",
     });
+    // A caption on a child would publish the text once per carousel item, so
+    // only the parent may carry it.
+    expect(
+      providerCalls.calls.slice(0, 3).every(({ url }) => url.searchParams.has("caption") === false),
+    ).toBe(true);
     // The parent carries the caption exactly once and the children in order.
     expect(Object.fromEntries(providerCalls.calls[3]!.url.searchParams)).toEqual({
       caption: "An Instagram post #launch",
@@ -371,6 +608,36 @@ describe("createInstagramAdapter", () => {
     expect(result).toEqual({
       outcome: "confirmed_success",
       providerOperationId: "created:carousel-parent",
+    });
+  });
+
+  it("keeps every attachment in a twenty-item Instagram carousel", async () => {
+    const children: Responder[] = Array.from(
+      { length: 20 },
+      (_, index) => () => json({ id: `child-${index + 1}` }),
+    );
+    const providerCalls = sequence(...children, (url) => {
+      expect(url.searchParams.get("children")).toBe(
+        "child-1,child-2,child-3,child-4,child-5,child-6,child-7,child-8,child-9,child-10,child-11,child-12,child-13,child-14,child-15,child-16,child-17,child-18,child-19,child-20",
+      );
+      return json({ id: "complete-carousel" });
+    });
+    await expect(
+      adapter(providerCalls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          media: Array.from({ length: 20 }, (_, index) => ({
+            contentType: "image/jpeg",
+            fileSize: 100,
+            mode: "remote_ingest" as const,
+            url: `https://assets.example/photo-${index + 1}.jpg`,
+          })),
+        }),
+      ),
+    ).resolves.toEqual({
+      outcome: "confirmed_success",
+      providerOperationId: "created:complete-carousel",
     });
   });
 
@@ -444,7 +711,7 @@ describe("createInstagramAdapter", () => {
     expect(JSON.stringify(result)).not.toContain("abc123");
   });
 
-  it("rejects video above Instagram's documented Reel size ceiling before HTTP", async () => {
+  it("rejects video above Meltiply's conservative Reel size ceiling before HTTP", async () => {
     const fetcher = vi.fn<typeof fetch>();
     await expect(
       adapter(fetcher).publish!(
@@ -495,7 +762,7 @@ describe("createInstagramAdapter", () => {
         ],
       }),
       publishInput({
-        media: Array.from({ length: 11 }, () => ({
+        media: Array.from({ length: 21 }, () => ({
           contentType: "image/jpeg",
           fileSize: 100,
           mode: "remote_ingest" as const,
@@ -660,5 +927,20 @@ describe("createInstagramAdapter", () => {
         }),
       ).searchParams.get("scope"),
     ).toBe("instagram_business_basic,instagram_business_content_publish");
+  });
+});
+
+describe("ambiguous provider metrics", () => {
+  it("declares exactly the insights it normalizes to zero", () => {
+    const declaration = createInstagramAdapter({
+      clientId: "local-client",
+      clientSecret: "local-secret",
+      redirectUri: "https://app.example/api/auth/oauth/instagram/callback",
+    });
+
+    // Instagram writes `metrics.get(name) ?? 0`, so a stored zero cannot be told
+    // apart from an absent insight. The declaration is what lets a consumer treat
+    // those zeros as unknown instead of as observed counts.
+    expect(declaration.ambiguousZeroMetrics).toEqual(["views", "reactions", "comments", "shares"]);
   });
 });

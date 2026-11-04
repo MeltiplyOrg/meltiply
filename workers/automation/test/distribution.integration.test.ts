@@ -1,5 +1,10 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { Effect } from "effect";
-import { ProviderRegistry, type ProviderAdapter } from "@meltiply/providers";
+import {
+  createInstagramAdapter,
+  ProviderRegistry,
+  type ProviderAdapter,
+} from "@meltiply/providers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { systemPoolFor } from "../src/database";
@@ -133,8 +138,7 @@ const eventIds = [
 
 const env = {
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   ENVIRONMENT: "test",
   VERSION: "1.0.0-target.0",
@@ -710,7 +714,8 @@ async function seedCompositionFixtures(): Promise<void> {
  * with the row: the publish intent is keyed by `(distribution, operation,
  * event id)`, and the job lease is keyed by event id alone and is only
  * re-claimable after a failure. Each test therefore starts from the state a
- * workspace that had never published would be in. The stalled-publish row is
+ * workspace that had never published would be in. Sanitized Provider warnings
+ * are cleared with other publication evidence. The stalled-publish row is
  * deliberately left in its seeded `processing` state, because that in-flight
  * attempt is what the reconciliation specs depend on.
  */
@@ -749,7 +754,7 @@ async function resetCompositions(): Promise<void> {
     await client.query(
       `UPDATE distributions
        SET status = 'queued', attempt_count = 0, reconciliation_attempt_count = 0,
-           provider_operation_id = NULL, platform_post_id = NULL,
+           provider_operation_id = NULL, platform_post_id = NULL, provider_warnings = '[]'::jsonb,
            platform_url = NULL, published_at = NULL, next_attempt_at = NULL,
            failure_code = NULL, failure_retryable = NULL, error_message = NULL,
            attachment_ids = CASE WHEN id = $2 THEN ARRAY[$3]::uuid[] ELSE NULL END,
@@ -760,7 +765,7 @@ async function resetCompositions(): Promise<void> {
     await client.query(
       `UPDATE distributions
        SET status = 'queued', attempt_count = 0, reconciliation_attempt_count = 0,
-           provider_operation_id = NULL, platform_post_id = NULL,
+           provider_operation_id = NULL, platform_post_id = NULL, provider_warnings = '[]'::jsonb,
            platform_url = NULL, published_at = NULL, next_attempt_at = NULL,
            failure_code = NULL, failure_retryable = NULL, error_message = NULL,
            updated_at = now()
@@ -1178,15 +1183,18 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
     });
   });
 
-  it("holds frozen media while a stalled attempt awaits reconciliation", async () => {
+  it("no-ops a publish delivery whose attempt the row records as in flight", async () => {
     const publish = vi.fn(async () => ({
       outcome: "confirmed_success" as const,
       providerPostId: "must-not-publish",
     }));
     const eventId = eventIds[2]!;
 
-    // An in-flight publish that was lost mid-attempt must not be republished,
-    // and its media must stay held while reconciliation owns the outcome.
+    // A publish trigger on a row that already records an attempt in flight is
+    // a no-op: the provider side effect is unknown, so the delivery must never
+    // reach the adapter. The intent, its frozen media, and its lease below are
+    // the durable evidence of that lost attempt, and the recovery test that
+    // follows reads them.
     await expect(
       Effect.runPromise(
         processDistributionMessage(env, publishMessage(eventId, leaseRecoveryDistributionId), {
@@ -1293,25 +1301,9 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
         ],
       ),
     );
-
-    const held = await mediaHolds(leaseRecoveryDistributionId);
-    expect(held).toEqual([
-      {
-        asset_id: secondAssetId,
-        media_hold_until: expect.any(Date),
-        object_key: secondRenditionKey,
-        operation: "publish",
-        position: 0,
-      },
-    ]);
-    expect(held[0]!.media_hold_until!.getTime()).toBeGreaterThan(Date.now());
   });
 
-  it("recovers a stalled attempt through reconciliation without republishing", async () => {
-    const publish = vi.fn(async () => ({
-      outcome: "confirmed_success" as const,
-      providerPostId: "must-not-publish",
-    }));
+  it("recovers a stalled attempt through a reconciliation trigger, never a second publish", async () => {
     const eventId = eventIds[2]!;
 
     await runSystemTransaction(env, (client) =>
@@ -1331,6 +1323,8 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       ),
     );
 
+    // The scan is workspace-global, so its total may include other fixtures;
+    // the per-row evidence below is what proves this stalled row was claimed.
     await expect(Effect.runPromise(enqueueDueDistributions(env))).resolves.toBeGreaterThanOrEqual(
       1,
     );
@@ -1353,10 +1347,119 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       );
       return result.rows[0];
     });
+    // Exactly one reconcile trigger was armed: a duplicate-arming regression
+    // would leave two live events and still satisfy the scan's total.
+    const reconcileEvents = await runSystemTransaction(env, (client) =>
+      client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM outbox_events
+          WHERE aggregate_id = $1 AND topic = 'distribution.reconcile.requested'`,
+        [leaseRecoveryDistributionId],
+      ),
+    );
+    expect(reconcileEvents.rows[0]?.count).toBe("1");
+    // Recovery must not release the attempt's retrieval hold: the bytes may
+    // still be in flight at the Provider, so the hold stays until it lapses.
+    const held = await mediaHolds(leaseRecoveryDistributionId);
+    expect(held.map((row) => row.object_key)).toEqual([secondRenditionKey]);
+    expect(held[0]!.media_hold_until!.getTime()).toBeGreaterThan(Date.now());
+    // The stalled row is armed for reconciliation and carries none of the
+    // evidence a republish would need: no second publish command exists for it.
     expect(recovered?.status).toBe("needs_reconciliation");
     expect(recovered?.failure_code).toBe("provider_outcome_ambiguous");
     expect(recovered?.topic).toBe("distribution.reconcile.requested");
-    expect(publish).not.toHaveBeenCalled();
+    const publishCommands = await runSystemTransaction(env, (client) =>
+      client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM outbox_events
+          WHERE aggregate_id = $1 AND topic = 'distribution.publish.requested'
+            AND state IN ('pending', 'leased')`,
+        [leaseRecoveryDistributionId],
+      ),
+    );
+    expect(publishCommands.rows[0]?.count).toBe("0");
+  });
+
+  it("keeps Instagram partial success published and blocks a later publish trigger", async () => {
+    await resetCompositions();
+    await runSystemTransaction(env, (client) =>
+      client.query("UPDATE distributions SET attachment_ids = ARRAY[$2]::uuid[] WHERE id = $1", [
+        mixedDistributionId,
+        mixedAssetId,
+      ]),
+    );
+    let finalWrites = 0;
+    const registry = new ProviderRegistry();
+    registry.register(
+      "instagram",
+      createInstagramAdapter({
+        clientId: "partial-client",
+        clientSecret: "partial-secret",
+        redirectUri: "https://api.example/callback",
+        fetch: async (input) => {
+          const url = new URL(input instanceof Request ? input.url : input.toString());
+          if (url.pathname.endsWith("/media")) return Response.json({ id: "partial-container" });
+          if (url.pathname.endsWith("/partial-container")) {
+            return Response.json({ id: "partial-container", status_code: "FINISHED" });
+          }
+          if (url.pathname.endsWith("/media_publish")) {
+            finalWrites++;
+            return Response.json({ id: "partial-post", config_issue: "CAPTION_NOT_ATTACHED" });
+          }
+          throw new Error(`Unexpected Instagram request: ${url.pathname}`);
+        },
+      }),
+    );
+    const dependencies = {
+      decryptToken: async (stored: string) => stored,
+      mediaFor: mediaResolver(),
+      providerRegistry: registry,
+    };
+    const message = publishMessage("distribution-integration-partial-warning", mixedDistributionId);
+    await expect(
+      Effect.runPromise(processDistributionMessage(env, message, dependencies)),
+    ).resolves.toBe("processed");
+    await expect(
+      Effect.runPromise(
+        processDistributionMessage(
+          env,
+          {
+            ...message,
+            event_id: `${message.event_id}-reconcile`,
+            topic: "distribution.reconcile.requested",
+          },
+          dependencies,
+        ),
+      ),
+    ).resolves.toBe("processed");
+    await expect(
+      Effect.runPromise(
+        processDistributionMessage(
+          env,
+          {
+            ...message,
+            event_id: `${message.event_id}-redelivery`,
+          },
+          dependencies,
+        ),
+      ),
+    ).resolves.toBe("skipped");
+    const outcome = await runSystemTransaction(env, (client) =>
+      client.query<{
+        status: string;
+        platform_post_id: string;
+        provider_warnings: string[];
+        failure_code: string | null;
+      }>(
+        "SELECT status, platform_post_id, provider_warnings, failure_code FROM distributions WHERE id = $1",
+        [mixedDistributionId],
+      ),
+    );
+    expect(outcome.rows[0]).toEqual({
+      status: "published",
+      platform_post_id: "partial-post",
+      failure_code: null,
+      provider_warnings: ["instagram_publish_partial"],
+    });
+    expect(finalWrites).toBe(1);
   });
 
   it("freezes the approved JPEG when the smaller ready WEBP is undeliverable", async () => {

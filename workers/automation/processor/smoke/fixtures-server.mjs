@@ -92,8 +92,8 @@ async function storeObject(request, response, name) {
   }
   // The upload lands beside the fixtures so a later job can legitimately read a
   // rendition back as its own input, exactly as a crash retry would.
-  const bytes = await storeBody(request, file, name);
-  response.writeHead(200, { "content-length": "0", etag: `"${bytes.toString(16)}"` }).end();
+  const stored = await storeBody(request, file, name);
+  response.writeHead(200, { "content-length": "0", etag: stored.etag }).end();
 }
 
 /**
@@ -114,8 +114,13 @@ async function storeBody(request, target, name) {
     sink.on("finish", resolve);
     request.pipe(sink);
   });
-  recorded.push({ bytes, key: name, sha256: digest.digest("hex") });
-  return bytes;
+  // A deliberately opaque ETag: it is not the byte count, so an engine that
+  // reports something other than the origin's tag cannot pass by coincidence,
+  // and its quoting exercises the engine's HTTP to R2 normalization.
+  const etag = `"${bytes.toString(16)}-${name.length.toString(16)}"`;
+  const sha256 = digest.digest("hex");
+  recorded.push({ bytes, etag, key: name, sha256 });
+  return { bytes, etag, sha256 };
 }
 
 await mkdir(objectsDir, { recursive: true });

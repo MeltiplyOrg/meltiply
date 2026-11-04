@@ -9,6 +9,8 @@ import {
   type WorkspaceView,
 } from "@/lib/navigation";
 import { WorkspaceProvider } from "@/context/workspace.context";
+import { OnboardingGate } from "@/components/onboarding/onboarding-gate";
+import { PublishingTimeZoneProvider } from "@/context/publishing-timezone.context";
 
 import { AppProviders } from "../providers";
 
@@ -74,7 +76,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps): Rea
   return (
     <AppProviders>
       <WorkspaceProvider>
-        <WorkspaceShell>{children}</WorkspaceShell>
+        <OnboardingGate>
+          <PublishingTimeZoneProvider>
+            <WorkspaceShell>{children}</WorkspaceShell>
+          </PublishingTimeZoneProvider>
+        </OnboardingGate>
       </WorkspaceProvider>
     </AppProviders>
   );

@@ -67,6 +67,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
+        with:
+          selfhost: "false"
       - name: Format, type, bindings, lint, coverage, and production builds
         run: |
           bun run --cwd frontend/app format-check
@@ -123,27 +125,9 @@ jobs:
         run: |
           bun run lint
           bun run lint:dead
-          bun run test:wrangler-drift
-          bun run test:frontend-directives
           bun run format-check:cloudflare
           bunx --no-install vp fmt .github/workflows/ci.yml .github/workflows/selfhost.yml .github/workflows/selfhost-ci.yml .github/actions/install-workspace/action.yml scripts/selfhost compose.selfhost.yml docs/public-ci.md --check
           git diff --exit-code -- packages/contracts
-          bun run test:ci-routing
-      - name: Local tooling, release, and supply-chain contracts
-        run: |
-          bun run test:local-setup
-          bun run test:available-port
-          bun run test:wrangler-env
-          bun run test:teardown
-          bun run test:dev
-          bun run test:quick-tunnel
-          bun run test:tunnel-hostname
-          bun run test:doctor
-          bun run test:k6-runner
-          bun run release:test
-          bun run test:supply-chain
-          bun run security:supply-chain
-          bun run cost:check
       - name: PostgreSQL integration tests
         env:
           MELTIPLY_DATABASE_TEST_URL: postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable
@@ -153,13 +137,76 @@ jobs:
         if: always()
         run: ./scripts/cloudflare-local/database.sh stop
 
+  cloudflare-tooling:
+    needs: changes
+    if: needs.changes.outputs.cloudflare == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-workspace
+      - name: Development launcher lifecycle
+        run: bun run test:dev
+      - name: Local tooling, release, and supply-chain contracts
+        run: |
+          bun run test:tooling
+          bun run test:local-setup
+          bun run test:wrangler-env
+          bun run test:teardown
+          bun run test:doctor
+          bun run test:k6-runner
+          bun run security:supply-chain
+          node scripts/infra/cost-model.mjs --check
+
+  frontend-performance:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.cloudflare == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-workspace
+      - name: Prepare deterministic populated stack
+        run: bun run setup --skip-dependencies --skip-image-pull
+      - name: Install Chromium
+        run: bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+      - name: Measure production publishing journeys
+        env:
+          MELTIPLY_E2E_START_PUBLIC: "1"
+          MELTIPLY_E2E_PUBLIC_BASE_URL: http://127.0.0.1:4321
+        run: bun run --cwd frontend/app test:performance
+      - name: Exercise publishing preferences in the browser
+        run: bun run --cwd frontend/app test:e2e e2e/publishing-preferences.spec.ts --project chromium
+      - name: Upload traces and reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: frontend-performance-${{ github.run_id }}
+          path: |
+            frontend/app/test-results/
+            frontend/app/playwright-report/
+          if-no-files-found: warn
+
   selfhost-images:
     needs: changes
     if: needs.changes.outputs.selfhost == 'true'
     uses: ./.github/workflows/selfhost-ci.yml
 
   ci-gate:
-    needs: [changes, baseline, frontend-fast, cloudflare-fast, selfhost-images]
+    needs:
+      [
+        changes,
+        baseline,
+        frontend-fast,
+        cloudflare-fast,
+        cloudflare-tooling,
+        frontend-performance,
+        selfhost-images,
+      ]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -172,6 +219,9 @@ jobs:
           FRONTEND: ${{ needs.frontend-fast.result }}
           CLOUDFLARE_SELECTED: ${{ needs.changes.outputs.cloudflare }}
           CLOUDFLARE: ${{ needs.cloudflare-fast.result }}
+          CLOUDFLARE_TOOLING: ${{ needs.cloudflare-tooling.result }}
+          PERFORMANCE_SELECTED: ${{ needs.changes.outputs.frontend == 'true' || needs.changes.outputs.cloudflare == 'true' }}
+          PERFORMANCE: ${{ needs.frontend-performance.result }}
           SELFHOST_SELECTED: ${{ needs.changes.outputs.selfhost }}
           SELFHOST_IMAGES: ${{ needs.selfhost-images.result }}
         run: |
@@ -182,6 +232,11 @@ jobs:
           else
             test "$SELFHOST_IMAGES" = skipped
           fi
+          if [ "$PERFORMANCE_SELECTED" = true ]; then
+            test "$PERFORMANCE" = success
+          else
+            test "$PERFORMANCE" = skipped
+          fi
           if [ "$FRONTEND_SELECTED" = true ]; then
             test "$FRONTEND" = success
           else
@@ -189,6 +244,8 @@ jobs:
           fi
           if [ "$CLOUDFLARE_SELECTED" = true ]; then
             test "$CLOUDFLARE" = success
+            test "$CLOUDFLARE_TOOLING" = success
           else
             test "$CLOUDFLARE" = skipped
+            test "$CLOUDFLARE_TOOLING" = skipped
           fi

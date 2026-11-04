@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { test } from "node:test";
@@ -245,7 +246,12 @@ test("dry-run hashes JSON messages and immediately retries their leases", async 
   assert.equal(result.applied, false);
   assert.equal(result.outcome, "dry_run");
   assert.equal(result.message_count, 1);
-  assert.equal(result.messages[0].digest.length, 64);
+  // The digest is the SHA-256 of `content-type NUL body`, which is what makes a
+  // later audit comparable; any other 64-character string must fail.
+  assert.equal(
+    result.messages[0].digest,
+    createHash("sha256").update(`json\0${encodedBody}`).digest("hex"),
+  );
   assert.doesNotMatch(JSON.stringify(result), /never-log-me|secret-token/);
   assert.equal(calls.length, 3);
   assert.ok(calls[1].url.endsWith("/source-id/messages/pull"));
@@ -282,6 +288,15 @@ test("apply pushes decoded JSON before acknowledging the DLQ lease", async () =>
 
   assert.equal(result.applied, true);
   assert.equal(result.outcome, "completed");
+  // Applied replay must report the counts the operator reads: one message was
+  // rewritten to the source workload and one DLQ lease was acknowledged.
+  assert.equal(result.message_count, 1);
+  assert.equal(result.replayed_count, 1);
+  assert.equal(result.acknowledged_count, 1);
+  assert.equal(result.retried_count, 0);
+  assert.equal(result.unsettled_count, 0);
+  assert.equal(result.source_queue, "meltiply-publish-tiktok-staging-dlq");
+  assert.equal(result.target_queue, "meltiply-publish-tiktok-staging");
   assert.ok(calls[2].url.endsWith("/target-id/messages"));
   assert.deepEqual(JSON.parse(calls[2].init.body), {
     body,

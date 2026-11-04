@@ -20,11 +20,24 @@ export interface AutomationEnv {
   RECURRING_COMMENTS_ENABLED?: string;
   /** "1" (default) serializes batches; "2" overlaps only distinct Provider accounts. */
   PUBLISH_BATCH_CONCURRENCY?: string;
+  /** Operator force-off for optional improvement reporting; "true" outranks a saved choice. */
+  REPORTING_FORCED_OFF?: string;
+  /** Maintainer PostHog ingestion origin; absent or unusable disables optional reporting. */
+  REPORTING_POSTHOG_HOST?: string;
+  /** Maintainer PostHog publishable project token; ingestion needs no personal API key. */
+  REPORTING_POSTHOG_PROJECT_TOKEN?: string;
   /** Standalone workerd owns sockets per invocation; omitted keeps managed pool reuse. */
   DATABASE_POOL_MODE?: "request";
+  /** Coarse deployment category reported with opt-in improvement events. */
+  DEPLOYMENT_CATEGORY?: string;
   DB_SYSTEM?: Hyperdrive;
   ENVIRONMENT: string;
   LOG_SAMPLE_RATE?: string;
+  MAIL?: SendEmail;
+  MAIL_FROM_ADDRESS?: string;
+  MAIL_FROM_NAME?: string;
+  /** Queue carrying durable notification deliveries to configured recipients. */
+  NOTIFICATIONS_QUEUE?: Queue<unknown>;
   FACEBOOK_CLIENT_ID?: string;
   FACEBOOK_CLIENT_SECRET?: string;
   FACEBOOK_LIVE_ACCEPTED?: string;

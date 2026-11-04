@@ -4,6 +4,8 @@ import type { Context } from "hono";
 import type { ApiWorkerEnvironment } from "./env";
 import { errorResponse } from "./responses";
 
+const queueMembershipPathPattern = /^\/api\/v1\/queues\/[^/]+\/posts\/[^/]+$/;
+
 const CONTENT_WRITE_PREFIXES = [
   "/api/v1/asset-upload-sessions",
   "/api/v1/assets",
@@ -56,8 +58,7 @@ export async function enforceWorkspaceCapabilities(
   }
 
   if (path.startsWith("/api/v1/queues")) {
-    const membershipRemoval =
-      /^\/api\/v1\/queues\/[^/]+\/posts\/[^/]+$/.test(path) && method === "DELETE";
+    const membershipRemoval = queueMembershipPathPattern.test(path) && method === "DELETE";
     const allowed = can(
       actor.role,
       actor.isInstallationOwner,
@@ -79,6 +80,18 @@ export async function enforceWorkspaceCapabilities(
         403,
         "forbidden_role",
         "Your workspace role is read-only.",
+      );
+    }
+    return next();
+  }
+
+  if (path.startsWith("/api/v1/publishing-preferences")) {
+    if (!can(actor.role, actor.isInstallationOwner, "preferences:manage")) {
+      return errorResponse(
+        c.get("requestId"),
+        403,
+        "workspace_admin_required",
+        "The workspace admin role is required.",
       );
     }
     return next();

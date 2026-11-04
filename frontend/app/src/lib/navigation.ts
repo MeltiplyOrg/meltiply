@@ -2,6 +2,8 @@ import type { ComponentType } from "react";
 import { CalendarClock, ChartColumn, PenSquare, Settings, Share2 } from "lucide-react";
 import { useLocation, useSearchParams as useRouterSearchParams } from "react-router";
 
+const leadingSlashPattern = /^\//;
+
 /** A destination in the signed-in workspace; every value owns one implemented route. */
 export type WorkspaceView = "posts" | "analytics" | "channels" | "queues" | "settings";
 
@@ -72,7 +74,7 @@ export function workspaceNavItem(view: WorkspaceView): WorkspaceNavItem {
  * @returns The owning destination, defaulting to `posts`.
  */
 export function resolveWorkspaceView(pathname: string): WorkspaceView {
-  const segment = pathname.replace(/^\//, "").split("/")[0] ?? "";
+  const segment = pathname.replace(leadingSlashPattern, "").split("/")[0] ?? "";
   return WORKSPACE_NAV_ITEMS.find((item) => item.path === `/${segment}`)?.id ?? "posts";
 }
 

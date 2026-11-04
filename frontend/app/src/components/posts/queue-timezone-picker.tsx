@@ -5,12 +5,14 @@ import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
 import { useI18n } from "@/lib/i18n";
 
+const nonAlphanumericPattern = /[^a-z0-9]/g;
+
 const TIMEZONES = ["UTC", ...Intl.supportedValuesOf("timeZone")];
 
 /** Ranks normalized IANA names by exact substring, then ordered character gaps. Spaces, slashes and underscores are interchangeable; missing letters are allowed (e.g. "ktm" finds Asia/Katmandu). Returns null for nonmatches, keeping the finite timezone catalog bounded. */
 function timezoneScore(zone: string, query: string): number | null {
-  const text = zone.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const needle = query.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const text = zone.toLowerCase().replace(nonAlphanumericPattern, "");
+  const needle = query.toLowerCase().replace(nonAlphanumericPattern, "");
   if (!needle) return 0;
   const exact = text.indexOf(needle);
   if (exact >= 0) return exact;
@@ -39,14 +41,18 @@ export function QueueTimezonePicker({
   onChange,
   onOpenChange,
   disabled,
+  label,
 }: {
   value: string;
   onChange: (zone: string) => void;
   /** Lets the owning dialog keep Escape scoped to the panel while it is open. */
   onOpenChange?: (open: boolean) => void;
   disabled: boolean;
+  /** Field label; defaults to the Queue configuration label. */
+  label?: string;
 }) {
   const { t } = useI18n();
+  const fieldLabel = label ?? t("Queue timezone");
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -95,13 +101,13 @@ export function QueueTimezonePicker({
   }
   return (
     <div className="grid min-w-0 gap-1.5">
-      <span className="text-sm">{t("Queue timezone")}</span>
+      <span className="text-sm">{fieldLabel}</span>
       <Button
         ref={triggerRef}
         type="button"
         variant="outline"
         disabled={disabled}
-        aria-label={`${t("Queue timezone")}: ${value}`}
+        aria-label={`${fieldLabel}: ${value}`}
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         className="min-w-0 justify-between font-normal"
@@ -143,7 +149,7 @@ export function QueueTimezonePicker({
           </div>
           <ListBox
             ref={listRef}
-            aria-label={t("Queue timezone")}
+            aria-label={fieldLabel}
             selectionMode="single"
             selectedKeys={[value]}
             items={matches}

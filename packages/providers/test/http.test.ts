@@ -196,21 +196,31 @@ describe("ProviderHttpClient", () => {
   });
 
   it("denies provider redirects instead of following them to an unapproved host", async () => {
-    const cancel = vi.fn();
-    const redirect = new Response(
-      new ReadableStream({
+    // Each request needs its own response double: cancelling a body is
+    // one-shot, so sharing one Response would let the read case satisfy the
+    // write case's cancel assertion without the write path ever running.
+    const redirectResponse = () => {
+      const cancel = vi.fn();
+      return {
         cancel,
-        start(controller) {
-          controller.enqueue(new TextEncoder().encode("secret-elsewhere"));
-        },
-      }),
-      { status: 302, headers: { Location: "https://attacker.example/take" } },
-    );
-    const read = client(async () => redirect).request(context, {
+        response: new Response(
+          new ReadableStream({
+            cancel,
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("secret-elsewhere"));
+            },
+          }),
+          { status: 302, headers: { Location: "https://attacker.example/take" } },
+        ),
+      };
+    };
+    const read = redirectResponse();
+    const write = redirectResponse();
+    const readOperation = client(async () => read.response).request(context, {
       method: "GET",
       url: "https://api.provider.example/status",
     });
-    const write = client(async () => redirect).request(context, {
+    const writeOperation = client(async () => write.response).request(context, {
       method: "POST",
       sideEffectPossible: true,
       url: "https://api.provider.example/publish",
@@ -218,17 +228,20 @@ describe("ProviderHttpClient", () => {
 
     // The Workers runtime has no redirect: "error" mode, so denial is explicit.
     // A redirect is a deterministic provider fault and never a retryable read.
-    await expect(read).rejects.toMatchObject({
+    await expect(readOperation).rejects.toMatchObject({
       failure: {
         classification: "deterministic",
         code: "provider_http_redirect",
         retryable: false,
       },
     });
-    await expect(write).rejects.toMatchObject({
+    await expect(writeOperation).rejects.toMatchObject({
       failure: { code: "provider_http_redirect" },
     });
-    expect(cancel).toHaveBeenCalled();
+    // The unapproved `Location` body must be released on both paths, not just
+    // the read one.
+    expect(read.cancel).toHaveBeenCalledOnce();
+    expect(write.cancel).toHaveBeenCalledOnce();
   });
 
   // Native JSON.parse errors can embed response bytes; internal diagnostics

@@ -1,3 +1,5 @@
+const unsafeIdentifierPattern = /[\u0000-\u001f\u007f\s]/;
+
 // Shared identifier normalization for the Automation Worker (AUD-023):
 // trims and rejects control characters, whitespace, and over-long provider
 // identifiers before they reach provider adapters or the database.
@@ -16,7 +18,7 @@
 export function normalizeIdentifier(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim();
-  return normalized && normalized.length <= 512 && !/[\u0000-\u001f\u007f\s]/.test(normalized)
+  return normalized && normalized.length <= 512 && !unsafeIdentifierPattern.test(normalized)
     ? normalized
     : undefined;
 }

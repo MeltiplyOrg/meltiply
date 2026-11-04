@@ -213,6 +213,10 @@ export interface paths {
          *     database-backed fixed-window authentication rate limit keyed by
          *     action and normalized email/IP.
          *     This installation accepts exactly one owner; subsequent signup is forbidden.
+         *     The optional `workspace_name` is the setup form's chosen name for the
+         *     shared Workspace. It is not an account field: it is stored with the
+         *     bootstrap record and applied once when the canonical Workspace is
+         *     created, so it survives email verification. Ignored for invited sign-ups.
          */
         post: operations["signUpWithEmail"];
         delete?: never;
@@ -738,6 +742,151 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read first-run setup progress
+         * @description Returns the resumable onboarding progress of the current Installation
+         *     Owner. `not_applicable` marks an installation whose Owner predates
+         *     onboarding (an upgrade): those Owners keep normal sign-in and are never
+         *     forced through setup. `in_progress` is the resumable state after the
+         *     first-run account exists and before the final screen is completed.
+         *     `completed` is terminal; the Workspace name is thereafter changed
+         *     through Workspace settings. Installation Owner only — the address is
+         *     resolved from the live session, so authority follows ownership transfer.
+         */
+        get: operations["getOnboarding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Save the reached setup screen
+         * @description Records optional-screen progress independently of reporting choices.
+         *     The step only advances, so an older tab cannot rewind the journey.
+         *     Completed onboarding returns `409 onboarding_complete`; upgraded
+         *     installations return `409 onboarding_not_applicable`. Installation Owner only.
+         */
+        patch: operations["saveOnboarding"];
+        trace?: never;
+    };
+    "/onboarding/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish first-run setup
+         * @description Marks onboarding complete once the Owner enters the Workspace. Optional
+         *     screens, Channel connection, and teammate invitations are independent,
+         *     so a skipped improvement screen or a failed connection cannot block
+         *     completion. Completion never renames the Workspace and is idempotent:
+         *     retries replay the stored response. Installation Owner only.
+         */
+        post: operations["completeOnboarding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/installation/reporting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read installation improvement-reporting policy
+         * @description Returns the Owner's requested choices and the effective outbound status
+         *     of each category, the disclosure version, and whether the deployment can
+         *     transmit at all. Every active member may read this, so the Owner's
+         *     choices and the effective policy stay visible to the whole team.
+         */
+        get: operations["getReportingPolicy"];
+        /**
+         * Change installation improvement-reporting choices
+         * @description Sets the two independent reporting choices. Only the current
+         *     Installation Owner may change them, and authority follows ownership
+         *     transfer. Withdrawing a category discards its unsent reports; enabling
+         *     it again starts a new reporting interval. The response reports the
+         *     requested and effective status of each category, so a deployment
+         *     override or a missing destination is never presented as working
+         *     reporting.
+         */
+        put: operations["updateReportingPreferences"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/installation/reporting/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the one-time discovery-source answer
+         * @description Returns the recorded discovery-source answer and its honest delivery
+         *     state: not shared, locally recorded, queued, or confirmed delivered.
+         *     Owner only.
+         */
+        get: operations["getReportingFeedback"];
+        put?: never;
+        /**
+         * Share the one-time discovery-source answer
+         * @description Shares one answer from the fixed discovery-source enumeration through an
+         *     explicit action. The answer carries its own random response identity and
+         *     never enables either reporting category. Skipping, or answering
+         *     "prefer not to say", shares nothing. A retry reuses the recorded logical
+         *     identity instead of creating a second response.
+         */
+        post: operations["submitReportingFeedback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/installation/reporting/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a sanitized diagnostic report
+         * @description Accepts an authenticated application failure for diagnostic reporting.
+         *     The receiving server re-checks persisted diagnostics consent before any
+         *     third-party transmission, so a browser-provided flag is never authority.
+         *     The report is saved locally and delivered best-effort; the response says
+         *     whether it was queued, not that the destination received it.
+         */
+        post: operations["ingestDiagnosticReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{workspaceId}/audit": {
         parameters: {
             query?: never;
@@ -909,6 +1058,49 @@ export interface paths {
          *     Requires the workspace admin role.
          */
         post: operations["restoreBrandProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publishing-preferences": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read owner publishing preferences
+         * @description Returns the Workspace's persistent publishing timezone, reusable
+         *     signature templates, and notification choices. An untouched Workspace
+         *     returns a null timezone, no templates, both notification events
+         *     disabled, and an empty email recipient list. `email_available` reports
+         *     whether the installation can actually deliver mail; clients must not
+         *     offer a channel when it is false.
+         */
+        get: operations["getPublishingPreferences"];
+        /**
+         * Replace owner publishing preferences
+         * @description Atomically replaces the complete timezone, signature template list, and
+         *     notification choices. A template list carries the full desired order,
+         *     so create, edit, reorder, delete, and default selection are one
+         *     replacement. An enabled email channel requires at least one valid
+         *     recipient. Changing the display timezone never rewrites a stored
+         *     Schedule instant. Requires the workspace admin role.
+         */
+        put: operations["updatePublishingPreferences"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1643,6 +1835,70 @@ export interface paths {
         patch: operations["updateScheduledDistribution"];
         trace?: never;
     };
+    "/distributions/{distribution_id}/broadcast": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path: {
+                distribution_id: components["parameters"]["DistributionId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read encoder credentials and live state
+         * @description Admin and Editor only. Contains secrets; responses are never cached.
+         */
+        get: operations["getBroadcast"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/distributions/{distribution_id}/broadcast/end": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path: {
+                distribution_id: components["parameters"]["DistributionId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End the existing live broadcast
+         * @description Writer-only remote write. A durable per-Distribution reservation fences
+         *     concurrent clients even when they choose different Idempotency-Key values.
+         *     Confirmed results replay after ending; uncertain results stay fenced for inspection.
+         */
+        post: operations["endBroadcast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/distributions/{distribution_id}/retry": {
         parameters: {
             query?: never;
@@ -1888,7 +2144,7 @@ export interface components {
         /** @enum {string} */
         AssetStatus: "pending_upload" | "uploading" | "processing" | "ready" | "failed" | "deleting" | "deleted";
         /** @enum {string} */
-        DistributionStatus: "scheduled" | "queued" | "processing" | "awaiting_provider" | "published" | "failed" | "cancel_requested" | "cancelled" | "needs_reconciliation";
+        DistributionStatus: "scheduled" | "queued" | "processing" | "awaiting_provider" | "delivered" | "published" | "failed" | "cancel_requested" | "cancelled" | "needs_reconciliation";
         /** @enum {string} */
         ReplyStatus: "not_replied" | "queued" | "processing" | "replied" | "failed" | "needs_reconciliation";
         /** @enum {string} */
@@ -1923,6 +2179,8 @@ export interface components {
             /** @constant */
             status: "ok";
             version: string;
+            /** @description Semantic version of the API contract implemented by this installation. */
+            contract_version: string;
             environment: string;
         };
         ReadinessComponent: {
@@ -2014,6 +2272,13 @@ export interface components {
             password: string;
             /** Format: uri */
             callbackURL?: string;
+            /**
+             * @description Initial shared Workspace name from the setup form. Trimmed; applied
+             *     once when the canonical Workspace is created so it survives email
+             *     verification. Omitted keeps the derived default. Ignored for
+             *     invited sign-ups.
+             */
+            workspace_name?: string;
         };
         RequestPasswordResetRequest: {
             /** Format: email */
@@ -2171,6 +2436,39 @@ export interface components {
             suspended_at: string | null;
             suspension_reason: string | null;
         };
+        OnboardingProgress: {
+            /**
+             * @description `not_applicable` marks an installation whose Owner predates
+             *     onboarding and is never forced through setup.
+             * @enum {string}
+             */
+            status: "not_applicable" | "in_progress" | "completed";
+            /**
+             * @description Optional screen the Owner reached. Persisted independently of
+             *     consent, attribution and completion, so a browser restart after
+             *     either skipping or opting in resumes at the same screen.
+             * @enum {string}
+             */
+            step: "improvement" | "ready";
+            /**
+             * @description Canonical shared Workspace name, or null when no Workspace exists
+             *     yet. Reflects a rename performed in Settings.
+             */
+            workspace_name: string | null;
+            /** @description True once the chosen setup name was applied to the Workspace. */
+            workspace_named: boolean;
+            /** Format: date-time */
+            completed_at: string | null;
+        };
+        /** @description Records the reached optional screen in one idempotent write. */
+        OnboardingSaveRequest: {
+            /**
+             * @description Optional screen to record. The step only advances, so a late write
+             *     from an older tab never moves the journey backwards.
+             * @enum {string}
+             */
+            step: "improvement" | "ready";
+        };
         SuspendMemberRequest: {
             reason?: string;
         };
@@ -2190,6 +2488,109 @@ export interface components {
         OwnershipTransferResponse: {
             /** Format: uuid */
             installation_owner_user_id: string;
+        };
+        ReportingCategoryStatus: {
+            /** @description The Installation Owner's stored choice. */
+            requested: boolean;
+            /** @description Whether an outbound report may be sent right now. */
+            effective: boolean;
+            /**
+             * @description Why the category is or is not effective.
+             * @enum {string}
+             */
+            reason: "enabled" | "not_requested" | "destination_unavailable" | "operator_disabled" | "preference_unavailable";
+            /**
+             * Format: date-time
+             * @description When the stored choice was last changed.
+             */
+            decision_at: string | null;
+            /**
+             * Format: date-time
+             * @description Start of the interval this category counts activity over.
+             */
+            interval_started_at: string | null;
+        };
+        ReportingPolicy: {
+            disclosure_version: number;
+            /** @description Whether this deployment has a usable reporting destination. */
+            destination_configured: boolean;
+            /** @description Whether the deployment override disables reporting outright. */
+            operator_forced_off: boolean;
+            /** @description True only for the current Installation Owner. */
+            owner_can_change: boolean;
+            /**
+             * Format: uuid
+             * @description Pseudonymous installation identifier, created on the first opt-in.
+             *     Reports linked by it are pseudonymous, not completely anonymous.
+             */
+            installation_reporting_id: string | null;
+            categories: {
+                usage: components["schemas"]["ReportingCategoryStatus"];
+                diagnostics: components["schemas"]["ReportingCategoryStatus"];
+            };
+        };
+        ReportingPreferencesUpdate: {
+            usage: boolean;
+            diagnostics: boolean;
+        };
+        /**
+         * @description Fixed discovery-source enumeration; there is no free-text answer.
+         * @enum {string}
+         */
+        DiscoverySource: "github" | "search_engine" | "social_media" | "video" | "article_newsletter" | "friend_word_of_mouth" | "ai_assistant" | "other" | "prefer_not_to_say";
+        FeedbackSubmission: {
+            discovery_source: components["schemas"]["DiscoverySource"];
+        };
+        ReportingFeedback: {
+            shared: boolean;
+            discovery_source: components["schemas"]["DiscoverySource"] | null;
+            /** Format: date-time */
+            submitted_at: string | null;
+            /**
+             * @description `not_shared` means no answer was ever submitted, `not_recorded`
+             *     means a local choice was saved without sharing, `pending` means the
+             *     report is queued, and `delivered` means the destination accepted it.
+             * @enum {string}
+             */
+            delivery_status: "not_shared" | "not_recorded" | "pending" | "delivered";
+        };
+        /**
+         * @description Fixed diagnostic class. `provider_failure` marks an expected Provider
+         *     condition the adapter already classified — a normal recoverable outcome
+         *     such as an expired authorization or a rate limit — and is kept separate
+         *     from unexpected application exceptions so expected conditions cannot hide
+         *     defects in Error Tracking. Every other value is an unexpected failure.
+         * @enum {string}
+         */
+        DiagnosticCategory: "unhandled_exception" | "provider_failure" | "request_failure" | "scheduled_job_failure" | "client_exception";
+        /**
+         * @description Canonical Provider failure classification, as the adapter records it.
+         *     Only meaningful with `category: provider_failure`, where it is the
+         *     countable fact behind the condition; no Provider message, status text or
+         *     response body is ever reported.
+         * @enum {string}
+         */
+        ProviderFailureClass: "ambiguous" | "auth" | "deterministic" | "quota" | "rate_limit" | "timeout" | "transient";
+        /** @enum {string} */
+        OperationCategory: "publish" | "analytics" | "inbox" | "auth" | "assets" | "queues" | "installation" | "reporting" | "other";
+        DiagnosticReportSubmission: {
+            category: components["schemas"]["DiagnosticCategory"];
+            operation: components["schemas"]["OperationCategory"];
+            platform?: components["schemas"]["Platform"];
+            provider_failure_class?: components["schemas"]["ProviderFailureClass"];
+            /** @description Error type name; sanitized to a plain identifier. */
+            error_name?: string;
+            /**
+             * @description Raw stack text. Only allowlisted application frames survive
+             *     sanitization; messages, URLs, query strings and identifiers are
+             *     dropped before transport.
+             */
+            error_stack?: string;
+        };
+        DiagnosticReportReceipt: {
+            accepted: boolean;
+            /** @enum {string} */
+            reason: "queued" | "category_disabled";
         };
         AuditEntry: {
             /** Format: uuid */
@@ -2572,11 +2973,12 @@ export interface components {
         };
         /**
          * @description Saved per-Channel settings for one Platform account on this Post.
-         *     attachment_ids selects and orders this Channel's attachment subset:
-         *     null inherits the Post's ordered attachments, [] publishes text only,
-         *     and a list overrides both membership and order. Targets may exist
-         *     before any Distribution; readiness is enforced only when the target
-         *     is scheduled.
+         *     signature is the resolved default signature snapshot this target will
+         *     append; null means no signature. attachment_ids selects and orders this
+         *     Channel's attachment subset: null inherits the Post's ordered
+         *     attachments, [] publishes text only, and a list overrides both
+         *     membership and order. Targets may exist before any Distribution;
+         *     readiness is enforced only when the target is scheduled.
          */
         PostTarget: {
             /** Format: uuid */
@@ -2585,6 +2987,7 @@ export interface components {
             description_override: string | null;
             hashtags: string[];
             provider_options: components["schemas"]["PostProviderOptions"] | null;
+            signature: string | null;
             attachment_ids: string[] | null;
         };
         /**
@@ -2721,9 +3124,12 @@ export interface components {
         };
         /**
          * @description Per-Channel settings to persist for one Platform account.
-         *     attachment_ids: null or omitted inherits the Post's ordered
-         *     attachments, [] publishes text only, and a list overrides membership
-         *     and order for this target. Each account appears at most once.
+         *     signature is the resolved signature snapshot the composer previewed for
+         *     this target; the server stores it verbatim and later template edits do
+         *     not change it. attachment_ids: null or omitted inherits the Post's
+         *     ordered attachments, [] publishes text only, and a list overrides
+         *     membership and order for this target. Each account appears at most
+         *     once.
          */
         PostTargetInput: {
             /** Format: uuid */
@@ -2732,10 +3138,12 @@ export interface components {
             description_override?: string | null;
             hashtags?: string[];
             provider_options?: components["schemas"]["PostProviderOptions"] | null;
+            signature?: string | null;
             attachment_ids?: string[] | null;
         };
         /**
-         * @description Creates one nonempty authoritative draft Post. attachment_ids is the
+         * @description Creates one authoritative draft containing text, Assets, or provider-hosted
+         *     content such as a link, repost, or prepared Live workflow. attachment_ids is the
          *     ordered attachment set; the array order becomes the attachment
          *     positions and each Asset may appear once. References may name Assets
          *     still uploading or processing inside a live upload session of the
@@ -2755,14 +3163,16 @@ export interface components {
             default_text: string;
         } | {
             attachment_ids: unknown[];
+        } | {
+            targets: unknown[];
         };
         /**
          * @description Patch-style save of the same Post. Omitted fields stay unchanged;
          *     attachment_ids replaces the whole ordered set and targets replaces
          *     the saved target set. The request must name the Post's owning Brand
          *     Profile (mismatch is a 422 validation error) and cannot leave the
-         *     Post without text or attachments; claims to Assets already claimed
-         *     for deletion are rejected.
+         *     Post without text, attachments, or provider-hosted content; claims to
+         *     Assets already claimed for deletion are rejected.
          */
         UpdatePostRequest: {
             /**
@@ -2846,6 +3256,14 @@ export interface components {
             platform_post_id: string | null;
             /** Format: uri */
             platform_url: string | null;
+            /** @description The primary Post published, but a secondary share or some requested Instagram content failed. Do not retry the primary publication. */
+            provider_warnings?: ("instagram_crossshare_failed" | "instagram_publish_partial")[];
+            /**
+             * @description Opaque remote reference for a terminal native draft, inbox, or
+             *     experiment handoff. Present only for delivered outcomes; never a
+             *     public Post ID or an encoder/upload credential.
+             */
+            provider_reference?: string;
             /**
              * @description Frozen composition of the newest claimed publish attempt, or null
              *     while no Provider attempt has claimed this Distribution. Once an
@@ -2893,18 +3311,21 @@ export interface components {
         };
         /**
          * @description Immutable resolved composition one Provider publish attempt froze at
-         *     claim time. title and text are the caption the Channel was asked to
-         *     publish after applying its overrides; media is the exact ordered set
-         *     of media identities delivered, each carrying only descriptive facts —
-         *     never storage keys or signed capabilities. An attachment whose
-         *     rendition was not ready at claim keeps its position with null media
-         *     facts instead of silently dropping out of the published order.
+         *     claim time. title, text, and signature are the caption the Channel was
+         *     asked to publish after applying its overrides; media is the exact
+         *     ordered set of media identities delivered, each carrying only
+         *     descriptive facts — never storage keys or signed capabilities. An
+         *     attachment whose rendition was not ready at claim keeps its position
+         *     with null media facts instead of silently dropping out of the
+         *     published order.
          */
         DistributionPublication: {
             /** @description Frozen caption title; empty when the attempt had none. */
             title: string;
             /** @description Frozen caption body; empty for media-only publications. */
             text: string;
+            /** @description Frozen signature appended to the caption, or null. */
+            signature: string | null;
             hashtags: string[];
             /** @description Frozen per-Provider settings the attempt was claimed with. */
             provider_options: components["schemas"]["ProviderPublishOptions"] | null;
@@ -2920,7 +3341,12 @@ export interface components {
         /** @enum {string} */
         TikTokPrivacyLevel: "PUBLIC_TO_EVERYONE" | "MUTUAL_FOLLOW_FRIENDS" | "FOLLOWER_OF_CREATOR" | "SELF_ONLY";
         TikTokPublishOptions: {
-            privacy_level: components["schemas"]["TikTokPrivacyLevel"];
+            /**
+             * @description Inbox sends a native draft for the creator to finish in TikTok; it is not a published Post.
+             * @enum {string}
+             */
+            post_mode?: "direct" | "inbox";
+            privacy_level?: components["schemas"]["TikTokPrivacyLevel"];
             allow_comment: boolean;
             allow_duet: boolean;
             allow_stitch: boolean;
@@ -2929,10 +3355,17 @@ export interface components {
             is_ai_generated: boolean;
             /** @constant */
             music_usage_confirmed: true;
+            /**
+             * @description Only applies to photo posts. When true TikTok adds recommended
+             *     music the creator can later change in the app.
+             */
+            auto_add_music?: boolean;
         };
         /** @enum {string} */
         YouTubePrivacyStatus: "public" | "unlisted" | "private";
         YouTubePublishOptions: {
+            /** @enum {string} */
+            post_type?: "video" | "live";
             made_for_kids: boolean;
             privacy_status?: components["schemas"]["YouTubePrivacyStatus"];
         };
@@ -2944,6 +3377,8 @@ export interface components {
          *     before creating complete TikTokPublishOptions for a Distribution.
          */
         TikTokPostOptions: {
+            /** @enum {string} */
+            post_mode?: "direct" | "inbox";
             privacy_level?: components["schemas"]["TikTokPrivacyLevel"];
             allow_comment: boolean;
             allow_duet: boolean;
@@ -2954,6 +3389,7 @@ export interface components {
             is_ai_generated: boolean;
             /** @constant */
             music_usage_confirmed: true;
+            auto_add_music?: boolean;
         };
         /**
          * @description Saved audience and visibility choices. An omitted made_for_kids is an
@@ -2961,20 +3397,242 @@ export interface components {
          *     boolean before creating YouTubePublishOptions for a Distribution.
          */
         YouTubePostOptions: {
+            /** @enum {string} */
+            post_type?: "video" | "live";
             made_for_kids?: boolean;
             privacy_status?: components["schemas"]["YouTubePrivacyStatus"];
+        };
+        /** @enum {string} */
+        InstagramPostType: "feed" | "reel" | "story";
+        InstagramContentOptions: {
+            alt_text?: string;
+            collaborators?: string[];
+            cover_url?: string;
+            thumb_offset?: number;
+            share_to_feed?: boolean;
+            audio_name?: string;
+            is_ai_generated?: boolean;
+            location_id?: string;
+            user_tags?: {
+                username: string;
+                x?: number;
+                y?: number;
+            }[];
+        };
+        /**
+         * @description Saved Instagram publication choices. A single image defaults to feed
+         *     and a single video defaults to reel; multiple attachments publish as
+         *     one feed carousel. story is supported for a single image or video.
+         *     trial_reel is valid only for a reel and asks Instagram to test the
+         *     reel with non-followers first; trial_graduation applies only with
+         *     trial_reel.
+         */
+        InstagramPostOptions: {
+            content?: components["schemas"]["InstagramContentOptions"];
+            /** @description Per-attachment alt text and user tags in selected attachment order. */
+            media_options?: components["schemas"]["InstagramContentOptions"][];
+            post_type?: components["schemas"]["InstagramPostType"];
+            trial_reel?: boolean;
+            /** @enum {string} */
+            trial_graduation?: "manual" | "performance";
+        };
+        InstagramPublishOptions: {
+            content?: components["schemas"]["InstagramContentOptions"];
+            media_options?: components["schemas"]["InstagramContentOptions"][];
+            post_type?: components["schemas"]["InstagramPostType"];
+            trial_reel?: boolean;
+            /** @enum {string} */
+            trial_graduation?: "manual" | "performance";
+        };
+        /**
+         * @description One reusable signature. body may use {brand_profile}, {platform}, and
+         *     {channel}; the composer resolves them against the actual target before
+         *     saving the Post snapshot.
+         */
+        SignatureTemplate: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            body: string;
+            is_default: boolean;
+            position: number;
+        };
+        NotificationPreferences: {
+            events: {
+                publication_failed: boolean;
+                channel_disconnected: boolean;
+            };
+            channels: {
+                email: components["schemas"]["EmailNotificationChannel"];
+            };
+        };
+        /**
+         * @description Email delivery for enabled notification events. recipients is the
+         *     explicit list of addresses that receive each alert; it is not derived
+         *     from the Installation Owner. A disabled channel may retain recipients
+         *     so they survive a temporary pause.
+         */
+        EmailNotificationChannel: {
+            enabled: boolean;
+            recipients: string[];
+        };
+        /**
+         * @description Persistent Workspace preferences. timezone null means the browser's
+         *     timezone remains in effect. email_available is false when the
+         *     installation has no working mail sender, and clients must not offer to
+         *     enable that channel.
+         */
+        PublishingPreferences: {
+            timezone: string | null;
+            signature_templates: components["schemas"]["SignatureTemplate"][];
+            notifications: components["schemas"]["NotificationPreferences"];
+            email_available: boolean;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PublishingPreferencesUpdate: {
+            timezone: string | null;
+            signature_templates: components["schemas"]["SignatureTemplate"][];
+            notifications: components["schemas"]["NotificationPreferences"];
+        };
+        /** @enum {string} */
+        FacebookPostType: "feed" | "video" | "reel" | "story" | "slideshow" | "crosspost" | "ab_test" | "live";
+        FacebookLinkCard: {
+            /** Format: uri */
+            link: string;
+            /** Format: uri */
+            picture: string;
+            name?: string;
+            description?: string;
+        };
+        /** @description Saved experiment choices; scheduling requires a name, goal, and two to four existing unpublished video IDs including the control. */
+        FacebookABTestOptions: {
+            name?: string;
+            control_video_id?: string;
+            experiment_video_ids?: string[];
+            /** @enum {string} */
+            optimization_goal?: "AVG_TIME_WATCHED" | "COMMENTS" | "IMPRESSIONS" | "IMPRESSIONS_UNIQUE" | "LINK_CLICKS" | "REACTIONS" | "REELS_PLAYS" | "SHARES" | "VIDEO_VIEWS_60S";
+            duration_seconds?: number;
+        };
+        FacebookABTestPostOptions: {
+            name?: string;
+            control_video_id?: string;
+            experiment_video_ids?: string[];
+            /** @enum {string} */
+            optimization_goal?: "AVG_TIME_WATCHED" | "COMMENTS" | "IMPRESSIONS" | "IMPRESSIONS_UNIQUE" | "LINK_CLICKS" | "REACTIONS" | "REELS_PLAYS" | "SHARES" | "VIDEO_VIEWS_60S";
+            duration_seconds?: number;
+        };
+        /** @description Saved Page publishing intent, including incomplete link cards and experiments. Scheduling enforces complete method-specific inputs. */
+        FacebookPostOptions: {
+            post_type?: components["schemas"]["FacebookPostType"];
+            /** @enum {string} */
+            delivery_mode?: "publish" | "draft";
+            link?: string;
+            link_cards?: {
+                link?: string;
+                picture?: string;
+                name?: string;
+                description?: string;
+            }[];
+            crossposted_video_id?: string;
+            ab_test?: components["schemas"]["FacebookABTestPostOptions"];
+        };
+        /**
+         * @description Page publication method. One video defaults to a Reel; text and photos
+         *     default to feed. Links and link cards require a media-free feed target.
+         *     Live broadcasts require an external encoder, not an uploaded Asset.
+         */
+        FacebookPublishOptions: {
+            post_type?: components["schemas"]["FacebookPostType"];
+            /**
+             * @description Native Page drafts are terminal delivered outcomes, never Published. Not available for Stories, live broadcasts, or experiments.
+             * @enum {string}
+             */
+            delivery_mode?: "publish" | "draft";
+            /** Format: uri */
+            link?: string;
+            link_cards?: components["schemas"]["FacebookLinkCard"][];
+            crossposted_video_id?: string;
+            ab_test?: components["schemas"]["FacebookABTestOptions"];
+        };
+        /** @description Native Threads publishing options. Reposts have no caption or Assets. Poll, GIF, long-text and ghost posts are text-only. */
+        ThreadsPostOptions: {
+            /** @enum {string} */
+            post_type?: "post" | "poll" | "long_text" | "gif" | "ghost" | "quote" | "reply" | "repost";
+            repost_id?: string;
+            quote_post_id?: string;
+            reply_to_id?: string;
+            poll_attachment?: {
+                option_a?: string;
+                option_b?: string;
+                option_c?: string;
+                option_d?: string;
+            };
+            gif_attachment?: {
+                gif_id?: string;
+                /** @enum {string} */
+                provider: "GIPHY";
+            };
+            text_attachment?: {
+                plaintext?: string;
+                link_attachment_url?: string;
+                text_with_styling_info?: {
+                    offset: number;
+                    length: number;
+                    styling_info: ("bold" | "italic" | "highlight" | "underline" | "strikethrough")[];
+                }[];
+            };
+            text_entities?: {
+                /** @enum {string} */
+                entity_type: "SPOILER";
+                offset: number;
+                length: number;
+            }[];
+            link_attachment?: string;
+            topic_tag?: string;
+            is_ghost_post?: boolean;
+            is_spoiler_media?: boolean;
+            is_made_with_ai?: boolean;
+            alt_text?: string;
+            /** @enum {string} */
+            reply_control?: "everyone" | "accounts_you_follow" | "mentioned_only" | "parent_post_author_only" | "followers_only";
+            enable_reply_approvals?: boolean;
+            allowlisted_country_codes?: string[];
+            location_id?: string;
+            crossreshare_to_ig?: boolean;
+            crossreshare_to_ig_dark_mode?: boolean;
+        };
+        ThreadsPublishOptions: components["schemas"]["ThreadsPostOptions"] & {
+            poll_attachment?: {
+                option_a: string;
+                option_b: string;
+                option_c?: string;
+                option_d?: string;
+            };
+            gif_attachment?: {
+                gif_id: string;
+            };
+            text_attachment?: {
+                plaintext: string;
+            };
         };
         /**
          * @description Provider choices saved on a Post, including incomplete drafts.
          *     Scheduling validates completeness before creating publication options.
          */
         PostProviderOptions: {
+            threads?: components["schemas"]["ThreadsPostOptions"];
+            facebook?: components["schemas"]["FacebookPostOptions"];
             tiktok?: components["schemas"]["TikTokPostOptions"];
             youtube?: components["schemas"]["YouTubePostOptions"];
+            instagram?: components["schemas"]["InstagramPostOptions"];
         };
         ProviderPublishOptions: {
+            threads?: components["schemas"]["ThreadsPublishOptions"];
+            facebook?: components["schemas"]["FacebookPublishOptions"];
             tiktok?: components["schemas"]["TikTokPublishOptions"];
             youtube?: components["schemas"]["YouTubePublishOptions"];
+            instagram?: components["schemas"]["InstagramPublishOptions"];
         };
         UpdateDistributionRequest: {
             /** Format: date-time */
@@ -3487,6 +4145,7 @@ export interface operations {
                      * @example {
                      *       "status": "ok",
                      *       "version": "01JZRELEASE",
+                     *       "contract_version": "1.0.0",
                      *       "environment": "staging"
                      *     }
                      */
@@ -4499,6 +5158,218 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    getOnboarding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current onboarding progress. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingProgress"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    saveOnboarding: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OnboardingSaveRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated onboarding progress. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingProgress"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    completeOnboarding: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Completed onboarding progress. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingProgress"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getReportingPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Member-readable reporting policy. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingPolicy"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    updateReportingPreferences: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportingPreferencesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated policy with effective status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getReportingFeedback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Attribution state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingFeedback"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    submitReportingFeedback: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackSubmission"];
+            };
+        };
+        responses: {
+            /** @description Attribution state, including delivery status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingFeedback"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    ingestDiagnosticReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiagnosticReportSubmission"];
+            };
+        };
+        responses: {
+            /** @description Ingestion decision. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiagnosticReportReceipt"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listWorkspaceAudit: {
         parameters: {
             query?: {
@@ -4794,6 +5665,75 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             429: components["responses"]["RateLimited"];
+        };
+    };
+    getPublishingPreferences: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current publishing preferences. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishingPreferences"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    updatePublishingPreferences: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublishingPreferencesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Preferences replaced. */
+            200: {
+                headers: {
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishingPreferences"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
         };
     };
     listPlatformCapabilities: {
@@ -6079,6 +7019,98 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
+        };
+    };
+    getBroadcast: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path: {
+                distribution_id: components["parameters"]["DistributionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current provider broadcast state and owner-scoped RTMPS credentials. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        state: "ready" | "testing" | "live" | "ended";
+                        ingestUrl?: string;
+                        streamKey?: string;
+                        providerUrl?: string;
+                        providerPostId?: string;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["RateLimited"];
+            502: components["responses"]["UpstreamError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    endBroadcast: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                distribution_id: components["parameters"]["DistributionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider confirmed the broadcast ended. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        ended: true;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["RateLimited"];
+            502: components["responses"]["UpstreamError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     retryDistribution: {

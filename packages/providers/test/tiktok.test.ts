@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   createTikTokAdapter,
   ProviderAdapterError,
-  ProviderRegistry,
   type ProviderRequestContext,
   type PublishInput,
 } from "../src";
@@ -117,31 +116,80 @@ function publishInput(patch: Partial<PublishInput> = {}): PublishInput {
 }
 
 describe("createTikTokAdapter", () => {
-  it("advertises only the implemented TikTok Direct Post subset", () => {
-    const provider = adapter(vi.fn<typeof fetch>());
-    expect(provider.capability).toMatchObject({
-      accepted_mime_types: ["image/jpeg", "image/webp", "video/mp4", "video/quicktime"],
-      analytics: true,
-      asset_types: ["image", "video"],
-      comments: false,
-      connect_available: true,
-      max_caption_length: 2_200,
-      max_file_size: 500 * 1024 * 1024,
-      max_hashtags: 30,
-      max_video_duration_sec: 600,
-      max_media_count: 35,
-      min_media_count: 1,
-      multi_asset_types: ["image"],
-      platform: "tiktok",
-      publish: true,
-      reply: false,
-    });
-    expect(provider.getPublicationRequirements).toBeTypeOf("function");
-    expect(provider.listAnalytics).toBeTypeOf("function");
-    expect(provider.listComments).toBeUndefined();
-    expect(provider.reply).toBeUndefined();
-    expect(() => new ProviderRegistry().register("tiktok", provider)).not.toThrow();
-  });
+  it.each(["video", "photo"] as const)(
+    "delivers a %s inbox draft without claiming publication",
+    async (kind) => {
+      const calls = sequence(
+        (url, init) => {
+          const body = JSON.parse(String(init.body));
+          if (kind === "video") {
+            expect(url.pathname).toBe("/v2/post/publish/inbox/video/init/");
+            expect(body).toEqual({
+              source_info: {
+                source: "PULL_FROM_URL",
+                video_url: `${mediaUrlPrefix}org/asset/video.mp4`,
+              },
+            });
+          } else {
+            expect(url.pathname).toBe("/v2/post/publish/content/init/");
+            expect(body).toMatchObject({
+              post_mode: "MEDIA_UPLOAD",
+              media_type: "PHOTO",
+              is_aigc: true,
+            });
+            expect(body.post_info).not.toHaveProperty("privacy_level");
+          }
+          return success({ publish_id: "inbox-draft-1" });
+        },
+        () => success({ status: "SEND_TO_USER_INBOX" }),
+      );
+      const provider = adapter(calls.fetcher);
+      const input = publishInput();
+      input.providerOptions!.tiktok!.postMode = "inbox";
+      delete input.providerOptions!.tiktok!.privacyLevel;
+      if (kind === "photo") {
+        input.media = [
+          {
+            contentType: "image/jpeg",
+            fileSize: 100,
+            mode: "remote_ingest",
+            metadata: { width: 1080, height: 1080 },
+            url: `${mediaUrlPrefix}org/asset/photo.jpg`,
+          },
+        ];
+      }
+      const submitted = await provider.publish!(context, credentials, input);
+      expect(submitted).toEqual({
+        outcome: "confirmed_success",
+        providerOperationId: "inbox:inbox-draft-1",
+      });
+      await expect(provider.lookupPublication!(context, credentials, submitted)).resolves.toEqual({
+        state: "delivered",
+        result: {
+          outcome: "confirmed_success",
+          delivery: "inbox",
+          providerOperationId: "inbox:inbox-draft-1",
+        },
+      });
+    },
+  );
+  it.each(["123456", "7493812345678901234"])(
+    "retains the exact numeric public Post ID %s",
+    async (id) => {
+      const calls = sequence(
+        () =>
+          new Response(
+            `{"data":{"status":"PUBLISH_COMPLETE","publicaly_available_post_id":[${id}]},"error":{"code":"ok"}}`,
+            { headers: { "Content-Type": "application/json" } },
+          ),
+      );
+      await expect(
+        adapter(calls.fetcher).lookupPublication!(context, credentials, {
+          providerOperationId: "publish:publish-one",
+        }),
+      ).resolves.toMatchObject({ state: "published", result: { providerPostId: id } });
+    },
+  );
 
   it("builds the exact state-bound TikTok web authorization URL", () => {
     const provider = adapter(vi.fn<typeof fetch>());
@@ -160,6 +208,7 @@ describe("createTikTokAdapter", () => {
         "user.info.profile",
         "user.info.stats",
         "video.publish",
+        "video.upload",
         "video.list",
       ]),
     );
@@ -184,6 +233,7 @@ describe("createTikTokAdapter", () => {
     "user.info.basic,user.info.profile,user.info.stats,video.publish,video.list",
     "user.info.basic,user.info.profile,video.publish",
     "user.info.basic,user.info.profile,video.publish,video.list",
+    "user.info.basic,user.info.profile,video.upload",
   ])("connects with granted scopes %s and binds the token open ID", async (grantedScopes) => {
     const providerCalls = sequence(
       (url, init) => {
@@ -428,7 +478,120 @@ describe("createTikTokAdapter", () => {
     ]);
   });
 
-  it("submits one JPEG through the photo Direct Post surface", async () => {
+  it("adds recommended music only when a photo target asks for it", async () => {
+    const photoUrl = `${mediaUrlPrefix}org/asset/photo.jpg?signature=safe`;
+    const providerCalls = sequence(
+      () => creator({ duet_disabled: true, stitch_disabled: true }),
+      () => success({ publish_id: "p_pub_url~v2.789" }),
+    );
+    const result = await adapter(providerCalls.fetcher).publish!(
+      context,
+      credentials,
+      publishInput({
+        caption: "Photo launch",
+        media: [
+          {
+            contentType: "image/jpeg",
+            fileSize: 1024,
+            metadata: { height: 1080, width: 1080 },
+            mode: "remote_ingest",
+            url: photoUrl,
+          },
+        ],
+        providerOptions: {
+          tiktok: {
+            allowComment: true,
+            allowDuet: false,
+            allowStitch: false,
+            autoAddMusic: true,
+            brandContent: false,
+            brandOrganic: true,
+            isAiGenerated: false,
+            musicUsageConfirmed: true,
+            privacyLevel: "SELF_ONLY",
+          },
+        },
+      }),
+    );
+    expect(result).toEqual({
+      outcome: "confirmed_success",
+      providerOperationId: "publish:p_pub_url~v2.789",
+    });
+    const body = JSON.parse(String(providerCalls.calls[1]!.init.body)) as {
+      post_info: { auto_add_music?: boolean };
+    };
+    expect(body.post_info.auto_add_music).toBe(true);
+  });
+
+  it("accepts a 1080p portrait photo rather than requiring a square image", async () => {
+    const calls = sequence(
+      () => creator(),
+      (url) => {
+        expect(url.pathname).toBe("/v2/post/publish/content/init/");
+        return success({ publish_id: "portrait-photo" });
+      },
+    );
+    await expect(
+      adapter(calls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          caption: "Portrait photo",
+          media: [
+            {
+              contentType: "image/jpeg",
+              fileSize: 1024,
+              mode: "remote_ingest",
+              metadata: { width: 1080, height: 1920 },
+              url: `${mediaUrlPrefix}org/asset/portrait.jpg`,
+            },
+          ],
+          providerOptions: {
+            tiktok: {
+              allowComment: false,
+              allowDuet: false,
+              allowStitch: false,
+              brandContent: false,
+              brandOrganic: false,
+              isAiGenerated: false,
+              musicUsageConfirmed: true,
+              privacyLevel: "SELF_ONLY",
+            },
+          },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      outcome: "confirmed_success",
+      providerOperationId: "publish:portrait-photo",
+    });
+  });
+
+  it("rejects automatic music on a video target instead of dropping the choice", async () => {
+    const providerCalls = sequence(() => creator());
+    await expect(
+      adapter(providerCalls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          providerOptions: {
+            tiktok: {
+              allowComment: true,
+              allowDuet: true,
+              allowStitch: true,
+              autoAddMusic: true,
+              brandContent: false,
+              brandOrganic: false,
+              isAiGenerated: false,
+              musicUsageConfirmed: true,
+              privacyLevel: "PUBLIC_TO_EVERYONE",
+            },
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ failure: { code: "tiktok_auto_music_video_unsupported" } });
+  });
+
+  it.each([false, true])("submits a JPEG photo with AI disclosure %s", async (isAiGenerated) => {
     const photoUrl = `${mediaUrlPrefix}org/asset/photo.jpg?signature=safe`;
     const providerCalls = sequence(
       () => creator({ duet_disabled: true, stitch_disabled: true }),
@@ -436,6 +599,7 @@ describe("createTikTokAdapter", () => {
         expect(url.pathname).toBe("/v2/post/publish/content/init/");
         expect(JSON.parse(String(init.body))).toEqual({
           media_type: "PHOTO",
+          is_aigc: isAiGenerated,
           post_info: {
             auto_add_music: false,
             brand_content_toggle: false,
@@ -473,7 +637,7 @@ describe("createTikTokAdapter", () => {
           allowStitch: false,
           brandContent: false,
           brandOrganic: true,
-          isAiGenerated: false,
+          isAiGenerated,
           musicUsageConfirmed: true,
           privacyLevel: "SELF_ONLY",
         },
@@ -540,34 +704,6 @@ describe("createTikTokAdapter", () => {
         ],
       }),
       "tiktok_video_invalid",
-    ],
-    [
-      "AI-generated photo when the photo API cannot declare it",
-      publishInput({
-        caption: "Photo",
-        media: [
-          {
-            contentType: "image/webp",
-            fileSize: 1024,
-            metadata: { height: 1080, width: 1080 },
-            mode: "remote_ingest",
-            url: `${mediaUrlPrefix}org/asset/photo.webp?signature=safe`,
-          },
-        ],
-        providerOptions: {
-          tiktok: {
-            allowComment: false,
-            allowDuet: false,
-            allowStitch: false,
-            brandContent: false,
-            brandOrganic: false,
-            isAiGenerated: true,
-            musicUsageConfirmed: true,
-            privacyLevel: "SELF_ONLY",
-          },
-        },
-      }),
-      "tiktok_photo_invalid",
     ],
   ])("rejects %s", async (_label, input, code) => {
     const providerCalls = sequence(() => creator());
@@ -737,9 +873,11 @@ describe("createTikTokAdapter", () => {
     );
     await expect(
       adapter(providerCalls.fetcher).refreshAccessToken!(context, "refresh-original"),
-    ).resolves.toMatchObject({
+    ).resolves.toEqual({
       accessToken: "access-rotated",
+      expiresAt: "2026-07-20T00:00:00.000Z",
       refreshToken: "refresh-rotated",
+      scopes: [],
     });
   });
 

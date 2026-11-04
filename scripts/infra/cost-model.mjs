@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+const billingMonthPattern = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
+
 const defaultInput = resolve(import.meta.dirname, "cost-model-inputs.json");
 const datePattern = /^\d{4}-\d{2}-\d{2}$/u;
 const roundingModes = new Set(["ceil_billable", "ceil_usage", "continuous"]);
@@ -420,8 +422,7 @@ const neonFields = {
   "endpoint.max_cu": (value) => nonnegative(value) && value > 0,
   "endpoint.min_cu": nonnegative,
   "recent_month.billed_compute_cu_hours": nonnegative,
-  "recent_month.month": (value) =>
-    typeof value === "string" && /^\d{4}-(?:0[1-9]|1[0-2])$/u.test(value),
+  "recent_month.month": (value) => typeof value === "string" && billingMonthPattern.test(value),
   "recent_month.wall_clock_hours": (value) => nonnegative(value) && value > 0,
 };
 

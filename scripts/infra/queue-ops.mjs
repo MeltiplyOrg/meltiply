@@ -3,6 +3,8 @@ import { pathToFileURL } from "node:url";
 
 import { readBoundedJsonResponse } from "../release/release-http.mjs";
 
+const queueNamePattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
 const MAXIMUM_API_RESPONSE_BYTES = 1024 * 1024;
 
 export const KNOWN_QUEUE_WORKLOADS = Object.freeze([
@@ -10,6 +12,7 @@ export const KNOWN_QUEUE_WORKLOADS = Object.freeze([
   "asset-processing",
   "channel-revocation",
   "comments",
+  "notifications",
   "publish-facebook",
   "publish-instagram",
   "publish-threads",
@@ -115,7 +118,7 @@ export function parseQueueArguments(argv) {
 
   const environment = values.get("environment")?.trim();
   const workload = values.get("workload")?.trim();
-  if (!environment || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(environment)) {
+  if (!environment || !queueNamePattern.test(environment)) {
     throw new TypeError("--environment must be a DNS-safe environment name");
   }
   if (!workload || !workloads.has(workload)) {

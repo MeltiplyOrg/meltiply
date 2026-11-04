@@ -18,6 +18,8 @@ import {
 } from "@meltiply/providers";
 import { normalizeIdentifier } from "./validation";
 
+const controlCharactersPattern = /[\u0000-\u001f\u007f]/;
+
 export interface ProviderAccountReadTarget {
   connectionStatus: string;
   platform: Platform;
@@ -44,6 +46,7 @@ export interface ProviderReadTarget {
   platform: Platform;
   providerAccountId?: string;
   providerPostId: string;
+  providerOperationId?: string;
   storedAccessToken: string;
   tokenExpiresAt: Date | null;
 }
@@ -183,7 +186,7 @@ function cursor(value: unknown): string | undefined {
   return typeof value === "string" &&
     value.length > 0 &&
     value.length <= 4_096 &&
-    !/[\u0000-\u001f\u007f]/.test(value)
+    !controlCharactersPattern.test(value)
     ? value
     : undefined;
 }
@@ -454,7 +457,12 @@ export function executeProviderAnalyticsEffect(
               accessToken,
               ...(target.providerAccountId ? { accountId: target.providerAccountId } : {}),
             },
-            { providerPostId: target.providerPostId },
+            {
+              providerPostId: target.providerPostId,
+              ...(target.providerOperationId
+                ? { providerOperationId: target.providerOperationId }
+                : {}),
+            },
             {
               ...(target.cursor ? { cursor: target.cursor } : {}),
               limit: 100,

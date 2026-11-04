@@ -15,6 +15,7 @@ on:
           - cloudflare-full
           - managed-release
           - device-authorization
+          - versioned-contract
           - object-storage
           - publishing-queues
           - publishing-flow
@@ -113,7 +114,7 @@ jobs:
         run: |
           bun run --filter frontend-app type-check
           bun run --cwd frontend/app test src/lib/browser-cache.test.tsx --coverage.enabled=false
-          node --test scripts/infra/cost-model.test.mjs scripts/infra/queue-ops.test.mjs scripts/infra/queue-alert.test.mjs scripts/benchmarks/backend/placement-compare.test.mjs
+          node --test scripts/infra/cost-model.test.mjs scripts/infra/queue-ops.test.mjs scripts/infra/queue-alert.test.mjs
       - name: Exercise authenticated request and Worker ownership changes
         if: inputs.lane == 'performance-backend'
         env:
@@ -127,7 +128,7 @@ jobs:
           bun run --cwd workers/api test:integration test/better-auth.integration.test.ts test/permission-matrix.integration.test.ts test/query-budget.integration.test.ts test/analytics-history.integration.test.ts
           bun run --cwd workers/automation test:integration test/comment-policy.integration.test.ts
           node --test scripts/infra/cost-model.test.mjs
-          node --test scripts/infra/queue-ops.test.mjs scripts/infra/queue-alert.test.mjs scripts/benchmarks/backend/placement-compare.test.mjs
+          node --test scripts/infra/queue-ops.test.mjs scripts/infra/queue-alert.test.mjs
           bunx --no-install tsc --project scripts/selfhost/tsconfig.json
           bunx --no-install wrangler deploy workers/automation/test-support/queue-capacity.ts --config workers/automation/wrangler.test.jsonc --dry-run --outdir artifacts/queue-capacity-worker
           trap 'rm -f scripts/selfhost/.queue-capacity-check.mjs' EXIT
@@ -201,7 +202,7 @@ jobs:
             exit 1
           fi
       - name: Prepare full gate database
-        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'managed-release' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'managed-release' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke' || inputs.lane == 'versioned-contract'
         run: bun run setup --skip-dependencies --skip-image-pull
       - name: Exercise every provider connection through real state and persistence
 
@@ -215,7 +216,7 @@ jobs:
             --outfile=scripts/selfhost/.oauth-connection-check.mjs
           node scripts/selfhost/.oauth-connection-check.mjs
       - name: Validate complete application contract
-        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'managed-release' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'managed-release' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'versioned-contract'
         run: bun run cloudflare:check
       - name: Validate managed release infrastructure
         if: (success() || failure()) && inputs.lane == 'managed-release'
@@ -366,6 +367,13 @@ jobs:
             await rm(outDir, { recursive: true, force: true });
           }
           NODE
+      - name: Exercise versioned release artifacts and public health
+        if: inputs.lane == 'versioned-contract'
+        run: |
+          bun run release:test
+          bun run contract:release:artifacts
+          node packages/contracts/scripts/contract-smoke.mjs
+          bun run docs:links
       - name: Observe cold, warm, concurrent, and lifecycle cache behavior in workerd
         if: inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         env:
@@ -382,7 +390,7 @@ jobs:
           trap 'rm -f scripts/selfhost/.requirements-cache-check.mjs' EXIT
           bun build scripts/selfhost/requirements-cache-check.ts --target=node --external miniflare --external pg --outfile=scripts/selfhost/.requirements-cache-check.mjs
           REQUIREMENTS_SMOKE_BUNDLE=artifacts/cache-provider-worker/requirements-smoke.js node scripts/selfhost/.requirements-cache-check.mjs
-          node scripts/benchmarks/backend/cache-runtime-check.mjs
+          node scripts/cloudflare-local/cache-smoke.mjs
       - name: Verify managed review guidance
         if: inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         run: |
@@ -653,6 +661,12 @@ jobs:
             kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
             rm -f "$RUNNER_TEMP/device-backend.pid"
           fi
+      - name: Start fresh browser acceptance database
+        # The complete application gate deliberately exercises ownership
+        # transfer, suspension, and quota-boundary fixtures. Browser acceptance
+        # needs the deterministic seed, not the gate's exhausted state.
+        if: inputs.lane == 'cloudflare-full'
+        run: bash scripts/cloudflare-local/database.sh reset
       - name: Exercise navigation focus and reconnect assignment in the browser
         if: inputs.lane == 'cloudflare-full'
         env:
@@ -662,6 +676,31 @@ jobs:
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
           bun run --cwd frontend/app test:e2e e2e/workspace-design.spec.ts --project workspace \
             --grep "keeps navigation focus and reconnect assignment correct" --trace on
+      - name: Exercise first-run setup and opt-in reporting
+        if: inputs.lane == 'cloudflare-full'
+        env:
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+          MELTIPLY_E2E_ACCEPTANCE: "1"
+          # Controlled loopback receiver the journey starts itself; the
+          # acceptance configs point both Workers at the same origin.
+          MELTIPLY_E2E_EGRESS_URL: http://127.0.0.1:9787
+          # Origin of the API Worker, which exposes the acceptance scheduled
+          # trigger the journey uses to drain the real reporting queue.
+          MELTIPLY_E2E_API_BASE_URL: http://127.0.0.1:8787
+        run: |
+          bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+          status=0
+          # The journey resumes optional onboarding for the seeded Owner, so it
+          # needs the deterministic seed from the reset above, not an empty
+          # installation. It disables screenshots and traces itself because it
+          # types a password and a session credential; assertions are its
+          # evidence, and this step must not add capture flags back.
+          bun run --cwd frontend/app test:e2e e2e/onboarding-reporting.spec.ts \
+            --project onboarding --trace off --retries 0 || status=1
+          # Nothing from this journey is published: no screenshot, trace, or
+          # captured report body may leave the runner.
+          rm -rf frontend/app/test-results/onboarding-reporting*
+          exit "$status"
       - uses: actions/setup-go@v6
         if: inputs.lane == 'object-storage'
         with:
@@ -856,17 +895,43 @@ jobs:
           bun run --cwd frontend/public preview --host 127.0.0.1 --port 4321 &
           public_pid=$!
           trap 'kill "$public_pid" 2>/dev/null || true' EXIT
-          bun run --cwd frontend/app test:e2e e2e/workspace-design.spec.ts e2e/analytics.spec.ts --project workspace --trace on
+          bun run --cwd frontend/app test:e2e e2e/workspace-design.spec.ts e2e/analytics.spec.ts e2e/public-site.spec.ts --project workspace --trace on
       - name: Inspect UI design mechanics
         if: inputs.lane == 'frontend-ui'
         run: node .agents/skills/impeccable/scripts/detect.mjs --json frontend/app/src/components/layout frontend/app/src/components/primitives/sidebar-nav.tsx frontend/shared/tokens.css frontend/public/src/styles
       - name: Check production performance without rebuilding
         if: inputs.lane == 'frontend-full'
         working-directory: frontend/app
+        env:
+          WRANGLER_DEV_ALLOWED_ORIGINS: http://127.0.0.1:3000
+          WRANGLER_DEV_APP_URL: http://127.0.0.1:3000
         run: |
-          setsid bun run --no-install vp preview --host 127.0.0.1 --port 3000 --strictPort >/tmp/meltiply-preview.log 2>&1 &
+          mkdir -p ../../artifacts/performance
+          # The production preview proxies /api/* to the local Worker. Measure a
+          # working application, not a preview whose auth reads fail with 502.
+          setsid ../../scripts/cloudflare-local/dev-backend.sh >../../artifacts/performance/backend.log 2>&1 &
+          backend_pid=$!
+          # Cloudflare compresses text assets at the edge; the Vite preview does
+          # not. Serve the built client with production-like brotli/gzip so the
+          # budget measures the application rather than an encoding artifact.
+          setsid node ../../scripts/ci/lighthouse-preview.mjs --root dist/client --port 3000 >../../artifacts/performance/preview.log 2>&1 &
           preview_pid=$!
-          trap 'kill -TERM -- "-$preview_pid" 2>/dev/null || true' EXIT
+          cleanup() {
+            kill -TERM -- "-$preview_pid" 2>/dev/null || true
+            kill -TERM -- "-$backend_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          backend_ready=false
+          for _ in $(seq 1 180); do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:8787/api/v1/health >/dev/null 2>&1; then backend_ready=true; break; fi
+            if ! kill -0 "$backend_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$backend_ready" != true ]; then
+            echo "API did not report healthy within 180s" >&2
+            cat ../../artifacts/performance/backend.log >&2
+            exit 1
+          fi
           preview_ready=false
           for _ in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:3000/posts >/dev/null; then preview_ready=true; break; fi
@@ -875,7 +940,7 @@ jobs:
           done
           if [ "$preview_ready" != true ]; then
             echo "Preview did not report ready within 60s" >&2
-            cat /tmp/meltiply-preview.log >&2
+            cat ../../artifacts/performance/preview.log >&2
             exit 1
           fi
           ../../scripts/ci/lighthouse.sh http://127.0.0.1:3000/posts ../../artifacts/performance/lighthouse.json

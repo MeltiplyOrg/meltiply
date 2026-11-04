@@ -120,25 +120,37 @@ test("bootstrap creates missing configurations without exposing credentials", as
     ["GET", "POST", "GET", "POST"],
   );
   const requestBodies = calls.flatMap(({ init }) => (init.body ? [JSON.parse(init.body)] : []));
-  assert.deepEqual(
-    requestBodies.map(({ caching, name, origin_connection_limit }) => ({
-      caching,
-      name,
-      origin_connection_limit,
-    })),
-    [
-      {
-        caching: { disabled: true },
-        name: "meltiply-authenticated-staging",
-        origin_connection_limit: 20,
+  // The origin block is what makes a Hyperdrive configuration usable: a body
+  // that named the configuration but omitted its database host/user/password
+  // must fail here rather than at first query.
+  assert.deepEqual(requestBodies, [
+    {
+      caching: { disabled: true },
+      name: "meltiply-authenticated-staging",
+      origin: {
+        database: "meltiply",
+        host: "db.example.test",
+        password: "authenticated-secret",
+        port: 5432,
+        scheme: "postgres",
+        user: "meltiply_rls",
       },
-      {
-        caching: { disabled: true },
-        name: "meltiply-system-staging",
-        origin_connection_limit: 20,
+      origin_connection_limit: 20,
+    },
+    {
+      caching: { disabled: true },
+      name: "meltiply-system-staging",
+      origin: {
+        database: "meltiply",
+        host: "db.example.test",
+        password: "system-secret",
+        port: 5432,
+        scheme: "postgres",
+        user: "meltiply_system",
       },
-    ],
-  );
+      origin_connection_limit: 20,
+    },
+  ]);
   assert.ok(
     calls.every(({ url }) =>
       ["authenticated-secret", "system-secret"].every((secret) => !url.includes(secret)),

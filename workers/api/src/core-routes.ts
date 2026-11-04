@@ -7,10 +7,17 @@ import {
   createProviderRegistryFromEnvironment,
   createProviderServiceLive,
   failureDiagnostic,
+  facebookOptimizationGoals,
   ProviderAdapterError,
   ProviderService,
+  parseThreadsPostOptions,
+  parseInstagramContent,
   type OAuthConnection,
   type OAuthExchangeResult,
+  type FacebookPostType,
+  type FacebookPublishOptions,
+  type InstagramPostType,
+  type InstagramTrialGraduation,
   type ProviderPublicationRequirements,
   type ProviderRegistry,
   type TikTokPrivacyLevel,
@@ -34,6 +41,7 @@ import type {
   SchedulePostInput,
 } from "./post-types";
 import type { PublishingQueueApiService } from "./publishing-queue-service";
+import type { PublishingPreferencesApiService } from "./publishing-preferences-service";
 import { registerPublishingQueueRoutes } from "./publishing-queue-routes";
 import type { StorageService } from "./effect/services/storage";
 import { scheduleInboxCommentSync } from "./inbox-comment-sync";
@@ -44,6 +52,7 @@ import {
   type WorkspaceLifecycleDependencies,
 } from "./workspace-lifecycle";
 import { errorResponse, jsonResponse } from "./responses";
+import { broadcastControlEffect } from "./broadcast-service";
 import {
   analyticsFormatParam,
   analyticsMetricParam,
@@ -81,6 +90,13 @@ import { runRouteEffect } from "./effect/runtime";
 import { fromPromise } from "./effect/route";
 import type { OAuthConnectionOwner } from "./oauth-connection";
 
+const weakEtagPrefixPattern = /^W\//;
+const base64PaddingPattern = /=+$/;
+const base64UrlPattern = /^[A-Za-z0-9_-]+$/;
+const unsafeMediaKeyPattern = /[/\\\p{Cc}]/u;
+const expiryPattern = /^\d{1,15}$/;
+const deterministicDatabaseErrorPattern = /^(22|23)[0-9A-Z]{3}$/;
+
 type Schemas = components["schemas"];
 
 export interface CoreRouteDependencies {
@@ -88,6 +104,7 @@ export interface CoreRouteDependencies {
   brandProfileService?: BrandProfileApiService;
   coreService?: CoreApiService;
   postService?: PostApiService;
+  publishingPreferencesService?: PublishingPreferencesApiService;
   publishingQueueService?: PublishingQueueApiService;
   providerRegistry?: ProviderRegistry;
   publicationRequirements?: PublicationRequirementsReader;
@@ -176,7 +193,7 @@ function entityTagMatches(header: string | undefined, current: string): boolean 
   return (
     header?.split(",").some((candidate) => {
       const value = candidate.trim();
-      return value === "*" || value.replace(/^W\//, "") === current;
+      return value === "*" || value.replace(weakEtagPrefixPattern, "") === current;
     }) ?? false
   );
 }
@@ -268,10 +285,231 @@ function providerOptionsField(body: Record<string, unknown>): PostProviderOption
     throw new CoreApiError(400, "validation_error", "provider_options must be an object.");
   }
   const options = value as Record<string, unknown>;
-  onlyKeys(options, ["tiktok", "youtube"]);
+  onlyKeys(options, ["facebook", "tiktok", "youtube", "instagram", "threads"]);
+  const threads =
+    options.threads === undefined ? undefined : parseThreadsPostOptions(options.threads);
+  if (threads === null)
+    throw new CoreApiError(400, "validation_error", "provider_options.threads is invalid.");
   return {
+    ...(threads !== undefined ? { threads } : {}),
+    ...(options.facebook !== undefined ? { facebook: facebookOptionsField(options.facebook) } : {}),
+    ...(options.instagram !== undefined
+      ? { instagram: instagramOptionsField(options.instagram) }
+      : {}),
     ...(options.tiktok !== undefined ? { tiktok: tiktokOptionsField(options.tiktok) } : {}),
     ...(options.youtube !== undefined ? { youtube: youtubeOptionsField(options.youtube) } : {}),
+  };
+}
+
+/**
+ * Validates Page method and link-carousel choices without requiring media-ready
+ * draft content. Attachment/method compatibility is checked before scheduling.
+ */
+function facebookOptionsField(value: unknown): FacebookPublishOptions {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new CoreApiError(400, "validation_error", "provider_options.facebook must be an object.");
+  }
+  const facebook = value as Record<string, unknown>;
+  onlyKeys(facebook, [
+    "post_type",
+    "delivery_mode",
+    "link",
+    "link_cards",
+    "crossposted_video_id",
+    "ab_test",
+  ]);
+  const postType =
+    facebook.post_type === undefined
+      ? undefined
+      : enumParam(
+          stringField(facebook, "post_type"),
+          "post_type",
+          new Set<FacebookPostType>([
+            "feed",
+            "video",
+            "reel",
+            "story",
+            "slideshow",
+            "crosspost",
+            "ab_test",
+            "live",
+          ]),
+        );
+  const cards = facebook.link_cards;
+  if (cards !== undefined && (!Array.isArray(cards) || cards.length > 5)) {
+    throw new CoreApiError(
+      400,
+      "validation_error",
+      "link_cards must contain at most five draft cards.",
+    );
+  }
+  if (facebook.post_type !== undefined && !postType) {
+    throw new CoreApiError(400, "validation_error", "post_type is invalid.");
+  }
+  const deliveryMode =
+    facebook.delivery_mode === undefined
+      ? undefined
+      : enumParam(
+          stringField(facebook, "delivery_mode"),
+          "delivery_mode",
+          new Set<"publish" | "draft">(["publish", "draft"]),
+        );
+  if (facebook.delivery_mode !== undefined && !deliveryMode) {
+    throw new CoreApiError(400, "validation_error", "delivery_mode is invalid.");
+  }
+  const crosspostedVideoId =
+    facebook.crossposted_video_id === undefined
+      ? undefined
+      : stringField(facebook, "crossposted_video_id");
+  if (crosspostedVideoId !== undefined && crosspostedVideoId.length > 255) {
+    throw new CoreApiError(400, "validation_error", "crossposted_video_id is invalid.");
+  }
+  const link = facebook.link === undefined ? undefined : stringField(facebook, "link");
+  if (link !== undefined && link.length > 2048)
+    throw new CoreApiError(400, "validation_error", "The Page link is too long.");
+  return {
+    ...(postType ? { postType } : {}),
+    ...(deliveryMode !== undefined ? { deliveryMode } : {}),
+    ...(crosspostedVideoId !== undefined ? { crosspostedVideoId } : {}),
+    ...(facebook.ab_test !== undefined
+      ? { abTest: facebookABTestOptionsField(facebook.ab_test) }
+      : {}),
+    ...(link !== undefined ? { link } : {}),
+    ...(Array.isArray(cards)
+      ? {
+          linkCards: cards.map((value: unknown) => {
+            if (!value || typeof value !== "object" || Array.isArray(value)) {
+              throw new CoreApiError(400, "validation_error", "Each link card must be an object.");
+            }
+            const card = value as Record<string, unknown>;
+            onlyKeys(card, ["link", "picture", "name", "description"]);
+            const name = card.name === undefined ? undefined : stringField(card, "name");
+            const description =
+              card.description === undefined ? undefined : stringField(card, "description");
+            const link = card.link === undefined ? "" : stringField(card, "link");
+            const picture = card.picture === undefined ? "" : stringField(card, "picture");
+            if (link.length > 2048 || picture.length > 2048)
+              throw new CoreApiError(400, "validation_error", "The link card URL is too long.");
+            if (
+              (name !== undefined && name.length > 200) ||
+              (description !== undefined && description.length > 5000)
+            ) {
+              throw new CoreApiError(400, "validation_error", "The link card text is too long.");
+            }
+            return {
+              link,
+              picture,
+              ...(name !== undefined ? { name } : {}),
+              ...(description !== undefined ? { description } : {}),
+            };
+          }),
+        }
+      : {}),
+  };
+}
+
+/**
+ * Bounds supplied experiment fields while preserving unanswered draft choices.
+ * Publishing separately requires two to four draft videos and a member control.
+ */
+function facebookABTestOptionsField(value: unknown): NonNullable<FacebookPublishOptions["abTest"]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new CoreApiError(400, "validation_error", "ab_test must be an object.");
+  }
+  const test = value as Record<string, unknown>;
+  onlyKeys(test, [
+    "name",
+    "control_video_id",
+    "experiment_video_ids",
+    "optimization_goal",
+    "duration_seconds",
+  ]);
+  const name = test.name === undefined ? undefined : stringField(test, "name");
+  const controlVideoId =
+    test.control_video_id === undefined ? undefined : stringField(test, "control_video_id");
+  const experimentVideoIds = stringArrayField(test, "experiment_video_ids");
+  const optimizationGoal =
+    test.optimization_goal === undefined
+      ? undefined
+      : enumParam(
+          stringField(test, "optimization_goal"),
+          "optimization_goal",
+          new Set(facebookOptimizationGoals),
+        );
+  const durationSeconds =
+    test.duration_seconds === undefined
+      ? undefined
+      : positiveIntegerField(test, "duration_seconds");
+  if (
+    (name !== undefined && name.length > 200) ||
+    (controlVideoId !== undefined && controlVideoId.length > 255) ||
+    (test.optimization_goal !== undefined && !optimizationGoal) ||
+    (experimentVideoIds !== undefined &&
+      (experimentVideoIds.length > 4 || experimentVideoIds.some((id) => id.length > 255))) ||
+    (durationSeconds !== undefined && durationSeconds > 604800)
+  ) {
+    throw new CoreApiError(400, "validation_error", "The A/B test options are invalid.");
+  }
+  return {
+    ...(name !== undefined ? { name } : {}),
+    ...(controlVideoId !== undefined ? { controlVideoId } : {}),
+    ...(experimentVideoIds !== undefined ? { experimentVideoIds } : {}),
+    ...(optimizationGoal !== undefined ? { optimizationGoal } : {}),
+    ...(durationSeconds !== undefined ? { durationSeconds } : {}),
+  };
+}
+
+/**
+ * Validates and normalizes the `provider_options.instagram` subtree.
+ *
+ * Accepts an unanswered post type for drafts while rejecting unknown enum
+ * values, non-boolean trial flags, and a graduation strategy without a trial.
+ * Scheduling validates that the chosen shape matches the actual media set.
+ *
+ * @param value - Raw `provider_options.instagram` value from the request payload.
+ * @returns Saved Instagram choices with camelCase fields.
+ * @throws {CoreApiError} 400 `validation_error` if option keys or types violate schema rules.
+ */
+function instagramOptionsField(value: unknown): NonNullable<PostProviderOptions["instagram"]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new CoreApiError(
+      400,
+      "validation_error",
+      "provider_options.instagram must be an object.",
+    );
+  }
+  const instagram = value as Record<string, unknown>;
+  onlyKeys(instagram, ["post_type", "trial_reel", "trial_graduation", "content", "media_options"]);
+  const content =
+    instagram.content === undefined ? undefined : parseInstagramContent(instagram.content);
+  const mediaOptions =
+    instagram.media_options === undefined
+      ? undefined
+      : Array.isArray(instagram.media_options) && instagram.media_options.length <= 20
+        ? instagram.media_options.map(parseInstagramContent)
+        : null;
+  if (content === null || mediaOptions === null || mediaOptions?.some((item) => item === null)) {
+    throw new CoreApiError(400, "validation_error", "Instagram content metadata is invalid.");
+  }
+  const postType = instagram.post_type;
+  const trialGraduation = instagram.trial_graduation;
+  if (
+    (postType !== undefined &&
+      (typeof postType !== "string" || !["feed", "reel", "story"].includes(postType))) ||
+    (instagram.trial_reel !== undefined && typeof instagram.trial_reel !== "boolean") ||
+    (trialGraduation !== undefined &&
+      (typeof trialGraduation !== "string" || !["manual", "performance"].includes(trialGraduation)))
+  ) {
+    throw new CoreApiError(400, "validation_error", "provider_options.instagram is invalid.");
+  }
+  return {
+    ...(content !== undefined ? { content } : {}),
+    ...(mediaOptions ? { mediaOptions: mediaOptions.filter((item) => item !== null) } : {}),
+    ...(postType !== undefined ? { postType: postType as InstagramPostType } : {}),
+    ...(instagram.trial_reel !== undefined ? { trialReel: instagram.trial_reel } : {}),
+    ...(trialGraduation !== undefined
+      ? { trialGraduation: trialGraduation as InstagramTrialGraduation }
+      : {}),
   };
 }
 
@@ -292,6 +530,7 @@ function tiktokOptionsField(value: unknown): NonNullable<PostProviderOptions["ti
   const tiktok = value as Record<string, unknown>;
   onlyKeys(tiktok, [
     "privacy_level",
+    "post_mode",
     "allow_comment",
     "allow_duet",
     "allow_stitch",
@@ -300,8 +539,17 @@ function tiktokOptionsField(value: unknown): NonNullable<PostProviderOptions["ti
     "is_ai_generated",
     "music_usage_confirmed",
     "disclose_commercial_content",
+    "auto_add_music",
   ]);
   const privacyLevel = tiktok.privacy_level;
+  const postMode =
+    tiktok.post_mode === undefined
+      ? undefined
+      : enumParam(
+          stringField(tiktok, "post_mode"),
+          "post_mode",
+          new Set<"direct" | "inbox">(["direct", "inbox"]),
+        );
   const booleanKeys = [
     "allow_comment",
     "allow_duet",
@@ -311,17 +559,20 @@ function tiktokOptionsField(value: unknown): NonNullable<PostProviderOptions["ti
     "is_ai_generated",
   ] as const;
   if (
+    (tiktok.post_mode !== undefined && !postMode) ||
     (privacyLevel !== undefined &&
       (typeof privacyLevel !== "string" ||
         !TIKTOK_PRIVACY_LEVELS.has(privacyLevel as TikTokPrivacyLevel))) ||
     (tiktok.disclose_commercial_content !== undefined &&
       typeof tiktok.disclose_commercial_content !== "boolean") ||
+    (tiktok.auto_add_music !== undefined && typeof tiktok.auto_add_music !== "boolean") ||
     booleanKeys.some((key) => typeof tiktok[key] !== "boolean") ||
     tiktok.music_usage_confirmed !== true
   ) {
     throw new CoreApiError(400, "validation_error", "provider_options.tiktok is invalid.");
   }
   return {
+    ...(postMode !== undefined ? { postMode } : {}),
     allowComment: tiktok.allow_comment as boolean,
     allowDuet: tiktok.allow_duet as boolean,
     allowStitch: tiktok.allow_stitch as boolean,
@@ -329,6 +580,7 @@ function tiktokOptionsField(value: unknown): NonNullable<PostProviderOptions["ti
     brandOrganic: tiktok.brand_organic as boolean,
     isAiGenerated: tiktok.is_ai_generated as boolean,
     musicUsageConfirmed: true,
+    ...(typeof tiktok.auto_add_music === "boolean" ? { autoAddMusic: tiktok.auto_add_music } : {}),
     ...(privacyLevel !== undefined ? { privacyLevel: privacyLevel as TikTokPrivacyLevel } : {}),
     ...(typeof tiktok.disclose_commercial_content === "boolean"
       ? { discloseCommercialContent: tiktok.disclose_commercial_content }
@@ -353,9 +605,12 @@ function youtubeOptionsField(value: unknown): NonNullable<PostProviderOptions["y
     throw new CoreApiError(400, "validation_error", "provider_options.youtube must be an object.");
   }
   const youtube = value as Record<string, unknown>;
-  onlyKeys(youtube, ["made_for_kids", "privacy_status"]);
+  onlyKeys(youtube, ["made_for_kids", "privacy_status", "post_type"]);
   const privacyStatus = youtube.privacy_status;
   if (
+    (youtube.post_type !== undefined &&
+      youtube.post_type !== "video" &&
+      youtube.post_type !== "live") ||
     (youtube.made_for_kids !== undefined && typeof youtube.made_for_kids !== "boolean") ||
     (privacyStatus !== undefined &&
       (typeof privacyStatus !== "string" ||
@@ -364,6 +619,9 @@ function youtubeOptionsField(value: unknown): NonNullable<PostProviderOptions["y
     throw new CoreApiError(400, "validation_error", "provider_options.youtube is invalid.");
   }
   return {
+    ...(youtube.post_type === "video" || youtube.post_type === "live"
+      ? { postType: youtube.post_type }
+      : {}),
     ...(typeof youtube.made_for_kids === "boolean" ? { madeForKids: youtube.made_for_kids } : {}),
     ...(privacyStatus !== undefined
       ? { privacyStatus: privacyStatus as YouTubePrivacyStatus }
@@ -418,14 +676,20 @@ function postTarget(body: Record<string, unknown>): PostTargetInput {
     "description_override",
     "hashtags",
     "provider_options",
+    "signature",
     "attachment_ids",
   ]);
+  const signature = optionalStringField(body, "signature");
+  if (signature !== null && signature !== undefined && signature.length > 1_000) {
+    throw new CoreApiError(400, "validation_error", "signature is too long.");
+  }
   return {
     attachmentIds: uuidArrayField(body, "attachment_ids"),
     descriptionOverride: optionalStringField(body, "description_override"),
     hashtags: stringArrayField(body, "hashtags"),
     platformAccountId: uuidParam(stringField(body, "platform_account_id"), "platform_account_id"),
     providerOptions: providerOptionsField(body),
+    signature: signature ?? null,
     titleOverride: optionalStringField(body, "title_override"),
   };
 }
@@ -487,6 +751,124 @@ function postComposition(body: Record<string, unknown>): {
 }
 
 /**
+ * Parses a complete publishing-preferences replacement.
+ *
+ * The document is intentionally whole-document: template create, edit,
+ * reorder, delete, and default selection are one authoritative write, so a
+ * partial merge can never leave two defaults or a stale position.
+ *
+ * @param body - Raw JSON body.
+ * @returns Validated replacement document with contract field names.
+ * @throws {CoreApiError} 400 when keys, types, or bounds violate the contract.
+ */
+function publishingPreferencesInput(
+  body: Record<string, unknown>,
+): components["schemas"]["PublishingPreferencesUpdate"] {
+  onlyKeys(body, ["timezone", "signature_templates", "notifications"]);
+  const timezone = body.timezone;
+  if (timezone !== null && typeof timezone !== "string") {
+    throw new CoreApiError(400, "validation_error", "timezone must be a string or null.");
+  }
+  if (typeof timezone === "string" && (timezone.length === 0 || timezone.length > 100)) {
+    throw new CoreApiError(400, "validation_error", "timezone is invalid.");
+  }
+  const rawTemplates = body.signature_templates;
+  if (!Array.isArray(rawTemplates) || rawTemplates.length > 10) {
+    throw new CoreApiError(
+      400,
+      "validation_error",
+      "signature_templates must be an array of at most 10 templates.",
+    );
+  }
+  const signatureTemplates = rawTemplates.map((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new CoreApiError(400, "validation_error", "Each signature template must be an object.");
+    }
+    const template = value as Record<string, unknown>;
+    onlyKeys(template, ["id", "name", "body", "is_default", "position"]);
+    if (
+      typeof template.id !== "string" ||
+      typeof template.name !== "string" ||
+      typeof template.body !== "string" ||
+      typeof template.is_default !== "boolean"
+    ) {
+      throw new CoreApiError(400, "validation_error", "Signature template fields are invalid.");
+    }
+    return {
+      body: template.body,
+      id: template.id,
+      is_default: template.is_default,
+      name: template.name,
+      position: typeof template.position === "number" ? template.position : 0,
+    };
+  });
+  const rawNotifications = body.notifications;
+  if (
+    !rawNotifications ||
+    typeof rawNotifications !== "object" ||
+    Array.isArray(rawNotifications)
+  ) {
+    throw new CoreApiError(400, "validation_error", "notifications must be an object.");
+  }
+  const notifications = rawNotifications as Record<string, unknown>;
+  onlyKeys(notifications, ["events", "channels"]);
+  if (
+    !notifications.events ||
+    typeof notifications.events !== "object" ||
+    Array.isArray(notifications.events) ||
+    !notifications.channels ||
+    typeof notifications.channels !== "object" ||
+    Array.isArray(notifications.channels)
+  ) {
+    throw new CoreApiError(
+      400,
+      "validation_error",
+      "Notification events and channels are required.",
+    );
+  }
+  const events = notifications.events as Record<string, unknown>;
+  const channels = notifications.channels as Record<string, unknown>;
+  onlyKeys(events, ["publication_failed", "channel_disconnected"]);
+  onlyKeys(channels, ["email"]);
+  const email = channels.email;
+  if (!email || typeof email !== "object" || Array.isArray(email)) {
+    throw new CoreApiError(400, "validation_error", "Notification email must be an object.");
+  }
+  const emailChannel = email as Record<string, unknown>;
+  onlyKeys(emailChannel, ["enabled", "recipients"]);
+  if (
+    typeof events.publication_failed !== "boolean" ||
+    typeof events.channel_disconnected !== "boolean" ||
+    typeof emailChannel.enabled !== "boolean" ||
+    !Array.isArray(emailChannel.recipients) ||
+    emailChannel.recipients.length > 20 ||
+    emailChannel.recipients.some((recipient) => typeof recipient !== "string")
+  ) {
+    throw new CoreApiError(
+      400,
+      "validation_error",
+      "Notification choices must include booleans and a recipient array.",
+    );
+  }
+  return {
+    notifications: {
+      channels: {
+        email: {
+          enabled: emailChannel.enabled,
+          recipients: emailChannel.recipients as string[],
+        },
+      },
+      events: {
+        channel_disconnected: events.channel_disconnected,
+        publication_failed: events.publication_failed,
+      },
+    },
+    signature_templates: signatureTemplates,
+    timezone,
+  };
+}
+
+/**
  * Obtains a Durable Object stub for managing OAuth state and CSRF tokens.
  *
  * Partitions Durable Object instances by deterministic organization routing key.
@@ -541,7 +923,7 @@ function oauthCallbackUrl(env: ApiWorkerEnv, provider: Platform): string {
 function base64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(base64PaddingPattern, "");
 }
 
 /**
@@ -615,7 +997,7 @@ function providerMediaPayload(expiresAtSeconds: number, key: string): string {
  * @returns Decoded bytes, or undefined when the text is not well-formed Base64url.
  */
 function base64UrlDecode(value: string): Uint8Array | undefined {
-  if (!/^[A-Za-z0-9_-]+$/.test(value)) return undefined;
+  if (!base64UrlPattern.test(value)) return undefined;
   const base64 = value.replaceAll("-", "+").replaceAll("_", "/");
   try {
     const binary = atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4));
@@ -695,7 +1077,7 @@ function providerMediaKey(pathname: string): string | undefined {
       segment === ".." ||
       // Decoded separators would let one segment smuggle extra path depth past the
       // split, and control characters can hide traversal in downstream tooling.
-      /[/\\\p{Cc}]/u.test(segment)
+      unsafeMediaKeyPattern.test(segment)
     ) {
       return undefined;
     }
@@ -840,6 +1222,16 @@ export function registerCoreRoutes(
       module.createPostApiService(registry().capabilities()),
     );
     return postServicePromise;
+  };
+  let preferencesServicePromise: Promise<PublishingPreferencesApiService> | undefined;
+  const preferences = async (): Promise<PublishingPreferencesApiService> => {
+    if (dependencies.publishingPreferencesService) {
+      return dependencies.publishingPreferencesService;
+    }
+    preferencesServicePromise ??= import("./publishing-preferences-service").then((module) =>
+      module.createPublishingPreferencesApiService(),
+    );
+    return preferencesServicePromise;
   };
 
   app.get("/api/v1/brand-profiles", (c) =>
@@ -1133,7 +1525,7 @@ export function registerCoreRoutes(
     const key = providerMediaKey(c.req.path);
     const expires = c.req.query("expires");
     const signature = c.req.query("signature");
-    const expiresAt = expires && /^\d{1,15}$/.test(expires) ? Number(expires) : NaN;
+    const expiresAt = expires && expiryPattern.test(expires) ? Number(expires) : NaN;
     if (
       !key ||
       !signature ||
@@ -1971,7 +2363,7 @@ export function registerCoreRoutes(
                 typeof databaseCause === "object" &&
                 "code" in databaseCause &&
                 typeof databaseCause.code === "string" &&
-                /^(22|23)[0-9A-Z]{3}$/.test(databaseCause.code);
+                deterministicDatabaseErrorPattern.test(databaseCause.code);
               if (failure instanceof CoreApiError || deterministicDatabaseFailure) {
                 yield* fromPromise(() =>
                   oauthStateStub(c.env, routingKey).releaseSelectionClaim(
@@ -2323,6 +2715,40 @@ export function registerCoreRoutes(
         });
         return jsonResponse(distributions, 200, requestId(c));
       }),
+    ),
+  );
+
+  app.get("/api/v1/distributions/:distributionId/broadcast", (c) =>
+    runRouteEffect(
+      c,
+      Effect.gen(function* () {
+        const session = c.get("actor").claims;
+        const details = yield* broadcastControlEffect(
+          c.env,
+          session,
+          yield* fromPromise(() => uuidParam(c.req.param("distributionId"), "distribution_id")),
+          requestId(c),
+          { kind: "read" },
+        );
+        return jsonResponse(details, 200, requestId(c), { "Cache-Control": "no-store" });
+      }).pipe(Effect.provide(createProviderServiceLive(registry()))),
+    ),
+  );
+
+  app.post("/api/v1/distributions/:distributionId/broadcast/end", (c) =>
+    runRouteEffect(
+      c,
+      Effect.gen(function* () {
+        const session = c.get("actor").claims;
+        const result = yield* broadcastControlEffect(
+          c.env,
+          session,
+          yield* fromPromise(() => uuidParam(c.req.param("distributionId"), "distribution_id")),
+          requestId(c),
+          { kind: "end", key: yield* fromPromise(() => idempotencyKey(c)) },
+        );
+        return jsonResponse(result, 200, requestId(c), { "Cache-Control": "no-store" });
+      }).pipe(Effect.provide(createProviderServiceLive(registry()))),
     ),
   );
 
@@ -2687,6 +3113,33 @@ export function registerCoreRoutes(
           requestId(c),
         );
         return jsonResponse(result.value, 202, requestId(c), {
+          ...idempotencyHeaders(result.replayed),
+        });
+      }),
+    ),
+  );
+
+  app.get("/api/v1/publishing-preferences", (c) =>
+    runRouteEffect(
+      c,
+      Effect.gen(function* () {
+        const service = yield* fromPromise(preferences);
+        const value = yield* service.get(c.env, c.get("actor").claims);
+        return jsonResponse(value, 200, requestId(c));
+      }),
+    ),
+  );
+
+  app.put("/api/v1/publishing-preferences", (c) =>
+    runRouteEffect(
+      c,
+      Effect.gen(function* () {
+        const body = yield* fromPromise(() => jsonBody(c));
+        const input = yield* fromPromise(() => publishingPreferencesInput(body));
+        const key = yield* fromPromise(() => idempotencyKey(c));
+        const service = yield* fromPromise(preferences);
+        const result = yield* service.replace(c.env, c.get("actor").claims, input, key);
+        return jsonResponse(result.value, 200, requestId(c), {
           ...idempotencyHeaders(result.replayed),
         });
       }),

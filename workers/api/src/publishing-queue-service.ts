@@ -16,7 +16,9 @@ import { lockOrganizationEffect } from "./organization-lock";
 import { assembleSinglePostEffect, lockPostEffect } from "./post-service";
 import {
   mapQueue,
+  queueColumns,
   readQueueEffect,
+  requireQueueEffect,
   releaseQueueMembershipEffect,
   type QueueRow,
   type PublishingQueue,
@@ -75,7 +77,7 @@ export function createPublishingQueueApiService(): PublishingQueueApiService {
           const organizationId = yield* activeOrganizationIdEffect(client);
           yield* requireActiveBrandProfileEffect(client, organizationId, brandProfileId);
           const rows = yield* client.query<QueueRow>(
-            "SELECT * FROM publishing_queues WHERE brand_profile_id = $1 AND deleted_at IS NULL AND ($2::uuid IS NULL OR id > $2) ORDER BY id LIMIT $3",
+            `SELECT ${queueColumns} FROM publishing_queues WHERE brand_profile_id = $1 AND deleted_at IS NULL AND ($2::uuid IS NULL OR id > $2) ORDER BY id LIMIT $3`,
             [brandProfileId, cursor ?? null, limit + 1],
           );
           const items = rows.rows.slice(0, limit).map(mapQueue);
@@ -142,7 +144,7 @@ export function createPublishingQueueApiService(): PublishingQueueApiService {
             let value: PublishingQueue | null = null;
             if (action === "create") {
               const result = yield* client.query<QueueRow>(
-                "INSERT INTO publishing_queues (org_id, brand_profile_id, name, timezone, slots) VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING *",
+                `INSERT INTO publishing_queues (org_id, brand_profile_id, name, timezone, slots) VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING ${queueColumns}`,
                 [
                   organizationId,
                   input.brand_profile_id,
@@ -153,15 +155,15 @@ export function createPublishingQueueApiService(): PublishingQueueApiService {
               );
               value = mapQueue(result.rows[0]!);
             } else {
-              const current = yield* readQueueEffect(client, id!, input.brand_profile_id);
               if (action === "delete") {
+                yield* requireQueueEffect(client, id!, input.brand_profile_id);
                 const pending = yield* client.query<{ exists: boolean }>(
                   `SELECT EXISTS (
                 SELECT 1 FROM publishing_queue_memberships m
                  WHERE m.queue_id = $1 AND m.released_at IS NULL
                    AND (NOT EXISTS (SELECT 1 FROM distributions d WHERE d.post_id = m.post_id)
                      OR EXISTS (SELECT 1 FROM distributions d WHERE d.post_id = m.post_id
-                       AND d.status NOT IN ('published', 'failed', 'cancelled')))
+                       AND d.status NOT IN ('delivered', 'published', 'failed', 'cancelled')))
               ) AS exists`,
                   [id],
                 );
@@ -178,8 +180,9 @@ export function createPublishingQueueApiService(): PublishingQueueApiService {
                   [id],
                 );
               } else {
+                const current = yield* readQueueEffect(client, id!, input.brand_profile_id);
                 const result = yield* client.query<QueueRow>(
-                  "UPDATE publishing_queues SET name = $2, timezone = $3, slots = $4::jsonb, updated_at = now() WHERE id = $1 RETURNING *",
+                  `UPDATE publishing_queues SET name = $2, timezone = $3, slots = $4::jsonb, updated_at = now() WHERE id = $1 RETURNING ${queueColumns}`,
                   [
                     id,
                     input.name ?? current.name,
@@ -235,8 +238,8 @@ export function createPublishingQueueApiService(): PublishingQueueApiService {
             );
             if (replay) return { replayed: true, value: replay.response_body as Schemas["Post"] };
             yield* lockOrganizationEffect(client, organizationId);
-            const post = yield* lockPostEffect(client, postId);
-            yield* readQueueEffect(client, queueId, brandProfileId);
+            const post = yield* lockPostEffect(client, postId, true);
+            yield* requireQueueEffect(client, queueId, brandProfileId);
             if (
               post.brand_profile_id !== brandProfileId ||
               post.queue_membership?.queue_id !== queueId

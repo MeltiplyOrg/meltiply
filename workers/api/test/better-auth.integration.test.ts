@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { createHmac } from "node:crypto";
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
@@ -34,15 +35,19 @@ if (!connectionString) {
  * system-only), so `DB_SYSTEM` must reach the privileged local role rather
  * than the authenticated fixture URL.
  */
-const baseSystemConnectionString =
-  "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const baseSystemConnectionString = integrationDatabaseUrl(
+  process.env.MELTIPLY_DATABASE_TEST_URL,
+  "system",
+);
 const isolatedDatabase = new URL(baseSystemConnectionString);
 isolatedDatabase.searchParams.set("options", "-c search_path=auth_lifecycle,public");
 const systemConnectionString = isolatedDatabase.href;
 const setupSecret = crypto.randomUUID() + crypto.randomUUID();
-const adminConnectionString =
-  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
-  "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const adminConnectionString = integrationDatabaseUrl(
+  connectionString,
+  "admin",
+  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL,
+);
 const adminPool = createHyperdrivePool({ connectionString: adminConnectionString });
 
 // Exercise the actual migrated auth tables and indexes without taking ownership
@@ -64,6 +69,7 @@ beforeAll(async () => {
     "twoFactor",
     "users",
     "workspace_invitations",
+    "installation_bootstrap",
   ]) {
     await adminPool.query(
       `CREATE TABLE auth_lifecycle."${table}" (LIKE public."${table}" INCLUDING ALL)`,
@@ -80,7 +86,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await systemPoolFor(systemEnv()).query(
-    `TRUNCATE "user", "session", "account", "verification", "twoFactor", users, workspace_invitations`,
+    `TRUNCATE "user", "session", "account", "verification", "twoFactor", users, workspace_invitations, installation_bootstrap`,
   );
 });
 
@@ -741,8 +747,10 @@ describe("bootstrap and invite-only sign-up", () => {
     expect(first.status).toBe(200);
 
     // Once actor resolution has claimed the first account, public sign-up is
-    // closed. Simulate that durable state directly: the auth surface reads the
-    // internal owner marker, not a Better Auth column.
+    // closed. That gate reads `EXISTS (SELECT 1 FROM "user")` — the Better Auth
+    // identity table — which `first` above already populated. The internal
+    // owner row below is irrelevant to the gate; it is inserted so later
+    // invitation assertions run against a realistic installation owner.
     await systemPoolFor(systemEnv()).query(
       `INSERT INTO users (id, auth_user_id, email, display_name, installation_owner)
        VALUES ($1, $2, $3, 'Owner', TRUE)`,
@@ -799,6 +807,56 @@ describe("bootstrap and invite-only sign-up", () => {
     expect(stored.rows).toEqual([{ plaintext: false, stored: true }]);
   });
 
+  it("captures the chosen Workspace name as bootstrap data without storing it on the account", async () => {
+    const auth = await betterAuthFor(localTestEnv(recordingMailBinding()));
+    const body = {
+      email: emails.localUnverified,
+      name: "Owner",
+      password: crypto.randomUUID(),
+      workspace_name: "  Acme Studio  ",
+    };
+    const created = await authPost(auth, "/api/auth/sign-up/email", body);
+    expect(created.status).toBe(200);
+    const subject = recordOf(recordOf(await created.json()).user).id;
+    if (typeof subject !== "string") throw new Error("sign-up must return a user id");
+
+    // The setup name is trimmed and stored as bootstrap data, not as a Better
+    // Auth user field, so the library's user record stays exactly name/email.
+    const bootstrap = await systemPoolFor(systemEnv()).query<{ workspace_name: string }>(
+      "SELECT workspace_name FROM installation_bootstrap WHERE auth_user_id = $1",
+      [subject],
+    );
+    expect(bootstrap.rows).toEqual([{ workspace_name: "Acme Studio" }]);
+    const account = await systemPoolFor(systemEnv()).query<{ name: string }>(
+      `SELECT name FROM "user" WHERE id = $1`,
+      [subject],
+    );
+    expect(account.rows).toEqual([{ name: "Owner" }]);
+  });
+
+  it("rejects an invalid Workspace name before any account or bootstrap row exists", async () => {
+    const auth = await betterAuthFor(localTestEnv(recordingMailBinding()));
+    const created = await authPost(auth, "/api/auth/sign-up/email", {
+      email: emails.localUnverified,
+      name: "Owner",
+      password: crypto.randomUUID(),
+      workspace_name: "   ",
+    });
+    expect(created.status).toBe(400);
+    expect(await created.json()).toMatchObject({
+      message: expect.stringContaining("workspace_name"),
+    });
+
+    const accounts = await systemPoolFor(systemEnv()).query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "user"`,
+    );
+    expect(accounts.rows[0]?.count).toBe("0");
+    const bootstrap = await systemPoolFor(systemEnv()).query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM installation_bootstrap",
+    );
+    expect(bootstrap.rows[0]?.count).toBe("0");
+  });
+
   it("serializes concurrent first registrations so only one account is created", async () => {
     const auth = await betterAuthFor(localTestEnv(recordingMailBinding()));
     const password = crypto.randomUUID();
@@ -845,7 +903,10 @@ describe("bootstrap and invite-only sign-up", () => {
       [authUserId, email],
     );
     const signIn = await authPost(auth, "/api/auth/sign-in/email", { email, password });
-    expect(signIn.status).toBeGreaterThanOrEqual(400);
+    // The session hook refuses creation, so Better Auth reports 401. A loose
+    // >= 400 would also accept a 500 crash in the suspension lookup, which must
+    // never look like a policy denial.
+    expect(signIn.status).toBe(401);
     const sessions = await systemPoolFor(systemEnv()).query<{ count: string }>(
       `SELECT count(*)::text AS count FROM "session" WHERE "userId" = $1`,
       [authUserId],
@@ -1013,13 +1074,20 @@ describe("optional authenticator lifecycle", () => {
     const invalidPassword = await post("two-factor/generate-backup-codes", {
       password: crypto.randomUUID(),
     });
-    expect(invalidPassword.status).toBeGreaterThanOrEqual(400);
+    // Password reauthentication is rejected with 400 INVALID_PASSWORD; a loose
+    // >= 400 would also accept a 500 from the code-generation boundary.
+    expect(invalidPassword.status).toBe(400);
+    expect(await invalidPassword.json()).toMatchObject({ code: "INVALID_PASSWORD" });
     jar.clear();
     await post("sign-in/email", { email, password });
-    expect(
-      (await post("two-factor/verify-backup-code", { code: backups[0], trustDevice: false }))
-        .status,
-    ).toBeGreaterThanOrEqual(400);
+    const consumedReplay = await post("two-factor/verify-backup-code", {
+      code: backups[0],
+      trustDevice: false,
+    });
+    // A consumed code is refused as an invalid backup code (401), not by an
+    // arbitrary server failure that a loose >= 400 would also accept.
+    expect(consumedReplay.status).toBe(401);
+    expect(await consumedReplay.json()).toMatchObject({ code: "INVALID_BACKUP_CODE" });
     expect(
       (await post("two-factor/verify-backup-code", { code: backups[1], trustDevice: false }))
         .status,
@@ -1033,10 +1101,14 @@ describe("optional authenticator lifecycle", () => {
     expect(currentSession !== null).toBe(true);
     jar.clear();
     await post("sign-in/email", { email, password });
-    expect(
-      (await post("two-factor/verify-backup-code", { code: backups[2], trustDevice: false }))
-        .status,
-    ).toBeGreaterThanOrEqual(400);
+    const supersededReplay = await post("two-factor/verify-backup-code", {
+      code: backups[2],
+      trustDevice: false,
+    });
+    // Regeneration replaced the set, so a code from the previous set is
+    // specifically an invalid backup code (401), never a generic failure.
+    expect(supersededReplay.status).toBe(401);
+    expect(await supersededReplay.json()).toMatchObject({ code: "INVALID_BACKUP_CODE" });
     const replacement = recordOf(await regenerated.json()).backupCodes;
     if (!Array.isArray(replacement)) throw new Error("Expected replacement codes");
     expect(

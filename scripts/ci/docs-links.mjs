@@ -3,6 +3,18 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+const codeFencePattern = /^\s{0,3}(`{3,}|~{3,})/u;
+const inlineCodePattern = /(`+).*?\1/gu;
+const imageLinkPattern = /!\[([^\]]*)\]\([^)]*\)/gu;
+const markdownLinkPattern = /\[([^\]]+)\]\([^)]*\)/gu;
+const htmlTagPattern = /<[^>]+>/gu;
+const markdownEmphasisPattern = /[*_~`]/gu;
+const headingPunctuationPattern = /[^\p{L}\p{M}\p{N}\-_ ]/gu;
+const headingWhitespacePattern = /\s+/gu;
+const headingPattern = /^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/u;
+const htmlAnchorPattern = /<a\s+(?:name|id)=["']([^"']+)["']/giu;
+const leadingSlashesPattern = /^\/+/;
+
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const markdownLink = /\]\(\s*(<[^>\n]+>|[^)\s\n]+)(?:\s+["'][^"'\n]*["'])?\s*\)/g;
 const externalTarget = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
@@ -17,7 +29,7 @@ function markdownLines(content) {
   const lines = content.split("\n");
   let fence;
   return lines.map((line) => {
-    const marker = line.match(/^\s{0,3}(`{3,}|~{3,})/u)?.[1];
+    const marker = line.match(codeFencePattern)?.[1];
     if (marker) {
       if (!fence) {
         fence = { character: marker[0], length: marker.length };
@@ -38,7 +50,7 @@ function markdownLines(content) {
  * @returns {string} Line with inline code replaced by spaces
  */
 function withoutInlineCode(line) {
-  return line.replace(/(`+).*?\1/gu, (code) => " ".repeat(code.length));
+  return line.replace(inlineCodePattern, (code) => " ".repeat(code.length));
 }
 
 /**
@@ -50,14 +62,14 @@ function withoutInlineCode(line) {
  */
 function headingSlug(value) {
   return value
-    .replace(/!\[([^\]]*)\]\([^)]*\)/gu, "$1")
-    .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
-    .replace(/<[^>]+>/gu, "")
-    .replace(/[*_~`]/gu, "")
+    .replace(imageLinkPattern, "$1")
+    .replace(markdownLinkPattern, "$1")
+    .replace(htmlTagPattern, "")
+    .replace(markdownEmphasisPattern, "")
     .trim()
     .toLowerCase()
-    .replace(/[^\p{L}\p{M}\p{N}\-_ ]/gu, "")
-    .replace(/\s+/gu, "-");
+    .replace(headingPunctuationPattern, "")
+    .replace(headingWhitespacePattern, "-");
 }
 
 /**
@@ -71,7 +83,7 @@ function headingAnchors(content) {
   const anchors = new Set();
   const duplicates = new Map();
   for (const line of markdownLines(content)) {
-    const heading = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/u)?.[1];
+    const heading = line.match(headingPattern)?.[1];
     if (!heading) continue;
     const base = headingSlug(heading);
     if (!base) continue;
@@ -80,7 +92,7 @@ function headingAnchors(content) {
     duplicates.set(base, duplicate + 1);
   }
   const visibleContent = markdownLines(content).join("\n");
-  for (const match of visibleContent.matchAll(/<a\s+(?:name|id)=["']([^"']+)["']/giu)) {
+  for (const match of visibleContent.matchAll(htmlAnchorPattern)) {
     anchors.add(match[1].toLowerCase());
   }
   return anchors;
@@ -145,7 +157,7 @@ export function collectLinkFailures(root, markdownFiles) {
         const target = linkPath
           ? resolve(
               linkPath.startsWith("/") ? absoluteRoot : dirname(absoluteFile),
-              linkPath.replace(/^\/+/, ""),
+              linkPath.replace(leadingSlashesPattern, ""),
             )
           : absoluteFile;
         const source = relative(absoluteRoot, absoluteFile);

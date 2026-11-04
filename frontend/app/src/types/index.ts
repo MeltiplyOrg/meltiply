@@ -129,6 +129,11 @@ export function brandProfileColorClass(color: BrandProfileColor): string {
   return BRAND_PROFILE_COLOR_CLASSES[color];
 }
 
+export type OnboardingProgress = components["schemas"]["OnboardingProgress"];
+export type ReportingPolicy = components["schemas"]["ReportingPolicy"];
+export type ReportingCategoryStatus = components["schemas"]["ReportingCategoryStatus"];
+export type ReportingFeedback = components["schemas"]["ReportingFeedback"];
+export type DiscoverySource = components["schemas"]["DiscoverySource"];
 export type UserProfile = components["schemas"]["UserProfile"];
 export type WorkspaceRole = components["schemas"]["WorkspaceRole"];
 export type WorkspaceMember = components["schemas"]["WorkspaceMember"];
@@ -206,6 +211,11 @@ export type QueueListResponse = components["schemas"]["QueueListResponse"];
 export type CreateQueueInput = components["schemas"]["CreateQueueRequest"];
 export type UpdateQueueInput = components["schemas"]["UpdateQueueRequest"];
 export type QueueQueryParams = NonNullable<operations["listQueues"]["parameters"]["query"]>;
+
+/** Persistent owner choices shared by the scheduling surface and composer. */
+export type PublishingPreferences = components["schemas"]["PublishingPreferences"];
+export type PublishingPreferencesUpdate = components["schemas"]["PublishingPreferencesUpdate"];
+export type SignatureTemplate = components["schemas"]["SignatureTemplate"];
 export type PostQueryParams = NonNullable<operations["listPosts"]["parameters"]["query"]>;
 
 export type Distribution = components["schemas"]["Distribution"];

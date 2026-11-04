@@ -57,17 +57,16 @@ function pullAnchor(event: MouseEvent) {
   const link =
     event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[href]") : null;
   if (!link || link.hasAttribute("download") || (link.target && link.target !== "_self")) return;
-  const url = new URL(link.href);
   if (
-    !url.hash ||
-    url.origin !== location.origin ||
-    url.pathname !== location.pathname ||
-    url.search !== location.search
+    !link.hash ||
+    link.origin !== location.origin ||
+    link.pathname !== location.pathname ||
+    link.search !== location.search
   )
     return;
   let id: string;
   try {
-    id = decodeURIComponent(url.hash.slice(1));
+    id = decodeURIComponent(link.hash.slice(1));
   } catch {
     return;
   }
@@ -78,7 +77,7 @@ function pullAnchor(event: MouseEvent) {
   // Astro's same-page navigation commits history synchronously. Restore the
   // starting position in the same task, before paint, then animate from there;
   // committing on arrival would record the destination as Back's saved position.
-  void navigate(url.href);
+  void navigate(link.href);
   window.scrollTo({ top: origin, behavior: "instant" });
   scroll.resize();
   // Focus before travel so keyboard users land at the heading and new input can

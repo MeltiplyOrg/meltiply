@@ -6,6 +6,9 @@ import { createObjectUrlSignerFromEnv } from "@meltiply/storage";
 
 import type { AutomationEnv } from "./env";
 
+const sha256Pattern = /^[0-9a-f]{64}$/i;
+const profileNamePattern = /^[a-z0-9_]{1,64}$/;
+
 /** Port the container engine listens on; mirrors the Dockerfile EXPOSE. */
 export const PROCESSOR_ENGINE_PORT = 8080;
 
@@ -302,7 +305,7 @@ export function validateJob(job: NativeProcessorJob): string | null {
     return "maximum_output_bytes must be a positive integer reservation.";
   }
   if (job.expected_checksum !== undefined && job.expected_checksum !== null) {
-    if (!/^[0-9a-f]{64}$/i.test(job.expected_checksum)) {
+    if (!sha256Pattern.test(job.expected_checksum)) {
       return "expected_checksum must be a sha256 hex digest.";
     }
   }
@@ -310,7 +313,7 @@ export function validateJob(job: NativeProcessorJob): string | null {
   if (!profile || (profile.kind !== "image" && profile.kind !== "video")) {
     return 'profile.kind must be "image" or "video".';
   }
-  if (!/^[a-z0-9_]{1,64}$/.test(profile.name)) {
+  if (!profileNamePattern.test(profile.name)) {
     return "profile.name must match ^[a-z0-9_]{1,64}$ for rendition identity.";
   }
   if (!Array.isArray(profile.allowed_content_types) || profile.allowed_content_types.length === 0) {

@@ -28,6 +28,7 @@ import {
   listPlatforms,
 } from "./api";
 import type { SessionScope } from "./effect";
+import { privateCacheRetentionMs } from "./query-defaults";
 import {
   useDisconnectPlatform,
   usePlatformCapabilities,
@@ -100,12 +101,20 @@ function CapabilityConsumer() {
   );
 }
 
-/** Mirrors the production scoped-client defaults that own the 60-second policy. */
+/**
+ * Mirrors the production scoped-client defaults that own the freshness and
+ * retention policies. `gcTime` matters as much as `staleTime` here: the
+ * retention assertions advance the clock past ten minutes, which exceeds
+ * TanStack's five-minute default garbage collection, so omitting the
+ * production 30-minute window would let a collected entry masquerade as a
+ * deliberately retained one.
+ */
 function createScopedClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
       mutations: { retry: false },
       queries: {
+        gcTime: privateCacheRetentionMs,
         refetchOnReconnect: true,
         refetchOnWindowFocus: true,
         retry: false,

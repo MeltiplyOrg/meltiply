@@ -6,6 +6,9 @@ import { defineConfig, type Plugin, lazyPlugins } from "vite-plus";
 import { renderThemeBootstrap, themeBootstrapMarker } from "../shared/theme-bootstrap-source";
 import { previewContractPlugin } from "./preview-contract";
 
+const environmentAssignmentPattern = /^([^#=]+)=(.*)$/;
+const sourceExtensionPattern = /\.(tsx?|jsx?)$/;
+
 // The repo root .env is the single source of truth for frontend public vars:
 // dev-backend.sh already sources it for Wrangler, and here its two public
 // values feed Vite's import.meta.env. The Cloudflare plugin only loads
@@ -31,7 +34,7 @@ function parseEnvFile(filePath: string): Record<string, string> {
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
-    const match = line.match(/^([^#=]+)=(.*)$/);
+    const match = line.match(environmentAssignmentPattern);
     if (match) {
       parsed[match[1].trim()] = match[2].trim();
     }
@@ -63,12 +66,10 @@ function rootEnvReloadPlugin(): Plugin {
  * Vite plugin redirecting non-canonical host requests (such as raw IP or localhost) to the canonical
  * `APP_URL` origin (e.g. MagicDNS domain) with a 308 Permanent Redirect for HTML requests.
  *
- * @param frontendUrl Configured public frontend URL origin, if any.
+ * @param canonical Parsed public frontend origin, if configured.
  * @returns Vite `Plugin` object with Connect middleware.
  */
-function canonicalFrontendOriginPlugin(frontendUrl: string | undefined): Plugin {
-  const canonical = frontendUrl ? new URL(frontendUrl) : undefined;
-
+function canonicalFrontendOriginPlugin(canonical: URL | undefined): Plugin {
   return {
     name: "meltiply-canonical-frontend-origin",
     configureServer(server) {
@@ -94,7 +95,7 @@ function canonicalFrontendOriginPlugin(frontendUrl: string | undefined): Plugin 
  * Local sign-in credentials remain excluded from every deployed build.
  *
  * `isDevMode()` is a runtime check — bundlers cannot fold the branches around
- * it, so dev tooling (react-scan, axe-core, query devtools, agentation) and the
+ * it, so dev tooling (axe-core, query devtools, agentation) and the
  * local sign-in fixture would otherwise still be emitted to `dist`. The stubs
  * remove developer tools from production/staging, while previews retain them.
  * Keeping credentials in a separate module makes one entry enough to exclude
@@ -127,7 +128,7 @@ function devOnlyStubPlugin(uiPreview: boolean, building: boolean): Plugin {
     // Virtual entry ids keep the dependency scanner from reading preview-only
     // files directly; the regular load hook supplies their inactive exports.
     resolveId(id) {
-      const normalized = id.replace(/\\/g, "/").replace(/\.(tsx?|jsx?)$/, "");
+      const normalized = id.replaceAll("\\", "/").replace(sourceExtensionPattern, "");
       if (
         !uiPreview &&
         (normalized.endsWith("/preview/browser") || normalized.endsWith("/preview/controls"))
@@ -135,7 +136,7 @@ function devOnlyStubPlugin(uiPreview: boolean, building: boolean): Plugin {
         return `\0${normalized}`;
     },
     load(id: string) {
-      const normalized = id.replace(/\\/g, "/").replace(/\.(tsx?|jsx?)$/, "");
+      const normalized = id.replaceAll("\\", "/").replace(sourceExtensionPattern, "");
       if (!uiPreview && normalized.endsWith("/preview/browser")) {
         return "export const startPreview = async () => {};";
       }
@@ -189,10 +190,10 @@ export default defineConfig(({ mode, command }) => {
   const frontendUrl = uiPreview
     ? undefined
     : process.env.APP_URL?.trim() || rootFileEnv.APP_URL?.trim() || undefined;
+  const canonical = frontendUrl ? new URL(frontendUrl) : undefined;
   const localApiPort = process.env.WRANGLER_DEV_PORT || rootFileEnv.WRANGLER_DEV_PORT || "8787";
   const localApp =
-    frontendUrl !== undefined &&
-    ["localhost", "127.0.0.1", "[::1]"].includes(new URL(frontendUrl).hostname);
+    canonical !== undefined && ["localhost", "127.0.0.1", "[::1]"].includes(canonical.hostname);
   return {
     // Statically substitute the whitelisted root .env values into import.meta.env.
     // Launcher-provided values override the file so detected MagicDNS origins
@@ -226,7 +227,7 @@ export default defineConfig(({ mode, command }) => {
               : {},
         }),
       rootEnvReloadPlugin(),
-      canonicalFrontendOriginPlugin(frontendUrl),
+      canonicalFrontendOriginPlugin(canonical),
       themeBootstrapPlugin(),
       devOnlyStubPlugin(uiPreview, command === "build"),
     ]),
@@ -235,7 +236,7 @@ export default defineConfig(({ mode, command }) => {
       port: Number(process.env.FRONTEND_DEV_PORT ?? 3000),
       // Vite already permits IP addresses and localhost. Add the configured
       // MagicDNS hostname without opening the server to arbitrary Host headers.
-      allowedHosts: frontendUrl ? [new URL(frontendUrl).hostname] : [],
+      allowedHosts: canonical ? [canonical.hostname] : [],
     },
     resolve: {
       // DEV-only Agentation is a React peer dependency. Keep its optimized

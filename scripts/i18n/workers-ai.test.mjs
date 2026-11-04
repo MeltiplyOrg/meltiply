@@ -101,18 +101,32 @@ test("calls Workers AI with a fixed seed, zero temperature, and a system message
 });
 
 test("reads the OpenAI-compatible chat response shape", async () => {
+  const requests = [];
   const provider = createWorkersAiProvider({
     accountId: "account",
     apiToken: "token",
     model: "@cf/test/model",
-    fetchImpl: async () =>
-      jsonResponse({
+    fetchImpl: async (url, init) => {
+      requests.push({ init, url: String(url) });
+      return jsonResponse({
         success: true,
         result: { choices: [{ message: { content: '["Hola"]' } }], usage: {} },
-      }),
+      });
+    },
   });
 
-  assert.equal(await provider.complete("prompt"), '["Hola"]');
+  // A batch-shaped prompt keeps the length check active, so the response shape
+  // is validated by the same path production uses.
+  assert.equal(await provider.complete(batchPrompt(["Hello"])), '["Hola"]');
+  assert.equal(requests.length, 1);
+  assert.equal(
+    requests[0].url,
+    "https://api.cloudflare.com/client/v4/accounts/account/ai/run/@cf/test/model",
+  );
+  assert.equal(new Headers(requests[0].init.headers).get("authorization"), "Bearer token");
+  const body = JSON.parse(requests[0].init.body);
+  assert.equal(body.temperature, 0);
+  assert.deepEqual(body.messages.at(-1), { role: "user", content: batchPrompt(["Hello"]) });
 });
 
 test("rejects a reasoning-only response as malformed", async () => {
@@ -242,6 +256,7 @@ test("retries the primary model before switching to the fallback", async () => {
     I18N_TIMEOUT_MS: "1000",
   });
   const calls = [];
+  const delays = [];
   try {
     const provider = createProvider({
       systemPrompt: "",
@@ -252,11 +267,14 @@ test("retries the primary model before switching to the fallback", async () => {
         }
         return jsonResponse({ success: true, result: { response: '["Hola"]' } });
       },
-      retryOptions: { retries: 2, baseDelayMs: 0, sleep: async () => {} },
+      retryOptions: { retries: 2, baseDelayMs: 5, sleep: async (ms) => delays.push(ms) },
     });
 
-    assert.equal(await provider.complete("prompt"), '["Hola"]');
+    assert.equal(await provider.complete(batchPrompt(["Hello"])), '["Hola"]');
+    // The primary is retried with exponential backoff before the fallback runs;
+    // a constant-delay retry would record [5, 5].
     assert.deepEqual(calls, ["primary", "primary", "primary", "fallback"]);
+    assert.deepEqual(delays, [5, 10]);
   } finally {
     restore();
   }

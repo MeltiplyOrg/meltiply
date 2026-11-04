@@ -20,11 +20,15 @@ import type {
   CreateUploadPartsInput,
   CreateUploadPartsResponse,
   CreateUploadSessionInput,
+  DiscoverySource,
   Distribution,
   InstallationSummary,
   InvitationPreview,
   OAuthSelection,
   OAuthSelectionConfirmRequest,
+  OnboardingProgress,
+  ReportingFeedback,
+  ReportingPolicy,
   Platform,
   PlatformAccountsResponse,
   PlatformCapabilitiesResponse,
@@ -33,6 +37,8 @@ import type {
   PostListResponse,
   PostQueryParams,
   PublishingRequirements,
+  PublishingPreferences,
+  PublishingPreferencesUpdate,
   SchedulePostInput,
   PublishingQueue,
   QueueListResponse,
@@ -56,10 +62,14 @@ import {
   abortUploadSession,
   acceptWorkspaceInvitation,
   ApiError,
+  getBroadcast,
+  endBroadcast,
+  type BroadcastInfo,
   cancelOAuthSelection,
   confirmOAuthSelection,
   cancelDistribution,
   completeUploadSession,
+  completeOnboarding,
   createBrandProfile,
   createPost,
   listQueues,
@@ -83,10 +93,15 @@ import {
   getInstallation,
   getInvitationPreview,
   getOAuthSelection,
+  getOnboarding,
+  getReportingFeedback,
+  getReportingPolicy,
   getDistribution,
   getDistributionAnalytics,
   getPlatformPublishingRequirements,
   getPost,
+  getPublishingPreferences,
+  updatePublishingPreferences,
   getUploadSession,
   listBrandProfiles,
   listPlatformCapabilities,
@@ -100,12 +115,15 @@ import {
   resendWorkspaceInvitation,
   retryDistribution,
   revokeWorkspaceInvitation,
+  saveOnboarding,
   schedulePost,
   startPlatformOAuth,
+  submitReportingFeedback,
   suspendInstallationMember,
   transferInstallationOwnership,
   updateBrandProfile,
   updatePost,
+  updateReportingPreferences,
   updateScheduledDistribution,
   updateWorkspaceMember,
   updateWorkspaceName,
@@ -154,6 +172,14 @@ function inWorkspace<T>(
  * metadata, and idempotency-key behavior.
  */
 export interface ApiClientServiceShape {
+  readonly getBroadcast: (
+    id: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<BroadcastInfo>;
+  readonly endBroadcast: (
+    id: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<{ ended: true }>;
   readonly getCurrentUser: () => ApiClientEffect<UserProfile>;
   readonly listBrandProfiles: (
     options?: ApiRequestOptions,
@@ -275,6 +301,13 @@ export interface ApiClientServiceShape {
     id: string,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<PublishingRequirements>;
+  readonly getPublishingPreferences: (
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<PublishingPreferences>;
+  readonly updatePublishingPreferences: (
+    input: PublishingPreferencesUpdate,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<PublishingPreferences>;
   readonly disconnectPlatform: (id: string, options?: ApiRequestOptions) => ApiClientEffect<void>;
   readonly getDistribution: (
     id: string,
@@ -391,6 +424,24 @@ export interface ApiClientServiceShape {
     member: WorkspaceMember;
     workspace: { id: string; name: string; role: WorkspaceRole; slug: string };
   }>;
+  readonly getOnboarding: (options?: ApiRequestOptions) => ApiClientEffect<OnboardingProgress>;
+  readonly saveOnboarding: (
+    input: { step: "improvement" | "ready" },
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<OnboardingProgress>;
+  readonly completeOnboarding: (options?: ApiRequestOptions) => ApiClientEffect<OnboardingProgress>;
+  readonly getReportingPolicy: (options?: ApiRequestOptions) => ApiClientEffect<ReportingPolicy>;
+  readonly updateReportingPreferences: (
+    input: { diagnostics: boolean; usage: boolean },
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<ReportingPolicy>;
+  readonly getReportingFeedback: (
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<ReportingFeedback>;
+  readonly submitReportingFeedback: (
+    input: { discovery_source: DiscoverySource },
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<ReportingFeedback>;
 }
 
 /**
@@ -421,6 +472,8 @@ export function createApiClientServiceTest(
     Effect.die(new Error(`ApiClientService.${name} is not stubbed in this test`));
 
   const service: ApiClientServiceShape = {
+    getBroadcast: unstubbed("getBroadcast"),
+    endBroadcast: unstubbed("endBroadcast"),
     listQueues: unstubbed("listQueues"),
     createQueue: unstubbed("createQueue"),
     updateQueue: unstubbed("updateQueue"),
@@ -450,6 +503,8 @@ export function createApiClientServiceTest(
     getInstallation: unstubbed("getInstallation"),
     getInvitationPreview: unstubbed("getInvitationPreview"),
     getPlatformPublishingRequirements: unstubbed("getPlatformPublishingRequirements"),
+    getPublishingPreferences: unstubbed("getPublishingPreferences"),
+    updatePublishingPreferences: unstubbed("updatePublishingPreferences"),
     getPost: unstubbed("getPost"),
     getUploadSession: unstubbed("getUploadSession"),
     listBrandProfiles: unstubbed("listBrandProfiles"),
@@ -476,6 +531,13 @@ export function createApiClientServiceTest(
     updateScheduledDistribution: unstubbed("updateScheduledDistribution"),
     updateWorkspaceMember: unstubbed("updateWorkspaceMember"),
     updateWorkspaceName: unstubbed("updateWorkspaceName"),
+    getOnboarding: unstubbed("getOnboarding"),
+    saveOnboarding: unstubbed("saveOnboarding"),
+    completeOnboarding: unstubbed("completeOnboarding"),
+    getReportingPolicy: unstubbed("getReportingPolicy"),
+    updateReportingPreferences: unstubbed("updateReportingPreferences"),
+    getReportingFeedback: unstubbed("getReportingFeedback"),
+    submitReportingFeedback: unstubbed("submitReportingFeedback"),
     ...impl,
   };
 
@@ -541,6 +603,10 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
     getAnalyticsPosts: (params, options) =>
       inWorkspace((workspaceId) => getAnalyticsPosts(workspaceId, params, options)),
     getCurrentUser: () => inWorkspace((workspaceId) => getCurrentUser(workspaceId)),
+    getBroadcast: (id, options) =>
+      inWorkspace((workspaceId) => getBroadcast(workspaceId, id, options)),
+    endBroadcast: (id, options) =>
+      inWorkspace((workspaceId) => endBroadcast(workspaceId, id, options)),
     getDistribution: (id, options) =>
       inWorkspace((workspaceId) => getDistribution(workspaceId, id, options)),
     getDistributionAnalytics: (id, options) =>
@@ -549,6 +615,10 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
     getInvitationPreview: (token, options) => getInvitationPreview(token, options),
     getPlatformPublishingRequirements: (id, options) =>
       inWorkspace((workspaceId) => getPlatformPublishingRequirements(workspaceId, id, options)),
+    getPublishingPreferences: (options) =>
+      inWorkspace((workspaceId) => getPublishingPreferences(workspaceId, options)),
+    updatePublishingPreferences: (input, options) =>
+      inWorkspace((workspaceId) => updatePublishingPreferences(workspaceId, input, options)),
     getPost: (id, options) => inWorkspace((workspaceId) => getPost(workspaceId, id, options)),
     getUploadSession: (sessionId, options) =>
       inWorkspace((workspaceId) => getUploadSession(workspaceId, sessionId, options)),
@@ -599,5 +669,12 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
       updateWorkspaceMember(workspaceId, memberId, role, options),
     updateWorkspaceName: (workspaceId, input, options) =>
       updateWorkspaceName(workspaceId, input, options),
+    getOnboarding: (options) => getOnboarding(options),
+    saveOnboarding: (input, options) => saveOnboarding(input, options),
+    completeOnboarding: (options) => completeOnboarding(options),
+    getReportingPolicy: (options) => getReportingPolicy(options),
+    updateReportingPreferences: (input, options) => updateReportingPreferences(input, options),
+    getReportingFeedback: (options) => getReportingFeedback(options),
+    submitReportingFeedback: (input, options) => submitReportingFeedback(input, options),
   },
 );

@@ -8,7 +8,8 @@ import {
 import { requiresEmailVerification, type ApiWorkerEnv } from "./env";
 import { sha256Hex } from "./crypto";
 import { allowedOriginsFor } from "./verifier-cache";
-import { createCloudflareMailSender, mailSenderConfiguration } from "./mail";
+import { mailSenderConfiguration } from "@meltiply/domain/mail-content";
+import { createCloudflareMailSender } from "./mail";
 import { authPolicyHandler } from "./auth-policy";
 
 let betterAuthCached:

@@ -9,19 +9,20 @@
         "scripts/cloudflare-local/complete-env.mjs",
         "lint/boundaries-plugin.d.mts",
         "lint/astro-ui-contract.d.mts",
-        "scripts/cloudflare-local/worker-types.mjs"
+        "scripts/cloudflare-local/worker-types.mjs",
+        "scripts/ci/lighthouse-preview.mjs"
       ]
     },
     "frontend/app": {
-      "entry": ["src/app/globals.css", "src/preview/worker.ts", "e2e/support/invitation-db.mjs"]
+      "entry": [
+        "src/app/globals.css",
+        "src/preview/worker.ts",
+        "e2e/support/invitation-db.mjs",
+        "e2e/support/onboarding-db.mjs"
+      ]
     },
     "workers/api": {
-      "entry": [
-        "test-support/index.ts",
-        "test-support/requirements-smoke.ts",
-        "bench/run.mjs",
-        "bench/compare.mjs"
-      ],
+      "entry": ["test-support/index.ts", "test-support/requirements-smoke.ts"],
       "vitest": {
         "config": ["vitest*.config.ts"]
       }
@@ -32,8 +33,7 @@
         "test-support/queue-capacity.ts",
         "processor/smoke/check.mjs",
         "processor/smoke/restart-check.mjs",
-        "processor/smoke/fixtures-server.mjs",
-        "processor/smoke/measure.mjs"
+        "processor/smoke/fixtures-server.mjs"
       ],
       "vitest": {
         "config": ["vitest*.config.ts"]

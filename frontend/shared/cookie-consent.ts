@@ -12,6 +12,7 @@ export const functionalStorageKeys = [
   "meltiply.theme",
   "meltiply.language",
   "meltiply.devbox",
+  "meltiply.onboarding.setup",
 ] as const;
 export const functionalStoragePrefixes = [
   "meltiply.composer.",

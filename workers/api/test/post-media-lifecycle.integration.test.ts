@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 // Ownership-aware retention, cleanup, and grant safety for post-owned media
 // (issue #284), proven through the two public seams that actually own the
 // lifecycle:
@@ -58,8 +59,10 @@ if (!connectionString) {
   throw new Error("MELTIPLY_DATABASE_TEST_URL is required for PostgreSQL integration suites");
 }
 const describeIntegration = describe;
-const systemConnectionString =
-  "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const systemConnectionString = integrationDatabaseUrl(
+  process.env.MELTIPLY_DATABASE_TEST_URL,
+  "system",
+);
 
 // A throwaway workspace with its own Brand Profile and Channel, created and
 // dropped by this file. Nothing here shares rows, ids, or usage counters with
@@ -2611,14 +2614,15 @@ describeIntegration("post-owned media retention with PostgreSQL", () => {
     expect((scheduled.body as Post).distributions[0]?.status).toBe("scheduled");
 
     // The other workspace owns a ready video of the same shape with real bytes
-    // behind it; neither capability may address it, whichever one is asked for.
+    // behind it. Tenant scoping is RLS plus an explicit org predicate, so a
+    // foreign asset is indistinguishable from a missing one: both variants
+    // must answer 404 not_found. Accepting 403 here would also accept a role
+    // guard masking a broken tenant filter.
     const foreign = await createForeignReadyVideo((await renditionRow(upload.assetId)).profile);
     for (const variant of ["download", "preview"] as const) {
       const response = await api(`/api/v1/assets/${foreign}/${variant}-url`);
-      expect([403, 404]).toContain(response.status);
-      if (response.status === 404) {
-        expect(errorCode(response.body)).toBe("not_found");
-      }
+      expect(response.status, variant).toBe(404);
+      expect(errorCode(response.body), variant).toBe("not_found");
     }
   }, 120_000);
 

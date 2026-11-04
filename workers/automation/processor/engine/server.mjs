@@ -35,6 +35,14 @@ import { createServer } from "node:http";
 import path from "node:path";
 import process from "node:process";
 
+const metadataLinePattern = /^([a-z0-9-]+):\s*(.*)$/i;
+const whitespacePattern = /\s+/;
+const bandsPattern = /^bands:\s*(\d+)/m;
+const interpretationPattern = /^interpretation:\s*(\S+)/m;
+const pageCountPattern = /^n-pages:\s*(\d+)/m;
+const formatPattern = /^format:\s*(\S+)/m;
+const sha256Pattern = /^[0-9a-fA-F]{64}$/;
+
 const ENGINE_ID = "meltiply-media-processor/1";
 
 /**
@@ -598,7 +606,7 @@ async function probeApng(file, timeoutMs, plays) {
 function parseVipsHeader(text) {
   const fields = new Map();
   for (const line of text.split("\n")) {
-    const match = /^([a-z0-9-]+):\s*(.*)$/i.exec(line);
+    const match = metadataLinePattern.exec(line);
     if (match) fields.set(match[1].toLowerCase(), match[2].trim());
   }
   return fields;
@@ -641,7 +649,7 @@ async function readImageFields(file, timeoutMs) {
 function parseFrameDelays(raw) {
   if (raw === undefined) return null;
   const delays = raw
-    .split(/\s+/)
+    .split(whitespacePattern)
     .filter((entry) => entry.length > 0)
     .map(Number);
   if (delays.length === 0 || delays.some((delay) => !Number.isFinite(delay) || delay < 0))
@@ -819,16 +827,16 @@ async function downloadInput(url, file, { expectedChecksum, expectedSize, signal
  */
 async function hasAlpha(file, timeoutMs) {
   const { stdout: header } = await run(["vipsheader", "-a", file], timeoutMs);
-  const bands = Number(/^bands:\s*(\d+)/m.exec(header)?.[1]);
-  const interpretation = /^interpretation:\s*(\S+)/m.exec(header)?.[1];
+  const bands = Number(bandsPattern.exec(header)?.[1]);
+  const interpretation = interpretationPattern.exec(header)?.[1];
   const colourBands =
     interpretation === "cmyk" ? 4 : interpretation === "b-w" || interpretation === "grey16" ? 1 : 3;
   if (!Number.isInteger(bands) || bands < colourBands) {
     throw new EngineError("corrupt_media", "The decoded image has an invalid colour-band layout.");
   }
   if (bands === colourBands) return false;
-  const pages = Number(/^n-pages:\s*(\d+)/m.exec(header)?.[1] ?? 1);
-  const format = /^format:\s*(\S+)/m.exec(header)?.[1];
+  const pages = Number(pageCountPattern.exec(header)?.[1] ?? 1);
+  const format = formatPattern.exec(header)?.[1];
   const opaque = format === "ushort" ? 65535 : format === "float" || format === "double" ? 1 : 255;
   const alphaFile = `${file}.alpha.v`;
   try {
@@ -872,7 +880,7 @@ async function videoFrameDeltas(file, timeoutMs) {
   );
   const times = stdout
     .split("\n")
-    .map((line) => Number(line.replace(/,/g, "").trim()))
+    .map((line) => Number(line.replaceAll(",", "").trim()))
     .filter((value) => Number.isFinite(value));
   return times.slice(1).map((value, index) => Math.round((value - (times[index] ?? value)) * 1000));
 }
@@ -1926,10 +1934,7 @@ function parseJob(body) {
     );
   }
   if (job.expected_checksum !== undefined && job.expected_checksum !== null) {
-    if (
-      typeof job.expected_checksum !== "string" ||
-      !/^[0-9a-fA-F]{64}$/.test(job.expected_checksum)
-    ) {
+    if (typeof job.expected_checksum !== "string" || !sha256Pattern.test(job.expected_checksum)) {
       throw new EngineError(
         "invalid_request",
         'Field "expected_checksum" must be a sha256 hex digest.',

@@ -1,3 +1,5 @@
+const integerPattern = /^\d+$/;
+
 /**
  * Reads a streaming HTTP response body into a UTF-8 string with strict size enforcement.
  * Checks Content-Length headers preemptively and streams chunks with a cumulative byte counter,
@@ -16,7 +18,7 @@ export async function readBoundedResponseBody(response, maximumBytes, name = "HT
   }
   const contentLength = response.headers?.get?.("content-length");
   if (contentLength !== null && contentLength !== undefined) {
-    if (!/^\d+$/.test(contentLength) || Number(contentLength) > maximumBytes) {
+    if (!integerPattern.test(contentLength) || Number(contentLength) > maximumBytes) {
       try {
         await response.body?.cancel?.();
       } catch {

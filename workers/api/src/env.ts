@@ -2,7 +2,7 @@ import { objectStorageBindings } from "@meltiply/storage";
 import type { AccessClaims, JwtIdentity } from "@meltiply/auth";
 
 import type { ResolvedActor } from "./actor-resolution";
-import { mailSenderConfiguration } from "./mail";
+import { mailSenderConfiguration } from "@meltiply/domain/mail-content";
 
 import type { OAuthStateCoordinatorStub } from "@meltiply/contracts";
 
@@ -36,6 +36,8 @@ export interface ApiWorkerEnv {
   BETTER_AUTH_JWKS_URL?: string;
   /** Standalone workerd owns sockets per request; omitted keeps managed pool reuse. */
   DATABASE_POOL_MODE?: "request";
+  /** Coarse deployment category reported with opt-in improvement events. */
+  DEPLOYMENT_CATEGORY?: string;
   DB_AUTHENTICATED?: Hyperdrive;
   DB_SYSTEM?: Hyperdrive;
   ENVIRONMENT: "local" | "preview" | "production" | "selfhost" | "staging" | "test";
@@ -48,6 +50,12 @@ export interface ApiWorkerEnv {
   MAIL_FROM_NAME?: string;
   /** Only self-hosted installs may set `"false"` to allow sign-in without verification mail. */
   REQUIRE_EMAIL_VERIFICATION?: string;
+  /** Operator force-off for optional improvement reporting; `"true"` outranks a saved choice. */
+  REPORTING_FORCED_OFF?: string;
+  /** Maintainer PostHog ingestion origin; absent or unusable disables optional reporting. */
+  REPORTING_POSTHOG_HOST?: string;
+  /** Maintainer PostHog publishable project token; ingestion needs no personal API key. */
+  REPORTING_POSTHOG_PROJECT_TOKEN?: string;
   INSTAGRAM_CLIENT_ID?: string;
   INSTAGRAM_CLIENT_SECRET?: string;
   INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED?: string;

@@ -26,6 +26,7 @@
     "mail_from_address": "auth@staging.meltiply.com",
     "mail_from_name": "Meltiply",
     "object_storage_provider": "r2",
-    "r2_account_id": "00000000000000000000000000000000"
+    "r2_account_id": "00000000000000000000000000000000",
+    "reporting_forced_off": false
   }
 }

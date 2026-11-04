@@ -1,5 +1,11 @@
 import type { PlatformCapability } from "@meltiply/domain";
 import { extractRateLimitBudget } from "./rate-limit";
+import {
+  applyThreadsOptions,
+  parseThreadsOptions,
+  threadsOptionsIssue,
+  type ThreadsPublishOptions,
+} from "./threads-options";
 
 import {
   addSeconds,
@@ -49,6 +55,12 @@ const videoMaximumBytes = 500 * 1024 * 1024;
 const tokenLifetimeMaximumSeconds = 90 * 24 * 60 * 60;
 
 const publishingScopes = ["threads_basic", "threads_content_publish", "threads_delete"] as const;
+const additionalPublishingScopes = [
+  "threads_location_tagging",
+  "threads_share_to_instagram",
+  "threads_keyword_search",
+  "threads_manage_mentions",
+] as const;
 
 const engagementScopes = [
   "threads_manage_insights",
@@ -67,7 +79,7 @@ const capability: PlatformCapability = {
   connect_available: true,
   max_caption_length: THREADS_MAX_CAPTION_LENGTH,
   max_file_size: videoMaximumBytes,
-  max_hashtags: 1,
+  max_hashtags: null,
   max_media_count: 20,
   max_video_duration_sec: 300,
   min_media_count: 0,
@@ -75,7 +87,10 @@ const capability: PlatformCapability = {
   notes: [
     "Text, image, video, and carousel posts use the Threads container flow.",
     "Up to 20 images and videos combine as one carousel post.",
+    "Text-only containers support polls, GIPHY GIFs, long-text attachments, and 24-hour ghost Posts; quotes, replies, and reposts preserve the source identity.",
+    "Location and Instagram Story cross-sharing need optional grants; country restrictions need an eligible account.",
     "Images are limited to 8 MiB; videos use Meltiply's 500 MiB upload ceiling.",
+    "Only the first in-text hashtag becomes a native topic tag; other hashtags remain ordinary caption text.",
     "Media is transferred through a short-lived HTTPS remote-ingest URL.",
     "Live-account acceptance remains required before runtime enablement.",
   ],
@@ -99,12 +114,13 @@ export interface ThreadsAdapterOptions {
 
 /**
  * Validates and extracts caption text for a Threads post.
- * Enforces Threads-specific constraints: maximum 500 Unicode codepoints and at most 1 hashtag.
+ * Enforces the 500-codepoint caption ceiling; only the first in-text tag becomes
+ * a native topic tag, so additional literal hashtags do not invalidate the Post.
  * Returns trimmed caption string. Throws ProviderAdapterError on constraint violations.
  */
 function postText(input: PublishInput): string {
   const caption = input.caption.trim();
-  if ([...caption].length > THREADS_MAX_CAPTION_LENGTH || input.hashtags.length > 1) {
+  if ([...caption].length > THREADS_MAX_CAPTION_LENGTH) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
         code: "threads_content_invalid",
@@ -141,7 +157,7 @@ function attachment(input: PublishInput, index: number): ThreadsAttachment {
       }),
     );
   }
-  const mediaUrl = secureUrl(media.url);
+  const mediaUrl = secureUrl(media.url)?.href;
   if (!mediaUrl) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
@@ -188,15 +204,12 @@ function carouselItemParameters(item: ThreadsAttachment): URLSearchParams {
 }
 
 /**
- * Builds the parent container parameters for a Threads post without
- * attachments: a text-only post uses the synchronous TEXT container and
- * requires text, so an attachment-free post with nothing to say is rejected.
- * @param text - Trimmed post text.
- * @returns Parameters for the TEXT container creation request.
- * @throws ProviderAdapterError when there is no text to publish.
+ * Builds a TEXT parent container. Plain Posts require text; a validated GIF or
+ * long-text attachment supplies its own content and does not need a fabricated
+ * teaser caption. Media Posts use their separate explicit media discriminators.
  */
-function textParameters(text: string): URLSearchParams {
-  if (!text) {
+function textParameters(text: string, options: ThreadsPublishOptions): URLSearchParams {
+  if (!text && !options.gif_attachment && !options.text_attachment) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
         code: "threads_text_invalid",
@@ -205,7 +218,7 @@ function textParameters(text: string): URLSearchParams {
     );
   }
   const parameters = new URLSearchParams();
-  parameters.set("text", text);
+  if (text) parameters.set("text", text);
   parameters.set("media_type", "TEXT");
   return parameters;
 }
@@ -280,7 +293,7 @@ function requiredPostId(lookup: ProviderPublicationLookup): string {
 
 /**
  * Instantiates a ProviderAdapter for Threads publishing, replies, comments, and analytics.
- * Configures Graph API endpoints on graph.threads.net, container creation and publication flow,
+ * Configures Graph API endpoints, container creation and publication flow,
  * rate limit extraction, token refreshes, and optional engagement method exclusion.
  * Returns configured ProviderAdapter conforming to Meltiply contracts.
  */
@@ -289,9 +302,11 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
   const clientSecret = required("clientSecret", options.clientSecret);
   const configuredRedirectUri = exactRedirectUri(options.redirectUri);
   const engagementEnabled = options.engagementEnabled ?? true;
-  const configuredScopes = engagementEnabled
-    ? [...publishingScopes, ...engagementScopes]
-    : [...publishingScopes];
+  const configuredScopes = [
+    ...publishingScopes,
+    ...additionalPublishingScopes,
+    ...(engagementEnabled ? engagementScopes : []),
+  ];
   const now = options.now ?? (() => new Date());
   const http = new ProviderHttpClient({
     allowedOrigins: [apiOrigin],
@@ -302,6 +317,35 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       ? {}
       : { timeoutMilliseconds: options.timeoutMilliseconds }),
   });
+  /**
+   * Introspects the current token with the app credential, retaining only
+   * provider-reported grants. Requesting a new optional publishing permission
+   * cannot make an existing account appear to have granted it after refresh.
+   */
+  const grantedScopes = async (
+    context: ProviderRequestContext,
+    token: string,
+    expectedAccount?: string,
+  ): Promise<string[]> => {
+    const url = new URL("/v1.0/debug_token", apiOrigin);
+    url.searchParams.set("input_token", token);
+    const response = await http.request<unknown>(context, {
+      headers: bearer(`TH|${clientId}|${clientSecret}`),
+      method: "GET",
+      url: url.toString(),
+    });
+    const data = record(record(response.body)?.data);
+    const scopes = data?.scopes;
+    if (
+      data?.is_valid !== true ||
+      !providerIdentifier(data.user_id) ||
+      (expectedAccount && data.user_id !== expectedAccount) ||
+      !Array.isArray(scopes) ||
+      scopes.some((scope) => typeof scope !== "string" || !/^[a-z_]+$/.test(scope))
+    )
+      throw malformed();
+    return [...new Set(scopes as string[])];
+  };
 
   /**
    * Issues the single finalizing publish for a ready Threads media container.
@@ -330,6 +374,9 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         outcome: "confirmed_success",
         providerOperationId: containerOperationId("created", containerId),
         providerPostId,
+        ...(record(response.body)?.crossreshare_to_ig_status === "FAILED"
+          ? { warnings: ["instagram_crossshare_failed" as const] }
+          : {}),
       };
     } catch (cause) {
       if (!(cause instanceof ProviderAdapterError)) throw cause;
@@ -500,13 +547,12 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
           retainedOperationId,
         );
       }
-      const url = new URL(`/${encodeURIComponent(providerPostId)}`, apiOrigin);
       try {
         const response = await http.request<unknown>(context, {
           headers: bearer(credentials.accessToken),
           method: "DELETE",
           sideEffectPossible: true,
-          url: url.toString(),
+          url: `${apiOrigin}/${encodeURIComponent(providerPostId)}`,
         });
         const body = record(response.body);
         if (
@@ -538,6 +584,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       comments: engagementEnabled,
       reply: engagementEnabled,
     },
+    ambiguousZeroMetrics: ["views", "reactions", "comments", "shares"] as const,
 
     /**
      * Exchanges the authorization code for a short-lived token, upgrades it via
@@ -597,7 +644,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       const avatarUrl =
         profile?.threads_profile_picture_url === undefined
           ? undefined
-          : secureUrl(profile.threads_profile_picture_url);
+          : secureUrl(profile.threads_profile_picture_url)?.href;
       if (
         !accountId ||
         !username ||
@@ -616,7 +663,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         },
         expiresAt,
         refreshToken: accessToken,
-        scopes: [...configuredScopes],
+        scopes: await grantedScopes(context, accessToken, accountId),
       };
     },
 
@@ -728,7 +775,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         const authorAvatarUrl =
           comment?.profile_picture_url === undefined
             ? undefined
-            : secureUrl(comment.profile_picture_url);
+            : secureUrl(comment.profile_picture_url)?.href;
         if (
           !providerCommentId ||
           identifiers.has(providerCommentId) ||
@@ -765,8 +812,9 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
 
     /**
      * Resolves publication status from either a confirmed post ID or a persisted
-     * container operation identity. Post lookups confirm the permalink; container
-     * lookups delegate to lookupContainer, which polls readiness and finalizes a
+     * container operation identity. A matching Post ID confirms publication even
+     * when Meta omits a copyright-restricted permalink; present URLs stay validated.
+     * Container lookups delegate to lookupContainer, which polls readiness and finalizes a
      * 'created' container exactly once without ever republishing a 'submitted' one.
      */
     async lookupPublication(context, credentials, lookup) {
@@ -783,8 +831,9 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
           });
           const body = record(response.body);
           const responseId = providerIdentifier(body?.id);
-          const providerUrl = secureUrl(body?.permalink);
-          if (responseId !== providerPostId || !providerUrl) throw malformed();
+          const providerUrl = secureUrl(body?.permalink)?.href;
+          if (responseId !== providerPostId || (body?.permalink !== undefined && !providerUrl))
+            throw malformed();
           return {
             result: {
               outcome: "confirmed_success",
@@ -792,7 +841,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
                 ? { providerOperationId: lookup.providerOperationId }
                 : {}),
               providerPostId,
-              providerUrl,
+              ...(providerUrl ? { providerUrl } : {}),
             },
             state: "published",
           };
@@ -806,24 +855,43 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       return lookupContainer(context, credentials, operation);
     },
     /**
-     * Creates Threads containers for a post's ordered attachments and, for
-     * media posts, returns the durable 'created:<parent>' operation identity
-     * without publishing; lookupPublication polls the parent and finalizes it
-     * exactly once. Multi-attachment posts first create one unpublished item
-     * container per attachment, then a CAROUSEL parent binding those item ids
-     * in creator order. Text-only posts use the synchronous TEXT container and
-     * keep the single-call create-and-publish flow.
+     * Creates a durable 'created:<parent>' operation for text or ordered media;
+     * lookupPublication polls readiness and finalizes it exactly once. Text
+     * containers can also be asynchronous, so they never bypass that gate.
+     * Multi-attachment posts first create one unpublished item container per
+     * attachment, then a CAROUSEL parent binding those item ids in creator order.
      * @param context - Request context carrying abort signal and rate telemetry.
      * @param credentials - Threads long-lived access token.
      * @param input - Composed post text plus the Post's ordered attachments.
-     * @returns confirmed_success for a text post, otherwise the container
-     * operation identity awaiting reconciliation.
+     * @returns confirmed_success carrying the container operation awaiting
+     * reconciliation, or the published identity of a native repost.
      */
     async publish(context, credentials, input) {
       required("idempotencyKey", input.idempotencyKey, 255);
       const { attachments, text } = postAttachments(input);
+      const options = parseThreadsOptions(input.providerOptions?.threads ?? {});
+      if (!options || threadsOptionsIssue(options, text, attachments.length)) {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({ code: "threads_publish_options_invalid", status: 400 }),
+        );
+      }
+      if (options.repost_id) {
+        const response = await http.request<unknown>(context, {
+          headers: bearer(credentials.accessToken),
+          method: "POST",
+          sideEffectPossible: true,
+          url: new URL(`/${encodeURIComponent(options.repost_id)}/repost`, apiOrigin).toString(),
+        });
+        const providerPostId = providerIdentifier(record(response.body)?.id);
+        if (!providerPostId) throw malformed(true);
+        return { outcome: "confirmed_success", providerPostId };
+      }
 
-      const createContainer = async (parameters: URLSearchParams): Promise<string> => {
+      const createContainer = async (
+        parameters: URLSearchParams,
+        parent = true,
+      ): Promise<string> => {
+        if (parent) applyThreadsOptions(parameters, options);
         const createUrl = new URL("/me/threads", apiOrigin);
         createUrl.search = parameters.toString();
         const response = await http.request<unknown>(context, {
@@ -836,20 +904,15 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         return containerId;
       };
 
-      if (attachments.length === 0) {
-        return publishContainer(
-          context,
-          credentials.accessToken,
-          await createContainer(textParameters(text)),
-        );
-      }
       const [only] = attachments;
-      if (attachments.length === 1) {
+      if (attachments.length <= 1) {
         return {
           outcome: "confirmed_success",
           providerOperationId: containerOperationId(
             "created",
-            await createContainer(singleParameters(only!, text)),
+            await createContainer(
+              only ? singleParameters(only, text) : textParameters(text, options),
+            ),
           ),
         };
       }
@@ -858,7 +921,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       // ids stay aligned with the published carousel order.
       const children: string[] = [];
       for (const item of attachments) {
-        children.push(await createContainer(carouselItemParameters(item)));
+        children.push(await createContainer(carouselItemParameters(item), false));
       }
       return {
         outcome: "confirmed_success",
@@ -890,7 +953,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         accessToken,
         expiresAt: addSeconds(now(), body.expires_in, tokenLifetimeMaximumSeconds),
         refreshToken: accessToken,
-        scopes: [...configuredScopes],
+        scopes: await grantedScopes(context, accessToken),
       };
     },
 

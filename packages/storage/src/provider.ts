@@ -2,6 +2,8 @@ import type { ConfiguredObjectStore, ObjectWriteUrlSigner } from "./object-store
 import { createR2SignerFromEnv, R2ObjectStore, type R2BucketLike } from "./r2";
 import { S3ObjectStore, type S3SigV4SignerOptions, S3SigV4Signer } from "./s3";
 
+const regionPattern = /^[a-z0-9-]+$/;
+
 /**
  * Object-storage provider selection.
  *
@@ -100,7 +102,7 @@ function forcePathStyle(value: string | undefined): boolean {
 function s3Region(value: string | undefined): string | undefined {
   const region = value?.trim();
   if (!region) return undefined;
-  if (!/^[a-z0-9-]+$/.test(region)) {
+  if (!regionPattern.test(region)) {
     throw new TypeError("S3_REGION must contain only lowercase letters, digits, and hyphens");
   }
   return region;

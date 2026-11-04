@@ -19,6 +19,8 @@ import { createServer, request } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 
+const ipv6BracketsPattern = /^\[|\]$/g;
+
 const args = new Map();
 for (let index = 2; index < process.argv.length; index += 2) {
   args.set(process.argv[index], process.argv[index + 1]);
@@ -98,7 +100,7 @@ const server = createServer(async (req, res) => {
     const upstream = request(
       {
         headers: { ...req.headers, host: apiOrigin.host },
-        host: apiOrigin.hostname.replace(/^\[|\]$/g, ""),
+        host: apiOrigin.hostname.replace(ipv6BracketsPattern, ""),
         method: req.method,
         path: req.url,
         port: apiOrigin.port || 80,

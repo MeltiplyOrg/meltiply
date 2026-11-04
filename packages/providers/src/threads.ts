@@ -157,7 +157,7 @@ function attachment(input: PublishInput, index: number): ThreadsAttachment {
       }),
     );
   }
-  const mediaUrl = secureUrl(media.url);
+  const mediaUrl = secureUrl(media.url)?.href;
   if (!mediaUrl) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
@@ -547,13 +547,12 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
           retainedOperationId,
         );
       }
-      const url = new URL(`/${encodeURIComponent(providerPostId)}`, apiOrigin);
       try {
         const response = await http.request<unknown>(context, {
           headers: bearer(credentials.accessToken),
           method: "DELETE",
           sideEffectPossible: true,
-          url: url.toString(),
+          url: `${apiOrigin}/${encodeURIComponent(providerPostId)}`,
         });
         const body = record(response.body);
         if (
@@ -645,7 +644,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       const avatarUrl =
         profile?.threads_profile_picture_url === undefined
           ? undefined
-          : secureUrl(profile.threads_profile_picture_url);
+          : secureUrl(profile.threads_profile_picture_url)?.href;
       if (
         !accountId ||
         !username ||
@@ -776,7 +775,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         const authorAvatarUrl =
           comment?.profile_picture_url === undefined
             ? undefined
-            : secureUrl(comment.profile_picture_url);
+            : secureUrl(comment.profile_picture_url)?.href;
         if (
           !providerCommentId ||
           identifiers.has(providerCommentId) ||
@@ -832,7 +831,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
           });
           const body = record(response.body);
           const responseId = providerIdentifier(body?.id);
-          const providerUrl = secureUrl(body?.permalink);
+          const providerUrl = secureUrl(body?.permalink)?.href;
           if (responseId !== providerPostId || (body?.permalink !== undefined && !providerUrl))
             throw malformed();
           return {

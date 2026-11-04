@@ -250,17 +250,18 @@ export function saveOAuthConnectionEffect(
          org_id, brand_profile_id, platform, platform_user_id, display_name,
          avatar_url, access_token, refresh_token, token_expires_at, scopes,
          metadata, connection_status, last_synced_at, revoked_at, updated_at,
-         token_refresh_next_attempt_at
+         token_refresh_next_attempt_at, username
        )
        VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-         jsonb_build_object('connected_by', $11::text, 'username', $13::text),
-         'connected', now(), NULL, now(), $12
+         jsonb_build_object('connected_by', $11::text),
+         'connected', now(), NULL, now(), $12, $13
        )
        ON CONFLICT (platform, platform_user_id)
        DO UPDATE SET
          display_name = EXCLUDED.display_name,
          avatar_url = EXCLUDED.avatar_url,
+         username = EXCLUDED.username,
          access_token = EXCLUDED.access_token,
          refresh_token = COALESCE(EXCLUDED.refresh_token, platform_accounts.refresh_token),
          token_expires_at = EXCLUDED.token_expires_at,

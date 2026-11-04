@@ -8,6 +8,8 @@ import { toLocalDateKey } from "@/components/posts/posts-helpers";
 import { useI18n } from "@/lib/i18n";
 import { TimeOfDayField } from "@/components/posts/time-of-day-field";
 
+const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
+
 const CALENDAR_CLASSES: Partial<ClassNames> = {
   root: "min-w-0",
   months: "relative",
@@ -72,9 +74,7 @@ export function ScheduleDateTime({
     setPreviousDateKey(dateKey);
     setMonth(selectedDate ?? new Date());
   }
-  const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(value.slice(11, 16))
-    ? value.slice(11, 16)
-    : "10:00";
+  const time = timePattern.test(value.slice(11, 16)) ? value.slice(11, 16) : "10:00";
   const dates = useMemo(
     () => ({
       full: new Intl.DateTimeFormat(language, { dateStyle: "full" }),

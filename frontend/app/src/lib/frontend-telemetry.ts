@@ -1,5 +1,9 @@
 import { applyAuthJwt } from "./auth-token";
 
+const unsafeFieldCharactersPattern = /[^a-zA-Z0-9_.-]/g;
+const configurationKeyPattern = /^[A-Z][A-Z0-9_]{0,63}$/;
+const hashPattern = /^[0-9a-f]{8,64}$/i;
+
 export const frontendTelemetryEvent = "meltiply:frontend-telemetry";
 
 type FrontendTelemetryKind = "api-error" | "frontend-error" | "unknown-contract-value";
@@ -51,7 +55,7 @@ function frameLines(stack: string | undefined): string | undefined {
  * @returns Sanitized field string.
  */
 function safeField(field: string): string {
-  return field.replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 64);
+  return field.replace(unsafeFieldCharactersPattern, "_").slice(0, 64);
 }
 
 /**
@@ -61,7 +65,7 @@ function safeField(field: string): string {
  * @returns Valid uppercase key string, or `undefined` if malformed.
  */
 function safeConfigurationKey(key: string): string | undefined {
-  return /^[A-Z][A-Z0-9_]{0,63}$/.test(key) ? key : undefined;
+  return configurationKeyPattern.test(key) ? key : undefined;
 }
 
 /**
@@ -113,7 +117,7 @@ function boundedStatus(status: number | undefined): number | undefined {
  * @returns Lowercase sanitized hash or `undefined`.
  */
 function boundedHash(hash: string | undefined): string | undefined {
-  return hash && /^[0-9a-f]{8,64}$/i.test(hash) ? hash.slice(0, 64).toLowerCase() : undefined;
+  return hash && hashPattern.test(hash) ? hash.slice(0, 64).toLowerCase() : undefined;
 }
 
 /**

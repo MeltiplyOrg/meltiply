@@ -3,6 +3,8 @@ import { previewObjectSchema } from "./contract-types";
 import type { PreviewObject, PreviewOperation, PreviewResponse } from "./contract-types";
 import { mergeExample } from "./values";
 
+const pathParameterPattern = /^\/\{([^}]+)\}$/;
+
 type Collection = { path: string; field: string; envelope: PreviewObject; items: PreviewObject[] };
 type Parameters = Readonly<Record<string, string | readonly string[] | undefined>>;
 
@@ -74,7 +76,7 @@ export function createPreviewState(
     const collection = owners.get(operation.operationId);
     if (!collection) return undefined;
     const suffix = operation.path.slice(collection.path.length);
-    const parameter = /^\/\{([^}]+)\}$/.exec(suffix)?.[1];
+    const parameter = pathParameterPattern.exec(suffix)?.[1];
     const id = parameter ? params[parameter] : undefined;
     const item = collection.items.find((item) => item.id === id || item.user_id === id);
     if (operation.method === "get" && suffix === "") {

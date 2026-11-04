@@ -8,7 +8,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
 import { ownerBrowserSession } from "../../frontend/app/e2e/selfhost-auth-smoke.mjs";
-import { cacheSmoke } from "../benchmarks/backend/cache-smoke.mjs";
+import { cacheSmoke } from "../lib/cache-smoke.mjs";
+
+const hexPattern = /^[0-9a-f]+$/u;
 
 const composeArgs = [
   "compose",
@@ -122,16 +124,6 @@ await cacheSmoke({
   origin,
   cookie,
   label: `compose-${process.arch}`,
-  observeMemory: async () => {
-    const containerId = compose("ps", "-q", "runtime").toString().trim();
-    return {
-      container_working_set: execFileSync(
-        "docker",
-        ["stats", "--no-stream", "--format", "{{.MemUsage}}", containerId],
-        { encoding: "utf8" },
-      ).trim(),
-    };
-  },
   query: async (text, values = []) =>
     JSON.parse(
       execFileSync(
@@ -339,7 +331,7 @@ async function verifyFullRestore() {
     await copyFile(".env.selfhost", protectedEnv);
     await chmod(protectedEnv, 0o600);
     const source = compose("ps", "-a", "-q", "runtime").toString().trim();
-    assert.match(source, /^[0-9a-f]+$/u);
+    assert.match(source, hexPattern);
     for (const [path, command] of [
       [
         dump,
@@ -394,7 +386,7 @@ async function verifyFullRestore() {
     }
     recover("up", "--no-start", "--no-deps", "--no-build", "runtime");
     const target = recover("ps", "-a", "-q", "runtime").toString().trim();
-    assert.match(target, /^[0-9a-f]+$/u);
+    assert.match(target, hexPattern);
     const runtimeArchive = openSync(archive, "r");
     try {
       execFileSync("docker", ["cp", "-a", "-", `${target}:/data`], {

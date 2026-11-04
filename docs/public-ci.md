@@ -40,7 +40,7 @@ baselines are reported explicitly. See the
 [contract upgrade procedure](../packages/contracts/README.md).
 
 `bun run test:tooling` discovers Node test files in CI helpers, local tooling,
-translations, infrastructure, releases, staging adapters, benchmarks, and self-hosted
+translations, infrastructure, releases, staging adapters, and self-hosted
 jobs. Shell regressions and PostgreSQL suites stay separate; none need deployment
 credentials.
 
@@ -79,15 +79,6 @@ on default-branch history alone can publish. See the
 
 Live deployments follow the
 [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
-
-## Backend benchmarks
-
-[`backend-benchmark.yml`](../.github/workflows/backend-benchmark.yml) is a manual
-two-revision job outside `ci-gate`: it checks out `master` as baseline and the
-dispatched commit as candidate, migrates a dedicated PostgreSQL 18.6 database for
-each, and runs the same in-process API workload against both in alternating order.
-Methodology and results are in the
-[backend comparison report](benchmarks/backend-optimization.md).
 
 ## Self-hosted release images
 

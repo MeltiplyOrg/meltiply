@@ -2,6 +2,8 @@ import type { BetterAuthInstance } from "@meltiply/auth";
 
 import { applicationOrigin, requiresEmailVerification, type ApiWorkerEnv } from "./env";
 
+const nonAlphanumericPattern = /[^a-zA-Z0-9]/g;
+
 /**
  * The only supported device-flow client. The CLI protocol names this value in
  * every code and token request; arbitrary clients are rejected by the installed
@@ -51,7 +53,7 @@ interface DeviceSessionRow extends Record<string, unknown> {
  * @returns Absolute `${applicationOrigin}/device` URL.
  */
 export function deviceVerificationUri(env: ApiWorkerEnv): string {
-  return new URL("/device", applicationOrigin(env)).href;
+  return `${applicationOrigin(env)}/device`;
 }
 
 /**
@@ -109,7 +111,7 @@ async function requestJsonRecord(request: Request): Promise<Record<string, unkno
  * @returns Normalized code used in deviceCode lookups.
  */
 function normalizeUserCode(value: string): string {
-  return value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  return value.replace(nonAlphanumericPattern, "").toUpperCase();
 }
 
 /**

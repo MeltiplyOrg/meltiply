@@ -7761,12 +7761,18 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           account: {
             displayName: "Integration Creator",
             id: "integration-oauth-user",
+            username: "integration-handle",
           },
           expiresAt: "2026-09-01T00:00:00.000Z",
           refreshToken: "integration-refresh-token",
           scopes: ["threads_basic", "threads_content_publish"],
         },
       );
+      expect(
+        (await Effect.runPromise(service.listPlatformAccounts(env, beta))).find(
+          (account) => account.platform_user_id === "integration-oauth-user",
+        ),
+      ).toMatchObject({ username: "integration-handle" });
 
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
@@ -7776,9 +7782,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
             refresh_token: string;
             revoked_at: Date | null;
             scopes: string[];
+            username: string;
           }>(
             `SELECT
-             access_token, refresh_token, scopes, connection_status, revoked_at
+             access_token, refresh_token, scopes, connection_status, revoked_at, username
            FROM platform_accounts
            WHERE platform_user_id = 'integration-oauth-user'`,
           );
@@ -7786,6 +7793,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
             connection_status: "connected",
             revoked_at: null,
             scopes: ["threads_basic", "threads_content_publish"],
+            username: "integration-handle",
           });
           expect(result.rows[0]?.access_token).toMatch(/^meltiply:v2:primary:/);
           expect(result.rows[0]?.refresh_token).toMatch(/^meltiply:v2:primary:/);

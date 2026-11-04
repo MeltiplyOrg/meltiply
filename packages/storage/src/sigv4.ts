@@ -10,6 +10,12 @@ import type {
   SignedUploadRequest,
 } from "./object-store";
 
+const unescapedUriCharactersPattern = /[!'()*]/g;
+const timestampSeparatorsPattern = /[:-]|\.\d{3}/g;
+const whitespacePattern = /\s+/g;
+const headerNamePattern = /^[a-z0-9!#$%&'*+.^_`|~-]+$/;
+const unsafeDownloadFilenamePattern = /[\u0000-\u001f\u007f"\\/]+/g;
+
 /**
  * Shared AWS Signature Version 4 machinery for every object-storage provider
  * Meltiply can talk to.
@@ -60,7 +66,7 @@ function required(name: string, value: string): string {
  */
 function encode(value: string): string {
   return encodeURIComponent(value).replace(
-    /[!'()*]/g,
+    unescapedUriCharactersPattern,
     (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
   );
 }
@@ -187,7 +193,7 @@ async function deriveSigningKey(
  * @returns Object with 8-character `date` (YYYYMMDD) and 16-character `value` (YYYYMMDDTHHMMSSZ).
  */
 function timestamp(now: Date): { date: string; value: string } {
-  const value = now.toISOString().replace(/[:-]|\.\d{3}/g, "");
+  const value = now.toISOString().replace(timestampSeparatorsPattern, "");
   return { date: value.slice(0, 8), value };
 }
 
@@ -487,7 +493,7 @@ export class SigV4Signer {
       : await sha256Bytes(new ArrayBuffer(0));
     const headers = new Map<string, string>();
     for (const [rawName, rawValue] of Object.entries(input.headers ?? {})) {
-      headers.set(rawName.trim().toLowerCase(), rawValue.trim().replace(/\s+/g, " "));
+      headers.set(rawName.trim().toLowerCase(), rawValue.trim().replace(whitespacePattern, " "));
     }
     headers.set("host", url.host);
     headers.set("x-amz-content-sha256", payloadHash);
@@ -663,13 +669,16 @@ function normalizedHeaders(
     }
     for (const [rawName, rawValue] of entries) {
       const name = rawName.trim().toLowerCase();
-      if (!/^[a-z0-9!#$%&'*+.^_`|~-]+$/.test(name)) {
+      if (!headerNamePattern.test(name)) {
         throw new TypeError("requiredHeaders contains an invalid header name");
       }
       if (name === "host") {
         throw new TypeError("requiredHeaders must not override host");
       }
-      const value = required(`requiredHeaders["${name}"]`, rawValue).replace(/\s+/g, " ");
+      const value = required(`requiredHeaders["${name}"]`, rawValue).replace(
+        whitespacePattern,
+        " ",
+      );
       headers.set(name, value);
     }
   }
@@ -685,10 +694,7 @@ function normalizedHeaders(
  * @throws {TypeError} If filename is missing or empty after trimming.
  */
 function downloadDisposition(filename: string): string {
-  const normalized = filename
-    .trim()
-    .replace(/[\u0000-\u001f\u007f"\\/]+/g, "_")
-    .slice(0, 180);
+  const normalized = filename.trim().replace(unsafeDownloadFilenamePattern, "_").slice(0, 180);
   if (!normalized) throw new TypeError("downloadFilename is required");
   return `attachment; filename="${normalized}"`;
 }

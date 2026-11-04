@@ -15,6 +15,10 @@ import {
 } from "./src/preview/contract-types";
 import { exampleForSchema, resolvePreviewReference } from "./preview-schema";
 
+const wildcardSuffixPattern = /\/\*$/;
+const trailingSlashPattern = /\/$/;
+const httpStatusPattern = /^\d{3}$/;
+
 const virtualId = "virtual:preview-contract";
 const resolvedId = `\0${virtualId}`;
 const specificationPath = fileURLToPath(
@@ -74,7 +78,7 @@ function frontendRoutes(): string[] {
     if (Schema.is(routeOpeningSchema)(value))
       for (const attribute of value.attributes) {
         if (Schema.is(pathAttributeSchema)(attribute) && attribute.value.value.startsWith("/"))
-          routes.add(attribute.value.value.replace(/\/\*$/, ""));
+          routes.add(attribute.value.value.replace(wildcardSuffixPattern, ""));
       }
     const children: unknown[] = Object.values(value);
     children.forEach(visit);
@@ -126,10 +130,13 @@ async function compileContract(): Promise<PreviewContract> {
           throw new Error(
             `Undocumented preview status ${operation.operationId}: ${response.status}`,
           );
-      const prefix = new URL(server.url, "http://preview.invalid").pathname.replace(/\/$/, "");
+      const prefix = new URL(server.url, "http://preview.invalid").pathname.replace(
+        trailingSlashPattern,
+        "",
+      );
       const examples = [example.success, ...example.errors];
       const responses: PreviewResponse[] = Object.entries(operation.responses)
-        .filter(([status]) => /^\d{3}$/.test(status))
+        .filter(([status]) => httpStatusPattern.test(status))
         .map(([status, definition]) => {
           const existing = examples.find((response) => response.status === Number(status));
           if (existing) return existing;

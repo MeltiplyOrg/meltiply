@@ -32,6 +32,13 @@ import type {
   TikTokPublishOptions,
 } from "./types";
 
+const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:~-]{0,254}$/;
+const opaqueIdentifierPattern = /^[A-Za-z0-9_-][A-Za-z0-9._:~-]{0,254}$/;
+const errorCodePattern = /^[a-z0-9][a-z0-9._-]{0,79}$/;
+const scopePattern = /^[a-z][a-z0-9._-]{0,99}$/;
+const publishOperationPattern = /^(?:publish|inbox):(.+)$/;
+const lineBreakPattern = /\r?\n/;
+
 const apiOrigin = "https://open.tiktokapis.com";
 const authorizationOrigin = "https://www.tiktok.com";
 const imageMaximumBytes = 20 * 1024 * 1024;
@@ -117,7 +124,7 @@ interface TikTokTokenBody {
 function tiktokIdentifier(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim();
-  return /^[A-Za-z0-9][A-Za-z0-9._:~-]{0,254}$/.test(normalized) ? normalized : undefined;
+  return identifierPattern.test(normalized) ? normalized : undefined;
 }
 
 /**
@@ -131,7 +138,7 @@ function tiktokIdentifier(value: unknown): string | undefined {
 function tiktokOpaqueIdentifier(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim();
-  return /^[A-Za-z0-9_-][A-Za-z0-9._:~-]{0,254}$/.test(normalized) ? normalized : undefined;
+  return opaqueIdentifierPattern.test(normalized) ? normalized : undefined;
 }
 
 /**
@@ -179,7 +186,7 @@ function apiFailureStatus(code: string): number {
  */
 function apiError(code: string): ProviderAdapterError {
   const normalized = code.trim().toLowerCase();
-  if (!/^[a-z0-9][a-z0-9._-]{0,79}$/.test(normalized)) throw malformed();
+  if (!errorCodePattern.test(normalized)) throw malformed();
   return new ProviderAdapterError(
     classifyProviderFailure({
       code: `tiktok_${normalized}`,
@@ -216,7 +223,7 @@ function scopeSet(value: unknown): Set<string> | undefined {
   if (
     scopes.length > 20 ||
     new Set(scopes).size !== scopes.length ||
-    scopes.some((scope) => !/^[a-z][a-z0-9._-]{0,99}$/.test(scope))
+    scopes.some((scope) => !scopePattern.test(scope))
   ) {
     return undefined;
   }
@@ -318,8 +325,8 @@ function configuredMediaPrefix(value: string): URL {
  * @throws ProviderAdapterError on prefix mismatch or invalid URL.
  */
 function pullMedia(media: ProviderMedia, mediaPrefix: URL): ProviderRemoteMedia & { url: string } {
-  const normalizedUrl = media.mode === "remote_ingest" ? secureUrl(media.url) : undefined;
-  if (media.mode !== "remote_ingest" || !normalizedUrl) {
+  const url = media.mode === "remote_ingest" ? secureUrl(media.url) : undefined;
+  if (media.mode !== "remote_ingest" || !url) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
         code: "tiktok_pull_media_required",
@@ -327,7 +334,6 @@ function pullMedia(media: ProviderMedia, mediaPrefix: URL): ProviderRemoteMedia 
       }),
     );
   }
-  const url = new URL(normalizedUrl);
   if (url.origin !== mediaPrefix.origin || !url.pathname.startsWith(mediaPrefix.pathname)) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
@@ -336,7 +342,7 @@ function pullMedia(media: ProviderMedia, mediaPrefix: URL): ProviderRemoteMedia 
       }),
     );
   }
-  return { ...media, url: normalizedUrl };
+  return { ...media, url: url.href };
 }
 
 /**
@@ -415,7 +421,7 @@ function validateHashtags(input: PublishInput): void {
 function creatorRequirements(value: unknown): TikTokPublicationRequirements {
   const data = envelope(value);
   const creatorAvatarUrl =
-    data.creator_avatar_url === undefined ? undefined : secureUrl(data.creator_avatar_url);
+    data.creator_avatar_url === undefined ? undefined : secureUrl(data.creator_avatar_url)?.href;
   const creatorUsername = boundedText(data.creator_username, 255);
   const creatorDisplayName = boundedText(data.creator_nickname, 500);
   const rawPrivacyLevels = data.privacy_level_options;
@@ -469,7 +475,7 @@ function operationId(publishId: string, inbox = false): string {
 function publishId(value: unknown): string | undefined {
   const normalized = tiktokIdentifier(value);
   if (!normalized) return undefined;
-  const match = normalized.match(/^(?:publish|inbox):(.+)$/);
+  const match = normalized.match(publishOperationPattern);
   return tiktokIdentifier(match?.[1]);
 }
 
@@ -627,7 +633,8 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       const user = record(envelope(userResponse.body).user);
       const openId = tiktokOpaqueIdentifier(user?.open_id);
       const displayName = boundedText(user?.display_name, 500);
-      const avatarUrl = user?.avatar_url === undefined ? undefined : secureUrl(user.avatar_url);
+      const avatarUrl =
+        user?.avatar_url === undefined ? undefined : secureUrl(user.avatar_url)?.href;
       const username = boundedString(user?.username, 255);
       if (
         openId !== tokens.openId ||
@@ -815,9 +822,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       if (status === "FAILED") {
         const reason = boundedString(data.fail_reason, 80)?.toLowerCase();
         const code =
-          reason && /^[a-z0-9][a-z0-9._-]{0,79}$/.test(reason)
-            ? `tiktok_${reason}`
-            : "tiktok_publish_failed";
+          reason && errorCodePattern.test(reason) ? `tiktok_${reason}` : "tiktok_publish_failed";
         // These are terminal outcomes for this operation, not uncertain writes.
         // TikTok explicitly permits retry after internal/retrieval failures;
         // removed authorization instead requires reconnection, never a retry.
@@ -978,7 +983,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         };
       } else {
         const title = caption
-          .split(/\r?\n/)
+          .split(lineBreakPattern)
           .map((line) => line.trim())
           .find(Boolean);
         const imagesInvalid =

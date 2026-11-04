@@ -44,6 +44,19 @@ import type {
   YouTubePrivacyStatus,
 } from "./types";
 
+const pkcePattern = /^[A-Za-z0-9_-]{43,128}$/;
+const whitespacePattern = /\s+/;
+const scopePattern = /^[\x21\x23-\x5B\x5D-\x7E]+$/;
+const videoOperationPattern = /^video:(.+)$/;
+const sessionOperationPattern = /^(session|submitted):([1-9]\d*):(?:(\d+):)?(https:\/\/.+)$/;
+const invalidOperationCharactersPattern = /[\u0000-\u001f\u007f\s]/;
+const handlePrefixPattern = /^@/;
+const handlePattern = /^[A-Za-z0-9_.-]{1,100}$/;
+const lineBreakPattern = /\r?\n/;
+const angleBracketsPattern = /[<>]/;
+const uploadRangePattern = /^bytes=0-(\d+)$/;
+const categoryIdPattern = /^\d{1,3}$/;
+
 const apiOrigin = "https://www.googleapis.com";
 const analyticsOrigin = "https://youtubeanalytics.googleapis.com";
 const tokenOrigin = "https://oauth2.googleapis.com";
@@ -149,7 +162,7 @@ function accountId(credentials: ProviderCredentials): string {
  */
 function pkce(name: string, value: string): string {
   const normalized = required(name, value, 128);
-  if (!/^[A-Za-z0-9_-]{43,128}$/.test(normalized)) {
+  if (!pkcePattern.test(normalized)) {
     throw new TypeError(`${name} is invalid`);
   }
   return normalized;
@@ -163,11 +176,11 @@ function pkce(name: string, value: string): string {
 function scopeSet(value: unknown): Set<string> | undefined {
   const normalized = boundedString(value, 4_096);
   if (!normalized) return undefined;
-  const scopes = normalized.split(/\s+/);
+  const scopes = normalized.split(whitespacePattern);
   if (
     scopes.length > 20 ||
     new Set(scopes).size !== scopes.length ||
-    scopes.some((scope) => !/^[\x21\x23-\x5B\x5D-\x7E]+$/.test(scope))
+    scopes.some((scope) => !scopePattern.test(scope))
   ) {
     return undefined;
   }
@@ -232,11 +245,11 @@ function operationId(operation: YouTubeOperation): string {
  */
 function parseOperationId(value: unknown): YouTubeOperation | undefined {
   const normalized = boundedString(value, maximumOperationIdLength);
-  if (!normalized || /[\u0000-\u001f\u007f\s]/.test(normalized)) return undefined;
-  const video = normalized.match(/^video:(.+)$/);
+  if (!normalized || invalidOperationCharactersPattern.test(normalized)) return undefined;
+  const video = normalized.match(videoOperationPattern);
   const videoId = providerIdentifier(video?.[1]);
   if (videoId) return { id: videoId, phase: "video" };
-  const session = normalized.match(/^(session|submitted):([1-9]\d*):(?:(\d+):)?(https:\/\/.+)$/);
+  const session = normalized.match(sessionOperationPattern);
   if (!session || (session[1] === "submitted") !== (session[3] !== undefined)) return undefined;
   const fileSize = Number(session[2]);
   const acknowledged = Number(session[3] ?? 0);
@@ -267,9 +280,9 @@ function sessionLocation(value: string | null): {
   id: string;
   url: string;
 } {
-  const normalized = secureUrl(value);
-  if (!normalized) throw malformed();
-  const url = new URL(normalized);
+  const url = secureUrl(value);
+  if (!url) throw malformed();
+  const normalized = url.href;
   const ids = url.searchParams.getAll("upload_id");
   if (
     normalized.length > maximumSessionUriLength ||
@@ -289,8 +302,8 @@ function sessionLocation(value: string | null): {
  */
 function youtubeHandle(customUrl: unknown): string | undefined {
   if (typeof customUrl !== "string") return undefined;
-  const normalized = customUrl.trim().replace(/^@/, "");
-  return normalized && /^[A-Za-z0-9_.-]{1,100}$/.test(normalized) ? normalized : undefined;
+  const normalized = customUrl.trim().replace(handlePrefixPattern, "");
+  return normalized && handlePattern.test(normalized) ? normalized : undefined;
 }
 
 /**
@@ -309,7 +322,7 @@ function uploadInput(input: PublishInput): UploadInput {
   required("idempotencyKey", input.idempotencyKey, 255);
   const description = input.caption.trim();
   const title = description
-    .split(/\r?\n/)
+    .split(lineBreakPattern)
     .map((line) => line.trim())
     .find(Boolean);
   const [media] = input.media;
@@ -321,8 +334,8 @@ function uploadInput(input: PublishInput): UploadInput {
     !title ||
     [...title].length > 100 ||
     new TextEncoder().encode(description).byteLength > 5_000 ||
-    /[<>]/.test(title) ||
-    /[<>]/.test(description) ||
+    angleBracketsPattern.test(title) ||
+    angleBracketsPattern.test(description) ||
     input.hashtags.length > 15 ||
     input.hashtags.join(",").length > 500 ||
     !metadata ||
@@ -416,7 +429,7 @@ function googleErrorDiagnosis(_status: number, body: unknown): ProviderErrorDiag
 function acknowledgedOffset(headers: Headers, fileSize: number, absent: number): number {
   const range = headers.get("Range");
   if (range === null) return absent;
-  const lastByte = Number(range.match(/^bytes=0-(\d+)$/)?.[1]);
+  const lastByte = Number(range.match(uploadRangePattern)?.[1]);
   if (!Number.isSafeInteger(lastByte) || lastByte + 1 > fileSize) {
     throw malformed();
   }
@@ -454,7 +467,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
   const clientSecret = required("clientSecret", options.clientSecret);
   const configuredRedirectUri = exactRedirectUri(options.redirectUri);
   const categoryId = required("categoryId", options.categoryId ?? "22", 3);
-  if (!/^\d{1,3}$/.test(categoryId)) {
+  if (!categoryIdPattern.test(categoryId)) {
     throw new TypeError("categoryId is invalid");
   }
   const now = options.now ?? (() => new Date());
@@ -1114,7 +1127,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
       const thumbnail = record(thumbnails?.default);
       const id = providerIdentifier(channel?.id);
       const displayName = boundedText(snippet?.title, 500);
-      const avatarUrl = thumbnail?.url === undefined ? undefined : secureUrl(thumbnail.url);
+      const avatarUrl = thumbnail?.url === undefined ? undefined : secureUrl(thumbnail.url)?.href;
       const username = youtubeHandle(snippet?.customUrl);
       if (!id || !displayName || (thumbnail?.url !== undefined && !avatarUrl)) {
         throw malformed();

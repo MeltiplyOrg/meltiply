@@ -20,7 +20,7 @@ let accessVerifier:
 
 let allowedOrigins: { raw: string; values: ReadonlySet<string> } | undefined;
 
-let jwtVerifier: { origin: string; jwksUrl: string; value: JwtVerifier } | undefined;
+let jwtVerifier: { configured: string; jwksOverride: string; value: JwtVerifier } | undefined;
 
 /**
  * Splits a comma-separated configuration string into a trimmed, non-empty list of tokens.
@@ -88,7 +88,7 @@ export function accessVerifierFor(env: ApiWorkerEnv): AccessTokenVerifier {
 }
 
 /**
- * Returns a cached Better Auth JWT verifier keyed by issuer and signing-key URL.
+ * Returns a Better Auth JWT verifier cached by its raw origin and signing-key configuration.
  *
  * Issuer and audience remain pinned to the public auth origin. An optional
  * BETTER_AUTH_JWKS_URL routes key retrieval through trusted internal ingress,
@@ -104,12 +104,17 @@ export function jwtVerifierFor(env: ApiWorkerEnv): JwtVerifier {
   if (!configured) {
     throw new Error("Better Auth JWT verifier configuration is unavailable");
   }
-  const origin = new URL(configured).origin;
-  const jwksUrl = new URL(env.BETTER_AUTH_JWKS_URL?.trim() || `${origin}/api/auth/jwks`).href;
-  if (jwtVerifier && jwtVerifier.origin === origin && jwtVerifier.jwksUrl === jwksUrl) {
+  const jwksOverride = env.BETTER_AUTH_JWKS_URL?.trim() ?? "";
+  if (
+    jwtVerifier &&
+    jwtVerifier.configured === configured &&
+    jwtVerifier.jwksOverride === jwksOverride
+  ) {
     return jwtVerifier.value;
   }
-  const verifier = createRemoteJwtVerifier({ audience: origin, issuer: origin }, new URL(jwksUrl));
-  jwtVerifier = { origin, jwksUrl, value: verifier };
+  const origin = new URL(configured).origin;
+  const jwksUrl = new URL(jwksOverride || `${origin}/api/auth/jwks`);
+  const verifier = createRemoteJwtVerifier({ audience: origin, issuer: origin }, jwksUrl);
+  jwtVerifier = { configured, jwksOverride, value: verifier };
   return verifier;
 }

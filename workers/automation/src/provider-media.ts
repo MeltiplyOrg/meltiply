@@ -8,6 +8,10 @@ import {
 import type { DistributionProviderDependencies } from "./distribution-provider";
 import type { AutomationEnv } from "./env";
 
+const contentTypePattern = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
+const base64PaddingPattern = /=+$/;
+const unsafeObjectKeyPattern = /[\u0000-\u001f\u007f\\]/;
+
 /**
  * Remote-ingest URL lifetime covering the asynchronous platform retrieval window.
  * Providers such as TikTok (PULL_FROM_URL) and Meta fetch the object minutes to hours after
@@ -47,9 +51,7 @@ const textEncoder = new TextEncoder();
  */
 function normalizedContentType(value: string | undefined): string | null {
   const normalized = value?.split(";", 1)[0]?.trim().toLowerCase();
-  return normalized && /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(normalized)
-    ? normalized
-    : null;
+  return normalized && contentTypePattern.test(normalized) ? normalized : null;
 }
 
 /**
@@ -76,7 +78,7 @@ function providerMediaPayload(expiresAtSeconds: number, key: string): string {
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(base64PaddingPattern, "");
 }
 
 /**
@@ -140,10 +142,8 @@ async function verifiedRemoteIngestUrl(
   const expiresAt = Math.floor(Date.now() / 1000) + providerMediaRetrievalLeaseSeconds;
   const signature = await providerMediaSignature(secret, expiresAt, key);
   const path = key.split("/").map(encodeURIComponent).join("/");
-  const url = new URL(`${providerMediaRoutePrefix}${path}`, origin);
-  url.searchParams.set("expires", String(expiresAt));
-  url.searchParams.set("signature", signature);
-  return url.toString();
+  const query = new URLSearchParams({ expires: String(expiresAt), signature });
+  return `${origin.origin}${providerMediaRoutePrefix}${path}?${query}`;
 }
 
 /**
@@ -165,7 +165,7 @@ function validateObjectKey(assetId: string, key: string): void {
     segments[1] !== assetId ||
     segments.some(
       (segment) =>
-        !segment || segment === "." || segment === ".." || /[\u0000-\u001f\u007f\\]/.test(segment),
+        !segment || segment === "." || segment === ".." || unsafeObjectKeyPattern.test(segment),
     )
   ) {
     throw new TypeError("provider media object key is invalid");

@@ -1,3 +1,6 @@
+const whitespacePattern = /\s/;
+const byteOrderMarkPattern = /^\uFEFF/;
+
 // Shared JSONC parsing for repository scripts. Wrangler configs and other
 // checked-in JSONC files must be parsed through here so there is exactly one
 // comment/trailing-comma stripping implementation (AUD-028).
@@ -83,7 +86,7 @@ function stripTrailingCommas(source) {
     }
     if (current === ",") {
       let lookahead = index + 1;
-      while (/\s/.test(source[lookahead] ?? "")) lookahead += 1;
+      while (whitespacePattern.test(source[lookahead] ?? "")) lookahead += 1;
       if (source[lookahead] === "}" || source[lookahead] === "]") continue;
     }
     result += current;
@@ -104,7 +107,9 @@ function stripTrailingCommas(source) {
  */
 export function parseJsonc(source, name = "JSONC input") {
   try {
-    return JSON.parse(stripTrailingCommas(stripJsonComments(source.replace(/^\uFEFF/, ""))));
+    return JSON.parse(
+      stripTrailingCommas(stripJsonComments(source.replace(byteOrderMarkPattern, ""))),
+    );
   } catch (error) {
     throw new TypeError(`${name} is invalid: ${error.message}`);
   }

@@ -29,6 +29,8 @@ import uiVi from "../locales/vi/ui.json";
 import uiZh from "../locales/zh/ui.json";
 import { isPseudoLocalized, pseudoLocaleEvent, pseudoLocalize } from "./pseudo-locale";
 
+const placeholderPattern = /\{(\w+)\}/g;
+
 export const supportedLanguages = [
   { code: "en", label: "English" },
   { code: "es", label: "Español" },
@@ -82,7 +84,7 @@ const statusTranslations: Record<Language, Record<string, string>> = {
  */
 function interpolate(message: string, values?: TranslationValues): string {
   if (!values) return message;
-  return message.replace(/\{(\w+)\}/g, (match, name: string) =>
+  return message.replace(placeholderPattern, (match, name: string) =>
     Object.hasOwn(values, name) ? String(values[name]) : match,
   );
 }
@@ -114,7 +116,7 @@ function translateNodes(
   const parts: ReactNode[] = [];
   const template = lookupMessage(language, message);
   let cursor = 0;
-  for (const match of template.matchAll(/\{(\w+)\}/g)) {
+  for (const match of template.matchAll(placeholderPattern)) {
     const start = match.index ?? 0;
     if (start > cursor) parts.push(template.slice(cursor, start));
     parts.push(

@@ -2,6 +2,8 @@ import { z } from "zod";
 import { createApiApp } from "../../workers/api/src/app";
 import { validateProductionBindings, type ApiWorkerEnv } from "../../workers/api/src/env";
 
+const base64UrlPattern = /^[A-Za-z0-9_-]+$/;
+
 type SelfhostEnv = ApiWorkerEnv & { SELFHOST_OPERATOR_SECRET: string };
 const claimsSchema = z.object({
   iss: z.literal("meltiply-selfhost"),
@@ -14,8 +16,8 @@ const claimsSchema = z.object({
 
 /** Decodes base64url JWT segments; malformed encodings reject before verification. */
 function decode(segment: string) {
-  if (!/^[A-Za-z0-9_-]+$/.test(segment)) throw new TypeError("Malformed operator token");
-  return Uint8Array.from(atob(segment.replace(/-/g, "+").replace(/_/g, "/")), (character) =>
+  if (!base64UrlPattern.test(segment)) throw new TypeError("Malformed operator token");
+  return Uint8Array.from(atob(segment.replaceAll("-", "+").replaceAll("_", "/")), (character) =>
     character.charCodeAt(0),
   );
 }

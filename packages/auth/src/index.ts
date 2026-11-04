@@ -5,6 +5,10 @@ import type { GenericEndpointContext } from "better-auth";
 import type { TimeString } from "better-auth/plugins";
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey, type JWTPayload } from "jose";
 
+const trailingSlashPattern = /\/$/;
+const accessTeamHostnamePattern = /^[a-z0-9-]+\.cloudflareaccess\.com$/i;
+const bearerTokenPattern = /^Bearer ([^\s]+)$/;
+
 /**
  * Verified tenant identity extracted from a Better Auth JWT bearer credential.
  * `subject` is the Better Auth user id; `email` is normalized to lowercase;
@@ -82,7 +86,7 @@ function nonEmptyString(value: unknown): string | undefined {
  * @throws {TypeError} When domain is not an HTTPS canonical cloudflareaccess.com origin.
  */
 function cloudflareAccessTeamDomain(value: string): string {
-  const candidate = value.trim().replace(/\/$/, "");
+  const candidate = value.trim().replace(trailingSlashPattern, "");
   try {
     const parsed = new URL(candidate);
     if (
@@ -93,7 +97,7 @@ function cloudflareAccessTeamDomain(value: string): string {
       parsed.search ||
       parsed.hash ||
       parsed.origin !== candidate ||
-      !/^[a-z0-9-]+\.cloudflareaccess\.com$/i.test(parsed.hostname)
+      !accessTeamHostnamePattern.test(parsed.hostname)
     ) {
       throw new TypeError("invalid Access team domain");
     }
@@ -111,7 +115,7 @@ function cloudflareAccessTeamDomain(value: string): string {
  * @returns The token string if matched against the Bearer scheme, otherwise undefined.
  */
 export function bearerToken(authorization: string | undefined): string | undefined {
-  const match = authorization?.match(/^Bearer ([^\s]+)$/);
+  const match = authorization?.match(bearerTokenPattern);
   return match?.[1];
 }
 
@@ -441,20 +445,24 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
   // always absolute (Better Auth would otherwise resolve it against the
   // forwarded request origin) and same-origin with the configured installation
   // base URL, so a proxy host can never redirect consent to another site.
-  const device = config.deviceAuthorization
-    ? {
-        ...config.deviceAuthorization,
-        clientId: config.deviceAuthorization.clientId.trim(),
-        verificationUri: new URL(config.deviceAuthorization.verificationUri).href,
-      }
+  const verificationUrl = config.deviceAuthorization
+    ? new URL(config.deviceAuthorization.verificationUri)
     : undefined;
+  const device =
+    config.deviceAuthorization && verificationUrl
+      ? {
+          ...config.deviceAuthorization,
+          clientId: config.deviceAuthorization.clientId.trim(),
+          verificationUri: verificationUrl.href,
+        }
+      : undefined;
   if (device && !device.clientId) {
     throw new TypeError("device authorization requires an exact client identifier");
   }
   const deviceClientId = device?.clientId;
-  if (device && config.baseURL) {
+  if (verificationUrl && config.baseURL) {
     const installationOrigin = new URL(config.baseURL).origin;
-    if (new URL(device.verificationUri).origin !== installationOrigin) {
+    if (verificationUrl.origin !== installationOrigin) {
       throw new TypeError("device authorization verification URI must be same-origin");
     }
   }

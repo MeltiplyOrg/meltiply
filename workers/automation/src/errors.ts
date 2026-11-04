@@ -1,3 +1,6 @@
+const urlPattern = /https?:\/\/\S+/gi;
+const credentialPattern = /(token|secret|password)=\S+/gi;
+
 // Shared error-message sanitizer for the Automation Worker (AUD-022).
 // Every error message that reaches logs or the database must pass through
 // here so URLs and inline credentials are redacted exactly once.
@@ -17,7 +20,7 @@
  */
 export function safeErrorMessage(cause: unknown, fallback = "unknown job error"): string {
   return (cause instanceof Error ? cause.message : fallback)
-    .replace(/https?:\/\/\S+/gi, "[REDACTED_URL]")
-    .replace(/(token|secret|password)=\S+/gi, "$1=[REDACTED]")
+    .replace(urlPattern, "[REDACTED_URL]")
+    .replace(credentialPattern, "$1=[REDACTED]")
     .slice(0, 1_000);
 }

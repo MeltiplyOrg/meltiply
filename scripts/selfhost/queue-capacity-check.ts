@@ -1,9 +1,8 @@
-// Production Queue handler + workerd + PostgreSQL. Only the Provider transport
-// is controlled; timing begins after fixture setup and Worker readiness.
+// Production Queue handler + workerd + PostgreSQL, with controlled Provider
+// transport for account serialization, bounded fanout and redelivery checks.
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
-import { mkdir, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { Miniflare, convertV4MiniflareOptions, Log, LogLevel } from "miniflare";
 import pg from "pg";
@@ -25,14 +24,6 @@ const cipher = new TokenCipher({
   currentKeyId: "primary",
   keys: [{ id: "primary", material: key }],
 });
-const observations: {
-  concurrency: number;
-  elapsed_ms: number;
-  first_independent_completion_ms: number;
-  maximum_active: number;
-  maximum_same_account: number;
-  accepted: number;
-}[] = [];
 const resultSchema = z.object({
   outcome: z.literal("ok"),
   explicitAcks: z.array(z.string()),
@@ -44,8 +35,8 @@ const providerRequest = z.object({
   caption: z.string(),
 });
 
-/** Seeds five independent durable publish intents, with two Posts sharing one Provider account. */
-async function sample(concurrency: 1 | 2) {
+/** Verifies durable outcomes, per-account ordering and redelivery for one bounded batch mode. */
+async function verifyBatch(concurrency: 1 | 2) {
   const organizationId = randomUUID();
   const profiles = Array.from({ length: 4 }, () => randomUUID());
   const accounts = profiles.map(() => randomUUID());
@@ -57,7 +48,6 @@ async function sample(concurrency: 1 | 2) {
   let active = 0;
   let maximumActive = 0;
   let maximumSameAccount = 0;
-  let started = 0;
   let firstIndependentCompletion = Number.POSITIVE_INFINITY;
   let slowCompleted = Number.POSITIVE_INFINITY;
   const activeAccounts = new Map<string, number>();
@@ -143,11 +133,11 @@ async function sample(concurrency: 1 | 2) {
                   const id = `accepted-${randomUUID()}`;
                   assert.ok(!accepted.has(body.operation), "Provider received a duplicate write");
                   accepted.set(body.operation, id);
-                  if (body.caption === "slow") slowCompleted = performance.now() - started;
+                  if (body.caption === "slow") slowCompleted = accepted.size;
                   else if (body.account !== `capacity-${accounts[0]}`)
                     firstIndependentCompletion = Math.min(
                       firstIndependentCompletion,
-                      performance.now() - started,
+                      accepted.size,
                     );
                   return new Response(null, { status: 200, headers: { "x-publication-id": id } });
                 } finally {
@@ -182,12 +172,10 @@ async function sample(concurrency: 1 | 2) {
       rows,
       metrics: { backlogCount: 5, backlogBytes: 1000 },
     });
-    started = performance.now();
     const response = await fetch(`${origin}/deliver`, {
       method: "POST",
       body: request,
     });
-    const elapsed = performance.now() - started;
     const decisions = resultSchema.parse(await response.json());
     assert.deepEqual([...decisions.explicitAcks].sort(), [...events].sort());
     assert.deepEqual(decisions.retryMessages, []);
@@ -221,35 +209,15 @@ async function sample(concurrency: 1 | 2) {
     const replayDecisions = resultSchema.parse(await replay.json());
     assert.deepEqual([...replayDecisions.explicitAcks].sort(), [...events].sort());
     assert.equal(accepted.size, 5, "Redelivery must not republish settled outcomes");
-    observations.push({
-      concurrency,
-      elapsed_ms: elapsed,
-      first_independent_completion_ms: firstIndependentCompletion,
-      maximum_active: maximumActive,
-      maximum_same_account: maximumSameAccount,
-      accepted: accepted.size,
-    });
   } finally {
     await runtime?.dispose();
     await database.query("DELETE FROM organizations WHERE id = $1", [organizationId]);
   }
 }
 try {
-  for (const order of [
-    [1, 2],
-    [2, 1],
-    [1, 2],
-  ] as const)
-    for (const concurrency of order) await sample(concurrency);
-  const report = {
-    runtime: "workerd with PostgreSQL and controlled Provider latency",
-    slow_provider_ms: 500,
-    fast_provider_ms: 50,
-    observations,
-  };
-  await mkdir("artifacts", { recursive: true });
-  await writeFile("artifacts/queue-capacity.json", `${JSON.stringify(report, null, 2)}\n`);
-  console.log(JSON.stringify(report));
+  await verifyBatch(1);
+  await verifyBatch(2);
+  console.log("Queue account ordering, bounded fanout and redelivery checks passed.");
 } finally {
   await database.end();
 }

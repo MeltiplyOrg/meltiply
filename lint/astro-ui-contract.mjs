@@ -22,6 +22,15 @@ import {
   stemOf,
 } from "./ui-contract-lib.mjs";
 
+const queryOrFragmentPattern = /[?#]/;
+const relativePathPattern = /^\.{1,2}\//;
+const retiredAliasPattern = /^@\/components\/(ui|atoms|primitives)\/(.+)$/;
+const retiredComponentPathPattern =
+  /\/frontend\/app\/src\/components\/(ui|atoms|primitives)\/([^/]+)$/;
+const frontendWorkspacePattern = /\/frontend\/(\w+)\//;
+const radixSpecifierPattern = /^(?:@radix-ui\/|radix-ui(?:\/|$))/;
+const deepSpecifierPattern = /\/(?:src|dist|components)\//;
+
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---/;
 const SKIP = Object.freeze({
@@ -64,19 +73,19 @@ export function checkAstroSource(source, file) {
     const spec = st.source;
     if (!spec || spec.type !== "Literal" || typeof spec.value !== "string") continue;
     const line = frontmatter.slice(0, spec.start).split("\n").length;
-    const value = spec.value.split(/[?#]/)[0];
-    const resolved = /^\.{1,2}\//.test(value)
+    const value = spec.value.split(queryOrFragmentPattern)[0];
+    const resolved = relativePathPattern.test(value)
       ? normalizePath(join(dirname(filename), value))
       : null;
     const retiredMatch =
-      value.match(/^@\/components\/(ui|atoms|primitives)\/(.+)$/) ??
-      resolved?.match(/\/frontend\/app\/src\/components\/(ui|atoms|primitives)\/([^/]+)$/);
+      value.match(retiredAliasPattern) ?? resolved?.match(retiredComponentPathPattern);
     if (retiredMatch) {
       const sanctioned =
         SANCTIONED_APP_COMPONENTS[retiredMatch[1]]?.[stemOf(retiredMatch[2])] === true;
       const sameWs =
         resolved === null ||
-        filename.match(/\/frontend\/(\w+)\//)?.[1] === resolved.match(/\/frontend\/(\w+)\//)?.[1];
+        filename.match(frontendWorkspacePattern)?.[1] ===
+          resolved.match(frontendWorkspacePattern)?.[1];
       // Sanctioned app files are fine from inside frontend/app (relative) or
       // via the app-only @/ alias; anything else hits the retired namespace.
       if (!sanctioned || !sameWs) {
@@ -86,21 +95,21 @@ export function checkAstroSource(source, file) {
           `\`${value}\` targets the retired app component dirs — use @meltiply/ui/<basename>.`,
         );
       }
-    } else if (/^(?:@radix-ui\/|radix-ui(?:\/|$))/.test(value)) {
+    } else if (radixSpecifierPattern.test(value)) {
       flag(
         "radixBypass",
         line,
         `\`${value}\` — Radix belongs to the canonical wrappers in frontend/shared/src/components/ui.`,
       );
-    } else if (value.startsWith("@meltiply/ui/") && /\/(?:src|dist|components)\//.test(value)) {
+    } else if (value.startsWith("@meltiply/ui/") && deepSpecifierPattern.test(value)) {
       flag(
         "deepSpecifier",
         line,
         `\`${value}\` reaches into @meltiply/ui internals — use the flat package specifier.`,
       );
     } else if (resolved?.includes("/frontend/")) {
-      const importerWs = filename.match(/\/frontend\/(\w+)\//)?.[1];
-      const targetWs = resolved.match(/\/frontend\/(\w+)\//)?.[1];
+      const importerWs = filename.match(frontendWorkspacePattern)?.[1];
+      const targetWs = resolved.match(frontendWorkspacePattern)?.[1];
       if (targetWs && importerWs && targetWs !== importerWs) {
         flag(
           targetWs === "shared" ? "bypassSpecifier" : "crossWorkspace",

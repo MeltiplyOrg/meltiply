@@ -1793,25 +1793,11 @@ async function jobPayload(name, job_id, profile, max) {
  * Runs one engine job for a fixture and, when the engine uploaded a rendition,
  * asserts the upload landed at the exact granted key with matching size/digest.
  * Returns `{ ok: false }` so a failed job does not cascade into byte assertions.
- * Emits an `EVIDENCE {json}` line for every job — elapsed wall time, input and
- * output byte counts — so each fixture carries machine-readable size/timing
- * evidence alongside the behavioral assertions. The exact submitted payload is
- * returned as `payload` for redelivery assertions.
+ * Returns the submitted `payload` for redelivery assertions.
  */
 async function runJob({ job_id, name, profile, max }) {
   const payload = await jobPayload(name, job_id, profile, max);
-  const started = performance.now();
   const response = await processRequest(payload);
-  const elapsedMs = Math.round(performance.now() - started);
-  const evidence = {
-    job_id,
-    elapsed_ms: elapsedMs,
-    input_bytes: payload.expected_size,
-    output_bytes: response.body?.output?.bytes ?? null,
-    result: response.body?.result ?? null,
-    status: response.status,
-  };
-  console.log(`EVIDENCE ${JSON.stringify(evidence)}`);
   if (response.status !== 200) {
     assert(`job ${job_id} succeeds`, false, JSON.stringify(response.body));
     return { ok: false, payload };

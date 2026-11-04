@@ -263,11 +263,6 @@ function dateOnly(value: Date | string): string {
 }
 
 /**
- * Maps each contract analytics metric to its already-aggregated `per_post`
- * column. A typed whitelist keeps the ranking column out of interpolated SQL;
- * the service never accepts a caller-provided column name.
- */
-/**
  * Classifies one Distribution's frozen attachment set as a content format.
  * Empty attachments mean text-only, multiple attachments mean carousel, and a
  * single video asset means video; every other single attachment is an image.
@@ -869,7 +864,7 @@ export function createCoreApiService(
             `SELECT
                pa.id, pa.org_id, pa.brand_profile_id, pa.platform,
                pa.platform_user_id, pa.display_name, pa.avatar_url,
-               pa.metadata->>'username' AS username,
+               pa.username,
                pa.connection_status, pa.token_expires_at, pa.last_synced_at,
                pa.revoked_at,
                COALESCE(pa.scopes, ARRAY[]::text[]) AS scopes,

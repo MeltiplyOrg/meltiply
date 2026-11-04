@@ -180,15 +180,14 @@ complete third-party review:
   These are not the Cloudflare control-plane API token.
 - **Cloudflare Email Sending** onboarding, an authorized sending domain with its
   required DNS records verified, and a sender matching `runtime.mail_from_address`.
-  The rendered API `MAIL` binding restricts `allowed_sender_addresses` to that
+  The rendered API and Automation `MAIL` bindings restrict `allowed_sender_addresses` to that
   address. See [Email Sending setup](https://developers.cloudflare.com/email-service/)
   for current account eligibility and domain onboarding. There is no SMTP/API-key
   fallback for managed Workers. Email verification is mandatory for staging and
   production; verify actual inbox delivery before inviting members.
 - For each enabled Platform: your own Provider app, client credentials, HTTPS
   OAuth callback and any webhook/media URL registration, necessary account roles,
-  scopes, consent, app review and production access. See the
-  [Provider connection research](../../docs/research/provider-channel-connections.md).
+  scopes, consent, app review and production access.
   Facebook/Instagram/Threads, TikTok, and YouTube permissions and reviews remain
   external obligations; a successful deployment never grants them.
 

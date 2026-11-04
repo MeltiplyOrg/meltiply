@@ -84,7 +84,7 @@ on default-branch history alone can publish. See the
 [release procedure](../packages/contracts/README.md#prepare-and-publish).
 
 Live deployments follow the
-[operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
+[operator-run release path](../infra/cloudflare/README.md#release-and-rollback).
 
 ## Self-hosted release images
 

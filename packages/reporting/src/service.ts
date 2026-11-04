@@ -1009,43 +1009,19 @@ function enqueuePending(
   );
 }
 
-/**
- * Creates a service whose every call is a failure-free no-op.
- *
- * Used where reporting is unavailable and by tests that must prove the product
- * works without it: every method resolves without touching the database or the
- * network. `policy` still reports the deployment's real requested/effective
- * status so the UI can explain why nothing is sent.
- */
+/** Builds a test Layer; unprovided methods die rather than silently accepting work. */
 export function createReportingServiceTest(
-  impl?: Partial<ReportingServiceShape>,
-  configuration: ReportingConfiguration = {
-    deploymentCategory: "unknown",
-    destination: null,
-    forcedOff: true,
-  },
+  impl: Partial<ReportingServiceShape> = {},
 ): Layer.Layer<ReportingService, never, never> {
-  const unavailable: ReportingServiceShape = {
-    deliverPending: () => Effect.succeed(emptySummary),
-    enqueueDiagnostic: () => Effect.succeed("skipped"),
-    enqueueUsageReport: () => Effect.succeed("skipped"),
-    feedbackState: () =>
-      Effect.succeed({
-        deliveryStatus: "not_shared",
-        discoverySource: null,
-        shared: false,
-        submittedAt: null,
-      }),
-    policy: () => Effect.succeed(policySnapshot(null, configuration)),
-    setPreferences: () =>
-      Effect.succeed({ changed: false, policy: policySnapshot(null, configuration) }),
-    submitFeedback: () =>
-      Effect.succeed({
-        deliveryStatus: "not_recorded",
-        discoverySource: null,
-        shared: false,
-        submittedAt: null,
-      }),
-  };
-  return Layer.succeed(ReportingService, { ...unavailable, ...impl });
+  const unstubbed = () => Effect.die(new Error("Unexpected ReportingService call"));
+  return Layer.succeed(ReportingService, {
+    deliverPending: unstubbed,
+    enqueueDiagnostic: unstubbed,
+    enqueueUsageReport: unstubbed,
+    feedbackState: unstubbed,
+    policy: unstubbed,
+    setPreferences: unstubbed,
+    submitFeedback: unstubbed,
+    ...impl,
+  });
 }

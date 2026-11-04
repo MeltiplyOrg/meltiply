@@ -1,17 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { reportingConfiguration } from "../src/configuration";
-import { categoryStatus, policySnapshot, retryDelaySeconds } from "../src/policy";
+import { categoryStatus, retryDelaySeconds } from "../src/policy";
 import type { PreferencesRow } from "../src/policy";
 
-/**
- * Policy projection cases.
- *
- * The database-backed suites prove the same rules through real HTTP. These cases
- * pin the decision table itself, including the order of precedence between an
- * unreadable preference row, a missing decision, the operator override and a
- * missing destination.
- */
+// Corrupt consent fails closed; declined metadata remains readable.
 
 const enabledConfiguration = reportingConfiguration({
   DEPLOYMENT_CATEGORY: "selfhosted",
@@ -33,43 +26,6 @@ const row: PreferencesRow = {
 };
 
 describe("category status", () => {
-  it("reports a category that was never requested as not requested and ineffective", () => {
-    const status = categoryStatus(null, "usage", enabledConfiguration);
-
-    expect(status).toEqual({
-      decidedAt: null,
-      disclosureVersion: null,
-      effective: false,
-      intervalStartedAt: null,
-      reason: "not_requested",
-      requested: false,
-    });
-  });
-
-  it("reports requested and effective separately when the destination is unavailable", () => {
-    const configuration = reportingConfiguration({});
-    const status = categoryStatus(row, "usage", configuration);
-
-    expect(status.requested).toBe(true);
-    expect(status.effective).toBe(false);
-    expect(status.reason).toBe("destination_unavailable");
-  });
-
-  it("lets the operator override outrank a saved request", () => {
-    const configuration = reportingConfiguration({
-      REPORTING_FORCED_OFF: "true",
-      REPORTING_POSTHOG_HOST: "https://us.i.posthog.com",
-      REPORTING_POSTHOG_PROJECT_TOKEN: "phc_acceptanceTokenValue123",
-    });
-    const policy = policySnapshot(row, configuration);
-
-    expect(policy.categories.usage.requested).toBe(true);
-    expect(policy.categories.usage.effective).toBe(false);
-    expect(policy.categories.usage.reason).toBe("operator_disabled");
-    expect(policy.categories.diagnostics.reason).toBe("operator_disabled");
-    expect(policy.operatorForcedOff).toBe(true);
-  });
-
   it("fails closed when the stored preference schema version is unknown", () => {
     const status = categoryStatus(
       { ...row, schema_version: 99 },
@@ -126,21 +82,6 @@ describe("category status", () => {
     // explains that the Owner never asked.
     expect(status.effective).toBe(false);
     expect(status.reason).toBe("not_requested");
-  });
-
-  it("keeps the two categories independent", () => {
-    const policy = policySnapshot(
-      { ...row, diagnostics_requested: false, diagnostics_interval_started_at: null },
-      enabledConfiguration,
-    );
-
-    expect(policy.categories.usage.effective).toBe(true);
-    expect(policy.categories.diagnostics.effective).toBe(false);
-    expect(policy.categories.diagnostics.reason).toBe("not_requested");
-  });
-
-  it("never exposes an installation id before a first opt-in", () => {
-    expect(policySnapshot(null, enabledConfiguration).installationReportingId).toBeNull();
   });
 });
 

@@ -1,17 +1,11 @@
 # Improvement reporting operations
 
-Meltiply can send two independent, off-by-default categories of improvement
-reporting to the maintainer's PostHog Cloud project: aggregate **usage
-statistics** and scrubbed **diagnostics**. Both are optional; neither affects
-installation, sign-in, publishing, or scheduled work when it is off, unconfigured,
-or unavailable. This page is the operational contract: what is collected, how it
-leaves an installation, what to configure, and how to read the receiving project.
-
-The [privacy policy](../frontend/public/content/docs/privacy.mdx) and
-[cookies](../frontend/public/content/docs/cookies.mdx) pages describe the same
-behavior for end users. An Installation Owner controls the choices; the
-implementation lives in `packages/reporting` and the HTTP contract is
-`GET`/`PUT /api/v1/installation/reporting`.
+Usage and diagnostics are independent, off-by-default reports to the maintainer's
+PostHog project. The Installation Owner controls consent; members can read the
+effective policy. Missing configuration or a destination outage never disables
+the product. End-user disclosures live in the
+[privacy](../frontend/public/content/docs/privacy.mdx) and
+[cookies](../frontend/public/content/docs/cookies.mdx) guides.
 
 ## What is collected
 
@@ -21,8 +15,8 @@ browser SDK is loaded for this feature.
 
 | Category    | Sent when                                                                           | Contents                                                                                                                                        |
 | ----------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Usage       | Once per day after the Owner enables it and a destination is configured             | Daily aggregate counters (below) for that UTC day.                                                                                              |
-| Diagnostics | When an unexpected application failure occurs after the Owner enables it            | One sanitized exception: fixed category, operation group, optional Platform, app version, and allowlisted application stack frames.             |
+| Usage       | After opt-in, per reporting interval and closed UTC day                             | Aggregate counters and as-of gauges described below.                                                                                            |
+| Diagnostics | After opt-in, on an application failure or categorized Provider condition           | Fixed category, operation group, optional Platform, app version and sanitized application frames.                                               |
 | Discovery   | Only when the Owner presses **Share feedback** on the one-time attribution question | The chosen fixed discovery-source value, app version, and deployment category. Never on skip, **Prefer not to say**, or later settings changes. |
 
 Names, email addresses, Workspace names, Brand Profile names, Channel identities,
@@ -54,12 +48,9 @@ six earlier days when they carry confirmed publications. An open day is never
 sent, and a repeated invocation or a partial delivery reuses the same frozen
 report identity rather than producing a second measurement.
 
-A confirmed publication belongs to the day its measurement committed, read from
-the database clock under the same lock the daily producer takes before it derives
-a day. A transaction that began before midnight and committed after it therefore
-counts in the day it truly committed, and the producer waits for an in-flight
-measurement instead of freezing a day without it. No confirmed success is ever
-discarded because a day was already reported.
+Publication counts use the database clock under the measurement/producer lock.
+The producer waits for in-flight measurements, so a transaction crossing midnight
+counts on its actual commit day instead of being lost from a frozen report.
 
 Rules that matter when reading the numbers:
 
@@ -112,13 +103,14 @@ and `schema_version`.
 
 ## Consent, identity, and transport
 
-- Both categories start **off**, including for installations that upgrade to a
-  release with this feature. There is no enrollment by default, and opening the
-  setup screen or ignoring it is not consent.
-- Choices are persisted before any report is sent, and the effective policy is
-  re-read immediately before every send and retry. A withdrawal, an operator
-  override, a missing destination, or unreadable preference state stops
-  transmission, and withdrawal also discards that category's unsent reports.
+- Both categories start **off**, including on upgrade. Visiting or skipping setup
+  never records consent.
+- Consent is persisted before enqueueing and rechecked before every send/retry.
+  Withdrawal discards unsent reports; operator override, missing destination or
+  unreadable preferences also prevent transmission.
+- Decisions retain their disclosure version and enabled interval. Missing or
+  unsupported versions fail closed; re-saving an unchanged choice never upgrades
+  the recorded disclosure.
 - The installation reporting identifier is generated randomly on first opt-in. It
   is never derived from a name, email, domain, machine fingerprint, or account
   identity.
@@ -131,17 +123,11 @@ and `schema_version`.
   maintained project must additionally discard client IP data and keep IP
   collection off, because the ingress, the maintainer's Cloudflare account, and
   any operator log can still observe the source of a request.
-- Delivery is bounded and best effort: one event per request, a 3-second
-  timeout, no redirects, a bounded pending queue, exponential backoff, and a
-  maximum 7-day lifetime for unsent reports. Transport failures are values, never
-  exceptions: a PostHog outage cannot change an HTTP status, a queue
-  acknowledgement, or a scheduled invocation's outcome, and the transport never
-  reports its own failure back to PostHog.
-- Retries reuse a frozen `uuid` and `timestamp` per logical report. PostHog
-  de-duplicates events that share `uuid`, `event`, `timestamp` and `distinct_id`,
-  but only **eventually**, during background merges — it is not an immediate
-  guarantee — so dashboards must also group on the logical report rather than
-  summing raw deliveries.
+- Delivery uses a bounded durable queue, exponential backoff and a maximum
+  seven-day retry lifetime. Failures never change product outcomes or report
+  themselves. Automation diagnostics enqueue only; scheduled delivery owns HTTP.
+- Retries reuse frozen event identities. Vendor de-duplication is eventual, so
+  dashboards must also reduce logical measurements as described below.
 
 ## Deployment configuration
 
@@ -152,67 +138,20 @@ and `schema_version`.
 | `REPORTING_FORCED_OFF`            | `true` disables both categories over any saved choice. Anything else leaves the Owner's choice in effect.    |
 | `DEPLOYMENT_CATEGORY`             | `managed` or `selfhosted`; any other value reports `unknown`.                                                |
 
-Missing configuration is not a deployment failure. Readiness does not require
-these bindings, and an unconfigured installation simply reports
-`destination_configured: false` with both categories unusable. Never invent a
-token, a default destination, or a project that has not been provisioned.
+Both destination bindings are optional; absent or malformed values keep reporting
+unavailable without failing deployment. Use a publishable project token, never a
+personal API key. Keep it out of browser bundles and logs.
 
-The ingestion token is publishable rather than secret: it authorizes event
-ingestion for that project and grants no project or organization administration.
-Do not substitute a personal API key. Keep the token out of browser bundles,
-support tickets, and logs, and treat any project-wide setting behind it as
-maintainer-only.
+The [managed deployment guide](../infra/cloudflare/README.md) owns release-input
+configuration. [Self-hosting](self-hosting.md) owns image defaults and operator
+overrides: released images can carry the maintainer destination, so operators
+need no PostHog account. Explicit environment values override image defaults;
+without either, nothing is sent.
 
-### Managed (Cloudflare) deployment
-
-The reviewed release input carries the optional destination, so a release without
-one deploys normally:
-
-```json
-{
-  "runtime": {
-    "reporting_posthog_project_token": "phc_…",
-    "reporting_posthog_host": "https://us.i.posthog.com",
-    "reporting_forced_off": false
-  }
-}
-```
-
-Set both destination fields or neither; the release rejects a half-configured
-destination. The rendered API and Automation configurations always declare
-`DEPLOYMENT_CATEGORY=managed` and `REPORTING_FORCED_OFF`. See the
-[managed deployment guide](../infra/cloudflare/README.md).
-
-### Self-hosted (Compose) deployment
-
-The released `meltiply-runtime` image is built with the maintainer's publishable
-token and matching origin, so an operator needs no PostHog account. The runtime
-uses an image default only when `.env.selfhost` leaves the binding empty; an
-explicit value overrides it, and an empty value with no image default keeps
-reporting off. `DEPLOYMENT_CATEGORY` is always `selfhosted` for this target.
-
-```dotenv
-# Optional overrides; leave commented to use the image's maintainer destination.
-# REPORTING_POSTHOG_PROJECT_TOKEN=phc_…
-# REPORTING_POSTHOG_HOST=https://us.i.posthog.com
-# Set to true to disable improvement reporting across the whole installation.
-REPORTING_FORCED_OFF=false
-```
-
-See [self-hosting](self-hosting.md) for the rest of the deployment.
-
-### Release prerequisite
-
-No maintainer PostHog project token or region exists in this repository, and a
-release that offers working improvement reporting must have both. Until the
-maintainer provisions a project and supplies the token and matching origin
-through the release input (`runtime.reporting_posthog_project_token` and
-`runtime.reporting_posthog_host`) and, for released self-hosted images, the
-`REPORTING_POSTHOG_PROJECT_TOKEN` and `REPORTING_POSTHOG_HOST` repository
-variables the image workflow passes as build arguments, released artifacts ship
-**no destination**: the settings screen honestly reports reporting as
-unavailable, and no improvement data is transmitted. Creating the project is a
-release prerequisite, not something an installation can satisfy locally.
+Before offering working reporting, provision the maintainer project, supply its
+token and matching regional origin to release inputs and self-hosted image build
+variables, and perform the live-project check below. Never invent credentials or
+claim an unconfigured destination works.
 
 ## Receiving project setup
 
@@ -234,94 +173,56 @@ The maintainer project must be configured before it can be trusted:
 
 ## Dashboards
 
-Build these as insights over `meltiply_usage_daily`, `$exception`, and
-`meltiply_feedback_discovery_source`. Every chart is labelled as coming from
-**participating installations**; opt-in data is not a census of Meltiply usage,
-and a change in a chart may be a change in who opted in rather than in usage.
+Label every dashboard **participating installations**: opt-in data is not a census,
+and a trend can reflect changing participation rather than changing usage.
 
-Delivered rows are not measurements. Transport retries repeat one frozen identity,
-and vendor de-duplication is eventual, so every usage chart reduces in two
-independent steps:
+Usage reductions have two independent keys:
 
-1. **Deduplicate deliveries by frozen event identity** — one row per
-   `properties.$insert_id` (equivalently `uuid` + `event` + `timestamp` +
-   `distinct_id`). This removes retry copies and nothing else.
-2. **Then group by the measurement's own logical key** —
-   `distinct_id` + `properties.consent_interval_started_at` + `report_date` +
-   `schema_version` — and count each group **once**.
+1. Deduplicate retries by `properties.$insert_id` (equivalently
+   `uuid` + `event` + `timestamp` + `distinct_id`).
+2. Deduplicate measurements by `distinct_id` +
+   `properties.consent_interval_started_at` + `report_date` + `schema_version`.
 
-The consent interval is part of that key on purpose. Withdrawing and re-enabling
-reporting inside one UTC day legitimately produces two reports for the same day,
-each counting activity from its own interval. A key without the interval would
-treat them as duplicates and silently drop one interval's publishing.
-
-Counters and gauges then reduce differently:
-
-- **Counters** (`publications.posts`, `publications.distributions.*`) are summed
-  **across intervals** after step 2, because each interval counted its own
-  successes.
-- **Gauges** (`channels`, `engagement.*`, `engagement_coverage`) are not summed.
-  Take the newest report per installation (highest `timestamp`, then highest
-  `uuid`) and read its values, because a repeated lifetime figure is the same
-  figure, not an addition.
-- Never `SUM` raw delivered rows, and never `SUM` a gauge across days.
+Re-enabling within a UTC day creates another legitimate interval. Sum publication
+counters across those intervals, but never merge their keys or sum raw deliveries.
+Gauges (`channels`, `engagement`, `engagement_coverage`) use the newest report per
+installation, ordered by `timestamp` then `uuid`; never sum them across days.
 
 ### Adoption
 
-- **Connected Channels by Platform** — latest report per installation, then sum
-  `properties.channels.<platform>`. Labelled "connected Channels, participating
-  installations".
-- **Participating installations** — count distinct `distinct_id` in
-  `meltiply_usage_daily` for the selected window, optionally split by
-  `deployment_category` and `app_version`.
-- **Platform mix** — share of participating installations with at least one
-  Channel on each Platform, from the same latest-report snapshot.
+- **Connected Channels by Platform** — sum `channels.<platform>` from each
+  installation's latest report.
+- **Participating installations** — distinct `distinct_id` for the selected window,
+  split by deployment category or app version when useful.
+- **Platform mix** — installations with a connected Channel per Platform.
 
 ### Publishing volume
 
-- **Successful Posts** — after de-duplicating deliveries by `uuid`, sum
-  `properties.publications.posts` per installation, reporting interval, and
-  `report_date`. Label it "Posts (confirmed successes)".
-- **Successful Distributions by Platform** — same reduction, then sum
-  `properties.publications.distributions.<platform>`. Label it "Distributions".
-- **Posts vs Distributions** — one chart with both series, so a Post published to
-  several Platforms is visibly one Post and several Distributions.
-- Do not add per-Platform distinct-Post counts together, and do not compare these
-  counters with Provider-side totals: queued, retried, and Ambiguous work is
-  deliberately excluded.
+- **Posts (confirmed successes)** and **Distributions by Platform** — reduce
+  deliveries/measurements first, then sum `publications.posts` and
+  `publications.distributions.<platform>` by `report_date`.
+- Show Posts and Distributions together: publishing one Post to several Platforms
+  is one Post and several Distributions. Never sum per-Platform distinct-Post counts.
+- These counters exclude queued, retried and Ambiguous work; Provider-side totals
+  are not comparable.
 
 ### Engagement as-of gauges
 
-- **Views / reactions / comments / shares by Platform** — take the latest report
-  per installation, then sum each `properties.engagement.<platform>.<metric>`.
-  Never `SUM` across `report_date`.
-- **Coverage** — sum `properties.engagement_coverage.measured` and
-  `.missing` from the same latest reports; show the ratio next to each gauge, and
-  flag a report whose `.truncated` is true instead of treating its gauges as
-  complete. Read `.unsupported_metrics` as the reason a metric is absent.
-- **Freshness** — use each `properties.engagement.<platform>.as_of`, falling back
-  to `engagement_as_of`; a stale timestamp means the snapshot is old, not that
-  engagement stopped. One Platform can be hours newer than another.
-- Treat an absent metric key as unknown. A displayed zero must come from an
-  observed zero, so break down by `platform` before concluding a Platform reports
-  nothing.
-- **Publication counters** are period counters, so reduce duplicate deliveries by
-  PostHog `uuid` and then by the installation's reporting interval and
-  `report_date`; a re-enabled interval has its own counter series and must not be
-  merged with the withdrawn one.
+- **Views / reactions / comments / shares by Platform** — sum each metric from
+  installations' latest reports, not across reporting days.
+- **Coverage** — show `measured` / (`measured` + `missing`) alongside gauges.
+  Flag `truncated` reports and explain omissions with `unsupported_metrics`.
+- **Freshness** — use the Platform's `as_of`, falling back to `engagement_as_of`.
+  An absent metric is unknown, not zero; Platform snapshots can have different ages.
 
 ### Expected failures and diagnostics
 
-- **Unexpected exceptions by release and operation** — Error Tracking issues
-  grouped by `app_version` and `operation_category`, filtered to
-  `$exception_level: error`.
-- **Failures by category and Platform** — `diagnostic_category` × `platform`
-  counts, excluding handled Provider conditions from the "unexpected" view.
-- **Diagnostics volume per installation** — distinct reporting identifiers per
-  day, to spot a repeat-failure loop; ingest is bounded per hour, so a flat
-  ceiling is expected behavior rather than data loss to chase.
-- Expected, categorized Provider conditions (expired authorization, rate limits)
-  are normal operation and should not be triaged as application bugs.
+- **Unexpected exceptions by release/operation** — Error Tracking issues grouped
+  by `app_version` and `operation_category`, filtered to `$exception_level: error`.
+- **Failures by category/Platform** — `diagnostic_category` × `platform`; keep
+  handled Provider conditions out of unexpected-defect counts.
+- **Diagnostics volume per installation/day** — identify repeat-failure loops;
+  the hourly ingestion bound can produce a flat ceiling.
 
 ### Discovery sources
 
@@ -330,75 +231,32 @@ installation submits at most one, and skip or **Prefer not to say** produces no
 event at all, so the denominator is "installations that chose to share", never
 "installations surveyed".
 
-## Consent metadata
-
-Each category stores the disclosure version its decision was recorded against,
-alongside the decision time and the interval it enabled. Reporting fails closed
-when a requested category's stored version is missing or no longer the
-supported one, so a decision cannot authorize a payload its disclosure never
-described. Re-saving an unchanged choice leaves that metadata alone rather than
-silently upgrading it; only an actual change records a new decision.
-
 ## Costs, retention, and deletion
 
-- Volume is deliberately small: at most one usage event per installation per
-  UTC day, at most one attribution event ever, and diagnostics bounded per
-  installation and hour. There is no per-view, per-click, or per-Provider-attempt
-  event.
-- PostHog Cloud applies the plan's event retention: currently one year on the
-  free plan and seven years on paid plans, and organization admins can shorten
-  the window, with older events removed at the next monthly cleanup rather than
-  immediately. Confirm the configured plan and any project-level window; do not
-  assume a retention period.
-- Per-product billing limits stop ingestion once the dollar cap is reached, and
-  data above the cap is discarded permanently, so a cap can silently truncate
-  reporting. Alerts fire at 80% and 100% of the limit and of the free allotment.
-  Review each product's limits rather than assuming one cap covers the project.
-- Local retention is bounded on the bytes, not just the row state: a report that
-  was sent or discarded has its payload deleted once it is off any retry path,
-  leaving only a minimal receipt that keeps the logical identity from being
-  replayed. Unsent optional data expires after at most seven days.
-- Withdrawal stops future sending and discards unsent local reports, including a
-  batch already claimed for delivery: a row is only transmitted while its own
-  consent interval is still the live one. It does not
-  delete data already received. Deleting a PostHog person does not remove
-  no-profile events, so deletion of received installation-scoped data must use a
-  vendor-supported procedure — a project deletion removes all of its data, while
-  a narrower request needs vendor support or a verified event-deletion workflow.
-  Do not promise a deletion outcome the configured plan does not provide.
+- Usage has one logical event per installation/consent interval/closed UTC day;
+  discovery has at most one shared answer ever. Diagnostics are hourly bounded,
+  not per view, click or Provider attempt.
+- Configure and verify receiving-project retention and per-product billing caps.
+  Retention cleanup need not be immediate, and caps discard excess events rather
+  than delaying them. Enable billing alerts and treat truncated ingestion honestly.
+- Unsent local data expires within seven days. Sent/discarded payloads are pruned,
+  leaving minimal receipts to prevent replay.
+- Withdrawal stops future transmission, including previously claimed batches,
+  but cannot retract received events. Deleting a person does not delete no-profile
+  events. Installation-scoped deletion needs a verified vendor-supported workflow
+  or vendor support; project deletion removes the entire project's data. Never
+  promise deletion the configured plan cannot provide.
 
 ## Synthetic ingestion check
 
-A successful HTTP response proves only that the endpoint accepted a request. Once
-the maintainer project exists, verify ingestion against the project itself with
-synthetic data only — never a real member's installation:
+An HTTP success or controlled receiver is not live-ingestion proof. With a
+disposable installation and synthetic data only:
 
-1. Configure a disposable installation (or a test deployment) with the destination
-   under test and enable diagnostics.
-2. Trigger one unexpected failure through a route that does not carry member data,
-   for example a deliberately broken test endpoint.
-3. Inspect the project: confirm one `$exception` event arrived with the expected
-   `schema_version`, `app_version`, `deployment_category`,
-   `diagnostic_category`, and that `$exception_list` contains sanitized frames.
-4. Confirm the event has no person profile, no `$geoip` properties, no URL with a
-   query string, and none of the canary values used in the test.
-5. For usage, run the daily scheduled unit against a seeded installation, then
-   confirm the `meltiply_usage_daily` event properties match the seeded
-   measurements and that the dashboard shows the same numbers after the
-   deduplicated reduction.
-6. Delete the synthetic events with the vendor's supported deletion procedure and
-   record the outcome.
+1. Enable diagnostics and trigger a data-free unexpected failure. Inspect the
+   project's `$exception` and sanitized frames, release, deployment and category.
+2. Verify no person profile, GeoIP properties, query-string URLs or canary values.
+3. Run daily usage against seeded measurements; compare the received properties
+   and deduplicated dashboard totals with the seed.
+4. Delete the synthetic events using the supported procedure and verify deletion.
 
-This check requires the maintainer project and cannot run in CI. A real live
-project inspection has **not** been performed for this repository; it remains a
-release prerequisite alongside provisioning the token and origin.
-
-## Verification
-
-Deterministic coverage uses real Worker entrypoints against real PostgreSQL with a
-controlled loopback receiver, so privacy and counting regressions are caught
-without production credentials: the reporting policy over HTTP, payload
-allowlisting, consent withdrawal, duplicate and retry identity, and the scheduled
-delivery path. The hosted `cloudflare-full` lane additionally runs the real-stack
-browser journey for first-run setup and opt-in reporting against that controlled
-receiver, and the self-hosted image lane exercises the production Compose stack.
+This requires maintainer project access; CI's controlled receiver cannot replace it.

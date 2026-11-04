@@ -1,50 +1,23 @@
 import { createRequestId, createTraceId, errorDiagnostic, log } from "@meltiply/observability";
 import { ProviderAdapterError } from "@meltiply/providers";
-import type { EffectTransactionClient } from "@meltiply/database";
 import {
-  createPostHogTransport,
-  createReportingServiceLive,
   diagnosticReportInput,
   isProviderFailureClass,
   REPORTING_MAX_DELIVERY_BATCH,
   ReportingService,
-  reportingConfiguration,
   type DiagnosticReportInput,
   type OperationCategory,
   type ReportingServiceShape,
-  type ReportingTransactionRunner,
 } from "@meltiply/reporting";
-import { Cause, Effect, Option, Result, type Layer } from "effect";
+import { Cause, Effect, Option, Result } from "effect";
 import type { Context } from "hono";
 
 import { runBackgroundContinuation } from "./background-continuation";
-import type { ApiWorkerEnv, ApiWorkerEnvironment } from "./env";
-// Type-only, so importing the route's seam never creates a runtime cycle back
-// into the request boundary that calls this module.
-import type { ReportingRouteDependencies } from "./reporting-routes";
+import type { ApiWorkerEnvironment } from "./env";
+import { reportingLayer, type ReportingDependencies } from "./reporting-layer";
 
-/**
- * Diagnostic production for the API Worker's own failure boundaries.
- *
- * Two producers exist and only two:
- *
- * 1. The browser forwards an authenticated client exception to
- *    `POST /api/v1/installation/reporting/diagnostics`, and that route decides
- *    whether persisted consent permits transmission.
- * 2. An unexpected HTTP invocation failure observed by the approved Effect
- *    boundary is turned into the same approved report shape here.
- *
- * Both converge on the reporting module, which re-reads the persisted policy
- * before writing a pending row and again before each send. A missing choice, a
- * withdrawal, an operator override, an unreadable preference row or a missing
- * destination therefore produces no traffic and no error: the product keeps
- * working and only the installation-local log records the failure.
- *
- * Canonical operational observability is unchanged. The structured `log` call
- * that already describes the failure still runs; forwarding is additive and
- * best-effort, and a reporting failure can never change an HTTP status, a queue
- * acknowledgment, a retry decision or a DLQ outcome.
- */
+// Optional reporting observes authenticated invocation failures after the HTTP
+// outcome is fixed. Consent and payload minimization remain in the shared service.
 
 /** Fixed operation grouping for one API path prefix, matched most specific first. */
 const operationPrefixes: readonly (readonly [string, OperationCategory])[] = [
@@ -67,16 +40,7 @@ const operationPrefixes: readonly (readonly [string, OperationCategory])[] = [
   ["/api/v1/flows", "other"],
 ];
 
-/**
- * Maps a request path to the maintainer's fixed operation grouping.
- *
- * The grouping is what a maintainer prioritizes by; the path itself never leaves
- * the installation. Anything unrecognized — the Better Auth surface, the
- * operator surface, an unmatched path — groups as `other`.
- *
- * @param path - Request pathname as the Worker observed it.
- * @returns Operation grouping for the diagnostic report.
- */
+/** Maps a local API path to a fixed operation group; unmatched paths become `other`. */
 export function operationForPath(path: string): OperationCategory {
   for (const [prefix, operation] of operationPrefixes) {
     if (path === prefix || path.startsWith(`${prefix}/`)) return operation;
@@ -84,18 +48,7 @@ export function operationForPath(path: string): OperationCategory {
   return "other";
 }
 
-/**
- * Selects the value that describes one failed invocation.
- *
- * A defect outranks a typed failure because an unhandled crash is the case worth
- * grouping; a typed failure is used when the cause carries one, and the squashed
- * cause is the last resort. Pure interruption is not a failure to report: a
- * client disconnect and a shutdown are not defects, and the timeout path already
- * logs them locally.
- *
- * @param cause - Failure cause from a finished Effect exit.
- * @returns The value to classify, or undefined for pure interruption.
- */
+/** Prefers defects over typed errors; pure interruption is not reportable. */
 function failureValue(cause: Cause.Cause<unknown>): unknown {
   if (Cause.hasInterruptsOnly(cause)) return undefined;
   if (Cause.hasDies(cause)) {
@@ -113,19 +66,7 @@ function providerFailureClass(cause: unknown): DiagnosticReportInput["failureCla
   return isProviderFailureClass(classification) ? classification : undefined;
 }
 
-/**
- * Builds the approved report for one failed HTTP invocation.
- *
- * An adapter failure that the boundary already classified is an expected
- * Provider condition: it reports as `provider_failure` with its canonical class,
- * so normal recoverable Provider behavior stays separate from application
- * defects. Everything else is an unexpected exception. The report never carries
- * the runtime message; the module keeps only allowlisted application frames.
- *
- * @param cause - Thrown value or squashed Effect cause at the boundary.
- * @param path - Request path, used only to derive the operation grouping.
- * @returns Report ready for `enqueueDiagnostic`.
- */
+/** Separates classified Provider conditions from defects without retaining runtime messages. */
 export function apiBoundaryReport(cause: unknown, path: string): DiagnosticReportInput {
   const failureClass = providerFailureClass(cause);
   return diagnosticReportInput(cause, {
@@ -134,69 +75,11 @@ export function apiBoundaryReport(cause: unknown, path: string): DiagnosticRepor
   });
 }
 
-/**
- * Resolves the reporting layer for one invocation.
- *
- * The injected layer wins, matching the reporting route's seam, so a test or an
- * alternate transport changes delivery without touching a boundary. Otherwise the
- * layer is derived from the current bindings, so a changed operator override or
- * destination applies without an isolate restart.
- *
- * @param env - Current Worker bindings.
- * @param dependencies - Optional injected reporting layer.
- * @param client - Existing transaction client to reuse, when present.
- * @returns Layer providing `ReportingService` with `R = never`.
- */
-function boundaryReportingLayer(
-  env: ApiWorkerEnv,
-  dependencies: ReportingRouteDependencies,
-  client?: EffectTransactionClient,
-): Layer.Layer<ReportingService, never, never> {
-  const injected = dependencies.reportingServiceLayer;
-  if (injected !== undefined && client === undefined) {
-    return typeof injected === "function" ? injected(env) : injected;
-  }
-  const configuration = reportingConfiguration(env);
-  const transaction: ReportingTransactionRunner = client
-    ? (operation) => operation(client)
-    : (operation) =>
-        // Resolved lazily: this module is in the Worker entry point's import graph,
-        // and a static database import would evaluate the Node PostgreSQL client in
-        // workerd unit isolates that never touch a database.
-        Effect.flatMap(
-          Effect.promise(() => import("./database")),
-          (module) =>
-            module.withSystemTransactionEffect(env, (systemClient) => operation(systemClient)),
-        );
-  return createReportingServiceLive({
-    appVersion: env.VERSION,
-    configuration,
-    transaction,
-    transport: configuration.destination
-      ? createPostHogTransport({ destination: configuration.destination })
-      : null,
-  });
-}
-
-/**
- * Records one approved diagnostic and drains the bounded queue on the request's
- * background continuation.
- *
- * Both the durable write and the delivery attempt happen after the response is
- * decided: `runBackgroundContinuation` registers them with the invocation
- * lifecycle and converts any rejection into a local log line, so a PostHog outage
- * or an unwritable preference row cannot delay the response describing the
- * failure, change its status, or escape as an unhandled rejection.
- *
- * @param c - Hono request context carrying the execution context.
- * @param input - Approved diagnostic report.
- * @param dependencies - Optional injected reporting layer.
- * @param event - Local log event name for the continuation's own outcome.
- */
+/** Enqueues and drains on the request continuation, after its HTTP outcome is fixed. */
 function scheduleDiagnostic(
   c: Context<ApiWorkerEnvironment>,
   input: DiagnosticReportInput,
-  dependencies: ReportingRouteDependencies,
+  dependencies: ReportingDependencies,
   event: string,
 ): void {
   // Reporting never reports itself: an ingestion or delivery failure inside the
@@ -216,7 +99,7 @@ function scheduleDiagnostic(
             yield* service.deliverPending({ limit: REPORTING_MAX_DELIVERY_BATCH });
             return { accepted: true, decision };
           }),
-        ).pipe(Effect.provide(boundaryReportingLayer(c.env, dependencies))),
+        ).pipe(Effect.provide(reportingLayer(c.env, dependencies))),
       ),
     onSuccess: (result) => ({
       diagnostic_accepted: result.accepted,
@@ -225,24 +108,7 @@ function scheduleDiagnostic(
   });
 }
 
-/**
- * Registers the diagnostic report for a finished-but-failed invocation.
- *
- * Called only from the approved request boundary after the response is already
- * mapped, so the original status, error code, details and retry headers cannot
- * change. Only the authenticated public API is a producer: the Better Auth and
- * operator surfaces sit outside the installation's reporting consent, and
- * pre-auth attempts are never forwarded.
- *
- * A 4xx outcome is a client mistake the route already reported honestly to the
- * caller, so it is not a defect to group. Expected Provider conditions are the
- * exception: their class is the countable diagnostic the maintainer asked for,
- * and they are exactly what must not be mixed into unexpected exceptions.
- *
- * @param c - Hono request context.
- * @param cause - Failure cause from the finished Effect exit.
- * @param status - Already-mapped HTTP status for the same failure.
- */
+/** Observes authenticated API failures; client mistakes and reporting's own failures are excluded. */
 export function scheduleInvocationFailureDiagnostic(
   c: Context<ApiWorkerEnvironment>,
   cause: Cause.Cause<unknown>,

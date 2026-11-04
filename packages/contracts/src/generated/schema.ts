@@ -767,13 +767,11 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Save the chosen Workspace name
-         * @description Persists the setup screen's Workspace name and applies it to the
-         *     canonical shared Workspace, auditing the rename with the same action
-         *     Settings uses. Repeating the same name is a no-op. Once onboarding is
-         *     complete this returns `409 onboarding_complete`: rename the Workspace
-         *     through Workspace settings instead, so finalization can never overwrite
-         *     a later change. Installation Owner only.
+         * Save the reached setup screen
+         * @description Records optional-screen progress independently of reporting choices.
+         *     The step only advances, so an older tab cannot rewind the journey.
+         *     Completed onboarding returns `409 onboarding_complete`; upgraded
+         *     installations return `409 onboarding_not_applicable`. Installation Owner only.
          */
         patch: operations["saveOnboarding"];
         trace?: never;
@@ -2462,18 +2460,14 @@ export interface components {
             /** Format: date-time */
             completed_at: string | null;
         };
-        /**
-         * @description Saves the setup form's Workspace name, the optional screen the Owner
-         *     reached, or both in one idempotent write.
-         */
+        /** @description Records the reached optional screen in one idempotent write. */
         OnboardingSaveRequest: {
-            workspace_name?: string;
             /**
              * @description Optional screen to record. The step only advances, so a late write
              *     from an older tab never moves the journey backwards.
              * @enum {string}
              */
-            step?: "improvement" | "ready";
+            step: "improvement" | "ready";
         };
         SuspendMemberRequest: {
             reason?: string;

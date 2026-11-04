@@ -2,31 +2,15 @@
 
 ## Unreleased
 
-- Add the installation improvement-reporting surface:
-  `GET /installation/reporting` (`getReportingPolicy`) returns the requested and
-  effective status of the independent `usage` and `diagnostics` categories, the
-  disclosure version, whether the deployment can transmit, and the pseudonymous
-  installation identifier; every active member may read it.
-  `PUT /installation/reporting` (`updateReportingPreferences`) is the
-  Owner-only, idempotent consent change. `GET`/`POST
-  /installation/reporting/feedback` (`getReportingFeedback`,
-  `submitReportingFeedback`) record and report the one-time discovery-source
-  answer with its honest delivery status and a separate random identity.
-  `POST /installation/reporting/diagnostics` (`ingestDiagnosticReport`) accepts
-  an authenticated application failure and answers with an ingestion decision,
-  never a delivery claim. All additions are additive; no existing operation,
-  schema or required field changed.
+- Add member-readable reporting policy and Owner-only idempotent consent,
+  one-time discovery feedback, and closed-schema diagnostic ingestion under
+  `/installation/reporting`. Ingestion decisions never claim delivery.
+- Add Owner-only resumable `/onboarding` reads, monotonic optional-screen saves,
+  and idempotent completion. Upgraded installations report `not_applicable`.
+- Add optional `SignUpEmailRequest.workspace_name`: bootstrap data applied once
+  to the shared Workspace, surviving verification. Omission keeps the derived default.
+- All additions are additive; existing operations and required fields are unchanged.
 
-- Add `GET /onboarding` (`getOnboarding`), `PATCH /onboarding` (`saveOnboarding`),
-  and `POST /onboarding/complete` (`completeOnboarding`) with
-  `OnboardingProgress`/`OnboardingSaveRequest`. They carry the current
-  Installation Owner's resumable first-run progress, report an upgraded
-  installation as `not_applicable`, and keep completion idempotent before a
-  later Workspace rename.
-- Add optional `SignUpEmailRequest.workspace_name` (1–200 characters). It is
-  bootstrap data for the canonical shared Workspace, not an account field, and
-  is applied once when that Workspace is created so it survives verification.
-  Omitting it keeps the existing derived default.
 ## 1.0.0 - 2026-11-03
 
 - Add method-specific Facebook Page, Threads, Instagram content, TikTok inbox,

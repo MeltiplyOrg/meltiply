@@ -4,7 +4,6 @@ import { isoDateTime, type DatabaseError } from "@meltiply/domain";
 import type { Context, Hono } from "hono";
 
 import type { ResolvedActor } from "./actor-resolution";
-import { auditActorFrom, recordWorkspaceAuditEffect } from "./audit";
 import { CoreApiError } from "./core-types";
 import { withSystemTransactionEffect } from "./database";
 import { fromPromise } from "./effect/route";
@@ -13,7 +12,7 @@ import type { ApiWorkerEnvironment } from "./env";
 import { hashIdempotencyRequestEffect } from "./idempotency";
 import { idempotencyHeaders } from "./idempotent-response";
 import { jsonResponse } from "./responses";
-import { idempotencyKey, jsonBody, onlyKeys, stringField, workspaceNameValue } from "./validation";
+import { idempotencyKey, jsonBody, onlyKeys } from "./validation";
 import { idempotentMutation } from "./workspace-lifecycle";
 
 /**
@@ -129,20 +128,7 @@ function requireCurrentOwner(actor: ResolvedActor): Effect.Effect<void, CoreApiE
   return Effect.void;
 }
 
-/**
- * Locks the caller's onboarding row and returns it.
- *
- * Save and completion both mutate the same progress record, and completion is
- * terminal: a save that read the row before a concurrent completion committed
- * would otherwise rename the Workspace afterwards, silently overwriting a name
- * the Owner set in Settings. Taking the row lock here is what orders the two, so
- * whichever runs second observes the other's committed state.
- *
- * @param client - Active system transaction client.
- * @param actor - Resolved Installation Owner.
- * @returns Effect resolving the locked onboarding row.
- * @throws {CoreApiError} 409 `onboarding_not_applicable` for an upgraded installation.
- */
+/** Locks progress so completion and screen advances serialize; upgrades have no row. */
 function lockOnboardingRow(
   client: EffectTransactionClient,
   actor: ResolvedActor,
@@ -172,27 +158,19 @@ function lockOnboardingRow(
     );
 }
 
-/**
- * Persists the optional screen the Owner reached.
- *
- * Progress is its own fact: it is not inferred from consent, attribution or
- * completion, because skipping and declining are both supported paths that must
- * still resume at the same screen after a restart. The step only ever advances,
- * so a late write from an older tab cannot move the journey backwards.
- *
- * @param client - Active system transaction client.
- * @param actor - Resolved Installation Owner.
- * @param step - Screen the Owner is on.
- * @returns Effect resolving the updated progress.
- * @throws {CoreApiError} 409 `onboarding_not_applicable` for an upgraded installation.
- */
+/** Advances the reached screen without rewinding it or reopening completed setup. */
 function saveOnboardingStepEffect(
   client: EffectTransactionClient,
   actor: ResolvedActor,
   step: "improvement" | "ready",
 ): Effect.Effect<OnboardingProgress, CoreApiError | DatabaseError> {
   return Effect.gen(function* () {
-    yield* lockOnboardingRow(client, actor);
+    const progress = yield* lockOnboardingRow(client, actor);
+    if (progress.completed_at !== null) {
+      return yield* Effect.fail(
+        new CoreApiError(409, "onboarding_complete", "Onboarding is already complete."),
+      );
+    }
     yield* client.query(
       `UPDATE installation_onboarding
        SET progress_step = $2, updated_at = now()
@@ -200,77 +178,6 @@ function saveOnboardingStepEffect(
          AND progress_step IS DISTINCT FROM $2
          AND ($2 = 'ready' OR progress_step = 'improvement')`,
       [actor.workspace.id, step],
-    );
-    return yield* onboardingProgressEffect(client, actor);
-  });
-}
-
-/**
- * Applies the chosen Workspace name to the canonical shared Workspace.
- *
- * Runs inside the caller's transaction and takes the onboarding row lock first,
- * so a save ordered after completion observes `completed_at` and refuses instead
- * of renaming the Workspace behind Settings. The Workspace row is locked as well,
- * so two concurrent saves serialize on the name they write.
- *
- * @param client - Active system transaction client.
- * @param actor - Resolved Installation Owner.
- * @param requestId - Request identifier recorded on the Audit entry.
- * @param name - Trimmed Workspace name to apply.
- * @returns Effect resolving the updated progress.
- */
-function saveWorkspaceNameEffect(
-  client: EffectTransactionClient,
-  actor: ResolvedActor,
-  requestId: string,
-  name: string,
-): Effect.Effect<OnboardingProgress, CoreApiError | DatabaseError> {
-  return Effect.gen(function* () {
-    const onboarding = yield* lockOnboardingRow(client, actor);
-    if (onboarding.completed_at !== null) {
-      return yield* Effect.fail(
-        new CoreApiError(
-          409,
-          "onboarding_complete",
-          "Onboarding is complete; change the workspace name in settings.",
-        ),
-      );
-    }
-    const locked = yield* client.query<{ name: string }>(
-      "SELECT name FROM organizations WHERE id = $1 FOR UPDATE",
-      [actor.workspace.id],
-    );
-    const current = locked.rows[0]?.name;
-    if (current === undefined) {
-      return yield* Effect.fail(
-        new CoreApiError(404, "workspace_not_found", "The workspace was not found."),
-      );
-    }
-    if (current !== name) {
-      yield* client.query("UPDATE organizations SET name = $2, updated_at = now() WHERE id = $1", [
-        actor.workspace.id,
-        name,
-      ]);
-      yield* recordWorkspaceAuditEffect(client, {
-        action: "workspace.renamed",
-        actor: auditActorFrom({
-          display_name: actor.displayName,
-          email: actor.email,
-          id: actor.userId,
-        }),
-        after: { name },
-        before: { name: current },
-        orgId: actor.workspace.id,
-        requestId,
-        targetId: actor.workspace.id,
-        targetType: "workspace",
-      });
-    }
-    yield* client.query(
-      `UPDATE installation_onboarding
-       SET workspace_name = $2, workspace_named = TRUE, updated_at = now()
-       WHERE org_id = $1`,
-      [actor.workspace.id, name],
     );
     return yield* onboardingProgressEffect(client, actor);
   });
@@ -350,34 +257,19 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
         const actor = c.get("actor");
         yield* requireCurrentOwner(actor);
         const body = yield* fromPromise(() => jsonBody(c));
-        yield* fromPromise(() => onlyKeys(body, ["step", "workspace_name"]));
-        const hasName = body.workspace_name !== undefined;
-        const hasStep = body.step !== undefined;
-        const name = hasName
-          ? yield* fromPromise(() =>
-              workspaceNameValue(stringField(body, "workspace_name"), "workspace_name"),
-            )
-          : null;
-        const step = hasStep
-          ? yield* fromPromise(() => {
-              const value = body.step;
-              if (value !== "improvement" && value !== "ready") {
-                throw new CoreApiError(
-                  400,
-                  "validation_error",
-                  "step must be `improvement` or `ready`.",
-                );
-              }
-              return value;
-            })
-          : null;
-        if (name === null && step === null) {
-          return yield* Effect.fail(
-            new CoreApiError(400, "validation_error", "Provide `workspace_name`, `step`, or both."),
-          );
-        }
+        yield* fromPromise(() => onlyKeys(body, ["step"]));
+        const step = yield* fromPromise(() => {
+          if (body.step !== "improvement" && body.step !== "ready") {
+            throw new CoreApiError(
+              400,
+              "validation_error",
+              "step must be `improvement` or `ready`.",
+            );
+          }
+          return body.step;
+        });
         const key = yield* fromPromise(() => idempotencyKey(c));
-        const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ name, step }));
+        const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ step }));
         const result = yield* idempotentMutation(
           c.env,
           actor.workspace.id,
@@ -385,21 +277,11 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
           key,
           requestHash,
           (client) =>
-            Effect.gen(function* () {
-              // The name and the screen commit together: a restart resumes at the
-              // screen whose save it acknowledges, never one ahead of it.
-              if (name !== null) {
-                yield* saveWorkspaceNameEffect(client, actor, requestId(c), name);
-              } else {
-                // The step-only path still refuses an upgraded installation.
-                yield* lockOnboardingRow(client, actor);
-              }
-              const updated =
-                step !== null
-                  ? yield* saveOnboardingStepEffect(client, actor, step)
-                  : yield* onboardingProgressEffect(client, actor);
-              return { body: updated, replayed: false, status: 200 };
-            }),
+            Effect.map(saveOnboardingStepEffect(client, actor, step), (body) => ({
+              body,
+              replayed: false,
+              status: 200,
+            })),
         );
         return jsonResponse(result.body, result.status, requestId(c), {
           ...idempotencyHeaders(result.replayed),

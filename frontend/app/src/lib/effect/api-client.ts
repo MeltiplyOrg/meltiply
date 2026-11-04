@@ -426,7 +426,7 @@ export interface ApiClientServiceShape {
   }>;
   readonly getOnboarding: (options?: ApiRequestOptions) => ApiClientEffect<OnboardingProgress>;
   readonly saveOnboarding: (
-    input: { step?: "improvement" | "ready"; workspace_name?: string },
+    input: { step: "improvement" | "ready" },
     options?: ApiRequestOptions,
   ) => ApiClientEffect<OnboardingProgress>;
   readonly completeOnboarding: (options?: ApiRequestOptions) => ApiClientEffect<OnboardingProgress>;

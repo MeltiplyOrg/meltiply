@@ -1,8 +1,6 @@
-import { Effect, type Layer } from "effect";
+import { Effect } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
 import {
-  createPostHogTransport,
-  createReportingServiceLive,
   isDiagnosticCategory,
   isDiscoverySource,
   isOperationCategory,
@@ -15,7 +13,6 @@ import {
   type ReportingFeedbackState,
   type ReportingServiceShape,
   type ReportingPolicySnapshot,
-  type ReportingTransactionRunner,
 } from "@meltiply/reporting";
 import type { Context, Hono } from "hono";
 
@@ -23,38 +20,18 @@ import type { ResolvedActor } from "./actor-resolution";
 import { auditActorFrom, recordWorkspaceAuditEffect } from "./audit";
 import { runBackgroundContinuation } from "./background-continuation";
 import { CoreApiError } from "./core-types";
-import { withSystemTransactionEffect } from "./database";
 import { fromPromise } from "./effect/route";
 import { runRouteEffect } from "./effect/runtime";
 import type { ApiWorkerEnv, ApiWorkerEnvironment } from "./env";
 import { hashIdempotencyRequestEffect } from "./idempotency";
 import { idempotencyHeaders } from "./idempotent-response";
 import { jsonResponse } from "./responses";
+import { reportingLayer, type ReportingDependencies } from "./reporting-layer";
 import { idempotencyKey, jsonBody, onlyKeys } from "./validation";
 import { idempotentMutation } from "./workspace-lifecycle";
 
-/**
- * Installation improvement-reporting HTTP surface.
- *
- * One policy document is readable by every active member so the Owner's choices
- * and the effective outbound state stay visible to the team. Only the current
- * Installation Owner mutates it: authority follows the `installation_owner` flag
- * on the user row, so a transferred installation is governed by its new Owner
- * without reissuing anything.
- *
- * Nothing here reports a delivery it has not confirmed. The feedback surface
- * separates a local choice (`not_shared`), a queued report (`pending`) and a
- * confirmed send (`delivered`), and `delivery_status` only becomes `delivered`
- * after the capture endpoint accepted the report.
- */
-
-/** Injection seam for reporting routes, mirroring the Mail/CurrentUser layers. */
-export interface ReportingRouteDependencies {
-  /** Overrides the live reporting layer for tests or alternate transports. */
-  reportingServiceLayer?:
-    | Layer.Layer<ReportingService, never, never>
-    | ((env: ApiWorkerEnv) => Layer.Layer<ReportingService, never, never>);
-}
+// Members may read policy; only the live Installation Owner may mutate it.
+// Delivery status distinguishes local, queued, and capture-accepted feedback.
 
 /** Wire shape of one category, matching the OpenAPI `ReportingCategoryStatus`. */
 interface CategoryBody {
@@ -129,47 +106,10 @@ function feedbackBody(state: ReportingFeedbackState): FeedbackBody {
   };
 }
 
-/**
- * Resolves the reporting layer for one invocation.
- *
- * An injected layer wins, matching the Mail and CurrentUser seams: callers that
- * own a transaction (the Owner mutations) still supply the client so the decision
- * and its Audit entry commit together. Otherwise the layer is derived per request
- * from the current bindings, so a changed operator override or destination applies
- * without an isolate restart.
- *
- * @param env - Current Worker bindings.
- * @param dependencies - Optional injected layer or layer factory.
- * @param client - Existing transaction client to reuse, when present.
- * @returns Layer providing `ReportingService` with `R = never`.
- */
-function reportingLayer(
-  env: ApiWorkerEnv,
-  dependencies: ReportingRouteDependencies = {},
-  client?: EffectTransactionClient,
-): Layer.Layer<ReportingService, never, never> {
-  const injected = dependencies.reportingServiceLayer;
-  if (injected !== undefined && client === undefined) {
-    return typeof injected === "function" ? injected(env) : injected;
-  }
-  const configuration = reportingConfiguration(env);
-  const transaction: ReportingTransactionRunner = client
-    ? (operation) => operation(client)
-    : (operation) => withSystemTransactionEffect(env, (systemClient) => operation(systemClient));
-  return createReportingServiceLive({
-    appVersion: env.VERSION,
-    configuration,
-    transaction,
-    transport: configuration.destination
-      ? createPostHogTransport({ destination: configuration.destination })
-      : null,
-  });
-}
-
 /** Runs one reporting service program against the current bindings. */
 function withReporting<A, E>(
   env: ApiWorkerEnv,
-  dependencies: ReportingRouteDependencies,
+  dependencies: ReportingDependencies,
   program: (service: ReportingServiceShape) => Effect.Effect<A, E>,
   client?: EffectTransactionClient,
 ): Effect.Effect<A, E> {
@@ -208,7 +148,7 @@ function booleanField(body: Record<string, unknown>, name: string): boolean {
  */
 export function registerReportingRoutes(
   app: Hono<ApiWorkerEnvironment>,
-  dependencies: ReportingRouteDependencies = {},
+  dependencies: ReportingDependencies = {},
 ): void {
   app.get("/api/v1/installation/reporting", (c) =>
     runRouteEffect(
@@ -462,7 +402,7 @@ export function registerReportingRoutes(
  */
 function scheduleReportingDelivery(
   c: Context<ApiWorkerEnvironment>,
-  dependencies: ReportingRouteDependencies,
+  dependencies: ReportingDependencies,
 ): void {
   if (!reportingConfiguration(c.env).destination) return;
   runBackgroundContinuation(c, {

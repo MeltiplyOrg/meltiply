@@ -1805,14 +1805,7 @@ export function acceptWorkspaceInvitation(token: string, options?: ApiRequestOpt
   );
 }
 
-/**
- * Reads the resumable first-run onboarding progress of the current Installation
- * Owner. `not_applicable` marks an upgraded installation that is never pushed
- * back through setup; invited members are refused by the API.
- *
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the onboarding progress.
- */
+/** Reads Owner-only progress; upgrades report `not_applicable`. */
 export function getOnboarding(options?: ApiRequestOptions) {
   return unwrap<OnboardingProgress>(
     (signal) => client().GET("/onboarding", { signal }),
@@ -1820,18 +1813,9 @@ export function getOnboarding(options?: ApiRequestOptions) {
   );
 }
 
-/**
- * Applies the setup screen's Workspace name to the canonical shared Workspace
- * for a journey that has not settled it yet. Repeating the same name is a no-op;
- * after completion the API refuses with `409 onboarding_complete`, so Settings
- * owns later renames.
- *
- * @param input Chosen Workspace name.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the updated onboarding progress.
- */
+/** Persists the reached screen idempotently; completed journeys reject further saves. */
 export function saveOnboarding(
-  input: { step?: "improvement" | "ready"; workspace_name?: string },
+  input: { step: "improvement" | "ready" },
   options?: ApiRequestOptions,
 ) {
   return unwrap<OnboardingProgress>(
@@ -1847,14 +1831,7 @@ export function saveOnboarding(
   );
 }
 
-/**
- * Marks onboarding complete once the Owner enters the Workspace. Idempotent:
- * retries replay the stored response, and completion never renames the
- * Workspace.
- *
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the completed onboarding progress.
- */
+/** Completes setup idempotently without changing the Workspace name. */
 export function completeOnboarding(options?: ApiRequestOptions) {
   return unwrap<OnboardingProgress>(
     (signal) =>

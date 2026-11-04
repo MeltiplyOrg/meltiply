@@ -2,42 +2,21 @@ import { Effect } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
 import { ProviderAdapterError } from "@meltiply/providers";
 import {
-  createPostHogTransport,
   createReportingServiceLive,
   diagnosticReportInput,
   isProviderFailureClass,
-  REPORTING_MAX_DELIVERY_BATCH,
   ReportingService,
   reportingConfiguration,
   type DiagnosticReportInput,
   type OperationCategory,
-  type ReportingServiceShape,
   type ReportingTransactionRunner,
 } from "@meltiply/reporting";
 import { errorDiagnostic, log, type LogContext } from "@meltiply/observability";
 
 import type { AutomationEnv } from "./env";
 
-/**
- * Diagnostic production for the Automation Worker's asynchronous boundaries.
- *
- * A queue message and a scheduled unit already classify their failure through
- * `exitToJobOutcome`/`classifyJobError`, and those decisions — `retry`,
- * `rejected`, `ambiguous` — are what the consumer acts on. That behavior is
- * untouched: reporting is a second, additive reader of the same classification.
- *
- * Three properties make the addition safe:
- *
- * - Nothing here can fail the caller. Recording absorbs every typed failure and
- *   every defect, so a PostHog or database problem cannot turn an ack into a
- *   retry, a retry into a DLQ entry, or a scheduled unit into a failed
- *   invocation.
- * - The policy is re-read by the reporting module before the row is written and
- *   again before each send, so an unconsented installation, a withdrawn category,
- *   an operator override or a missing destination produces no traffic at all.
- * - Nothing here can recurse. The reporting delivery unit never reports its own
- *   failure, and the capture transport returns failures as values.
- */
+// Diagnostics observe the existing job classification without changing retry,
+// rejection, ambiguity, or DLQ decisions. Reporting never reports itself.
 
 /** Operation grouping for one queue topic prefix. */
 const topicOperations: readonly (readonly [string, OperationCategory])[] = [
@@ -54,14 +33,7 @@ const reportingDeliveryUnit = "improvement-reporting-delivery";
 /** The usage-summary producer, whose failures belong to the same operation grouping. */
 const reportingUsageUnit = "usage-reporting";
 
-/**
- * Maps a queue topic to the maintainer's fixed operation grouping.
- *
- * The topic itself never leaves the installation; only the grouping does.
- *
- * @param topic - Outbox topic from the message, when the body carries one.
- * @returns Operation grouping for the diagnostic report.
- */
+/** Maps a local queue topic to a fixed group; empty or unmatched topics become `other`. */
 export function operationForTopic(topic: string | undefined): OperationCategory {
   if (!topic) return "other";
   for (const [prefix, operation] of topicOperations) {
@@ -70,12 +42,7 @@ export function operationForTopic(topic: string | undefined): OperationCategory 
   return "other";
 }
 
-/**
- * Maps a scheduled unit name to its fixed operation grouping.
- *
- * @param unit - Scheduled unit name.
- * @returns Operation grouping for the diagnostic report.
- */
+/** Maps scheduled work to fixed groups; reporting units cannot report themselves. */
 export function operationForScheduledUnit(unit: string): OperationCategory {
   if (unit === reportingDeliveryUnit || unit === reportingUsageUnit) return "reporting";
   if (unit.startsWith("provider-sync") || unit === "account-analytics-sweep") return "analytics";
@@ -110,17 +77,7 @@ export interface QueueDiagnosticContext {
   readonly outcome: "ambiguous" | "rejected" | "retry";
 }
 
-/**
- * Builds the approved report for one failed queue message.
- *
- * The message id, correlation ids, organization id, Post and Channel identifiers
- * and the payload never enter the report. The per-hour logical identity keeps a
- * redelivered failure as one pending row.
- *
- * @param cause - Original thrown value recovered from the job Exit.
- * @param context - Provider, topic and boundary outcome already known.
- * @returns Report ready for `enqueueDiagnostic`.
- */
+/** Builds a bounded diagnostic without queue payloads or installation/domain identifiers. */
 export function queueDiagnosticReport(
   cause: unknown,
   context: QueueDiagnosticContext,
@@ -139,18 +96,7 @@ export function queueDiagnosticReport(
   });
 }
 
-/**
- * Builds the approved report for one failed scheduled unit.
- *
- * A scheduled failure is the maintenance tier failing, not an individual message:
- * the tier keeps running its sibling units and the maintainer sees the unit's
- * operation grouping. The unit name is not part of the payload; it survives only
- * in the local log line the scheduled loop already writes.
- *
- * @param cause - Original thrown value recovered from the unit's Exit.
- * @param unit - Scheduled unit name that failed.
- * @returns Report ready for `enqueueDiagnostic`.
- */
+/** Reports a failed maintenance unit without retaining its local name. */
 export function scheduledDiagnosticReport(cause: unknown, unit: string): DiagnosticReportInput {
   const failureClass = providerFailureClass(cause);
   return diagnosticReportInput(cause, {
@@ -161,19 +107,7 @@ export function scheduledDiagnosticReport(cause: unknown, unit: string): Diagnos
   });
 }
 
-/**
- * Builds the approved report for one failed durable workflow step.
- *
- * The workflow's step boundary is the only place a later reply execution can
- * fail: enqueueing the workflow is covered by the queue producer, but the step
- * body runs afterwards in its own retry loop. Reporting here observes that
- * execution without touching its retry decision — the step still throws the same
- * cause, so the workflow's own backoff and DLQ path are unchanged.
- *
- * @param cause - Original thrown value recovered from the step's Exit.
- * @param context - Provider the reply belonged to and the step's boundary outcome.
- * @returns Report ready for `enqueueDiagnostic`.
- */
+/** Observes reply execution without changing the durable workflow's retry decision. */
 export function workflowDiagnosticReport(
   cause: unknown,
   context: { readonly outcome: "ambiguous" | "rejected" | "retry"; readonly provider?: string },
@@ -189,18 +123,7 @@ export function workflowDiagnosticReport(
   });
 }
 
-/**
- * Records one approved diagnostic and drains the bounded pending queue.
- *
- * The Effect never fails: a typed failure and a defect both collapse to "nothing
- * was recorded", so no caller can observe a change in its own outcome. Delivery is
- * bounded to one batch so a scheduled pass or a queue message stays inside the
- * invocation budget.
- *
- * @param env - Automation Worker bindings for this invocation.
- * @param input - Approved diagnostic report.
- * @returns Whether a report was written and a delivery pass attempted.
- */
+/** Enqueues best-effort; only scheduled delivery performs HTTP, never the publishing critical path. */
 export function recordDiagnostic(
   env: AutomationEnv,
   input: DiagnosticReportInput,
@@ -223,17 +146,10 @@ export function recordDiagnostic(
     appVersion: env.VERSION,
     configuration,
     transaction,
-    transport: configuration.destination
-      ? createPostHogTransport({ destination: configuration.destination })
-      : null,
+    transport: null,
   });
-  return Effect.flatMap(ReportingService, (service: ReportingServiceShape) =>
-    Effect.gen(function* () {
-      const decision = yield* service.enqueueDiagnostic(input);
-      if (decision === "skipped") return false;
-      yield* service.deliverPending({ limit: REPORTING_MAX_DELIVERY_BATCH });
-      return true;
-    }),
+  return Effect.flatMap(ReportingService, (service) =>
+    Effect.map(service.enqueueDiagnostic(input), (decision) => decision !== "skipped"),
   ).pipe(
     Effect.provide(layer),
     Effect.catchCause(() => Effect.succeed(false)),

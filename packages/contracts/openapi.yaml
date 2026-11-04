@@ -1181,14 +1181,12 @@ paths:
     patch:
       tags: [Onboarding]
       operationId: saveOnboarding
-      summary: Save the chosen Workspace name
+      summary: Save the reached setup screen
       description: |
-        Persists the setup screen's Workspace name and applies it to the
-        canonical shared Workspace, auditing the rename with the same action
-        Settings uses. Repeating the same name is a no-op. Once onboarding is
-        complete this returns `409 onboarding_complete`: rename the Workspace
-        through Workspace settings instead, so finalization can never overwrite
-        a later change. Installation Owner only.
+        Records optional-screen progress independently of reporting choices.
+        The step only advances, so an older tab cannot rewind the journey.
+        Completed onboarding returns `409 onboarding_complete`; upgraded
+        installations return `409 onboarding_not_applicable`. Installation Owner only.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -4027,15 +4025,9 @@ components:
     OnboardingSaveRequest:
       type: object
       additionalProperties: false
-      minProperties: 1
-      description: |
-        Saves the setup form's Workspace name, the optional screen the Owner
-        reached, or both in one idempotent write.
+      required: [step]
+      description: Records the reached optional screen in one idempotent write.
       properties:
-        workspace_name:
-          type: string
-          minLength: 1
-          maxLength: 200
         step:
           type: string
           enum: [improvement, ready]

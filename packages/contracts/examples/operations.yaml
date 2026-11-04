@@ -846,7 +846,7 @@ operations:
   saveOnboarding:
     headers: *bearer_authorization
     request:
-      workspace_name: Alpha Studio
+      step: improvement
     success:
       status: 200
       body: *onboarding_progress

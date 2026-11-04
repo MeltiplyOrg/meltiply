@@ -356,20 +356,15 @@ describe("first-run bootstrap through the auth surface", () => {
 
   it("rejects an invalid Workspace name before creating an account", async () => {
     const app = appWith({});
-    const blank = await signUp(app, {
-      email: owner.email,
-      name: owner.name,
-      password: owner.password,
-      workspace_name: "   ",
-    });
-    expect(blank.status).toBe(400);
-    const control = await signUp(app, {
-      email: owner.email,
-      name: owner.name,
-      password: owner.password,
-      workspace_name: "Acme\u0000Studio",
-    });
-    expect(control.status).toBe(400);
+    for (const workspace_name of ["", "   ", "x".repeat(201), "Acme\u0000Studio"]) {
+      const response = await signUp(app, {
+        email: owner.email,
+        name: owner.name,
+        password: owner.password,
+        workspace_name,
+      });
+      expect(response.status).toBe(400);
+    }
 
     const accounts = await systemPoolFor(env()).query<{ count: string }>(
       `SELECT count(*)::text AS count FROM "user"`,
@@ -496,42 +491,7 @@ describe("first-run bootstrap through the auth surface", () => {
 });
 
 describe("onboarding save and completion", () => {
-  it("saves and audits the chosen name, replaying an identical retry", async () => {
-    const { app, token } = await bootstrapOwner();
-    const key = crypto.randomUUID();
-    const save = (name: string) =>
-      onboardingRequest(app, token, "", {
-        body: JSON.stringify({ workspace_name: name }),
-        headers: { "Idempotency-Key": key },
-        method: "PATCH",
-      });
-
-    const saved = await save("Renamed Studio");
-    expect(saved.status).toBe(200);
-    expect(await progressOf(saved)).toMatchObject({
-      status: "in_progress",
-      workspace_name: "Renamed Studio",
-      workspace_named: true,
-    });
-    expect((await sharedWorkspace())?.name).toBe("Renamed Studio");
-
-    const replayed = await onboardingRequest(app, token, "", {
-      body: JSON.stringify({ workspace_name: "Renamed Studio" }),
-      headers: { "Idempotency-Key": key },
-      method: "PATCH",
-    });
-    expect(replayed.status).toBe(200);
-    expect(replayed.headers.get("Idempotency-Replayed")).toBe("true");
-
-    const audit = await systemPoolFor(env()).query<{ after_state: { name: string } }>(
-      `SELECT after_state FROM workspace_audit_entries
-       WHERE action = 'workspace.renamed'
-       ORDER BY created_at DESC`,
-    );
-    expect(audit.rows).toEqual([{ after_state: { name: "Renamed Studio" } }]);
-  });
-
-  it("completes idempotently and refuses to rewrite a name changed afterwards", async () => {
+  it("completes idempotently without changing a later Settings rename", async () => {
     const { app, token } = await bootstrapOwner();
     const complete = (key: string) =>
       onboardingRequest(app, token, "/complete", {
@@ -567,7 +527,7 @@ describe("onboarding save and completion", () => {
 
     // Finalization is terminal: onboarding cannot clobber the Settings rename.
     const refused = await onboardingRequest(app, token, "", {
-      body: JSON.stringify({ workspace_name: "Onboarding Rename" }),
+      body: JSON.stringify({ step: "ready" }),
       headers: { "Idempotency-Key": crypto.randomUUID() },
       method: "PATCH",
     });
@@ -582,63 +542,6 @@ describe("onboarding save and completion", () => {
     ).toBe("Settings Rename");
     // Completion itself stays idempotent after the rename.
     expect((await progressOf(await complete(crypto.randomUUID()))).status).toBe("completed");
-  });
-
-  it("rejects unknown fields and a blank name without touching the Workspace", async () => {
-    const { app, token } = await bootstrapOwner();
-    const unknown = await onboardingRequest(app, token, "", {
-      body: JSON.stringify({ name: "Sneaky" }),
-      headers: { "Idempotency-Key": crypto.randomUUID() },
-      method: "PATCH",
-    });
-    expect(unknown.status).toBe(400);
-
-    const blank = await onboardingRequest(app, token, "", {
-      body: JSON.stringify({ workspace_name: "   " }),
-      headers: { "Idempotency-Key": crypto.randomUUID() },
-      method: "PATCH",
-    });
-    expect(blank.status).toBe(400);
-
-    const missingKey = await onboardingRequest(app, token, "", {
-      body: JSON.stringify({ workspace_name: "No Key" }),
-      method: "PATCH",
-    });
-    expect(missingKey.status).toBe(400);
-
-    expect((await sharedWorkspace())?.name).toBe(owner.workspaceName);
-  });
-
-  it("serializes concurrent saves so the stored name matches the audited name", async () => {
-    const { app, token } = await bootstrapOwner();
-    const save = (name: string, key: string) =>
-      onboardingRequest(app, token, "", {
-        body: JSON.stringify({ workspace_name: name }),
-        headers: { "Idempotency-Key": key },
-        method: "PATCH",
-      });
-    const responses = await Promise.all([
-      save("Concurrent A", crypto.randomUUID()),
-      save("Concurrent B", crypto.randomUUID()),
-    ]);
-    expect(responses.map((response) => response.status)).toEqual([200, 200]);
-
-    const stored = (await sharedWorkspace())?.name;
-    expect(["Concurrent A", "Concurrent B"]).toContain(stored);
-
-    // Each accepted rename is audited once, so the trail explains how the
-    // stored name came about instead of recording only one of two writes.
-    const audit = await systemPoolFor(env()).query<{ after_state: { name: string } }>(
-      `SELECT after_state FROM workspace_audit_entries
-       WHERE action = 'workspace.renamed'
-       ORDER BY created_at, id`,
-    );
-    const audited = audit.rows.map((row) => row.after_state.name);
-    expect(audited.sort()).toEqual(["Concurrent A", "Concurrent B"]);
-    expect(audited).toContain(stored);
-
-    const progress = await progressOf(await onboardingRequest(app, token, "", { method: "GET" }));
-    expect(progress.workspace_name).toBe(stored);
   });
 
   it("moves onboarding authority with ownership transfer", async () => {
@@ -808,22 +711,6 @@ describe("durable setup progress", () => {
     expect(await progressOf(await save("improvement"))).toMatchObject({ step: "ready" });
   });
 
-  it("saves a name and a screen together in one write", async () => {
-    const { app, token } = await bootstrapOwner();
-    const saved = await onboardingRequest(app, token, "", {
-      body: JSON.stringify({ step: "ready", workspace_name: "Renamed Studio" }),
-      headers: { "Idempotency-Key": crypto.randomUUID() },
-      method: "PATCH",
-    });
-
-    expect(saved.status).toBe(200);
-    expect(await progressOf(saved)).toMatchObject({
-      step: "ready",
-      workspace_name: "Renamed Studio",
-    });
-    expect((await sharedWorkspace())?.name).toBe("Renamed Studio");
-  });
-
   it("refuses an unknown field, an invalid step, and an empty body", async () => {
     const { app, token } = await bootstrapOwner();
     const patch = (body: unknown) =>
@@ -836,6 +723,14 @@ describe("durable setup progress", () => {
     expect((await patch({ step: "finish" })).status).toBe(400);
     expect((await patch({ tracker: true })).status).toBe(400);
     expect((await patch({})).status).toBe(400);
+    expect(
+      (
+        await onboardingRequest(app, token, "", {
+          body: JSON.stringify({ step: "ready" }),
+          method: "PATCH",
+        })
+      ).status,
+    ).toBe(400);
   });
 
   it("refuses screen progress on an upgraded installation", async () => {
@@ -1005,54 +900,14 @@ describe("recoverable setup-name handoff", () => {
 
 describe("onboarding completion and save ordering", () => {
   /**
-   * A save ordered after completion must refuse, so a Settings rename committed
-   * between the stale read and the write can never be overwritten.
-   */
-  it("refuses a save that is ordered after completion", async () => {
-    const { app, token } = await bootstrapOwner();
-    const workspace = await sharedWorkspace();
-    const rename = (name: string) =>
-      app.request(
-        `/api/v1/workspaces/${workspace!.id}`,
-        {
-          body: JSON.stringify({ name }),
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-            "Idempotency-Key": crypto.randomUUID(),
-          },
-          method: "PATCH",
-        },
-        env(),
-      );
-
-    // Completion first, then a Settings rename, then a late onboarding save —
-    // the interleaving that previously depended on transaction timing.
-    const completed = await onboardingRequest(app, token, "/complete", {
-      headers: { "Idempotency-Key": crypto.randomUUID() },
-      method: "POST",
-    });
-    expect(completed.status).toBe(200);
-    expect((await rename("Settings Canonical")).status).toBe(200);
-
-    const late = await onboardingRequest(app, token, "", {
-      body: JSON.stringify({ step: "ready", workspace_name: "Stale Onboarding Name" }),
-      headers: { "Idempotency-Key": crypto.randomUUID() },
-      method: "PATCH",
-    });
-    expect(late.status).toBe(409);
-    expect((await sharedWorkspace())?.name).toBe("Settings Canonical");
-  });
-
-  /**
-   * Completion must not be lost to a concurrent save: both take the onboarding
-   * row lock, so the terminal state always lands and the name stays canonical.
+   * Completion must not be lost to a concurrent screen advance: both take the
+   * onboarding row lock, so the terminal state always lands.
    */
   it("serializes a concurrent save against completion", async () => {
     const { app, token } = await bootstrapOwner();
     const [saved, completed] = await Promise.all([
       onboardingRequest(app, token, "", {
-        body: JSON.stringify({ step: "ready", workspace_name: "Concurrent Name" }),
+        body: JSON.stringify({ step: "ready" }),
         headers: { "Idempotency-Key": crypto.randomUUID() },
         method: "PATCH",
       }),

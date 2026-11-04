@@ -3,7 +3,6 @@ import { useNavigate } from "react-router";
 import { ArrowRight, Check, Share2, UserRoundPlus } from "lucide-react";
 import { Alert } from "@meltiply/ui/alert";
 import { Button } from "@meltiply/ui/button";
-import { Input } from "@meltiply/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@meltiply/ui/select";
 import { Switch } from "@meltiply/ui/switch";
 import { StatusPill } from "@meltiply/ui/status-pill";
@@ -118,18 +117,12 @@ function ReadyScreen({
 function ImprovementScreen({
   advancing,
   onContinue,
-  workspaceName,
-  workspaceNamed,
 }: {
   advancing: boolean;
   onContinue: () => void;
-  workspaceNamed: boolean;
-  workspaceName: string | null;
 }): React.ReactElement {
   const { t } = useI18n();
   const scope = useSessionScope();
-  const saveName = useSaveOnboarding(scope);
-  const [nameDraft, setNameDraft] = useState(() => workspaceName ?? "");
   const policy = useReportingPolicy(scope);
   const feedbackQuery = useReportingFeedback(scope);
   const savePreferences = useUpdateReportingPreferences(scope);
@@ -199,55 +192,12 @@ function ImprovementScreen({
     }
   };
 
-  const settleWorkspaceName = async () => {
-    setError(null);
-    try {
-      await saveName.mutateAsync({ workspaceName: nameDraft.trim() });
-    } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : t("Your choices could not be saved. Try again."),
-      );
-    }
-  };
-
   return (
     <div className="space-y-5">
       {error && (
         <Alert variant="destructive" id="wizard-error">
           {error}
         </Alert>
-      )}
-      {!workspaceNamed && (
-        <div className="space-y-2 rounded-control border border-line p-3">
-          <label
-            htmlFor="wizard-workspace-name"
-            className="text-(length:--font-size-control) font-medium text-ink"
-          >
-            {t("Workspace name")}
-          </label>
-          <p className="text-xs leading-relaxed text-ink-2">
-            {t(
-              "Your earlier visit did not save a Workspace name yet. Confirm it to settle the shared Workspace.",
-            )}
-          </p>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Input
-              id="wizard-workspace-name"
-              maxLength={200}
-              value={nameDraft}
-              onChange={(event) => setNameDraft(event.target.value)}
-              disabled={saveName.isPending}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              disabled={saveName.isPending || nameDraft.trim().length === 0}
-              onClick={() => void settleWorkspaceName()}
-            >
-              {saveName.isPending ? t("Saving…") : t("Save name")}
-            </Button>
-          </div>
-        </div>
       )}
       <fieldset className="space-y-3">
         <legend className="text-(length:--font-size-control) font-medium text-ink">
@@ -474,12 +424,7 @@ export function OnboardingWizard({
         </div>
         {error && <Alert variant="destructive">{error}</Alert>}
         {step === "improvement" ? (
-          <ImprovementScreen
-            advancing={saveProgress.isPending}
-            onContinue={() => void advance()}
-            workspaceName={progress.workspace_name}
-            workspaceNamed={progress.workspace_named}
-          />
+          <ImprovementScreen advancing={saveProgress.isPending} onContinue={() => void advance()} />
         ) : (
           <ReadyScreen
             onDone={(destination) => void finish(destination)}

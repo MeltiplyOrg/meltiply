@@ -6,17 +6,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus
 
 import type { AutomationEnv } from "../src/env";
 import { deliverImprovementReports } from "../src/improvement-reporting";
+import { recordDiagnostic } from "../src/diagnostic-reporting";
 import { runSystemTransaction } from "./system-transaction";
 
-/**
- * Real acceptance coverage for the scheduled improvement-reporting unit.
- *
- * The production unit program runs against real PostgreSQL and a real loopback
- * capture receiver, so the assertions are delivered bytes or their absence. The
- * unit's daily-tier registration and its isolation from sibling scheduled work
- * are asserted in `test/improvement-reporting.test.ts`, which runs in the
- * workerd pool where `cloudflare:workers` resolves.
- */
+// Production delivery and diagnostic enqueueing against PostgreSQL and real capture HTTP.
 
 const connectionString = process.env.MELTIPLY_DATABASE_TEST_URL;
 if (!connectionString) {
@@ -162,6 +155,39 @@ describe("scheduled improvement reporting with PostgreSQL", () => {
       event: "meltiply_usage_daily",
     });
     expect(await reportState()).toEqual([{ last_error_code: null, state: "sent" }]);
+  });
+
+  it("keeps capture traffic off the diagnostic producer until scheduled delivery", async () => {
+    await seedPendingReport({
+      category: "diagnostics",
+      eventName: "$exception",
+      payload: { diagnostic_category: "unhandled_exception", schema_version: 1 },
+    });
+    receiver.mode = { kind: "status", status: 503 };
+
+    expect(
+      await Effect.runPromise(
+        recordDiagnostic(env, {
+          category: "request_failure",
+          error: { name: "TypeError" },
+          handled: true,
+          occurredAt: new Date().toISOString(),
+          operation: "publish",
+        }),
+      ),
+    ).toBe(true);
+    expect(receiver.requests).toEqual([]);
+    expect(await reportState()).toEqual([
+      { last_error_code: null, state: "pending" },
+      { last_error_code: null, state: "pending" },
+    ]);
+
+    receiver.mode = { kind: "ok" };
+    expect(await runDelivery()).toMatchObject({ delivered: 2 });
+    expect(receiver.requests.map((request) => request.body.event)).toEqual([
+      "$exception",
+      "$exception",
+    ]);
   });
 
   it("discards rather than sends when the operator forces reporting off", async () => {

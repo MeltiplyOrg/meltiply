@@ -44,7 +44,8 @@ import {
 } from "./flow-observability";
 import { registerInstallationRoutes } from "./installation-routes";
 import { registerOnboardingRoutes } from "./onboarding";
-import { registerReportingRoutes, type ReportingRouteDependencies } from "./reporting-routes";
+import { registerReportingRoutes } from "./reporting-routes";
+import type { ReportingDependencies } from "./reporting-layer";
 import { registerOperatorRoutes, type OperatorRouteDependencies } from "./operator-routes";
 import { scheduleEagerOutboxRelay } from "./outbox-relay";
 import { Effect, type Layer } from "effect";
@@ -64,7 +65,7 @@ export interface ApiDependencies extends CoreRouteDependencies, OperatorRouteDep
   betterAuth?: BetterAuthInstance | ((env: ApiWorkerEnv) => BetterAuthInstance);
   currentUserServiceLayer?: Layer.Layer<CurrentUserService, never, never>;
   /** Overrides the live improvement-reporting layer (tests, alternate transports). */
-  reportingServiceLayer?: ReportingRouteDependencies["reportingServiceLayer"];
+  reportingServiceLayer?: ReportingDependencies["reportingServiceLayer"];
   loadCurrentUser?: (env: ApiWorkerEnv, claims: SessionClaims) => Promise<UserProfile | null>;
   resolveActor?: (
     env: ApiWorkerEnv,

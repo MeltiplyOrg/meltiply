@@ -1833,17 +1833,7 @@ export function useInvitationPreview(token: string | null) {
   });
 }
 
-/**
- * Reads the current Installation Owner's resumable onboarding progress.
- *
- * The API answers `not_applicable` for upgraded installations and refuses
- * members outright, so the wizard gate never invents a journey for an upgraded
- * installation or an invited teammate.
- *
- * @param scope Session scope gating execution.
- * @param enabled Whether the query may run (signed in, and the caller is Owner).
- * @returns Query result with the onboarding progress.
- */
+/** Reads resumable progress only for a signed-in Installation Owner. */
 export function useOnboarding(scope: SessionScope, enabled = true) {
   return useQuery({
     queryKey: queryKeys.onboarding(),
@@ -1852,37 +1842,17 @@ export function useOnboarding(scope: SessionScope, enabled = true) {
   });
 }
 
-/**
- * Records first-run progress: the setup form's Workspace name, the optional
- * screen the Owner reached, or both. Repeating a saved value is a no-op, and after
- * completion the API refuses the name write so Settings owns later renames.
- *
- * @param scope Session scope gating execution.
- * @returns Mutation accepting the name and/or the reached screen.
- */
+/** Persists the reached screen with an idempotency key and refreshes progress. */
 export function useSaveOnboarding(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
-    (api, input: { step?: "improvement" | "ready"; workspaceName?: string }, idempotencyKey) =>
-      api.saveOnboarding(
-        {
-          ...(input.step === undefined ? {} : { step: input.step }),
-          ...(input.workspaceName === undefined ? {} : { workspace_name: input.workspaceName }),
-        },
-        { idempotencyKey },
-      ),
-    () => [queryKeys.onboarding(), queryKeys.currentUser(), queryKeys.installation()],
+    (api, input: { step: "improvement" | "ready" }, idempotencyKey) =>
+      api.saveOnboarding(input, { idempotencyKey }),
+    () => [queryKeys.onboarding()],
   );
 }
 
-/**
- * Completes onboarding once the Owner enters the Workspace, the first Channel
- * flow, or the teammate invitation. Completion is idempotent and never renames
- * the Workspace.
- *
- * @param scope Session scope gating execution.
- * @returns Mutation accepting no variables.
- */
+/** Completes setup before navigation into the chosen Workspace flow. */
 export function useCompleteOnboarding(scope: SessionScope) {
   return useIdempotentMutation(
     scope,

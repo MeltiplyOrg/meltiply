@@ -166,7 +166,7 @@
     },
     "saveOnboarding": {
       "state": "specified",
-      "evidenceAndGate": "Chosen Workspace-name persistence and audit; real PostgreSQL bootstrap coverage plus hosted browser acceptance required."
+      "evidenceAndGate": "Monotonic optional-screen progress; real PostgreSQL bootstrap coverage plus hosted browser acceptance required."
     },
     "completeOnboarding": {
       "state": "specified",

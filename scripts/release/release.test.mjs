@@ -475,6 +475,7 @@ test("optional improvement reporting renders only a complete destination", () =>
       api: { name: "meltiply-api" },
       automation: { name: "meltiply-automation", queues: { producers: [] } },
       state: { name: "meltiply-state" },
+      frontend: { env: { staging: { services: [{ binding: "API", service: "meltiply-api" }] } } },
     },
     plain,
     iac,
@@ -491,6 +492,7 @@ test("optional improvement reporting renders only a complete destination", () =>
       api: { name: "meltiply-api" },
       automation: { name: "meltiply-automation", queues: { producers: [] } },
       state: { name: "meltiply-state" },
+      frontend: { env: { staging: { services: [{ binding: "API", service: "meltiply-api" }] } } },
     },
     validateReleaseSpec({
       ...releaseInput(),

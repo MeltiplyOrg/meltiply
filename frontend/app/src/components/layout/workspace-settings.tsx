@@ -44,7 +44,7 @@ const LANGUAGE_CODES = supportedLanguages.map(({ code }) => code);
  */
 const SECTION_GROUPS = [
   { id: "general", label: "General", sections: ["appearance", "language", "publishing"] },
-  { id: "account", label: "Account", sections: ["account", "security"] },
+  { id: "account", label: "Account", sections: ["account", "privacy", "security"] },
   { id: "workspace", label: "Workspace", sections: ["administration"] },
 ] as const satisfies readonly {
   id: string;

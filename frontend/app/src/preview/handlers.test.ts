@@ -256,6 +256,47 @@ describe("contract-driven UI preview HTTP boundary", () => {
     ).toBe(profile.email);
   });
 
+  it("keeps first-run progress until completion and resets it with the preview", async () => {
+    server.resetHandlers(...createPreviewHandlers({ scenario: "first-run" }));
+    expect((await fetch(`${origin}/api/v1/onboarding`)).status).toBe(401);
+    await fetch(`${origin}/api/auth/sign-up/email`, { method: "POST" });
+    expect(
+      await fetch(`${origin}/api/v1/onboarding`).then((response) => response.json()),
+    ).toMatchObject({
+      status: "in_progress",
+      completed_at: null,
+    });
+    await fetch(`${origin}/api/v1/onboarding`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ step: "ready" }),
+    });
+    expect(
+      await fetch(`${origin}/api/v1/onboarding`).then((response) => response.json()),
+    ).toMatchObject({
+      status: "in_progress",
+      step: "ready",
+    });
+    await fetch(`${origin}/api/v1/onboarding/complete`, { method: "POST" });
+    const completed = await fetch(`${origin}/api/v1/onboarding`).then((response) =>
+      response.json(),
+    );
+    expect(completed).toMatchObject({ status: "completed", step: "ready" });
+    await fetch(`${origin}/api/v1/onboarding/complete`, { method: "POST" });
+    expect(await fetch(`${origin}/api/v1/onboarding`).then((response) => response.json())).toEqual(
+      completed,
+    );
+    server.resetHandlers(...createPreviewHandlers({ scenario: "first-run" }));
+    await fetch(`${origin}/api/auth/sign-up/email`, { method: "POST" });
+    expect(
+      await fetch(`${origin}/api/v1/onboarding`).then((response) => response.json()),
+    ).toMatchObject({
+      status: "in_progress",
+      step: "improvement",
+      completed_at: null,
+    });
+  });
+
   it("exposes failed publication and expired Channel recovery states from the shared examples", async () => {
     server.resetHandlers(...createPreviewHandlers({ scenario: "publication-failed" }));
     const post = await fetch(`${origin}/api/v1/posts`)

@@ -412,12 +412,14 @@ interface language.
 | `loading`                               | Requests stay pending until canceled or reload                  |
 | `validation-error`                      | Mutation validation failure; reads still populate forms         |
 | `server-error`, `permission-denied`     | Data-request failures with session/workspace bootstrap retained |
-| `signed-out`, `first-run`, `two-factor` | Sign-in, installation setup, authenticator challenge            |
+| `signed-out`, `two-factor`              | Sign-in and authenticator challenge                             |
+| `first-run`                             | Account creation followed by optional setup progress            |
 | `viewer`, `editor`                      | Read-only or editorial permissions without Owner authority      |
 | `publication-failed`, `channel-expired` | Publishing failures and Channel reconnection                    |
 
-URL parameters are `previewScenario`, `previewOperation`, and `previewStatus`. Generic
-saves, deletes, sign-in/out, and single-part uploads operate only in browser memory:
+URL parameters are `previewScenario`, `previewOperation`, and `previewStatus`.
+Initialized previews start past onboarding; only `first-run` opens a new journey.
+Saves, deletes, sign-in/out, setup progress, and single-part uploads stay in tab memory:
 uploaded bytes become local Blob URLs, never R2 objects. Upload completion returns a
 ready Asset; session reads retain the upload-session envelope. Draft updates retain
 Channel identity and replace provider options, including incomplete method choices,

@@ -626,18 +626,21 @@ describe("onboarding save and completion", () => {
       workspace_named: false,
     });
 
-    // An upgrade is never pushed through setup: no completion, no rename.
+    // An upgrade has no optional journey to complete or advance.
     const completed = await onboardingRequest(app, subject, "/complete", {
       headers: { "Idempotency-Key": crypto.randomUUID() },
       method: "POST",
     });
     expect(completed.status).toBe(409);
     const saved = await onboardingRequest(app, subject, "", {
-      body: JSON.stringify({ workspace_name: "Upgrade Rename" }),
+      body: JSON.stringify({ step: "ready" }),
       headers: { "Idempotency-Key": crypto.randomUUID() },
       method: "PATCH",
     });
     expect(saved.status).toBe(409);
+    await expect(saved.json()).resolves.toMatchObject({
+      error: { code: "onboarding_not_applicable" },
+    });
     expect((await sharedWorkspace())?.name).toBe("Legacy Workspace");
   });
 
@@ -731,40 +734,6 @@ describe("durable setup progress", () => {
         })
       ).status,
     ).toBe(400);
-  });
-
-  it("refuses screen progress on an upgraded installation", async () => {
-    const subject = "legacy-owner-step-subject";
-    const legacyEmail = "legacy-step@onboarding.test";
-    await systemPoolFor(env()).query(
-      `INSERT INTO "user" (id, name, email, "emailVerified") VALUES ($1, 'Legacy', $2, TRUE)`,
-      [subject, legacyEmail],
-    );
-    await systemPoolFor(env()).query(
-      `INSERT INTO users (id, auth_user_id, email, display_name, installation_owner)
-       VALUES ($1, $2, $3, 'Legacy', TRUE)`,
-      ["10000000-0000-4000-8000-000000009911", subject, legacyEmail],
-    );
-    await systemPoolFor(env()).query(
-      `INSERT INTO organizations (id, name, slug, is_shared)
-       VALUES ($1, 'Legacy Workspace', 'legacy-workspace-step', TRUE)`,
-      ["20000000-0000-4000-8000-000000009911"],
-    );
-    await systemPoolFor(env()).query(
-      "INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, 'admin')",
-      ["20000000-0000-4000-8000-000000009911", "10000000-0000-4000-8000-000000009911"],
-    );
-
-    const app = appWith({ [subject]: { email: legacyEmail, name: "Legacy", subject } });
-    const saved = await onboardingRequest(app, subject, "", {
-      body: JSON.stringify({ step: "ready" }),
-      headers: { "Idempotency-Key": crypto.randomUUID() },
-      method: "PATCH",
-    });
-    expect(saved.status).toBe(409);
-    await expect(saved.json()).resolves.toMatchObject({
-      error: { code: "onboarding_not_applicable" },
-    });
   });
 });
 

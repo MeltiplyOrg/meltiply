@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { http, HttpResponse } from "msw";
 import contract from "virtual:preview-contract";
+import type { OnboardingProgress } from "@/types";
 import {
   previewObjectSchema,
   type PreviewObject,
@@ -16,6 +17,7 @@ const bootstrapOperations: Record<string, true> = {
   getAuthSession: true,
   getSetupStatus: true,
   getCurrentUser: true,
+  getOnboarding: true,
   listBrandProfiles: true,
   listPlatformCapabilities: true,
 };
@@ -31,7 +33,7 @@ function responseFor(result: PreviewResponse, operationId: string): Response {
   );
 }
 
-/** Registers every contract operation automatically. Build-time seed projections supply public workspace data; browser scenarios, local CRUD, and Blobs never access Postgres, credentials, or external effects. Each factory call resets the scenario. */
+/** Registers contract-driven, tab-local previews without upstream effects. Initialized Workspaces start past setup; only `first-run` creates an unfinished journey. */
 export function createPreviewHandlers(options: PreviewOptions = {}) {
   const now = Date.now();
   const fixtures = Object.assign(
@@ -86,6 +88,11 @@ export function createPreviewHandlers(options: PreviewOptions = {}) {
     options.scenario ?? "populated",
   );
   let initialized = options.scenario !== "first-run";
+  const onboarding: Pick<OnboardingProgress, "status" | "step" | "completed_at"> = {
+    status: options.scenario === "first-run" ? "in_progress" : "completed",
+    step: "improvement",
+    completed_at: options.scenario === "first-run" ? null : new Date(now).toISOString(),
+  };
 
   /** Chooses existing error examples where available; common synthetic transport failures reuse canonical error envelopes. */
   function failure(operation: PreviewOperation, status: number, fixture: string): PreviewResponse {
@@ -180,6 +187,28 @@ export function createPreviewHandlers(options: PreviewOptions = {}) {
                 operation.operationId,
               );
             }
+          }
+          if (
+            operation.operationId === "getOnboarding" ||
+            operation.operationId === "saveOnboarding" ||
+            operation.operationId === "completeOnboarding"
+          ) {
+            if (operation.operationId === "saveOnboarding" && input.step === "ready")
+              onboarding.step = "ready";
+            if (operation.operationId === "completeOnboarding") {
+              onboarding.status = "completed";
+              onboarding.completed_at ??= new Date().toISOString();
+            }
+            return responseFor(
+              {
+                status: operation.success.status,
+                body: Object.assign(
+                  Schema.decodeUnknownSync(previewObjectSchema)(operation.success.body),
+                  onboarding,
+                ),
+              },
+              operation.operationId,
+            );
           }
           if (operation.operationId === "startPlatformOAuth") {
             const selection = Schema.decodeUnknownSync(previewObjectSchema)(

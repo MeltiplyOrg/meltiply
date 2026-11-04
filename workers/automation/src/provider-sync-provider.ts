@@ -46,6 +46,7 @@ export interface ProviderReadTarget {
   platform: Platform;
   providerAccountId?: string;
   providerPostId: string;
+  providerOperationId?: string;
   storedAccessToken: string;
   tokenExpiresAt: Date | null;
 }
@@ -456,7 +457,12 @@ export function executeProviderAnalyticsEffect(
               accessToken,
               ...(target.providerAccountId ? { accountId: target.providerAccountId } : {}),
             },
-            { providerPostId: target.providerPostId },
+            {
+              providerPostId: target.providerPostId,
+              ...(target.providerOperationId
+                ? { providerOperationId: target.providerOperationId }
+                : {}),
+            },
             {
               ...(target.cursor ? { cursor: target.cursor } : {}),
               limit: 100,

@@ -255,4 +255,21 @@ describe("settings section rail", () => {
 
     expect(screen.getByRole("navigation", { name: "Settings sections" }).scrollLeft).toBe(0);
   });
+
+  it("groups visible sections and hides admin-only groups from members", () => {
+    const { rerender } = renderSettings();
+
+    expect(screen.getByRole("group", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Account" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Workspace" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Publishing" })).toBeNull();
+
+    workspace.canManageSettings = true;
+    rerender(<SettingsRouteFixture />);
+
+    expect(screen.getByRole("group", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publishing" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Administration" })).toBeInTheDocument();
+  });
 });

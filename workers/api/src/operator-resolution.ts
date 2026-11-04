@@ -6,7 +6,7 @@ import { CoreApiError } from "./core-types";
 import { RFC4122_UUID_PATTERN as uuid } from "./crypto";
 import type { ApiWorkerEnv } from "./env";
 
-export type OperatorDistributionResolution = "cancelled" | "failed" | "published";
+export type OperatorDistributionResolution = "cancelled" | "delivered" | "failed" | "published";
 
 export interface OperatorResolutionInput {
   failureCode: string | null;
@@ -114,8 +114,9 @@ function canonicalUrl(value: unknown): string | null {
  * Parses and validates an operator manual reconciliation resolution for a publication distribution.
  *
  * Enforces field allowlisting, exact confirmation phrasing (`"resolve <id> as <resolution>"`),
- * and validates that resolution evidence matches terminal state invariants (`published` requires `provider_post_id`,
- * `failed` requires `failure_code` and boolean `retryable`).
+ * and validates terminal evidence: `published` requires a public Post ID;
+ * `delivered` is an externally verified native handoff without a public Post ID;
+ * `failed` requires a failure code and optional boolean retryability.
  *
  * @param distributionId - UUID of the target distribution.
  * @param value - Raw request body payload.
@@ -151,11 +152,16 @@ export function parseOperatorResolution(
     );
   }
   const resolution = value.resolution;
-  if (resolution !== "cancelled" && resolution !== "failed" && resolution !== "published") {
+  if (
+    resolution !== "cancelled" &&
+    resolution !== "delivered" &&
+    resolution !== "failed" &&
+    resolution !== "published"
+  ) {
     throw new CoreApiError(
       400,
       "invalid_operator_resolution",
-      "resolution must be published, failed, or cancelled.",
+      "resolution must be published, delivered, failed, or cancelled.",
     );
   }
   if (value.confirm !== `resolve ${distributionId} as ${resolution}`) {

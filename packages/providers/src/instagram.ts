@@ -31,6 +31,7 @@ import {
 } from "./meta-common";
 import type { MetaContainerOperation } from "./meta-common";
 import type {
+  InstagramPostType,
   OAuthConnection,
   ProviderAdapter,
   ProviderCredentials,
@@ -40,13 +41,15 @@ import type {
   ProviderTokenSet,
   PublishInput,
 } from "./types";
+import { resolveInstagramOptions, type ResolvedInstagramOptions } from "./instagram-options";
+import { applyInstagramContent } from "./instagram-content";
 
 const apiOrigin = "https://graph.instagram.com";
 const exchangeOrigin = "https://api.instagram.com";
 const authorizationOrigin = "https://www.instagram.com";
 const apiVersion = "v25.0";
 const imageMaximumBytes = 8 * 1024 * 1024;
-const videoMaximumBytes = 300_000_000;
+const videoMaximumBytes = 500 * 1024 * 1024;
 const tokenLifetimeMaximumSeconds = 90 * 24 * 60 * 60;
 
 const publishingScopes = [
@@ -59,7 +62,7 @@ const engagementScopes = [
 ] as const;
 
 /** Instagram's documented carousel ceiling for one API-published post. */
-const maximumCarouselItems = 10;
+const maximumCarouselItems = 20;
 
 /** Instagram's caption ceiling remains known even before live publishing is configured. */
 export const INSTAGRAM_MAX_CAPTION_LENGTH = 2_200;
@@ -73,15 +76,16 @@ const capability: PlatformCapability = {
   max_caption_length: INSTAGRAM_MAX_CAPTION_LENGTH,
   max_file_size: videoMaximumBytes,
   max_hashtags: 30,
-  max_media_count: 10,
-  max_video_duration_sec: 900,
+  max_media_count: maximumCarouselItems,
+  max_video_duration_sec: null,
   min_media_count: 1,
   multi_asset_types: ["image", "video"],
   notes: [
     "Professional Business or Creator accounts use Instagram Login.",
-    "Single images and Reels use public HTTPS remote-ingest URLs.",
-    "Up to 10 images and Reels combine as one carousel post.",
-    "Images are limited to 8 MiB; Reels are limited to 1 GiB and 15 minutes.",
+    "Single images, videos, Reels, and Stories use public HTTPS remote-ingest URLs.",
+    "Up to 20 images and videos combine as one feed carousel post.",
+    "Trial Reels are shared to non-followers first and support manual or performance graduation.",
+    "Images are limited to 8 MiB; Reels are limited to 300 MB and 15 minutes, and Story videos to 100 MB and 60 seconds.",
     "Live-account acceptance remains required before runtime enablement.",
   ],
   platform: "instagram",
@@ -142,10 +146,9 @@ interface InstagramAttachment {
 }
 
 /**
- * Validates one ordered attachment and returns the remote-ingest URL Instagram
- * will fetch, checking transfer mode, HTTPS shape, the JPEG-only 8 MiB image
- * ceiling, and a conservative 300 MB (decimal) MP4/MOV Reel ceiling. Carousel items are validated
- * identically to single posts because Instagram publishes them as one media item.
+ * Validates one ordered remote-ingest attachment, keeping the JPEG-only image
+ * ceiling and method-specific video bounds. Feed videos/carousel children use
+ * the app's 500 MiB ceiling; only Reels use 300 MB and Stories use 100 MB.
  * @param input - Publish input whose `media[index]` is being validated.
  * @param index - Attachment position, quoted in the thrown failure context.
  * @returns The attachment kind and its canonical HTTPS URL.
@@ -164,12 +167,17 @@ function attachment(input: PublishInput, index: number): InstagramAttachment {
   const url = secureUrl(media.url)?.href;
   const contentType = media.contentType.split(";", 1)[0]!.toLowerCase();
   const fileSize = media.fileSize;
+  const postType =
+    input.providerOptions?.instagram?.postType ??
+    (input.media.length === 1 && contentType.startsWith("video/") ? "reel" : "feed");
+  const maximumVideoBytes =
+    postType === "story" ? 100_000_000 : postType === "reel" ? 300_000_000 : videoMaximumBytes;
   const valid =
     url !== undefined &&
     Number.isSafeInteger(fileSize) &&
     fileSize >= 1 &&
     ((contentType === "image/jpeg" && fileSize <= imageMaximumBytes) ||
-      (["video/mp4", "video/quicktime"].includes(contentType) && fileSize <= videoMaximumBytes));
+      (["video/mp4", "video/quicktime"].includes(contentType) && fileSize <= maximumVideoBytes));
   if (!valid) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
@@ -186,7 +194,7 @@ function attachment(input: PublishInput, index: number): InstagramAttachment {
 
 /**
  * Validates the ordered attachment set and reports the caption for this post.
- * Instagram requires at least one attachment and accepts at most 10 as one
+ * Instagram requires at least one attachment and accepts at most 20 as one
  * carousel, so anything else fails closed here rather than being truncated.
  * @param input - Composed caption plus the Post's ordered attachments.
  * @returns Every validated attachment in creator order plus the trimmed caption.
@@ -255,22 +263,80 @@ function carouselParentParameters(children: readonly string[], text: string): UR
 }
 
 /**
- * Builds container-creation parameters for a single-attachment post, keeping
- * the historical image_url or REELS shape so accepted behavior and its
- * reconciliation lifecycle are unchanged.
+ * Resolves Instagram's publication shape against the actual attachment set,
+ * failing closed when the stored choices cannot apply to this media set. The
+ * rule lives in `instagram-options` so the pre-flight validator and this
+ * adapter cannot disagree.
+ *
+ * @param input - Composed caption plus the Post's ordered attachments.
+ * @param attachments - Validated attachments in creator order.
+ * @returns The validated post type and trial settings.
+ * @throws ProviderAdapterError when the choices cannot apply to this media set.
+ */
+function instagramOptions(
+  input: PublishInput,
+  attachments: readonly InstagramAttachment[],
+): ResolvedInstagramOptions {
+  const resolved = resolveInstagramOptions(
+    input.providerOptions?.instagram,
+    attachments.map((attachment) => attachment.kind),
+  );
+  if (!resolved) {
+    throw new ProviderAdapterError(
+      classifyProviderFailure({
+        code: "instagram_post_options_invalid",
+        status: 400,
+      }),
+    );
+  }
+  return resolved;
+}
+
+/**
+ * Builds container-creation parameters for a single-attachment post. Images
+ * use a feed image or Story container; videos use VIDEO, REELS, or STORIES.
+ * share_to_feed remains true for a standard Reel, and trial Reels carry the
+ * documented graduation strategy.
  * @param item - The single validated attachment being published.
  * @param text - Trimmed caption for the published post.
+ * @param options - Validated post type and trial settings.
  * @returns Parameters for the container creation request.
  */
-function singleParameters(item: InstagramAttachment, text: string): URLSearchParams {
+function singleParameters(
+  item: InstagramAttachment,
+  text: string,
+  options: {
+    postType: InstagramPostType;
+    trialGraduation: "manual" | "performance";
+    trialReel: boolean;
+  },
+): URLSearchParams {
   const parameters = new URLSearchParams();
-  if (text) parameters.set("caption", text);
+  if (text && options.postType !== "story") parameters.set("caption", text);
   if (item.kind === "image") {
     parameters.set("image_url", item.url);
-  } else {
-    parameters.set("media_type", "REELS");
-    parameters.set("share_to_feed", "true");
-    parameters.set("video_url", item.url);
+    if (options.postType === "story") parameters.set("media_type", "STORIES");
+    return parameters;
+  }
+  parameters.set("video_url", item.url);
+  if (options.postType === "story") {
+    parameters.set("media_type", "STORIES");
+    return parameters;
+  }
+  if (options.postType === "feed") {
+    parameters.set("media_type", "VIDEO");
+    return parameters;
+  }
+  parameters.set("media_type", "REELS");
+  parameters.set("share_to_feed", "true");
+  if (options.trialReel) {
+    parameters.set(
+      "trial_params",
+      JSON.stringify({
+        graduation_strategy:
+          options.trialGraduation === "performance" ? "SS_PERFORMANCE" : "MANUAL",
+      }),
+    );
   }
   return parameters;
 }
@@ -332,6 +398,8 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
    * ambiguous outcome records 'submitted:<container>' so reconciliation can prove the
    * publish was dispatched and must never be issued again. A retryable rejection keeps
    * the container 'processing' so the next poll retries finalization.
+   * Documented caption, tag, or caption-add-on loss remains published with one
+   * sanitized warning; retrying a partial success would duplicate the Post.
    * Returns the publication status produced by the publish attempt.
    */
   const publishContainer = async (
@@ -352,13 +420,20 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
         sideEffectPossible: true,
         url: url.toString(),
       });
-      const providerPostId = providerIdentifier(record(response.body)?.id);
+      const body = record(response.body);
+      const providerPostId = providerIdentifier(body?.id);
       if (!providerPostId) throw malformed(true);
       return {
         result: {
           outcome: "confirmed_success",
           providerOperationId: createdOperationId,
           providerPostId,
+          ...(body?.config_issue === "CAPTION_NOT_ATTACHED" ||
+          body?.config_issue === "USER_TAGGING_FAILURE" ||
+          body?.caption_add_on_attachment_status === "POLL_CREATION_FAILURE" ||
+          body?.caption_add_on_attachment_status === "PROMPT_CREATION_FAILURE"
+            ? { warnings: ["instagram_publish_partial" as const] }
+            : {}),
         },
         state: "published",
       };
@@ -597,7 +672,9 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
 
     /**
      * Reads the professional account's lifetime follower and media counters.
-     * Uses the same long-lived token as publishing; no Post identity is needed.
+     * Accepts the same flat or single-account data envelope as Instagram Login;
+     * a missing/invalid follower count or ambiguous account envelope fails closed.
+     * Uses the publishing token; no Post identity is needed.
      */
     async getAccountAnalytics(context, credentials) {
       const url = new URL(`/${apiVersion}/me`, apiOrigin);
@@ -607,10 +684,10 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
         method: "GET",
         url: url.toString(),
       });
-      const body = record(response.body);
-      const followers = metricValue(body?.followers_count);
-      const following = metricValue(body?.follows_count);
-      const posts = metricValue(body?.media_count);
+      const body = loginRecord(response.body);
+      const followers = metricValue(body.followers_count);
+      const following = metricValue(body.follows_count);
+      const posts = metricValue(body.media_count);
       if (followers === undefined) throw malformed();
       return {
         followers,
@@ -789,8 +866,25 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
       required("idempotencyKey", input.idempotencyKey, 255);
       const { attachments, text } = carouselAttachments(input);
       const account = accountId(credentials);
+      const metadata = input.providerOptions?.instagram;
+      const resolved = instagramOptions(input, attachments);
+      if (resolved.postType === "story" && (text || input.hashtags.length)) {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({ code: "instagram_story_caption_unsupported", status: 400 }),
+        );
+      }
 
-      const createContainer = async (parameters: URLSearchParams): Promise<string> => {
+      const createContainer = async (
+        parameters: URLSearchParams,
+        childIndex?: number,
+      ): Promise<string> => {
+        if (childIndex !== undefined)
+          applyInstagramContent(parameters, metadata?.mediaOptions?.[childIndex]);
+        else {
+          applyInstagramContent(parameters, metadata?.content);
+          if (attachments.length === 1)
+            applyInstagramContent(parameters, metadata?.mediaOptions?.[0]);
+        }
         const response = await http.request<unknown>(context, {
           headers: bearer(credentials.accessToken),
           method: "POST",
@@ -807,16 +901,21 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
           outcome: "confirmed_success",
           providerOperationId: containerOperationId(
             "created",
-            await createContainer(singleParameters(only!, text)),
+            await createContainer(
+              singleParameters(only!, text, instagramOptions(input, attachments)),
+            ),
           ),
         };
       }
+      // Carousels are always feed posts; instagramOptions rejects a story or
+      // trial Reel choice here instead of silently publishing a different shape.
+      instagramOptions(input, attachments);
       // Children are created one at a time in creator order so a rejected
       // attachment stops the flow before later children exist, and the returned
       // ids stay aligned with the published carousel order.
       const children: string[] = [];
-      for (const item of attachments) {
-        children.push(await createContainer(carouselItemParameters(item)));
+      for (const [index, item] of attachments.entries()) {
+        children.push(await createContainer(carouselItemParameters(item), index));
       }
       return {
         outcome: "confirmed_success",

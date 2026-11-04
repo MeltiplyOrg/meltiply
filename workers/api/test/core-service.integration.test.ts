@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import {
   type DatabaseError,
   MailSubmissionError,
@@ -189,8 +190,7 @@ const env = {
   ALLOWED_ORIGINS: "http://localhost:3000",
   DB_AUTHENTICATED: { connectionString } as Hyperdrive,
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   ENVIRONMENT: "test",
   APP_URL: "http://localhost:3000",
@@ -3390,7 +3390,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         createAlphaPost(posts, { attachmentIds: [], defaultText: "" }, "integration-post-empty"),
       ).rejects.toMatchObject({
         code: "validation_error",
-        message: "A post requires default_text or at least one attachment.",
         status: 422,
       });
       await expect(

@@ -4,7 +4,6 @@ import {
   createFacebookAdapter,
   failureDiagnostic,
   ProviderAdapterError,
-  ProviderRegistry,
   type ProviderRequestContext,
   type PublishInput,
 } from "../src";
@@ -105,6 +104,380 @@ function reelStatus(
 }
 
 describe("createFacebookAdapter", () => {
+  it("publishes a caption-only Page feed post without requiring a Reel", async () => {
+    const providerCalls = sequence((url, init) => {
+      expect(url.pathname).toBe("/v25.0/page-1/feed");
+      expect(JSON.parse(String(init.body))).toEqual({
+        message: "A regular Page update",
+        published: true,
+      });
+      return json({ id: "page-1_post-1" });
+    });
+    await expect(
+      adapter(providerCalls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({ caption: "A regular Page update", hashtags: [], media: [] }),
+      ),
+    ).resolves.toEqual({
+      outcome: "confirmed_success",
+      providerOperationId: "post:page-1_post-1",
+      providerPostId: "page-1_post-1",
+      providerUrl: "https://www.facebook.com/page-1_post-1",
+    });
+  });
+
+  it("publishes ordered photos as one Page feed post", async () => {
+    const providerCalls = sequence(
+      (url, init) => {
+        expect(url.pathname).toBe("/v25.0/page-1/photos");
+        expect(JSON.parse(String(init.body))).toEqual({
+          url: "https://assets.example/first.jpg",
+          published: false,
+        });
+        return json({ id: "photo-1" });
+      },
+      () => json({ id: "photo-2" }),
+      (url, init) => {
+        expect(url.pathname).toBe("/v25.0/page-1/feed");
+        expect(JSON.parse(String(init.body))).toEqual({
+          message: "Two moments",
+          published: true,
+          attached_media: [{ media_fbid: "photo-1" }, { media_fbid: "photo-2" }],
+        });
+        return json({ id: "page-1_photos" });
+      },
+    );
+    await expect(
+      adapter(providerCalls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          caption: "Two moments",
+          hashtags: [],
+          media: [
+            {
+              contentType: "image/jpeg",
+              fileSize: 100,
+              mode: "remote_ingest",
+              url: "https://assets.example/first.jpg",
+            },
+            {
+              contentType: "image/jpeg",
+              fileSize: 100,
+              mode: "remote_ingest",
+              url: "https://assets.example/second.jpg",
+            },
+          ],
+        }),
+      ),
+    ).resolves.toMatchObject({
+      outcome: "confirmed_success",
+      providerPostId: "page-1_photos",
+    });
+  });
+
+  it("publishes a regular Page video rather than forcing the Reel endpoint", async () => {
+    const providerCalls = sequence(
+      (url, init) => {
+        expect(url.pathname).toBe("/v25.0/page-1/videos");
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          description: "A longer Page video",
+          file_url: "https://assets.example/long.mp4",
+          published: true,
+        });
+        return json({ id: "long-video" });
+      },
+      () => json({ id: "long-video", status: { video_status: "ready" } }),
+    );
+    const provider = adapter(providerCalls.fetcher);
+    const submitted = await provider.publish!(
+      context,
+      credentials,
+      publishInput({
+        caption: "A longer Page video",
+        hashtags: [],
+        media: [
+          {
+            contentType: "video/mp4",
+            fileSize: 1024,
+            mode: "remote_ingest",
+            metadata: { durationSeconds: 600, width: 1920, height: 1080 },
+            url: "https://assets.example/long.mp4",
+          },
+        ],
+        providerOptions: { facebook: { postType: "video" } },
+      }),
+    );
+    expect(submitted).toEqual({
+      outcome: "confirmed_success",
+      providerOperationId: "video:long-video",
+    });
+    await expect(
+      provider.lookupPublication!(context, credentials, submitted),
+    ).resolves.toMatchObject({
+      state: "published",
+      result: { providerPostId: "long-video", providerUrl: "https://www.facebook.com/long-video" },
+    });
+  });
+
+  it("publishes a photo Story using fresh unpublished media", async () => {
+    const providerCalls = sequence(
+      (_url, init) => {
+        expect(JSON.parse(String(init.body))).toEqual({
+          url: "https://assets.example/story.jpg",
+          published: false,
+        });
+        return json({ id: "story-photo" });
+      },
+      (url, init) => {
+        expect(url.pathname).toBe("/v25.0/page-1/photo_stories");
+        expect(JSON.parse(String(init.body))).toEqual({ photo_id: "story-photo" });
+        return json({ success: true, post_id: 1234 });
+      },
+    );
+    await expect(
+      adapter(providerCalls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          caption: "",
+          hashtags: [],
+          media: [
+            {
+              contentType: "image/jpeg",
+              fileSize: 100,
+              mode: "remote_ingest",
+              url: "https://assets.example/story.jpg",
+            },
+          ],
+          providerOptions: { facebook: { postType: "story" } },
+        }),
+      ),
+    ).resolves.toEqual({
+      outcome: "confirmed_success",
+      providerOperationId: "story:story-photo",
+      providerPostId: "1234",
+    });
+  });
+
+  it("publishes a video Story without substituting a Reel", async () => {
+    const calls = sequence(
+      (url) => {
+        expect(url.pathname).toBe("/v25.0/page-1/video_stories");
+        return json({
+          video_id: "story-video",
+          upload_url: "https://rupload.facebook.com/video-upload/v25.0/story-video",
+        });
+      },
+      () => json({ success: true }),
+      (url) => {
+        expect(url.pathname).toBe("/v25.0/page-1/video_stories");
+        expect(Object.fromEntries(url.searchParams)).toEqual({
+          video_id: "story-video",
+          upload_phase: "finish",
+        });
+        return json({ success: true, post_id: "video-story-post" });
+      },
+    );
+    await expect(
+      adapter(calls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          caption: "",
+          hashtags: [],
+          providerOptions: { facebook: { postType: "story" } },
+        }),
+      ),
+    ).resolves.toEqual({
+      outcome: "confirmed_success",
+      providerOperationId: "story:story-video",
+      providerPostId: "video-story-post",
+    });
+  });
+
+  it("creates a slideshow video from the ordered photo attachments", async () => {
+    const calls = sequence((url, init) => {
+      expect(url.pathname).toBe("/v25.0/page-1/videos");
+      expect(JSON.parse(String(init.body))).toMatchObject({
+        slideshow_spec: {
+          images_urls: [
+            "https://assets.example/one.jpg",
+            "https://assets.example/two.jpg",
+            "https://assets.example/three.jpg",
+          ],
+        },
+      });
+      return json({ id: "slideshow-video" });
+    });
+    await expect(
+      adapter(calls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          media: ["one", "two", "three"].map((name) => ({
+            contentType: "image/jpeg",
+            fileSize: 100,
+            mode: "remote_ingest" as const,
+            url: `https://assets.example/${name}.jpg`,
+          })),
+          providerOptions: { facebook: { postType: "slideshow" } },
+        }),
+      ),
+    ).resolves.toEqual({
+      outcome: "confirmed_success",
+      providerOperationId: "video:slideshow-video",
+    });
+  });
+
+  it("crossposts an authorized existing video without re-uploading media", async () => {
+    const calls = sequence((url, init) => {
+      expect(url.pathname).toBe("/v25.0/page-1/videos");
+      expect(JSON.parse(String(init.body))).toEqual({
+        description: "",
+        published: true,
+        crossposted_video_id: "source-video",
+      });
+      return json({ id: "crossposted-copy" });
+    });
+    await expect(
+      adapter(calls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          caption: "",
+          hashtags: [],
+          media: [],
+          providerOptions: {
+            facebook: { postType: "crosspost", crosspostedVideoId: "source-video" },
+          },
+        }),
+      ),
+    ).resolves.toEqual({
+      outcome: "confirmed_success",
+      providerOperationId: "video:crossposted-copy",
+    });
+  });
+
+  it("hands a native Page draft off without claiming a public post", async () => {
+    const calls = sequence((_url, init) => {
+      expect(JSON.parse(String(init.body))).toEqual({
+        message: "Review this in Meta",
+        published: false,
+      });
+      return json({ id: "page-1_native-draft" });
+    });
+    await expect(
+      adapter(calls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          caption: "Review this in Meta",
+          hashtags: [],
+          media: [],
+          providerOptions: { facebook: { postType: "feed", deliveryMode: "draft" } },
+        }),
+      ),
+    ).resolves.toEqual({
+      outcome: "confirmed_success",
+      delivery: "draft",
+      providerOperationId: "post_draft:page-1_native-draft",
+    });
+  });
+
+  it("creates an experiment from native draft videos without inventing a winning post", async () => {
+    const calls = sequence((url, init) => {
+      expect(url.pathname).toBe("/v25.0/page-1/ab_tests");
+      expect(JSON.parse(String(init.body))).toEqual({
+        name: "Launch comparison",
+        description: "Compare both openings",
+        control_video_id: "draft-one",
+        experiment_video_ids: ["draft-one", "draft-two"],
+        optimization_goal: "REELS_PLAYS",
+        duration: 1800,
+      });
+      return json({ id: "experiment-1" });
+    });
+    await expect(
+      adapter(calls.fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          caption: "Compare both openings",
+          hashtags: [],
+          media: [],
+          providerOptions: {
+            facebook: {
+              postType: "ab_test",
+              abTest: {
+                name: "Launch comparison",
+                controlVideoId: "draft-one",
+                experimentVideoIds: ["draft-one", "draft-two"],
+                optimizationGoal: "REELS_PLAYS",
+                durationSeconds: 1800,
+              },
+            },
+          },
+        }),
+      ),
+    ).resolves.toEqual({
+      outcome: "confirmed_success",
+      delivery: "experiment",
+      providerOperationId: "ab_test:experiment-1",
+    });
+  });
+
+  it("creates a live broadcast and exposes encoder credentials only through the explicit read", async () => {
+    const calls = sequence(
+      (url, init) => {
+        expect(url.pathname).toBe("/v25.0/page-1/live_videos");
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          status: "LIVE_NOW",
+          description: "Live launch",
+        });
+        return json({
+          id: "live-1",
+          secure_stream_url: "rtmps://live-api.facebook.com:443/rtmp/secret-key",
+        });
+      },
+      () =>
+        json({
+          id: "live-1",
+          status: "LIVE",
+          secure_stream_url: "rtmps://live-api.facebook.com:443/rtmp/secret-key",
+        }),
+      () => json({ id: "live-1" }),
+      () => json({ id: "live-1", status: "VOD" }),
+    );
+    const provider = adapter(calls.fetcher);
+    const submitted = await provider.publish!(
+      context,
+      credentials,
+      publishInput({
+        caption: "Live launch",
+        hashtags: [],
+        media: [],
+        providerOptions: { facebook: { postType: "live" } },
+      }),
+    );
+    expect(submitted).toEqual({
+      outcome: "confirmed_success",
+      delivery: "broadcast",
+      providerOperationId: "live:live-1",
+    });
+    await expect(provider.getBroadcastInfo!(context, credentials, submitted)).resolves.toEqual({
+      state: "live",
+      ingestUrl: "rtmps://live-api.facebook.com:443/rtmp/secret-key",
+      providerPostId: "live-1",
+      providerUrl: "https://www.facebook.com/live-1",
+    });
+    await expect(provider.endBroadcast!(context, credentials, submitted)).resolves.toMatchObject({
+      outcome: "confirmed_success",
+      providerPostId: "live-1",
+    });
+  });
+
   it("measures followers without misreporting Page likes as following", async () => {
     const providerCalls = sequence((url) => {
       expect(url.searchParams.get("fields")).toBe("followers_count");
@@ -116,33 +489,6 @@ describe("createFacebookAdapter", () => {
       followers: 420,
       recordedAt: "2026-07-19T00:00:00.000Z",
     });
-  });
-
-  it("advertises only the implemented Page Reels subset", () => {
-    const provider = adapter(vi.fn<typeof fetch>());
-    expect(provider.capability).toMatchObject({
-      analytics: true,
-      asset_types: ["video"],
-      comments: false,
-      connect_available: true,
-      max_caption_length: 2_200,
-      max_file_size: 500 * 1024 * 1024,
-      max_hashtags: 30,
-      max_video_duration_sec: 60,
-      max_media_count: 1,
-      min_media_count: 1,
-      multi_asset_types: [],
-      platform: "facebook",
-      publish: true,
-      reply: false,
-    });
-    expect(provider.transferModes).toEqual(["remote_ingest"]);
-    expect(provider.listAnalytics).toBeTypeOf("function");
-    expect(provider.listComments).toBeUndefined();
-    expect(provider.reply).toBeUndefined();
-    expect(provider.cancelPublication).toBeUndefined();
-    const registry = new ProviderRegistry();
-    expect(() => registry.register("facebook", provider)).not.toThrow();
   });
 
   it("builds a state-bound Facebook dialog URL and pins the callback", () => {
@@ -161,7 +507,7 @@ describe("createFacebookAdapter", () => {
       redirect_uri: redirectUri,
       response_type: "code",
       scope:
-        "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement,read_insights,business_management",
+        "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement,read_insights,pages_read_user_content,business_management",
       state: "oauth-state",
     });
     expect(() =>
@@ -308,6 +654,7 @@ describe("createFacebookAdapter", () => {
       () => json({ access_token: "rotated-user-secret", token_type: "bearer" }),
       inspect,
       () => json({ id: "page-1", access_token: "rotated-page-secret" }),
+      defaultGrantedPermissions,
     );
     const provider = adapter(calls.fetcher);
     const result = await provider.exchangeAuthorizationCode!(context, {
@@ -1255,8 +1602,7 @@ describe("createFacebookAdapter", () => {
     const fetcher = vi.fn<typeof fetch>();
     const provider = adapter(fetcher);
     const invalidInputs: PublishInput[] = [
-      publishInput({ media: [] }),
-      publishInput({ caption: "x".repeat(2_201) }),
+      publishInput({ caption: "", hashtags: [], media: [] }),
       publishInput({
         media: [
           {
@@ -1510,6 +1856,7 @@ describe("createFacebookAdapter", () => {
           name: "Meltiply Page",
         });
       },
+      defaultGrantedPermissions,
     );
     await expect(
       adapter(providerCalls.fetcher).refreshAccessToken!(

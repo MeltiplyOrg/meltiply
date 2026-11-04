@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { Cause, Effect, Exit, Option } from "effect";
 import { afterAll, afterEach, describe, expect, it } from "vite-plus/test";
 
@@ -628,9 +629,11 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
   // on the authenticated pool to exercise RLS.
   const systemPool = createHyperdrivePool(
     {
-      connectionString:
-        process.env.MELTIPLY_DATABASE_SYSTEM_TEST_URL ??
-        "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+      connectionString: integrationDatabaseUrl(
+        connectionString,
+        "system",
+        process.env.MELTIPLY_DATABASE_SYSTEM_TEST_URL,
+      ),
     },
     { max: 1 },
   );

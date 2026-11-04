@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { abbreviateRecordId, formatBytes, formatDuration } from "./format";
+import { abbreviateRecordId, formatBytes, formatDuration, postDateFormatters } from "./format";
 
 describe("formatBytes", () => {
   it("formats bytes", () => {
@@ -45,5 +45,21 @@ describe("abbreviateRecordId", () => {
   it("keeps ids that are already short", () => {
     expect(abbreviateRecordId("abc123")).toBe("abc123");
     expect(abbreviateRecordId("3f7c1a92-5b4e-4d21-9a77-0c8f2e1b6d40")).toBe("1b6d40");
+  });
+});
+
+describe("postDateFormatters", () => {
+  it("reuses one formatter pair for each publishing timezone", () => {
+    const newYork = postDateFormatters("America/New_York");
+    expect(postDateFormatters("America/New_York")).toBe(newYork);
+    expect(postDateFormatters("Asia/Tokyo")).not.toBe(newYork);
+  });
+
+  it("formats a stored instant in the selected zone", () => {
+    const value = new Date("2026-01-01T04:30:00.000Z");
+    const formatters = postDateFormatters("America/New_York");
+    expect(formatters.day.format(value)).toBe("Dec 31");
+    expect(formatters.time.format(value)).toContain("11:30");
+    expect(postDateFormatters("Asia/Tokyo").day.format(value)).toBe("Jan 1");
   });
 });

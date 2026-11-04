@@ -206,6 +206,11 @@ export type QueueListResponse = components["schemas"]["QueueListResponse"];
 export type CreateQueueInput = components["schemas"]["CreateQueueRequest"];
 export type UpdateQueueInput = components["schemas"]["UpdateQueueRequest"];
 export type QueueQueryParams = NonNullable<operations["listQueues"]["parameters"]["query"]>;
+
+/** Persistent owner choices shared by the scheduling surface and composer. */
+export type PublishingPreferences = components["schemas"]["PublishingPreferences"];
+export type PublishingPreferencesUpdate = components["schemas"]["PublishingPreferencesUpdate"];
+export type SignatureTemplate = components["schemas"]["SignatureTemplate"];
 export type PostQueryParams = NonNullable<operations["listPosts"]["parameters"]["query"]>;
 
 export type Distribution = components["schemas"]["Distribution"];

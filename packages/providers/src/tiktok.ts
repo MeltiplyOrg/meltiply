@@ -36,7 +36,7 @@ const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:~-]{0,254}$/;
 const opaqueIdentifierPattern = /^[A-Za-z0-9_-][A-Za-z0-9._:~-]{0,254}$/;
 const errorCodePattern = /^[a-z0-9][a-z0-9._-]{0,79}$/;
 const scopePattern = /^[a-z][a-z0-9._-]{0,99}$/;
-const publishOperationPattern = /^publish:(.+)$/;
+const publishOperationPattern = /^(?:publish|inbox):(.+)$/;
 const lineBreakPattern = /\r?\n/;
 
 const apiOrigin = "https://open.tiktokapis.com";
@@ -44,10 +44,16 @@ const authorizationOrigin = "https://www.tiktok.com";
 const imageMaximumBytes = 20 * 1024 * 1024;
 const videoMaximumBytes = 500 * 1024 * 1024;
 const tokenLifetimeMaximumSeconds = 2 * 24 * 60 * 60;
-/** Scopes publishing cannot work without; a grant missing either one is rejected. */
-const requiredScopes = ["user.info.basic", "video.publish"] as const;
+/** Identity is required; either direct-publish or native-inbox consent enables publishing. */
+const requiredScopes = ["user.info.basic"] as const;
 /** Profile metadata and analytics consent are optional and never block publishing. */
-const optionalScopes = ["user.info.profile", "user.info.stats", "video.list"] as const;
+const optionalScopes = [
+  "video.publish",
+  "video.upload",
+  "user.info.profile",
+  "user.info.stats",
+  "video.list",
+] as const;
 const requestedScopes = [...requiredScopes, ...optionalScopes] as const;
 const privacyLevels = new Set<TikTokPrivacyLevel>([
   "PUBLIC_TO_EVERYONE",
@@ -57,7 +63,7 @@ const privacyLevels = new Set<TikTokPrivacyLevel>([
 ]);
 
 /** TikTok's caption ceiling remains known even before live publishing is configured. */
-export const TIKTOK_MAX_CAPTION_LENGTH = 2_200;
+export const TIKTOK_MAX_CAPTION_LENGTH = 4_000;
 
 const capability: PlatformCapability = {
   accepted_mime_types: ["image/jpeg", "image/webp", "video/mp4", "video/quicktime"],
@@ -73,12 +79,12 @@ const capability: PlatformCapability = {
   min_media_count: 1,
   multi_asset_types: ["image"],
   notes: [
-    "One video, or up to 35 images as one photo post, is submitted through TikTok Direct Post.",
+    "One video or up to 35 images can publish directly or be handed to the creator's TikTok inbox for native completion.",
     "A photo post is images only; mixing a video with images is not supported.",
     "Privacy, interaction, commercial-content, AI, and music-usage choices are explicit per target.",
     "Media uses PULL_FROM_URL from an HTTPS URL prefix verified in the TikTok developer portal.",
     "The Channel username appears only when the optional user.info.profile scope is granted.",
-    "Creator eligibility and current account limits are queried immediately before publication.",
+    "Direct Post re-queries creator permissions immediately before publication; inbox upload requires video.upload and is not a published outcome.",
     "Analytics reads the creator's own view, like, comment, and share counters; comments and replies are not claimed.",
     "Existing connections must reconnect to grant the video.list analytics scope.",
     "TikTok app audit and approved live-account acceptance remain required.",
@@ -265,7 +271,9 @@ function tokenBody(value: unknown, now: Date, requireGrantedScopes: boolean): Ti
         }),
       );
     }
-    const missingScopes = requiredScopes.filter((scope) => !scopes?.has(scope));
+    const missingScopes: string[] = requiredScopes.filter((scope) => !scopes?.has(scope));
+    if (!scopes?.has("video.publish") && !scopes?.has("video.upload"))
+      missingScopes.push("video.publish");
     if (missingScopes.length > 0) {
       throw new ProviderAdapterError(
         classifyProviderFailure({ code: "tiktok_scope_not_granted", status: 400 }),
@@ -366,7 +374,9 @@ function publishOptions(input: PublishInput): TikTokPublishOptions {
   if (
     !value ||
     value.musicUsageConfirmed !== true ||
-    !privacyLevels.has(value.privacyLevel) ||
+    (value.postMode !== "inbox" &&
+      (!value.privacyLevel || !privacyLevels.has(value.privacyLevel))) ||
+    (value.postMode !== undefined && !["direct", "inbox"].includes(value.postMode)) ||
     [
       value.allowComment,
       value.allowDuet,
@@ -375,7 +385,8 @@ function publishOptions(input: PublishInput): TikTokPublishOptions {
       value.brandOrganic,
       value.isAiGenerated,
     ].some((choice) => typeof choice !== "boolean") ||
-    (value.brandContent && value.privacyLevel === "SELF_ONLY")
+    (value.autoAddMusic !== undefined && typeof value.autoAddMusic !== "boolean") ||
+    (value.postMode !== "inbox" && value.brandContent && value.privacyLevel === "SELF_ONLY")
   ) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
@@ -452,8 +463,8 @@ function creatorRequirements(value: unknown): TikTokPublicationRequirements {
  * Formats a canonical TikTok operation identifier string from a publish ID (e.g. 'publish:v_pub_file_123').
  * Returns formatted operation identifier string.
  */
-function operationId(publishId: string): string {
-  return `publish:${publishId}`;
+function operationId(publishId: string, inbox = false): string {
+  return `${inbox ? "inbox" : "publish"}:${publishId}`;
 }
 
 /**
@@ -642,7 +653,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         },
         expiresAt: tokens.expiresAt,
         refreshToken: tokens.refreshToken,
-        scopes: tokens.scopes ?? [...requiredScopes],
+        scopes: tokens.scopes ?? [],
       };
     },
 
@@ -743,12 +754,12 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
     },
 
     /**
-     * Reconciles a Direct Post operation through TikTok's status/fetch endpoint.
-     * PROCESSING_UPLOAD/PROCESSING_DOWNLOAD stay pollable; SEND_TO_USER_INBOX is terminal
-     * (the video landed as an inbox draft, not a public post) and maps to a non-retryable
-     * confirmed failure so reconciliation stops instead of polling forever. PUBLISH_COMPLETE
-     * accepts TikTok's documented identifier list and adopts the first validated entry as the
-     * primary providerPostId. Returns ProviderPublicationStatus; throws on malformed envelopes.
+     * Reconciles Direct Post and native inbox operations through status/fetch.
+     * Processing states remain pollable. SEND_TO_USER_INBOX is terminal Delivered
+     * for an inbox operation, but a non-retryable failure for a Direct Post.
+     * PUBLISH_COMPLETE adopts the first validated public ID without rounding its
+     * integer value. Throws on malformed envelopes; inbox delivery never invents
+     * a public Post ID.
      */
     async lookupPublication(context, credentials, lookup) {
       accountId(credentials);
@@ -761,7 +772,8 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
           }),
         );
       }
-      const retainedOperationId = operationId(retainedPublishId);
+      const inbox = lookup.providerOperationId?.startsWith("inbox:") === true;
+      const retainedOperationId = operationId(retainedPublishId, inbox);
       const response = await http.request<unknown>(context, {
         body: JSON.stringify({ publish_id: retainedPublishId }),
         headers: {
@@ -769,6 +781,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
           "Content-Type": "application/json; charset=UTF-8",
         },
         method: "POST",
+        preserveLargeIntegers: true,
         url: `${apiOrigin}/v2/post/publish/status/fetch/`,
       });
       const responseBody = record(response.body);
@@ -785,6 +798,16 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         };
       }
       if (status === "SEND_TO_USER_INBOX") {
+        if (inbox) {
+          return {
+            state: "delivered",
+            result: {
+              outcome: "confirmed_success",
+              delivery: "inbox",
+              providerOperationId: retainedOperationId,
+            },
+          };
+        }
         return {
           result: confirmedFailure(
             classifyProviderFailure({
@@ -814,7 +837,11 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         };
       }
       if (status !== "PUBLISH_COMPLETE") throw malformed();
-      const postIds = data.publicaly_available_post_id;
+      const postIds = Array.isArray(data.publicaly_available_post_id)
+        ? data.publicaly_available_post_id.map((id: unknown) =>
+            typeof id === "number" && Number.isSafeInteger(id) && id > 0 ? String(id) : id,
+          )
+        : data.publicaly_available_post_id;
       if (
         postIds !== undefined &&
         (!Array.isArray(postIds) || postIds.some((id) => !tiktokIdentifier(id)))
@@ -840,6 +867,8 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
      * requirements before choosing the video or photo init endpoint. A set that
      * mixes kinds fails closed because TikTok publishes videos and photo posts
      * through different endpoints, and no attachment is ever dropped.
+     * Photo 1080p limits apply to the short side, allowing portrait and landscape
+     * images instead of imposing an unrelated 1080-by-1080 square restriction.
      * @param context - Request context carrying abort signal and rate telemetry.
      * @param credentials - Creator access token and open_id.
      * @param input - Composed caption plus the Post's ordered attachments.
@@ -876,12 +905,23 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       }
       const [first] = media;
       const choices = publishOptions(input);
-      const requirements = await getRequirements(context, credentials);
+      if (isVideo && choices.autoAddMusic === true) {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({
+            code: "tiktok_auto_music_video_unsupported",
+            status: 400,
+          }),
+        );
+      }
+      const inbox = choices.postMode === "inbox";
+      const requirements = inbox ? undefined : await getRequirements(context, credentials);
       if (
-        !requirements.privacyLevels.includes(choices.privacyLevel) ||
-        (choices.allowComment && !requirements.commentAllowed) ||
-        (choices.allowDuet && !requirements.duetAllowed) ||
-        (choices.allowStitch && !requirements.stitchAllowed)
+        requirements &&
+        (!choices.privacyLevel ||
+          !requirements.privacyLevels.includes(choices.privacyLevel) ||
+          (choices.allowComment && !requirements.commentAllowed) ||
+          (choices.allowDuet && !requirements.duetAllowed) ||
+          (choices.allowStitch && !requirements.stitchAllowed))
       ) {
         throw new ProviderAdapterError(
           classifyProviderFailure({
@@ -901,15 +941,15 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         const metadata = first!.metadata;
         if (
           media.length !== 1 ||
-          caption.length > 2_200 ||
-          !["video/mp4", "video/quicktime"].includes(contentType) ||
+          (!inbox && caption.length > 2_200) ||
+          !["video/mp4", "video/quicktime", "video/webm"].includes(contentType) ||
           !Number.isSafeInteger(first!.fileSize) ||
           first!.fileSize < 1 ||
           first!.fileSize > videoMaximumBytes ||
           !metadata ||
           !Number.isFinite(metadata.durationSeconds) ||
           metadata.durationSeconds! <= 0 ||
-          metadata.durationSeconds! > requirements.maxVideoDurationSeconds ||
+          metadata.durationSeconds! > (requirements?.maxVideoDurationSeconds ?? 600) ||
           !Number.isInteger(metadata.width) ||
           metadata.width! < 360 ||
           metadata.width! > 4_096 ||
@@ -924,7 +964,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
             }),
           );
         }
-        endpoint = `${apiOrigin}/v2/post/publish/video/init/`;
+        endpoint = `${apiOrigin}/v2/post/publish/${inbox ? "inbox/video" : "video"}/init/`;
         body = {
           post_info: {
             brand_content_toggle: choices.brandContent,
@@ -960,19 +1000,16 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
               !metadata ||
               !Number.isInteger(metadata.width) ||
               metadata.width! < 1 ||
-              metadata.width! > 1_080 ||
               !Number.isInteger(metadata.height) ||
               metadata.height! < 1 ||
-              metadata.height! > 1_080
+              Math.min(metadata.width!, metadata.height!) > 1_080
             );
           });
         if (
           !title ||
           title.length > 90 ||
           caption.length > 4_000 ||
-          choices.allowDuet ||
-          choices.allowStitch ||
-          choices.isAiGenerated ||
+          (!inbox && (choices.allowDuet || choices.allowStitch)) ||
           imagesInvalid
         ) {
           throw new ProviderAdapterError(
@@ -985,8 +1022,9 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         endpoint = `${apiOrigin}/v2/post/publish/content/init/`;
         body = {
           media_type: "PHOTO",
+          is_aigc: choices.isAiGenerated,
           post_info: {
-            auto_add_music: false,
+            auto_add_music: choices.autoAddMusic === true,
             brand_content_toggle: choices.brandContent,
             brand_organic_toggle: choices.brandOrganic,
             description: caption,
@@ -994,13 +1032,23 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
             privacy_level: choices.privacyLevel,
             title,
           },
-          post_mode: "DIRECT_POST",
+          post_mode: inbox ? "MEDIA_UPLOAD" : "DIRECT_POST",
           source_info: {
             photo_cover_index: 0,
             photo_images: media.map((attachment) => attachment.url),
             source: "PULL_FROM_URL",
           },
         };
+      }
+      if (inbox) {
+        if (isVideo) {
+          body = { source_info: { source: "PULL_FROM_URL", video_url: first!.url } };
+        } else {
+          body.post_info = {
+            title: caption.split(/\r?\n/, 1)[0] ?? "",
+            description: caption,
+          };
+        }
       }
 
       try {
@@ -1018,7 +1066,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         if (!id) throw malformed(true);
         return {
           outcome: "confirmed_success",
-          providerOperationId: operationId(id),
+          providerOperationId: operationId(id, inbox),
         };
       } catch (cause) {
         if (!(cause instanceof ProviderAdapterError)) throw cause;
@@ -1049,7 +1097,8 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         accessToken: tokens.accessToken,
         expiresAt: tokens.expiresAt,
         refreshToken: tokens.refreshToken,
-        scopes: tokens.scopes ?? [...requiredScopes],
+        // The existing refresh consumer treats [] as preserve-the-stored-grant.
+        scopes: tokens.scopes ?? [],
       };
     },
 

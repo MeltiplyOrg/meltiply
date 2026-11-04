@@ -151,12 +151,12 @@ owns Queue timezone, bounded paged reads, live clock, and reservation actions.
 navigation uses neutral Buttons and `SidebarGlideHighlight`; phones use a compact
 Select with the same administrator actions.
 
-`QueueTimezonePicker` owns timezone selection: the finite browser IANA catalog plus
-`UTC` and the saved alias, ranked by substring then ordered character gaps. The panel
-renders **inline** under its trigger, not in a portal — a portalled list inside a
-modal dialog has wheel events cancelled by the dialog's scroll lock. Search never
-commits (Enter must not submit the Queue form); choosing an identifier closes the
-panel; Escape belongs to the panel while open.
+`QueueTimezonePicker` owns timezone selection for Queue configuration and Settings →
+Publishing: the finite browser IANA catalog plus `UTC` and the saved alias, ranked by
+substring then ordered character gaps. The panel renders **inline** under its trigger,
+not in a portal — a portalled list inside a modal dialog has wheel events cancelled
+by the dialog's scroll lock. Search never commits (Enter must not submit the Queue
+form); choosing an identifier closes the panel; Escape belongs to the panel while open.
 
 Week chips paint over the hourly canvas, so they use the opaque
 `--accent-tint-solid`/`--green-tint-solid`/`--red-tint-solid` twins rather than
@@ -195,13 +195,17 @@ successes and retain failures for retry.
 
 ## Settings and dialogs
 
-`WorkspaceSettings` is a full route with Appearance, Language, Account, Security, and
-— for administrators — Administration. Every section shares one background; the
-preference and security sections use the bounded form column, Administration follows
-the directory composition. Compact theme cards offer Light/Dark/System; System
-follows live OS changes. Account identity is read-only. Security controls are inline
-and keep password verification, authenticator enrollment, and recovery-code
-requirements.
+`WorkspaceSettings` is a full route grouped into General (Appearance, Language, and
+Publishing), Account (Account and Security), and Workspace (Administration). Empty
+groups disappear; Publishing and Administration are administrator-only. Publishing
+stores the timezone, reusable signatures with one default, and notification events
+with explicit email recipients as one atomic document. Every section shares one
+background; the preference and security sections use the bounded form column,
+Administration follows the directory composition. Compact theme cards offer
+Light/Dark/System; System follows live OS changes. Current-page preferences work
+without optional storage; persistence follows the consent-aware owners. Account
+identity is read-only. Security controls are inline and keep password verification,
+authenticator enrollment, and recovery-code requirements.
 
 | Task                        | Primitive                                  |
 | --------------------------- | ------------------------------------------ |
@@ -268,6 +272,12 @@ work. A multi-profile batch keeps copy identities together under the
 new-composition key; learning an anchor copy id never moves progress to another
 namespace.
 
+Recovery retains each Channel's resolved signature snapshot, including an explicit
+no-signature value, rather than applying a newer default template. Hydrating a
+Schedule is not a creator edit: an untouched field follows publishing-timezone
+changes while preserving its instant and midnight. Provider choices that must
+change together, such as Instagram post type and Trial Reel, commit atomically.
+
 Original-media reads use the canonical `lib/api.ts` binary adapter: a signed
 object-store download never receives API bearer headers or session cookies. Failed
 copy uploads release their sessions. A new draft write invalidates the previous
@@ -275,7 +285,9 @@ accepted delivery marker because saving cancels pending deliveries; only an unch
 retry skips a completed profile. Readiness follows each Channel's selected
 attachments, so unused media never blocks text-only delivery. Readiness reads and
 polling share a five-minute per-profile deadline; expiry reports a failure and
-retains the saved copy for retry.
+retains the saved copy for retry. Recovered media copies derive filename extensions
+from the canonical MIME policy, keeping display titles and original bytes without
+weakening upload validation.
 
 Every account uses the same `ChannelAvatar` owner as the Channels directory: account
 photo, initials when missing or failed, and a separate provider badge. Eligible
@@ -306,13 +318,16 @@ columns when there is room, one on narrow panels. Provider capability metadata k
 the adapters' canonical caption ceilings even when credentials are absent.
 
 `ScheduleDateTime` shows a compact date button beside `TimeOfDayField` with the
-browser time zone underneath. The same wall-time editor serves recurring Queue slots;
+owner's publishing time zone underneath. The same wall-time editor serves recurring Queue slots;
 it accepts complete `HH:mm` values without timezone conversion. The date button opens
 a Radix popover containing React DayPicker; coarse pointers get 44px day targets.
 `@meltiply/ui/popover` owns anchored, non-menu form panels, including both scheduler
 pickers. Date and time share one compact row; clicking the time field's background
 focuses hours so a complete `HH:mm` can be typed, and the clock opens a compact
 chooser with canonical Selects for all 24 hours and 60 minutes.
+
+The composer owns hydration, recovery, publishing-zone wall-clock-to-instant
+conversion, and submit validation.
 
 Primitives own accessible names, focus trapping, Escape/dismissal, scroll lock, and
 transitions. Preserve content through exits with `useLatchedValue`; clear secrets per
@@ -402,13 +417,24 @@ interface language.
 
 URL parameters are `previewScenario`, `previewOperation`, and `previewStatus`. Generic
 saves, deletes, sign-in/out, and single-part uploads operate only in browser memory:
-uploaded bytes become local Blob URLs, never R2 objects. No preview response sends
-email, changes credentials, publishes content, or invokes background infrastructure.
+uploaded bytes become local Blob URLs, never R2 objects. Upload completion returns a
+ready Asset; session reads retain the upload-session envelope. Draft updates retain
+Channel identity and replace provider options, including incomplete method choices,
+without inheriting another Channel's fields.
+No preview response sends email, changes credentials, publishes content, or invokes
+background infrastructure.
 
 `wrangler.ui-preview.jsonc` has no service, database, or storage bindings and rejects
 API/telemetry requests reaching the server; browser handlers also reject unknown API
 calls, and the CSP limits network access to its own origin. Never add production
 secrets, an `API` binding, or a real backend origin.
+
+The seed includes a native Facebook Page draft, a TikTok inbox handoff, a prepared
+Facebook Live broadcast, and a successful Threads Post with a failed secondary
+Instagram Story share. These expose Delivered status, provider references, warning
+copy, and writer-only Live controls. Encoder values are nonfunctional examples.
+Method selection and draft reopen are reviewable here; actual grants, eligibility,
+media ingestion, native completion, and encoder delivery require approved live accounts.
 
 For PR previews, create a separate Git-connected Worker `meltiply-ui-preview` with
 the repository root as build root:

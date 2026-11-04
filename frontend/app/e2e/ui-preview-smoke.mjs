@@ -115,7 +115,7 @@ try {
   const original = candidates.find((post) => visibleCaptions.includes(post.default_text));
   assert.ok(original, "the Posts table must render a record from the compiled seed");
 
-  // Verify local file effects, not just canned upload responses: uploaded bytes must decode and remain attached after saving.
+  // Verify local file effects: completion returns an Asset; session state is read separately, and decoded bytes stay attached after saving.
   const upload = await page.evaluate(
     async ({ bytes, profileId }) => {
       const created = await fetch("/api/v1/asset-upload-sessions", {
@@ -139,6 +139,9 @@ try {
         `/api/v1/asset-upload-sessions/${created.upload_session.id}/complete`,
         { method: "POST" },
       ).then((response) => response.json());
+      const completedSession = await fetch(
+        `/api/v1/asset-upload-sessions/${created.upload_session.id}`,
+      ).then((response) => response.json());
       const preview = await fetch(`/api/v1/assets/${created.asset.id}/preview-url`).then(
         (response) => response.json(),
       );
@@ -156,7 +159,8 @@ try {
       }).then((response) => response.json());
       return {
         initial: created.upload_session.status,
-        completed: completed.upload_session.status,
+        completed: completed.status,
+        session: completedSession.upload_session.status,
         asset: post.attachments[0].asset.status,
         image: [image.naturalWidth, image.naturalHeight],
         caption: post.default_text,
@@ -170,7 +174,8 @@ try {
   );
   assert.deepEqual(upload, {
     initial: "created",
-    completed: "completed",
+    completed: "ready",
+    session: "completed",
     asset: "ready",
     image: [64, 64],
     caption: "Preview upload smoke",

@@ -28,6 +28,17 @@ migrations, and fixtures. Run `make setup` alone only when the host tools are al
 present. Keep credentials out of commits; configure overrides in that root `.env`
 using [`.env.example`](.env.example).
 
+The self-host runtime is a separate npm package, outside the Bun workspaces.
+Before repository-wide linting or running its local smoke scripts, install its
+locked development dependencies as well:
+
+```bash
+npm ci --prefix scripts/selfhost --include=dev
+```
+
+This supplies Miniflare and PostgreSQL types at their owning package boundary;
+do not rely on transitive dependencies from other workspaces.
+
 `make dev` starts the database, Workers, app, and public site on loopback. Public
 tunnels require `MELTIPLY_DEV_TUNNEL=1 make dev`; callback and webhook URLs must match
 the chosen origin. For app-only iteration against an existing backend use

@@ -374,18 +374,30 @@ test("generator output is deterministic and check mode rejects drift", async () 
 
   const directory = await mkdtemp(join(tmpdir(), "meltiply-readiness-"));
   const output = join(directory, "endpoint-readiness.md");
+  // The checked-in catalog promotes getHealth, so check mode resolves its
+  // evidence. A fully `specified` catalog is what proves that states needing no
+  // artifacts fetch none: `fetchImplementation` fails loudly if one is resolved.
+  const specified = structuredClone(catalog);
+  for (const readiness of Object.values(specified.operations)) {
+    readiness.state = "specified";
+    delete readiness.promotionEvidence;
+  }
+  const specifiedMetadata = join(directory, "specified-readiness.json");
   try {
-    await writeFile(output, renderEndpointReadiness(openApi, catalog), "utf8");
+    await writeFile(specifiedMetadata, JSON.stringify(specified), "utf8");
+    await writeFile(output, renderEndpointReadiness(openApi, specified), "utf8");
     await assert.doesNotReject(
-      run(["--check", "--metadata", metadataPath, "--openapi", openApiPath, "--output", output], {
-        // Every checked-in operation is `specified`, so check mode resolves no
-        // artifacts; an empty environment proves that no real credential is
-        // consulted. `fetchImplementation` fails loudly if that ever changes.
-        environment: {},
-        fetchImplementation: async () => {
-          throw new Error("check mode must not fetch evidence for specified operations");
+      run(
+        ["--check", "--metadata", specifiedMetadata, "--openapi", openApiPath, "--output", output],
+        {
+          // Every operation is `specified`, so check mode resolves no artifacts;
+          // an empty environment proves that no real credential is consulted.
+          environment: {},
+          fetchImplementation: async () => {
+            throw new Error("check mode must not fetch evidence for specified operations");
+          },
         },
-      }),
+      ),
     );
 
     await writeFile(output, "stale\n", "utf8");

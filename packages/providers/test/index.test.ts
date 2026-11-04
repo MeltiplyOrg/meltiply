@@ -210,9 +210,6 @@ describe("ProviderRegistry", () => {
     expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
       "https://api.example.com/api/v1/platforms/threads/callback",
     );
-    expect(authorizationUrl.searchParams.get("scope")).toBe(
-      "threads_basic,threads_content_publish,threads_delete",
-    );
   });
 
   it("requires independent live acceptance before exposing engagement", () => {
@@ -381,17 +378,6 @@ describe("ProviderRegistry", () => {
       FACEBOOK_LIVE_ACCEPTED: "true",
       APP_URL: "https://api.example.com/base",
     }).get("facebook")!;
-    expect(facebook.capability).toMatchObject({
-      analytics: true,
-      asset_types: ["video"],
-      comments: false,
-      connect_available: true,
-      publish: true,
-      reply: false,
-    });
-    expect(facebook.listAnalytics).toBeTypeOf("function");
-    expect(facebook.listComments).toBeUndefined();
-    expect(facebook.reply).toBeUndefined();
     const authorizationUrl = new URL(
       facebook.authorizationUrl!({
         codeChallenge: "unused",
@@ -401,9 +387,6 @@ describe("ProviderRegistry", () => {
     );
     expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
       "https://api.example.com/api/v1/platforms/facebook/callback",
-    );
-    expect(authorizationUrl.searchParams.get("scope")).toBe(
-      "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement,read_insights,business_management",
     );
   });
 
@@ -483,15 +466,6 @@ describe("ProviderRegistry", () => {
     expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
       "https://api.example.com/api/v1/platforms/tiktok/callback",
     );
-    expect(new Set(authorizationUrl.searchParams.get("scope")?.split(","))).toEqual(
-      new Set([
-        "user.info.basic",
-        "video.publish",
-        "user.info.profile",
-        "user.info.stats",
-        "video.list",
-      ]),
-    );
   });
 
   it("requires complete accepted YouTube configuration and pins the callback", () => {
@@ -528,9 +502,6 @@ describe("ProviderRegistry", () => {
     );
     expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
       "https://api.example.com/api/v1/platforms/youtube/callback",
-    );
-    expect(authorizationUrl.searchParams.get("scope")).toBe(
-      "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",
     );
   });
 

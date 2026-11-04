@@ -10,6 +10,7 @@ import type {
   ProviderAnalyticsRecord,
   ProviderCommentRecord,
   ProviderCredentials,
+  ProviderBroadcastInfo,
   ProviderOperationResult,
   ProviderPage,
   ProviderPageInput,
@@ -373,6 +374,20 @@ export function failureDiagnostic(error: ProviderAdapterError): {
  * transient/timeout failures.
  */
 export interface ProviderServiceShape {
+  /** Reads secret encoder details only at an explicitly authorized, no-store API boundary. */
+  readonly getBroadcastInfo: (
+    platform: Platform,
+    context: ProviderRequestContext,
+    credentials: ProviderCredentials,
+    lookup: ProviderPublicationLookup,
+  ) => Effect.Effect<ProviderBroadcastInfo, ProviderAdapterError>;
+  /** Ends one broadcast exactly once; ambiguous writes must be reconciled, not retried. */
+  readonly endBroadcast: (
+    platform: Platform,
+    context: ProviderRequestContext,
+    credentials: ProviderCredentials,
+    lookup: ProviderPublicationLookup,
+  ) => Effect.Effect<ProviderOperationResult, ProviderAdapterError>;
   readonly cancelPublication: (
     platform: Platform,
     context: ProviderRequestContext,
@@ -484,6 +499,22 @@ function resolveAdapter(
  */
 function makeProviderService(source: ProviderAdapterSource): ProviderServiceShape {
   return {
+    getBroadcastInfo: (platform, context, credentials, lookup) =>
+      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
+        adapter.getBroadcastInfo
+          ? providerCallEffect(context, (child) =>
+              adapter.getBroadcastInfo!(child, credentials, lookup),
+            )
+          : unsupported("broadcast_info"),
+      ),
+    endBroadcast: (platform, context, credentials, lookup) =>
+      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
+        adapter.endBroadcast
+          ? providerCallEffect(context, (child) =>
+              adapter.endBroadcast!(child, credentials, lookup),
+            )
+          : unsupported("end_broadcast"),
+      ),
     cancelPublication: (platform, context, credentials, lookup) =>
       Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
         cancelPublicationEffect(adapter, context, credentials, lookup),

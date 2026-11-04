@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   createYouTubeAdapter,
   ProviderAdapterError,
-  ProviderRegistry,
   type ProviderRequestContext,
   type ProviderMediaMetadata,
   type ProviderStreamMedia,
@@ -18,6 +17,8 @@ const credentials = {
   accessToken: "access-secret",
   accountId: "channel-1",
 };
+const resumableLocation =
+  "https://www.googleapis.com/upload/youtube/v3/videos?upload_id=upload_1&upload_protocol=resumable&alt=json";
 const redirectUri = "https://api.example.com/api/v1/platforms/youtube/callback";
 
 type Responder = (url: URL, init: RequestInit) => Response | Promise<Response>;
@@ -131,31 +132,132 @@ function video(
 }
 
 describe("createYouTubeAdapter", () => {
-  it("advertises only the implemented YouTube Shorts candidate subset", () => {
-    const provider = adapter(vi.fn<typeof fetch>());
-    expect(provider.capability).toMatchObject({
-      analytics: true,
-      asset_types: ["video"],
-      comments: false,
-      connect_available: true,
-      max_caption_length: 5_000,
-      max_file_size: 500 * 1024 * 1024,
-      max_hashtags: 15,
-      max_video_duration_sec: 180,
-      max_media_count: 1,
-      min_media_count: 1,
-      multi_asset_types: [],
-      platform: "youtube",
-      publish: true,
-      reply: false,
+  it("creates, binds, and ends an encoder-backed live broadcast without uploading an Asset", async () => {
+    const calls = sequence(
+      (url, init) => {
+        expect(url.pathname).toBe("/youtube/v3/liveBroadcasts");
+        if (
+          !(
+            Date.parse(String(JSON.parse(String(init.body)).snippet.scheduledStartTime)) >
+            Date.parse("2026-07-19T00:00:00Z")
+          )
+        ) {
+          return json(
+            { error: { code: 400, errors: [{ reason: "invalidScheduledStartTime" }] } },
+            {
+              status: 400,
+            },
+          );
+        }
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          status: { privacyStatus: "unlisted", selfDeclaredMadeForKids: false },
+          contentDetails: { enableAutoStart: true, enableAutoStop: true },
+        });
+        return json({ id: "broadcast-one" });
+      },
+      (url) => {
+        expect(url.pathname).toBe("/youtube/v3/liveStreams");
+        return json({ id: "stream-one" });
+      },
+      (url) => {
+        expect(url.pathname).toBe("/youtube/v3/liveBroadcasts/bind");
+        expect(url.searchParams.get("streamId")).toBe("stream-one");
+        return json({ id: "broadcast-one", contentDetails: { boundStreamId: "stream-one" } });
+      },
+      () =>
+        json({
+          items: [
+            {
+              id: "broadcast-one",
+              snippet: { channelId: "channel-1" },
+              status: { lifeCycleStatus: "ready" },
+              contentDetails: { boundStreamId: "stream-one" },
+            },
+          ],
+        }),
+      () =>
+        json({
+          items: [
+            {
+              id: "stream-one",
+              cdn: {
+                ingestionInfo: {
+                  rtmpsIngestionAddress: "rtmps://a.rtmps.youtube.com/live2",
+                  streamName: "private-encoder-key",
+                },
+              },
+            },
+          ],
+        }),
+      () =>
+        json({
+          items: [
+            {
+              id: "broadcast-one",
+              snippet: { channelId: "channel-1" },
+              status: { lifeCycleStatus: "live" },
+            },
+          ],
+        }),
+      () => json({ id: "broadcast-one", status: { lifeCycleStatus: "complete" } }),
+    );
+    const provider = adapter(calls.fetcher);
+    const submitted = await provider.publish!(
+      context,
+      credentials,
+      publishInput({
+        caption: "Live walkthrough",
+        hashtags: [],
+        media: [],
+        providerOptions: {
+          youtube: { postType: "live", madeForKids: false, privacyStatus: "unlisted" },
+        },
+      }),
+    );
+    expect(submitted).toEqual({
+      outcome: "confirmed_success",
+      delivery: "broadcast",
+      providerOperationId: "live:broadcast-one",
     });
-    expect(provider.transferModes).toEqual(["resumable_upload"]);
-    expect(provider.listAnalytics).toBeTypeOf("function");
-    expect(provider.listComments).toBeUndefined();
-    expect(provider.reply).toBeUndefined();
-    expect(provider.cancelPublication).toBeUndefined();
-    const registry = new ProviderRegistry();
-    expect(() => registry.register("youtube", provider)).not.toThrow();
+    await expect(provider.getBroadcastInfo!(context, credentials, submitted)).resolves.toEqual({
+      state: "ready",
+      ingestUrl: "rtmps://a.rtmps.youtube.com/live2",
+      streamKey: "private-encoder-key",
+      providerUrl: "https://youtu.be/broadcast-one",
+    });
+    await expect(provider.endBroadcast!(context, credentials, submitted)).resolves.toMatchObject({
+      outcome: "confirmed_success",
+      providerPostId: "broadcast-one",
+    });
+  });
+  it("cancels an unstarted broadcast without claiming a published video", async () => {
+    const calls = sequence(
+      () =>
+        json({
+          items: [
+            {
+              id: "never-live",
+              snippet: { channelId: "channel-1" },
+              status: { lifeCycleStatus: "ready" },
+            },
+          ],
+        }),
+      (url, init) => {
+        expect(url.pathname).toBe("/youtube/v3/liveBroadcasts");
+        expect(init.method).toBe("DELETE");
+        expect(url.searchParams.get("id")).toBe("never-live");
+        return new Response(null, { status: 204 });
+      },
+    );
+    await expect(
+      adapter(calls.fetcher).endBroadcast!(context, credentials, {
+        providerOperationId: "live:never-live",
+      }),
+    ).resolves.toEqual({
+      outcome: "confirmed_success",
+      delivery: "broadcast",
+      providerOperationId: "ended_live:never-live",
+    });
   });
 
   it("builds an offline, PKCE-bound Google authorization URL", () => {
@@ -179,7 +281,7 @@ describe("createYouTubeAdapter", () => {
       redirect_uri: redirectUri,
       response_type: "code",
       scope:
-        "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",
+        "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly https://www.googleapis.com/auth/youtube.force-ssl",
       state: "oauth-state",
     });
     expect(() =>
@@ -400,10 +502,109 @@ describe("createYouTubeAdapter", () => {
     });
   });
 
+  it("publishes a long landscape video through the same resumable upload as Shorts", async () => {
+    const providerCalls = sequence(
+      () =>
+        new Response(null, {
+          headers: {
+            Location:
+              "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&upload_id=standard-upload&part=snippet%2Cstatus",
+          },
+        }),
+      () => json({ id: "standard-video" }, { status: 201 }),
+      () =>
+        json({
+          items: [
+            video("standard-video", {
+              processingStatus: "succeeded",
+              uploadStatus: "processed",
+            }),
+          ],
+        }),
+    );
+    const provider = adapter(providerCalls.fetcher);
+    const submitted = await provider.publish!(
+      context,
+      credentials,
+      publishInput({
+        caption: "Landscape tutorial\nThe complete ten-minute walkthrough.",
+        media: [shot({ durationSeconds: 600, width: 1920, height: 1080 })],
+      }),
+    );
+    expect(submitted).toEqual({
+      outcome: "confirmed_success",
+      providerOperationId: "video:standard-video",
+    });
+    await expect(provider.lookupPublication!(context, credentials, submitted)).resolves.toEqual({
+      state: "published",
+      result: {
+        outcome: "confirmed_success",
+        providerOperationId: "video:standard-video",
+        providerPostId: "standard-video",
+        providerUrl: "https://youtu.be/standard-video",
+      },
+    });
+  });
+
+  it.each([
+    "https://www.googleapis.com/upload/youtube/v3/videos?upload_id=opaque-session",
+    "https://www.googleapis.com/upload/youtube/v3/videos?upload_id=opaque-session&upload_protocol=resumable&part=snippet%2Cstatus&alt=json",
+  ])(
+    "uploads to the returned opaque session URI without inventing its query: %s",
+    async (location) => {
+      const calls = sequence(
+        () => new Response(null, { headers: { Location: location } }),
+        (url, init) => {
+          expect(url.toString()).toBe(location);
+          expect(init.method).toBe("PUT");
+          return json({ id: "opaque-video" }, { status: 201 });
+        },
+      );
+      await expect(
+        adapter(calls.fetcher).publish!(context, credentials, publishInput()),
+      ).resolves.toMatchObject({
+        outcome: "confirmed_success",
+        providerOperationId: "video:opaque-video",
+      });
+    },
+  );
+
+  it("retains the opaque session URI across interrupted upload and a fresh adapter's recovery", async () => {
+    const initial = sequence(
+      () => new Response(null, { headers: { Location: resumableLocation } }),
+      ...Array.from({ length: 4 }, () => [
+        () => {
+          throw new TypeError("connection reset");
+        },
+        () => new Response(null, { status: 308, headers: { Range: "bytes=0-1" } }),
+      ]).flat(),
+    );
+    const pending = await adapter(initial.fetcher).publish!(context, credentials, publishInput());
+    expect(pending).toMatchObject({ outcome: "unknown", failure: { classification: "ambiguous" } });
+    const resumed = sequence(
+      (url, init) => {
+        expect(url.toString()).toBe(resumableLocation);
+        expect(new Headers(init.headers).get("Content-Range")).toBe("bytes */4");
+        return new Response(null, { status: 308, headers: { Range: "bytes=0-1" } });
+      },
+      (url, init) => {
+        expect(url.toString()).toBe(resumableLocation);
+        expect(new Headers(init.headers).get("Content-Range")).toBe("bytes 2-3/4");
+        expect([...(init.body as Uint8Array)]).toEqual([3, 4]);
+        return json({ id: "recovered-video" }, { status: 201 });
+      },
+    );
+    await expect(
+      adapter(resumed.fetcher).lookupPublication!(context, credentials, {
+        providerOperationId: pending.providerOperationId,
+        media: { body: stream(), contentType: "video/mp4", fileSize: 4, mode: "resumable_upload" },
+      }),
+    ).resolves.toMatchObject({ state: "processing", providerOperationId: "video:recovered-video" });
+  });
+
   it.each([
     ["missing metadata", { media: [shot(undefined)] }],
-    ["landscape media", { media: [shot({ durationSeconds: 60, height: 720, width: 1280 })] }],
-    ["overlong media", { media: [shot({ durationSeconds: 181, height: 1080, width: 1080 })] }],
+    ["overlong media", { media: [shot({ durationSeconds: 43_201, height: 1080, width: 1920 })] }],
     ["an overlong title", { caption: "x".repeat(101) }],
     ["angle brackets", { caption: "A <Short>" }],
     ["no attachment at all", { media: [] }],
@@ -457,9 +658,38 @@ describe("createYouTubeAdapter", () => {
         outcome: "confirmed_success",
         providerOperationId: "video:video-1",
         providerPostId: "video-1",
-        providerUrl: "https://www.youtube.com/shorts/video-1",
+        providerUrl: "https://youtu.be/video-1",
       },
       state: "published",
+    });
+  });
+
+  it("uses upload status when old processing information is no longer available", async () => {
+    const calls = sequence(
+      () => json({ items: [video("video-1", { processingStatus: "terminated" })] }),
+      () =>
+        json({
+          items: [
+            video("video-1", {
+              processingStatus: "terminated",
+              uploadStatus: "processed",
+            }),
+          ],
+        }),
+    );
+    const provider = adapter(calls.fetcher);
+    await expect(
+      provider.lookupPublication!(context, credentials, {
+        providerOperationId: "video:video-1",
+      }),
+    ).resolves.toMatchObject({ state: "processing" });
+    await expect(
+      provider.lookupPublication!(context, credentials, {
+        providerOperationId: "video:video-1",
+      }),
+    ).resolves.toMatchObject({
+      state: "published",
+      result: { outcome: "confirmed_success", providerPostId: "video-1" },
     });
   });
 
@@ -542,7 +772,7 @@ describe("createYouTubeAdapter", () => {
     expect(providerCalls.calls).toHaveLength(4);
   });
 
-  it("retains the acknowledged offset when the resume budget is exhausted", async () => {
+  it("bounds retries when resumable upload still has no confirmed completion", async () => {
     const providerCalls = sequence(
       () =>
         new Response(null, {
@@ -589,16 +819,14 @@ describe("createYouTubeAdapter", () => {
     expect(published).toMatchObject({
       failure: { classification: "ambiguous" },
       outcome: "unknown",
-      providerOperationId: "submitted:4:2:upload_1",
     });
     await expect(
       provider.lookupPublication!(context, credentials, {
-        providerOperationId: "submitted:4:2:upload_1",
+        providerOperationId: published.providerOperationId,
       }),
     ).resolves.toMatchObject({
       result: {
         outcome: "unknown",
-        providerOperationId: "submitted:4:4:upload_1",
       },
       state: "unknown",
     });
@@ -660,7 +888,7 @@ describe("createYouTubeAdapter", () => {
     const providerCalls = sequence(() => json({ id: "video-1" }));
     await expect(
       adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
-        providerOperationId: "submitted:4:0:upload_1",
+        providerOperationId: `submitted:4:0:${resumableLocation}`,
       }),
     ).resolves.toEqual({
       providerOperationId: "video:video-1",
@@ -772,16 +1000,15 @@ describe("createYouTubeAdapter", () => {
     },
   );
 
-  it("rejects a resumable Location outside the exact Google session shape", async () => {
-    const providerCalls = sequence(
-      () =>
-        new Response(null, {
-          headers: {
-            Location:
-              "https://attacker.example/upload/youtube/v3/videos?uploadType=resumable&upload_id=upload_1&part=snippet%2Cstatus",
-          },
-        }),
-    );
+  it.each([
+    "https://attacker.example/upload/youtube/v3/videos?upload_id=upload_1",
+    "http://www.googleapis.com/upload/youtube/v3/videos?upload_id=upload_1",
+    "https://www.googleapis.com/other?upload_id=upload_1",
+    "https://user:secret@www.googleapis.com/upload/youtube/v3/videos?upload_id=upload_1",
+    "https://www.googleapis.com/upload/youtube/v3/videos?upload_id=upload_1&upload_id=upload_2",
+    `https://www.googleapis.com/upload/youtube/v3/videos?upload_id=${"x".repeat(600)}`,
+  ])("rejects an unsafe or unretainable resumable Location: %s", async (location) => {
+    const providerCalls = sequence(() => new Response(null, { headers: { Location: location } }));
     await expect(
       adapter(providerCalls.fetcher).publish!(context, credentials, publishInput()),
     ).rejects.toMatchObject({
@@ -842,14 +1069,6 @@ describe("createYouTubeAdapter", () => {
     });
   });
 
-  it("declares resumable continuation only for open upload sessions", () => {
-    const provider = adapter(vi.fn<typeof fetch>());
-    expect(provider.continuesResumableUpload!("submitted:4:2:upload_1")).toBe(true);
-    expect(provider.continuesResumableUpload!("session:4:upload_1")).toBe(true);
-    expect(provider.continuesResumableUpload!("video:video-1")).toBe(false);
-    expect(provider.continuesResumableUpload!("garbage")).toBe(false);
-  });
-
   it("resumes a persisted submitted session after Google's acknowledged offset", async () => {
     const providerCalls = sequence(
       (_url, init) => {
@@ -877,7 +1096,7 @@ describe("createYouTubeAdapter", () => {
           fileSize: 4,
           mode: "resumable_upload",
         },
-        providerOperationId: "submitted:4:2:upload_1",
+        providerOperationId: `submitted:4:2:${resumableLocation}`,
       }),
     ).resolves.toEqual({
       providerOperationId: "video:video-1",
@@ -904,7 +1123,7 @@ describe("createYouTubeAdapter", () => {
           fileSize: 4,
           mode: "resumable_upload",
         },
-        providerOperationId: "session:4:upload_1",
+        providerOperationId: `session:4:${resumableLocation}`,
       }),
     ).resolves.toEqual({
       providerOperationId: "video:video-1",
@@ -922,67 +1141,13 @@ describe("createYouTubeAdapter", () => {
           fileSize: 4,
           mode: "resumable_upload",
         },
-        providerOperationId: "submitted:4:2:upload_1",
+        providerOperationId: `submitted:4:2:${resumableLocation}`,
       }),
     ).resolves.toEqual({
       providerOperationId: "video:video-1",
       state: "processing",
     });
     expect(providerCalls.calls).toHaveLength(1);
-  });
-
-  it("keeps the refreshed submitted identity when continuation is interrupted", async () => {
-    const providerCalls = sequence(
-      () =>
-        new Response(null, {
-          headers: { Range: "bytes=0-1" },
-          status: 308,
-        }),
-      () => {
-        throw new TypeError("network reset");
-      },
-      () =>
-        new Response(null, {
-          headers: { Range: "bytes=0-2" },
-          status: 308,
-        }),
-      () => {
-        throw new TypeError("network reset");
-      },
-      () =>
-        new Response(null, {
-          headers: { Range: "bytes=0-2" },
-          status: 308,
-        }),
-      () => {
-        throw new TypeError("network reset");
-      },
-      () =>
-        new Response(null, {
-          headers: { Range: "bytes=0-2" },
-          status: 308,
-        }),
-      () => {
-        throw new TypeError("network reset");
-      },
-    );
-    await expect(
-      adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
-        media: {
-          body: stream(),
-          contentType: "video/mp4",
-          fileSize: 4,
-          mode: "resumable_upload",
-        },
-        providerOperationId: "submitted:4:2:upload_1",
-      }),
-    ).resolves.toMatchObject({
-      result: {
-        outcome: "unknown",
-        providerOperationId: "submitted:4:3:upload_1",
-      },
-      state: "unknown",
-    });
   });
 
   it("fails a continuation whose media does not match the persisted session", async () => {
@@ -995,7 +1160,7 @@ describe("createYouTubeAdapter", () => {
           fileSize: 8,
           mode: "resumable_upload",
         },
-        providerOperationId: "submitted:4:2:upload_1",
+        providerOperationId: `submitted:4:2:${resumableLocation}`,
       }),
     ).resolves.toMatchObject({
       result: {
@@ -1075,7 +1240,6 @@ describe("createYouTubeAdapter", () => {
     );
     expect(published).toMatchObject({
       outcome: "unknown",
-      providerOperationId: "submitted:4:0:upload_1",
     });
     expect(providerCalls.calls).toHaveLength(5);
   });

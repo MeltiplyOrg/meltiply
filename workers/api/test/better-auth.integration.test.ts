@@ -1,3 +1,4 @@
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { createHmac } from "node:crypto";
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
@@ -34,15 +35,19 @@ if (!connectionString) {
  * system-only), so `DB_SYSTEM` must reach the privileged local role rather
  * than the authenticated fixture URL.
  */
-const baseSystemConnectionString =
-  "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const baseSystemConnectionString = integrationDatabaseUrl(
+  process.env.MELTIPLY_DATABASE_TEST_URL,
+  "system",
+);
 const isolatedDatabase = new URL(baseSystemConnectionString);
 isolatedDatabase.searchParams.set("options", "-c search_path=auth_lifecycle,public");
 const systemConnectionString = isolatedDatabase.href;
 const setupSecret = crypto.randomUUID() + crypto.randomUUID();
-const adminConnectionString =
-  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
-  "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const adminConnectionString = integrationDatabaseUrl(
+  connectionString,
+  "admin",
+  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL,
+);
 const adminPool = createHyperdrivePool({ connectionString: adminConnectionString });
 
 // Exercise the actual migrated auth tables and indexes without taking ownership

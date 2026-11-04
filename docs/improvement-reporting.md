@@ -218,7 +218,8 @@ installation, ordered by `timestamp` then `uuid`; never sum them across days.
 ### Expected failures and diagnostics
 
 - **Unexpected exceptions by release/operation** — Error Tracking issues grouped
-  by `app_version` and `operation_category`, filtered to `$exception_level: error`.
+  by `app_version` and `operation_category`, filtered to `$exception_level: error`
+  and `diagnostic_handled: false`, excluding `diagnostic_category: provider_failure`.
 - **Failures by category/Platform** — `diagnostic_category` × `platform`; keep
   handled Provider conditions out of unexpected-defect counts.
 - **Diagnostics volume per installation/day** — identify repeat-failure loops;

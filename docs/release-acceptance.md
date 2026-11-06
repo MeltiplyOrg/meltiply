@@ -1,9 +1,10 @@
 # MVP release acceptance
 
 Use this checklist to decide whether an exact release candidate can serve persistent
-live users under [STATE.md](../STATE.md). It is a test plan, not evidence that the
-product has passed. The [capability inventory](frontend-capabilities.md) defines the
-shipped scope; this checklist does not add features.
+live users under [STATE.md](../STATE.md). Checked items apply only to the candidate
+identified in the evidence below; they do not establish live acceptance. The
+[capability inventory](frontend-capabilities.md) defines the shipped scope; this
+checklist does not add features.
 
 ## Scope, evidence, and safety
 
@@ -33,9 +34,9 @@ resource-intensive runs. Do not change CI scheduling or cancel runs without appr
 These checks supplement live acceptance; controlled Provider responses do not prove
 real credentials, app review, external mail delivery, or actual publication.
 
-- [ ] The candidate's `ci-gate` passes with every applicable application and image lane
+- [x] The candidate's `ci-gate` passes with every applicable application and image lane
       selected. A docs-only routed pass is not an application release gate.
-- [ ] The full application gate passes on the candidate (`cloudflare-full`, or an
+- [x] The full application gate passes on the candidate (`cloudflare-full`, or an
       applicable extended lane that includes `bun run cloudflare:check`).
 - [ ] `frontend-full` and `frontend-ui` pass for browser journeys and actual-surface
       coverage described in [frontend verification](frontend-verification.md).
@@ -48,6 +49,80 @@ real credentials, app review, external mail delivery, or actual publication.
 - [ ] `versioned-contract` passes. For managed releases, `managed-release` also passes;
       for image releases, both native architecture build/smoke jobs pass for the exact
       artifacts being published. These results do not replace the target drills below.
+
+### Candidate evidence
+
+Candidate: `c54cd7e17356a02695ffc91c67d574351a8e5d37`; application and contract package
+version: `1.0.0-target.0`. Tester: coding assistant, hosted dispatch account `tmih06`.
+All runs used this SHA and disposable GitHub-hosted fixtures; manually started runs
+were serialized. No deployed resources, Provider acceptance flags, or project state
+were changed. The documentation-only evidence commit does not retest or change the
+candidate's application, configuration, or dependencies.
+
+The full manual CI selected every application and image lane, including six native
+image builds and production Compose smoke on amd64 and arm64. Controlled Provider
+responses, production-built browser assets, PostgreSQL, workerd, MinIO, and native
+processing establish fixture coverage, not real Provider or target acceptance.
+Deployment origin, previous deployed revision, accepted Provider/method scope, and
+operator recovery objectives remain unrecorded. Live checks below remain unchecked.
+
+| Gate or lane               | Result | Run evidence                                                                    |
+| -------------------------- | ------ | ------------------------------------------------------------------------------- |
+| Full manual CI / `ci-gate` | Pass   | [42009425662](https://github.com/MeltiplyOrg/meltiply/actions/runs/42009425662) |
+| `cloudflare-full`          | Pass   | [42010561644](https://github.com/MeltiplyOrg/meltiply/actions/runs/42010561644) |
+| `managed-release`          | Pass   | [42012073239](https://github.com/MeltiplyOrg/meltiply/actions/runs/42012073239) |
+| `frontend-full`            | Fail   | [42013264330](https://github.com/MeltiplyOrg/meltiply/actions/runs/42013264330) |
+| `frontend-ui`              | Pass   | [42015217432](https://github.com/MeltiplyOrg/meltiply/actions/runs/42015217432) |
+| `publishing-flow`          | Fail   | [42016300340](https://github.com/MeltiplyOrg/meltiply/actions/runs/42016300340) |
+| `publishing-browser`       | Fail   | [42021078340](https://github.com/MeltiplyOrg/meltiply/actions/runs/42021078340) |
+| `publishing-queues`        | Pass   | [42024652576](https://github.com/MeltiplyOrg/meltiply/actions/runs/42024652576) |
+| `device-authorization`     | Pass   | [42026351590](https://github.com/MeltiplyOrg/meltiply/actions/runs/42026351590) |
+| `object-storage`           | Pass   | [42027583783](https://github.com/MeltiplyOrg/meltiply/actions/runs/42027583783) |
+| `portable-caching`         | Fail   | [42033033322](https://github.com/MeltiplyOrg/meltiply/actions/runs/42033033322) |
+| `portable-caching-smoke`   | Pass   | [42034457304](https://github.com/MeltiplyOrg/meltiply/actions/runs/42034457304) |
+| `performance-focused`      | Pass   | [42035422726](https://github.com/MeltiplyOrg/meltiply/actions/runs/42035422726) |
+| `performance-backend`      | Pass   | [42035697507](https://github.com/MeltiplyOrg/meltiply/actions/runs/42035697507) |
+| `performance-media`        | Pass   | [42060197945](https://github.com/MeltiplyOrg/meltiply/actions/runs/42060197945) |
+| `cloudflare-extended`      | Pass   | [42060890541](https://github.com/MeltiplyOrg/meltiply/actions/runs/42060890541) |
+| `versioned-contract`       | Fail   | [42060996494](https://github.com/MeltiplyOrg/meltiply/actions/runs/42060996494) |
+| `cloudflare-integration`   | Pass   | [42062066743](https://github.com/MeltiplyOrg/meltiply/actions/runs/42062066743) |
+
+The remaining grouped gates are incomplete:
+
+- `frontend-full`: 52 browser passes, two failures, two flaky passes, and three
+  skips. Reporting expects queued feedback without a configured destination;
+  completed-setup sign-in hits authentication throttling. Sign-out and the MOV
+  journey pass only on retry; the latter initially reaches the workspace error
+  boundary. Their causes remain unresolved. The dedicated controlled-reporting
+  configuration passes all four onboarding journeys in `cloudflare-full`.
+  Later recovery and Lighthouse commands in `frontend-full` are not reached.
+- Both publishing lanes: the all-Platform video journey times out waiting for a
+  Facebook Reel Visibility control absent from the captured UI; multi-profile
+  recovery stops because its textbox locator matches three controls. Five other
+  publication journeys and the Queue journey pass, but these blocked paths are
+  not accepted.
+- `portable-caching`: sign-in succeeds, then token issuance returns HTTP 500 with
+  Better Auth's private-key decryption error. A persisted-fixture/secret mismatch
+  is suspected, not proven. The fresh-fixture smoke pass does not clear this failure.
+- `versioned-contract`: release tests pass, but artifact production rejects stale
+  release metadata. The subsequent production-entry health smoke is not reached.
+- CI's four browser performance journeys pass with retries disabled, but the later
+  preferences journey overwrites their measurements before artifact upload.
+  Retained journey JSON/traces cannot be reviewed, so performance acceptance remains
+  incomplete despite passing lane statuses.
+
+Independent runtime proof includes live OpenAPI/CORS/webhook smoke, 212 native
+processor assertions with restart/replay, and bounded Queue fanout/redelivery.
+The public-endpoint load probe covers only three virtual users over 20 seconds:
+693 requests with no failures. It does not establish representative authenticated
+composition, upload, delivery, analytics capacity, or production cost.
+
+Commands: `gh workflow run ci.yml --ref feature/first-release-stabilization` and
+`gh workflow run extended.yml --ref feature/first-release-stabilization -f lane=LANE`.
+Run steps retain the exact inputs and assertions. Preserve redacted evidence before
+the extended artifacts expire on November 12; raw browser artifacts can contain
+fixture passwords, session headers, private content, and signed capabilities.
+This evidence is not the protected release record or a release-owner sign-off.
 
 ## Installation, onboarding, and authentication
 

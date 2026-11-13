@@ -23,7 +23,7 @@
     "@meltiply/secrets": "workspace:*",
     "@meltiply/storage": "workspace:*",
     "effect": "4.0.5",
-    "hono": "4.13.11",
+    "hono": "4.13.16",
     "zod": "4.6.6"
   },
   "devDependencies": {

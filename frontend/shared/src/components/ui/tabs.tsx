@@ -1,6 +1,7 @@
 import * as React from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 import { SlidingHighlight } from "../primitives/sliding-highlight";
+import { useForwardedRef } from "../primitives/use-forwarded-ref";
 import {
   SEGMENTED_INDICATOR,
   SEGMENTED_ITEM,
@@ -8,16 +9,10 @@ import {
 } from "../primitives/segmented-chrome";
 import { cn } from "@meltiply/ui/utils";
 
-/** Radix owns tab selection, arrow-key navigation, and tab/panel relationships. */
 export const Tabs = TabsPrimitive.Root;
 
 type TabsListProps = React.ComponentPropsWithoutRef<typeof TabsPrimitive.List> & {
   variant?: "segment" | "line" | "navigation";
-  /**
-   * Styling for the sliding selection indicator, merged over the variant's own
-   * look (a surface pill for `segment`, an accent underline for `line`). DevBox
-   * inverts its strip, so it recolors the pill instead of painting a second fill.
-   */
   indicatorClassName?: string;
 };
 const listStyles = {
@@ -30,27 +25,11 @@ const indicatorStyles = {
   line: "-bottom-px h-0.5 rounded-none border-transparent bg-accent shadow-none",
 };
 
-/**
- * One tab owner supports compact segments, directory underlines, and settings
- * navigation without page CSS. The horizontal variants hand their selection to a
- * shared partial: the highlight travels to the selected trigger instead of each
- * trigger painting the fill in place, so switching sections slides. The `line`
- * strip uses a minimum height so a coarse-pointer trigger (the shared 44px item
- * minimum) grows the strip instead of being clipped by it.
- */
 export const TabsList = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.List>,
   TabsListProps
 >(({ variant = "segment", className, indicatorClassName, children, ...props }, ref) => {
-  const listRef = React.useRef<React.ElementRef<typeof TabsPrimitive.List> | null>(null);
-  const setRefs = React.useCallback(
-    (node: React.ElementRef<typeof TabsPrimitive.List> | null) => {
-      listRef.current = node;
-      if (typeof ref === "function") ref(node);
-      else if (ref) ref.current = node;
-    },
-    [ref],
-  );
+  const [listRef, setRefs] = useForwardedRef(ref);
 
   return (
     <TabsPrimitive.List
@@ -74,11 +53,6 @@ export const TabsList = React.forwardRef<
 });
 TabsList.displayName = TabsPrimitive.List.displayName;
 
-/**
- * Named tab with one focus contract; its containing list selects the shared visual
- * variant. The active label color lives here while the selection's fill and
- * underline belong to the list's sliding indicator, so the two never paint twice.
- */
 export const TabsTrigger = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.Trigger>,
   React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
@@ -95,7 +69,6 @@ export const TabsTrigger = React.forwardRef<
 ));
 TabsTrigger.displayName = TabsPrimitive.Trigger.displayName;
 
-/** Native tab panel semantics with a shared focus ring; callers own layout and scrolling. */
 export const TabsContent = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof TabsPrimitive.Content>

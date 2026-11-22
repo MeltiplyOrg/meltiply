@@ -5,13 +5,8 @@ import {
   ActiveOrganizationRequiredError,
   DatabaseError,
   NotFoundError,
-  ProviderError,
-  ProviderRateLimitError,
-  RateLimitExceededError,
   RequestContext,
-  StorageUnavailable,
   StorageUnavailableError,
-  ValidationError,
 } from "@meltiply/domain";
 import { ProviderAdapterError } from "@meltiply/providers";
 
@@ -119,7 +114,6 @@ describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
     const c = createMockHonoContext({ requestId: "req-error-404" });
     const program = Effect.gen(function* () {
       yield* new NotFoundError({
-        entityId: "item_999",
         message: "Requested item not found",
       });
       return null;
@@ -133,94 +127,6 @@ describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
         message: "Requested item not found",
       },
     });
-  });
-
-  it("maps ValidationError with structured issues to OpenAPI ErrorEnvelope details and issues", async () => {
-    const c = createMockHonoContext({ requestId: "req-val-422" });
-    const program = Effect.gen(function* () {
-      yield* new ValidationError({
-        issues: [
-          {
-            constraint: "email_format",
-            field: "email",
-            message: "Must be a valid email address",
-          },
-        ],
-        message: "Validation failed for input parameters.",
-      });
-      return null;
-    });
-
-    const response = await runWorkerEffect(c, program);
-    expect(response.status).toBe(422);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "validation_error",
-        details: [
-          expect.objectContaining({
-            field: "email",
-            message: "Must be a valid email address",
-          }),
-        ],
-        issues: [
-          expect.objectContaining({
-            field: "email",
-            message: "Must be a valid email address",
-          }),
-        ],
-        message: "Validation failed for input parameters.",
-        request_id: "req-val-422",
-      },
-    });
-  });
-
-  it("normalizes ValidationError details-shape entries to canonical ErrorDetail records", async () => {
-    const c = createMockHonoContext({ requestId: "req-val-details" });
-    const program = Effect.gen(function* () {
-      yield* new ValidationError({
-        details: [
-          {
-            field: "email",
-            limit: "5",
-            message: "Required",
-          },
-        ],
-        message: "Invalid",
-      });
-      return null;
-    });
-
-    const response = await runWorkerEffect(c, program);
-    expect(response.status).toBe(422);
-    const body: {
-      error: {
-        code: string;
-        details: Record<string, unknown>[];
-        issues: Record<string, unknown>[];
-        message: string;
-        request_id: string;
-      };
-    } = await response.json();
-    expect(body.error).toMatchObject({
-      code: "validation_error",
-      details: [
-        {
-          code: "invalid",
-          field: "email",
-          message: "Required",
-        },
-      ],
-      issues: [
-        expect.objectContaining({
-          constraint: "invalid",
-          field: "email",
-          message: "Required",
-        }),
-      ],
-      message: "Invalid",
-      request_id: "req-val-details",
-    });
-    expect(body.error.details[0]).not.toHaveProperty("limit");
   });
 
   it("maps unexpected defects to 500 internal_error", async () => {
@@ -245,7 +151,6 @@ describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
       Effect.gen(function* () {
         yield* Effect.addFinalizer(() => Effect.die(new Error("Finalizer crashed unexpectedly")));
         yield* new NotFoundError({
-          entityId: "item_999",
           message: "Requested item not found",
         });
         return null;
@@ -390,24 +295,7 @@ describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
       });
     });
 
-    it("sanitizes provider 502 errors for both ProviderError and ProviderAdapterError", async () => {
-      const c1 = createMockHonoContext({ requestId: "req-prov-502-1" });
-      const prog1 = Effect.fail(
-        new ProviderError({
-          message: "upstream tiktok internal 500 response body",
-          provider: "tiktok",
-        }),
-      );
-      const res1 = await runWorkerEffect(c1, prog1);
-      expect(res1.status).toBe(502);
-      await expect(res1.json()).resolves.toMatchObject({
-        error: {
-          code: "provider_error",
-          message: "An unexpected error occurred.",
-          request_id: "req-prov-502-1",
-        },
-      });
-
+    it("sanitizes provider 502 errors from ProviderAdapterError", async () => {
       const c2 = createMockHonoContext({ requestId: "req-prov-502-2" });
       const prog2 = Effect.fail(
         new ProviderAdapterError({
@@ -428,7 +316,7 @@ describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
       });
     });
 
-    it("sanitizes domain StorageUnavailableError 503 while preserving DomainError 503 message", async () => {
+    it("sanitizes StorageUnavailableError 503 messages", async () => {
       const c1 = createMockHonoContext({ requestId: "req-storage-effect" });
       const prog1 = Effect.fail(
         new StorageUnavailableError({
@@ -444,58 +332,9 @@ describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
           request_id: "req-storage-effect",
         },
       });
-
-      const c2 = createMockHonoContext({ requestId: "req-storage-domain" });
-      const prog2 = Effect.fail(new StorageUnavailable("Storage is unavailable."));
-      const res2 = await runWorkerEffect(c2, prog2);
-      expect(res2.status).toBe(503);
-      await expect(res2.json()).resolves.toMatchObject({
-        error: {
-          code: "service_unavailable",
-          message: "Storage is unavailable.",
-          request_id: "req-storage-domain",
-        },
-      });
     });
 
-    it("preserves message and formats Retry-After header on 429 rate limit errors", async () => {
-      const cRate = createMockHonoContext({ requestId: "req-rate-429" });
-      const progRate = Effect.fail(
-        new RateLimitExceededError({
-          message: "Rate limit budget exceeded. Try again shortly.",
-          retryAfterSeconds: 30,
-        }),
-      );
-      const resRate = await runWorkerEffect(cRate, progRate);
-      expect(resRate.status).toBe(429);
-      expect(resRate.headers.get("Retry-After")).toBe("30");
-      await expect(resRate.json()).resolves.toMatchObject({
-        error: {
-          code: "rate_limited",
-          message: "Rate limit budget exceeded. Try again shortly.",
-          request_id: "req-rate-429",
-        },
-      });
-
-      const cProv = createMockHonoContext({ requestId: "req-prov-rate-429" });
-      const progProv = Effect.fail(
-        new ProviderRateLimitError({
-          message: "TikTok publish rate limit reached.",
-          provider: "tiktok",
-          retryAfterSeconds: 45,
-        }),
-      );
-      const resProv = await runWorkerEffect(cProv, progProv);
-      expect(resProv.status).toBe(429);
-      expect(resProv.headers.get("Retry-After")).toBe("45");
-      await expect(resProv.json()).resolves.toMatchObject({
-        error: {
-          code: "provider_rate_limited",
-          message: "TikTok publish rate limit reached.",
-          request_id: "req-prov-rate-429",
-        },
-      });
-
+    it("formats Retry-After and a sanitized message on provider 429 rate limits", async () => {
       const cAdapter = createMockHonoContext({
         requestId: "req-adapter-rate-429",
       });

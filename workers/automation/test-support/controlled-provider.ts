@@ -306,7 +306,7 @@ function controlledCapability(platform: Platform): PlatformCapability {
             : platform === "tiktok"
               ? createTikTokAdapter({
                   ...options,
-                  clientKey: fixtureClientId,
+                  clientId: fixtureClientId,
                   mediaUrlPrefix: "https://controlled-provider.invalid/media/",
                 })
               : undefined;

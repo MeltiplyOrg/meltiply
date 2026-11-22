@@ -1,4 +1,3 @@
-# Local-dev Loki: filesystem store, ready for optional Worker log shipping.
 auth_enabled: false
 
 server:

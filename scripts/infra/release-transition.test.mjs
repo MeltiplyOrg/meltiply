@@ -10,7 +10,6 @@ const execFileAsync = promisify(execFile);
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const transitionScript = join(repositoryRoot, "scripts/infra/release-transition.sh");
 
-/** Supplies an explicitly selected protected installation and a fake provider executable. */
 async function fixture(environment = "staging") {
   const root = await mkdtemp(join(tmpdir(), "meltiply-release-transition-"));
   const releaseDir = join(root, "release");
@@ -171,7 +170,6 @@ test("requires explicit reviewed-plan confirmation before applying infrastructur
   assert.doesNotMatch(await readFile(setup.tofuLog, "utf8"), / apply /);
 });
 
-/** Production confirmation must name production; changing protected inputs cannot retarget a saved plan. */
 test("production plans require environment confirmation and the reviewed protected backend", async () => {
   const setup = await fixture("production");
   await execFileAsync(transitionScript, ["plan", "foundation", setup.tfvars], {
@@ -211,7 +209,6 @@ test("production plans require environment confirmation and the reviewed protect
   );
 });
 
-/** The wrapper must reject missing explicit inputs and a provider plan targeting another installation. */
 test("protected release selection is mandatory and mismatched plans fail before apply", async () => {
   const setup = await fixture("production");
   await assert.rejects(
@@ -235,7 +232,6 @@ test("protected release selection is mandatory and mismatched plans fail before 
   assert.doesNotMatch(await readFile(setup.tofuLog, "utf8"), / apply /);
 });
 
-/** Approval creation names the installation and refuses a confirmation borrowed from staging. */
 test("production operator review requires environment-specific intent and emits scoped evidence", async () => {
   const setup = await fixture("production");
   await execFileAsync(transitionScript, ["plan", "foundation", setup.tfvars], {
@@ -276,7 +272,6 @@ test("production operator review requires environment-specific intent and emits 
   assert.equal(approval.plan_digest, digest);
 });
 
-/** Domain planning/applying must fail before even initializing a provider without this frontend release. */
 test("domain wrapper refuses missing, stale, or config-mismatched frontend evidence before provider mutation", async () => {
   const setup = await fixture("production");
   const run = (action = "plan", env = setup.env) =>
@@ -297,7 +292,6 @@ test("domain wrapper refuses missing, stale, or config-mismatched frontend evide
   };
   spec.api_workers_dev_url = "https://meltiply-api-production.example.workers.dev";
   await writeFile(setup.env.MELTIPLY_RELEASE_INPUT, JSON.stringify(spec));
-  // The first failed domain request bound no provider state; start a fresh reviewed context.
   const { rm, mkdir } = await import("node:fs/promises");
   await rm(join(setup.releaseDir, "reviewed-context.json"));
   const queues = Object.fromEntries(

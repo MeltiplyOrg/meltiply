@@ -1,14 +1,5 @@
-// Job admission surface of the native media processor engine (issue #284).
-//
-// This module owns everything needed to turn an untrusted POST /process body
-// into a validated job: environment configuration, the error taxonomy the HTTP
-// layer renders, and the request validators. It is deliberately free of
-// server/process/fs side effects so the validation rules can be unit-tested
-// without booting ffmpeg, vips, or the HTTP listener; `server.mjs` imports it.
-
 const sha256Pattern = /^[0-9a-fA-F]{64}$/;
 
-/** Media formats accepted by the current upload surface (issue #284 decision 8). */
 const ACCEPTED_CONTENT_TYPES = new Set([
   "image/gif",
   "image/jpeg",
@@ -18,11 +9,6 @@ const ACCEPTED_CONTENT_TYPES = new Set([
   "video/quicktime",
 ]);
 
-/**
- * Error taxonomy shared with the Worker adapter. `status` is the HTTP status the
- * engine answers with; `retryable` tells the adapter whether a queue redelivery
- * can fix the failure. Codes are stable identifiers for durable failure storage.
- */
 const ERRORS = {
   busy: { retryable: true, status: 429 },
   checksum_mismatch: { retryable: false, status: 422 },
@@ -41,7 +27,6 @@ const ERRORS = {
   unsupported_media: { retryable: false, status: 422 },
 };
 
-/** Failure carrying an engine error code; the HTTP layer renders it as JSON. */
 class EngineError extends Error {
   constructor(code, message) {
     super(message);
@@ -49,11 +34,6 @@ class EngineError extends Error {
   }
 }
 
-/**
- * Reads and validates engine configuration from the environment, failing fast
- * on a missing job secret: an engine that cannot authenticate anyone must not
- * accept jobs at all.
- */
 function readConfig(env) {
   const token = env.PROCESSOR_JOB_TOKEN;
   if (!token || token.length < 16) {
@@ -81,10 +61,6 @@ function readConfig(env) {
   };
 }
 
-/**
- * Parses a bounded integer environment override, falling back when unset or
- * unusable so a typo cannot silently disable a resource bound.
- */
 function boundedInt(raw, fallback, minimum, maximum) {
   if (raw === undefined || raw === "") return fallback;
   const value = Number(raw);
@@ -92,25 +68,12 @@ function boundedInt(raw, fallback, minimum, maximum) {
   return value;
 }
 
-/**
- * Default bounds used when validating jobs without a full process config (for
- * example in unit tests that do not supply `PROCESSOR_JOB_TOKEN`). Mirrors
- * `readConfig`'s defaults so tests and production enforce identical limits.
- */
 const DEFAULT_LIMITS = {
   jobTimeoutMs: 540_000,
   maxInputBytes: 550 * 1024 * 1024,
   maxOutputBytes: 512 * 1024 * 1024,
 };
 
-/**
- * Returns the effective per-job deadline in milliseconds, clamped to the engine
- * ceiling so a caller cannot request unbounded compute.
- *
- * @param {Record<string, unknown>} job - Validated job payload.
- * @param {{ jobTimeoutMs: number }} [limits] - Engine timeout ceiling; defaults to `DEFAULT_LIMITS`.
- * @returns {number} Bounded deadline in milliseconds.
- */
 function deadlineMsFor(job, limits = DEFAULT_LIMITS) {
   const requested =
     typeof job.deadline_seconds === "number" && Number.isFinite(job.deadline_seconds)
@@ -119,16 +82,6 @@ function deadlineMsFor(job, limits = DEFAULT_LIMITS) {
   return Math.max(5_000, Math.min(limits.jobTimeoutMs, requested));
 }
 
-/**
- * Validates and narrows an untrusted request body into a job, rejecting unknown
- * shapes outright so a malformed payload can never reach the media pipeline.
- * Returns a fresh job object: the parsed body is never mutated, so a replayed or
- * inspected request keeps exactly what the caller sent.
- *
- * @param {unknown} body - Untrusted decoded JSON payload.
- * @param {{ maxInputBytes: number; maxOutputBytes: number }} [limits] - Engine size bounds; defaults to `DEFAULT_LIMITS`.
- * @returns {Record<string, unknown>} Fresh validated job object.
- */
 function parseJob(body, limits = DEFAULT_LIMITS) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new EngineError("invalid_request", "The request body must be a JSON object.");
@@ -197,10 +150,6 @@ function parseJob(body, limits = DEFAULT_LIMITS) {
       `maximum_output_bytes may not exceed the engine ceiling of ${limits.maxOutputBytes} bytes.`,
     );
   }
-  // An explicit deadline must be a real number inside the engine's own
-  // [5s, 540s] compute window: anything else — a string, a boolean, NaN, or a
-  // value outside the window — is a malformed request, not a deadline to
-  // silently clamp. Absent or null means the configured job timeout applies.
   if (
     job.deadline_seconds !== undefined &&
     job.deadline_seconds !== null &&
@@ -253,8 +202,6 @@ function parseJob(body, limits = DEFAULT_LIMITS) {
       );
     }
   }
-  // The validated job is a fresh object: allowed_content_types is normalized
-  // into lowercase on the copy, so the raw request body is never mutated.
   return {
     ...job,
     profile: { ...profile, allowed_content_types: allowedContentTypes },

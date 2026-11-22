@@ -80,7 +80,6 @@ function metadata(value: R2ObjectLike): ObjectMetadata {
   };
 }
 
-/** Wraps a native R2 multipart handle in Meltiply's provider-neutral contract. */
 function multipart(upload: R2MultipartUploadLike): MultipartUpload {
   return {
     abort: () => upload.abort(),
@@ -99,21 +98,10 @@ function multipart(upload: R2MultipartUploadLike): MultipartUpload {
  * destination is written only when absent.
  */
 export class R2ObjectStore extends EffectObjectStore {
-  /**
-   * Initializes the object store wrapping a Cloudflare R2 bucket binding.
-   *
-   * @param bucket - R2 bucket or mock instance.
-   */
   constructor(private readonly bucket: R2BucketLike) {
     super();
   }
 
-  /**
-   * Retrieves metadata for an object without reading its body.
-   *
-   * @param key - Storage object key.
-   * @returns ObjectMetadata if found, or null if the object does not exist.
-   */
   async head(key: string): Promise<ObjectMetadata | null> {
     const object = await this.bucket.head(key);
     return object ? metadata(object) : null;
@@ -130,11 +118,6 @@ export class R2ObjectStore extends EffectObjectStore {
    * destination a crashed attempt already wrote. R2 answers a failed
    * precondition with the object metadata and no body, so a bodyless response
    * declines the copy exactly like an absent source.
-   *
-   * @param sourceKey - Existing source object key.
-   * @param destinationKey - Destination object key; left untouched when it already exists.
-   * @param options - `ifSourceEtagMatches` required source ETag guard, `contentType` written metadata, `ifDestinationAbsent` destination guard.
-   * @returns Metadata of the copy, or `null` when the source is absent, its pinned ETag no longer matches, or the destination already exists.
    */
   async copyObject(
     sourceKey: string,
@@ -149,8 +132,6 @@ export class R2ObjectStore extends EffectObjectStore {
       onlyIf: { etagMatches: options.ifSourceEtagMatches },
     });
     if (!source) return null;
-    // A conditional get whose precondition failed still returns the object, just
-    // without a body, so the pinned source generation is gone: decline the copy.
     if (!source.body) return null;
     const copied = await this.bucket.put(destinationKey, source.body, {
       ...(options.contentType ? { httpMetadata: { contentType: options.contentType } } : {}),
@@ -159,22 +140,10 @@ export class R2ObjectStore extends EffectObjectStore {
     return copied ? metadata(copied) : null;
   }
 
-  /**
-   * Deletes an object from the bucket.
-   *
-   * @param key - Storage object key to delete.
-   */
   async delete(key: string): Promise<void> {
     await this.bucket.delete(key);
   }
 
-  /**
-   * Streams a whole object for relay to an authenticated caller.
-   *
-   * @param key - Storage object key.
-   * @returns Streaming body plus content type and size, or null when absent.
-   * @throws {TypeError} If the object exposes no readable body stream.
-   */
   async read(key: string): Promise<ObjectBody | null> {
     const object = await this.bucket.get(key);
     if (!object) return null;
@@ -188,15 +157,6 @@ export class R2ObjectStore extends EffectObjectStore {
     };
   }
 
-  /**
-   * Reads a bounded slice of an object by byte offset and maximum length.
-   *
-   * @param key - Storage object key.
-   * @param offset - Non-negative start byte offset.
-   * @param maximumBytes - Length of slice to read (between 1 and 1,048,576 bytes).
-   * @returns Byte buffer if found, or null.
-   * @throws {RangeError} If offset or maximumBytes are outside safe bounds.
-   */
   async readRange(key: string, offset: number, maximumBytes: number): Promise<Uint8Array | null> {
     assertValidByteRange(offset, maximumBytes);
     const object = await this.bucket.get(key, {
@@ -205,26 +165,12 @@ export class R2ObjectStore extends EffectObjectStore {
     return object ? new Uint8Array(await object.arrayBuffer()) : null;
   }
 
-  /**
-   * Initiates an R2 multipart upload session for large assets.
-   *
-   * @param key - Destination object key.
-   * @param contentType - MIME content type of the upload.
-   * @returns MultipartUpload controller handle for uploading parts, completing, or aborting.
-   */
   async createMultipartUpload(key: string, contentType: string): Promise<MultipartUpload> {
     return multipart(
       await this.bucket.createMultipartUpload(key, { httpMetadata: { contentType } }),
     );
   }
 
-  /**
-   * Resumes an in-flight R2 multipart upload session using its known uploadId.
-   *
-   * @param key - Destination object key.
-   * @param uploadId - Active multipart upload ID.
-   * @returns MultipartUpload controller handle.
-   */
   resumeMultipartUpload(key: string, uploadId: string): MultipartUpload {
     return multipart(this.bucket.resumeMultipartUpload(key, uploadId));
   }
@@ -265,19 +211,12 @@ export interface R2SigV4SignerOptions {
  * S3-compatible origin.
  */
 export class R2SigV4Signer extends SigV4UrlSigner {
-  /**
-   * @param options - Signer configuration including credentials, bucket, endpoint, and optional endpoint path prefix.
-   * @throws {TypeError} If required options are missing, the endpoint is not an allowed origin, or the path prefix is invalid.
-   */
   constructor(options: R2SigV4SignerOptions) {
     super({
       accessKeyId: options.accessKeyId,
       ...(options.allowInsecureEndpoint ? { allowInsecureEndpoint: true } : {}),
       addressing: "path",
       bucket: options.bucket,
-      // The account id becomes part of the signed host when no explicit endpoint
-      // is configured, so it is validated as a path segment: an empty or
-      // traversing value would otherwise mint URLs pointing at another origin.
       endpoint:
         options.endpoint ??
         `https://${normalizeSegment("accountId", options.accountId)}.r2.cloudflarestorage.com`,
@@ -323,11 +262,6 @@ export interface R2SignerEnv {
  * from `ENVIRONMENT === "local" | "test"` alone, so no configuration value can
  * turn it on in a deployed environment. Credentials are validated eagerly so a
  * misconfigured worker fails closed instead of signing nothing.
- *
- * @param env - Worker bindings carrying the R2 credentials and optional endpoint settings.
- * @param now - Optional clock override for deterministic tests.
- * @returns Configured signer for exact-object GET, upload, and write grants.
- * @throws {TypeError} When any credential is missing or the endpoint/prefix is untrusted.
  */
 export function createR2SignerFromEnv(env: R2SignerEnv, now?: () => Date): R2SigV4Signer {
   if (

@@ -14,8 +14,6 @@ cleanup() {
   cleanup_done=1
   set +e
   if [[ -n "$backend_pid" ]]; then
-    # setsid owns the complete Worker process group. Never wait indefinitely:
-    # a stuck workerd otherwise prevents runner cancellation and cleanup.
     kill -TERM -- "-$backend_pid" >/dev/null 2>&1 || kill -TERM "$backend_pid" >/dev/null 2>&1 || true
     for _ in $(seq 1 10); do
       kill -0 "$backend_pid" >/dev/null 2>&1 || break
@@ -32,8 +30,6 @@ cleanup() {
 }
 cleanup_on_signal() {
   local code="$1"
-  # The outer CI timeout may land while the readiness loop is still polling a
-  # wedged port; dump the backend log so the failure is diagnosable.
   cat "$log_file" >&2 2>/dev/null || true
   cleanup
   "$repo_root/scripts/cloudflare-local/teardown.sh" >/dev/null 2>&1 || true

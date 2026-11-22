@@ -31,8 +31,6 @@ test("release options preserve repeated approval metadata and reject ambiguity",
   assert.equal(parsed.apply, true);
   assert.equal(parsed.phase, "api-update");
   assert.equal(parsed.step, "upload");
-  // Repeated flags are preserved in order and resolved to absolute paths, which
-  // is what later approval loading depends on.
   assert.deepEqual(parsed.approvalMetadata, [
     path.resolve("release-approval.json"),
     path.resolve("traffic-approval.json"),

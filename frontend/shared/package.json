@@ -32,7 +32,6 @@
     "./public/brand-mark": "./src/components/public/brand-mark.astro",
     "./cookie-consent": "./cookie-consent.ts",
     "./cookie-notice": "./src/components/ui/cookie-notice.tsx",
-    "./consent-bootstrap": "./ConsentBootstrap.astro",
     "./sileo": "./src/components/ui/sileo.tsx",
     "./toast": "./sileo-store.ts",
     "./theme-preference": "./theme-preference.ts",

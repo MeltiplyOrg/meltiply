@@ -1,28 +1,21 @@
 import { Context, Effect, Layer } from "effect";
 import {
   type InvalidRequestError,
-  errorMessage,
   type NotFoundError,
   StorageUnavailableError,
 } from "@meltiply/domain";
 
 import {
   toStorageError,
+  type ConfiguredObjectStore,
   type EffectMultipartUpload,
-  type EffectObjectStore,
   type ObjectMetadata,
   type ObjectUrlSigner,
   type SignedMultipartPartRequest,
   type SignedObjectRequest,
   type SignedUploadRequest,
 } from "./object-store";
-import type { R2SigV4SignerOptions } from "./r2";
-import { R2SigV4Signer } from "./r2";
-import { SigV4UrlSigner } from "./sigv4";
 
-/**
- * Service shape describing effectful cloud object storage and presigned URL operations.
- */
 export interface StorageServiceShape {
   readonly createMultipartUpload: (
     key: string,
@@ -61,106 +54,64 @@ export interface StorageServiceShape {
   ) => Effect.Effect<string, InvalidRequestError | StorageUnavailableError>;
 }
 
-/**
- * Effect service tag for object storage and URL signing.
- */
 export class StorageService extends Context.Service<StorageService, StorageServiceShape>()(
   "StorageService",
 ) {}
 
 export interface CreateStorageServiceLiveOptions {
-  /** Preconstructed provider store; omitted leaves object access failing closed. */
-  store?: EffectObjectStore;
-  signer?: ObjectUrlSigner | R2SigV4SignerOptions;
+  signer?: ObjectUrlSigner;
+  store?: ConfiguredObjectStore;
   storageUnavailableError?: StorageUnavailableError;
 }
 
+/** Store and signer fail independently: a missing one fails only its own operations. */
 export function createStorageServiceLive(
   options: CreateStorageServiceLiveOptions,
-): Layer.Layer<StorageService, never, never> {
-  const storageUnavailable = () =>
-    Effect.fail(
-      options.storageUnavailableError ??
-        new StorageUnavailableError({
-          message: "Object storage is not configured.",
-        }),
-    );
-  let signer: ObjectUrlSigner | undefined;
-  let signerInitError: string | undefined;
-  if (options.signer) {
-    if ("signUpload" in options.signer) {
-      signer = options.signer;
-    } else {
-      try {
-        signer = new R2SigV4Signer(options.signer);
-      } catch (cause) {
-        signerInitError = errorMessage(cause, "Object URL signer is not configured.");
-      }
-    }
-  }
-
-  const sigV4Signer = signer instanceof SigV4UrlSigner ? signer : undefined;
-
-  const signerUnavailable = () =>
-    Effect.fail(
-      new StorageUnavailableError({
-        message: signerInitError ?? "Object URL signer is not configured.",
-      }),
-    );
-
+): Layer.Layer<StorageService> {
+  const { signer, store } = options;
+  const unavailable =
+    options.storageUnavailableError ??
+    new StorageUnavailableError({ message: "Object storage is not configured." });
   const withStore = <A, E>(
-    run: (store: EffectObjectStore) => Effect.Effect<A, E>,
+    run: (configured: ConfiguredObjectStore) => Effect.Effect<A, E>,
   ): Effect.Effect<A, E | StorageUnavailableError> =>
-    options.store ? run(options.store) : storageUnavailable();
+    store ? run(store) : Effect.fail(unavailable);
+  const withSigner = (
+    run: (configured: ObjectUrlSigner) => Promise<string>,
+    fallback: string,
+  ): Effect.Effect<string, InvalidRequestError | StorageUnavailableError> =>
+    signer
+      ? Effect.tryPromise({
+          catch: (cause) => toStorageError(cause, fallback),
+          try: () => run(signer),
+        })
+      : Effect.fail(unavailable);
 
-  const service: StorageServiceShape = {
+  return Layer.succeed(StorageService, {
     createMultipartUpload: (key, contentType) =>
-      withStore((store) => store.createMultipartUploadEffect(key, contentType)),
-    delete: (key) => withStore((store) => store.deleteEffect(key)),
-    getMetadata: (key) => withStore((store) => store.getMetadataEffect(key)),
-    head: (key) => withStore((store) => store.headEffect(key)),
+      withStore((configured) => configured.createMultipartUploadEffect(key, contentType)),
+    delete: (key) => withStore((configured) => configured.deleteEffect(key)),
+    getMetadata: (key) => withStore((configured) => configured.getMetadataEffect(key)),
+    head: (key) => withStore((configured) => configured.headEffect(key)),
     readPrefix: (key, maximumBytes) =>
-      withStore((store) => store.readPrefixEffect(key, maximumBytes)),
+      withStore((configured) => configured.readPrefixEffect(key, maximumBytes)),
     readRange: (key, offset, maximumBytes) =>
-      withStore((store) => store.readRangeEffect(key, offset, maximumBytes)),
+      withStore((configured) => configured.readRangeEffect(key, offset, maximumBytes)),
     resumeMultipartUpload: (key, uploadId) =>
-      withStore((store) => store.resumeMultipartUploadEffect(key, uploadId)),
-    signDownload: (request) => {
-      if (!signer) return signerUnavailable();
-      if (sigV4Signer) return sigV4Signer.signDownloadEffect(request);
-      return Effect.tryPromise({
-        catch: (cause) => toStorageError(cause, "Failed to sign download URL"),
-        try: () => signer.signDownload(request),
-      });
-    },
-    signMultipartPart: (request) => {
-      if (!signer) return signerUnavailable();
-      if (sigV4Signer) return sigV4Signer.signMultipartPartEffect(request);
-      return Effect.tryPromise({
-        catch: (cause) => toStorageError(cause, "Failed to sign multipart part URL"),
-        try: () => signer.signMultipartPart(request),
-      });
-    },
-    signUpload: (request) => {
-      if (!signer) return signerUnavailable();
-      if (sigV4Signer) return sigV4Signer.signUploadEffect(request);
-      return Effect.tryPromise({
-        catch: (cause) => toStorageError(cause, "Failed to sign upload URL"),
-        try: () => signer.signUpload(request),
-      });
-    },
-  };
-
-  return Layer.succeed(StorageService, service);
+      withStore((configured) => configured.resumeMultipartUploadEffect(key, uploadId)),
+    signDownload: (request) =>
+      withSigner((configured) => configured.signDownload(request), "Failed to sign download URL"),
+    signMultipartPart: (request) =>
+      withSigner(
+        (configured) => configured.signMultipartPart(request),
+        "Failed to sign multipart part URL",
+      ),
+    signUpload: (request) =>
+      withSigner((configured) => configured.signUpload(request), "Failed to sign upload URL"),
+  });
 }
 
-/**
- * Creates a test Layer providing a stubbed or fake StorageService implementation.
- * Replaces live object storage with in-memory test doubles.
- *
- * @param impl - Optional partial method implementations for StorageServiceShape.
- * @returns Layer providing the configured test StorageService.
- */
+/** In-memory doubles for every operation unless overridden. */
 export function createStorageServiceTest(
   impl?: Partial<StorageServiceShape>,
 ): Layer.Layer<StorageService, never, never> {

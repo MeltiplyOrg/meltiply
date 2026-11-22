@@ -66,7 +66,7 @@ describe("Effect provider safety", () => {
         : Response.json({ value: "recovered" });
     });
     const read = withReadRetry(
-      http.requestEffect<{ value: string }>(context, {
+      http.requestEffect(context, {
         method: "GET",
         url: "https://provider.example/read",
       }),

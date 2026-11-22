@@ -1,20 +1,15 @@
 import type { PlatformCapability, ValidationIssue } from "@meltiply/contracts";
 
-import { codePointLength, normalizeContentType } from "./meta-common";
-import { resolveInstagramOptions } from "./instagram-options";
-import { resolveFacebookPostType } from "./facebook-options";
+import { resolveFacebookPostType } from "./facebook/options";
+import { resolveInstagramOptions } from "./instagram/options";
 import { PROVIDER_LIMITS } from "./limits";
-import { parseThreadsOptions, threadsOptionsIssue } from "./threads-options";
+import { parseThreadsOptions, threadsOptionsIssue } from "./threads/options";
 import type { PublishInput } from "./types";
+import { codePointLength, mediaKind, normalizeContentType } from "./values";
 
 export type { ValidationIssue } from "@meltiply/contracts";
 
-/**
- * Counts Unicode codepoints in a post caption without allocating an intermediate
- * array. Accurately measures multi-byte UTF-16 surrogate pairs and emoji
- * sequences to enforce provider limits.
- * Returns the non-negative integer count of Unicode codepoints in text.
- */
+/** Counts Unicode codepoints in a post caption without allocating an intermediate array. */
 export function captionLength(text: string): number {
   return codePointLength(text);
 }
@@ -34,13 +29,8 @@ export interface CaptionSource {
 }
 
 /**
- * Composes the normalized caption sent to a provider from Post title/body, the
- * target's overrides, the resolved signature snapshot, and hashtags.
- * Deduplicates title and body when identical, appends the signature as its own
- * paragraph, and appends space-separated hashtags. Pure function reused across
- * pre-flight validation and publishing to guarantee character count parity.
- * @param source - Post title/default text, optional target overrides, signature, and hashtags.
- * @returns The formatted multi-line caption string, empty when nothing is set.
+ * Composes the normalized caption sent to a provider from Post title/body,
+ * target overrides, signature snapshot, and hashtags.
  */
 export function composeCaption(source: CaptionSource): string {
   const title = (source.titleOverride ?? source.title).trim();
@@ -53,29 +43,6 @@ export function composeCaption(source: CaptionSource): string {
   return [content, tags].filter(Boolean).join("\n\n");
 }
 
-/**
- * Maps a normalized MIME type to the attachable media kind it belongs to.
- * The top-level `image/` and `video/` prefixes are the whole mapping: an
- * unrecognized prefix yields null so the caller reports an unsupported media
- * type instead of guessing a kind.
- */
-function mediaKind(contentType: string): "image" | "video" | null {
-  if (contentType.startsWith("image/")) return "image";
-  if (contentType.startsWith("video/")) return "video";
-  return null;
-}
-
-/**
- * Evaluates one ordered attachment against the platform capability.
- * Validates the MIME type, that its kind is attachable, the file size bound,
- * and — for video — the duration ceiling; an unknown video duration is an
- * issue because it cannot be shown to fit.
- * @param capability - Target platform capability authority.
- * @param acceptedMimeTypes - Precomputed lowercase Set of accepted MIME types.
- * @param media - Attachment at `index`.
- * @param index - Attachment position, used for actionable field names.
- * @returns Issues for this attachment only; empty when it is fully acceptable.
- */
 function attachmentIssues(
   capability: PlatformCapability,
   acceptedMimeTypes: ReadonlySet<string>,

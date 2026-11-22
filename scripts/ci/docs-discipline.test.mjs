@@ -73,7 +73,6 @@ test("an info string inside a fence does not close it", () => {
       "The migration ledger is append-only.",
     ].join("\n"),
   });
-  // The nested ```js line carries an info string, so it must not end the block.
   assert.deepEqual(collectDisciplineFindings(root, ["guide.md"]), []);
 });
 

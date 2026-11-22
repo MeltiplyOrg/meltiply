@@ -1,34 +1,15 @@
 #!/usr/bin/env bash
-# Orchestrates the native processor smoke (issue #284).
-#
-# Steps:
-#   1. Build and run the REAL engine image for linux/amd64 even on an ARM host.
-#   2. Generate/probe fixtures with the same codecs on the daemon's native CPU.
-#   3. Start the fixture object service and the engine on one docker network.
-#   4. Drive real jobs through the HTTP behavior and restart suites.
-#
-# The isolated fixture service substitutes only object transport. Native codecs
-# really decode and encode the bytes; Worker/R2/browser integration is separate.
-#
-# Prerequisite diagnosis is shared with the rest of the repo through
-# scripts/cloudflare-local/container-runtime.sh (a bash helper), which is why
-# this script runs under bash too.
-#
-# Set PROCESSOR_SMOKE_UNBOUNDED=1 only on hosts without cgroup limits;
-# that mode verifies media behavior, not the CPU/memory envelope.
 set -eu
 
 cd "$(dirname "$0")/.."
 ROOT_DIR="$(pwd)"
 SMOKE_DIR="$ROOT_DIR/smoke"
 IMAGE="${SMOKE_IMAGE:-meltiply-processor-smoke${COMPOSE_PROJECT_NAME:+-$COMPOSE_PROJECT_NAME}}"
-# Host-daemon bind mounts must live under the host-identical checkout, not the
-# devcontainer's private /tmp. The private suffix also isolates concurrent runs.
+# The host daemon resolves bind mounts against the host-identical checkout, not the
+# devcontainer's private /tmp.
 TMP="$(mktemp -d "$ROOT_DIR/.smoke-tmp.XXXXXX")"
 NETWORK="meltiply-processor-smoke-$(basename "$TMP")"
 TOKEN="${PROCESSOR_JOB_TOKEN:-smoke-$(dd if=/dev/urandom bs=8 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')}"
-# Fixture helpers use the host UID so the private mktemp bind mount stays private
-# and writable. The engine itself still runs as the image's unprivileged user.
 HOST_USER="$(id -u):$(id -g)"
 
 MODE="strict"
@@ -42,11 +23,7 @@ fi
 ENGINE_CONTAINER=""
 FIXTURE_CONTAINER=""
 
-# Strict mode hands Docker --cpus/--memory, which runc applies only inside a
-# cgroup v2 domain. Prove that before the image build and fixture generation,
-# which would otherwise die on the first `docker run` with runc's cgroup error.
-# The operator keeps the choice: the run stops with the host repair instead of
-# degrading to unbounded mode behind their back.
+# runc applies Docker --cpus/--memory only inside a cgroup v2 domain.
 if [ "$MODE" = "strict" ]; then
   # shellcheck source=../../../../scripts/cloudflare-local/container-runtime.sh
   . "$ROOT_DIR/../../../scripts/cloudflare-local/container-runtime.sh"
@@ -54,7 +31,6 @@ if [ "$MODE" = "strict" ]; then
   echo "==> strict mode: the daemon can enforce the CPU/memory envelope"
 fi
 
-# Preserve suite failures while tearing down only this run's containers and network.
 cleanup() {
   status=$?
   docker rm -f "$ENGINE_CONTAINER" "$FIXTURE_CONTAINER" 2>/dev/null || true
@@ -64,8 +40,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Snapshot scripts once: an editor changing a bind-mounted shell file mid-read
-# can splice unrelated commands into a running fixture-generation process.
+# Bash reads scripts incrementally, so editing a bind-mounted script mid-run can
+# splice in unrelated commands.
 cp -R "$SMOKE_DIR" "$TMP/smoke"
 SMOKE_DIR="$TMP/smoke"
 case "$(docker info --format '{{.Architecture}}')" in
@@ -150,5 +126,4 @@ if [ "$SUITE_STATUS" -eq 0 ]; then
     "$TOOLS_IMAGE" node /smoke/restart-check.mjs verify || SUITE_STATUS=$?
 fi
 
-# The EXIT trap preserves the suite's exit status while removing its resources.
 exit "$SUITE_STATUS"

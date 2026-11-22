@@ -6,6 +6,8 @@ import { isMailSenderAddress, isMailSenderName } from "../../packages/domain/src
 import { assertDatabaseRoles } from "../lib/database-roles.mjs";
 import { parseJsonc } from "../lib/jsonc.mjs";
 import { releaseEnvironments } from "../lib/release-environments.mjs";
+import { stableJson, stableValue } from "../lib/stable-json.mjs";
+import { verifyReleaseCheckout } from "./release-guard.mjs";
 import { exactKeys, plainObject } from "./validation.mjs";
 
 const controlCharactersPattern = /[\u0000-\u001f\u007f]/;
@@ -32,7 +34,7 @@ const workerConfigs = {
   frontend: "frontend/app/wrangler.jsonc",
 };
 
-const queueBindings = {
+export const queueBindings = {
   analytics: "ANALYTICS_QUEUE",
   "asset-processing": "ASSET_PROCESSING_QUEUE",
   "channel-revocation": "CHANNEL_REVOCATION_QUEUE",
@@ -125,17 +127,6 @@ const exactRuntimeKeys = new Set([
   "youtube_shorts_client_id",
 ]);
 
-/**
- * Validates that a value is a trimmed, non-empty string adhering to length, control-character,
- * and optional regex constraints.
- *
- * @param {unknown} value - Value to validate
- * @param {string} name - Contextual label for error reporting
- * @param {RegExp} [pattern] - Optional pattern the string must match
- * @param {number} [maximum=512] - Maximum permitted string length
- * @returns {string} The validated string
- * @throws {TypeError} If the value is invalid or exceeds maximum length
- */
 function requiredString(value, name, pattern, maximum = 512) {
   if (
     typeof value !== "string" ||
@@ -150,30 +141,11 @@ function requiredString(value, name, pattern, maximum = 512) {
   return value;
 }
 
-/**
- * Validates an optional string; returns undefined if undefined, otherwise runs requiredString.
- *
- * @param {unknown} value - Value to validate
- * @param {string} name - Contextual label for error reporting
- * @param {RegExp} [pattern] - Optional regex pattern
- * @param {number} [maximum=512] - Maximum permitted string length
- * @returns {string | undefined} Validated string or undefined
- */
 function optionalString(value, name, pattern, maximum = 512) {
   if (value === undefined) return undefined;
   return requiredString(value, name, pattern ?? configurationTokenPattern, maximum);
 }
 
-/**
- * Validates that a string is a credential-free HTTPS URL or origin.
- *
- * @param {unknown} value - Candidate URL string
- * @param {string} name - Contextual label for error reporting
- * @param {object} [options={}] - Validation options
- * @param {boolean} [options.originOnly=false] - Whether the URL must be an origin without path/search/hash
- * @returns {string} Normalized HTTPS URL or origin
- * @throws {TypeError} If URL is malformed, not HTTPS, contains credentials, or violates originOnly
- */
 function httpsUrl(value, name, { originOnly = false } = {}) {
   requiredString(value, name);
   let parsed;
@@ -195,28 +167,11 @@ function httpsUrl(value, name, { originOnly = false } = {}) {
   return originOnly ? parsed.origin : parsed.toString().replace(trailingSlashPattern, "");
 }
 
-/**
- * Validates that a value is a strict boolean.
- *
- * @param {unknown} value - Value to test
- * @param {string} name - Contextual label for error reporting
- * @returns {boolean} The validated boolean
- * @throws {TypeError} If value is not a boolean
- */
 function boolean(value, name) {
   if (typeof value !== "boolean") throw new TypeError(`${name} must be boolean`);
   return value;
 }
 
-/**
- * Extracts a non-sensitive output value from an OpenTofu JSON outputs dictionary.
- * Fails closed if the output is flagged as sensitive, ensuring secrets do not flow into state outputs.
- *
- * @param {Record<string, object>} outputs - OpenTofu outputs map
- * @param {string} name - Output property name
- * @returns {any} Resolved non-sensitive output value
- * @throws {TypeError} If output is missing or sensitive
- */
 function outputValue(outputs, name) {
   const output = outputs[name];
   if (!output || typeof output !== "object" || !("value" in output)) {
@@ -228,69 +183,15 @@ function outputValue(outputs, name) {
   return output.value;
 }
 
-/**
- * Recursively normalizes an object or array with sorted keys to produce deterministic serialized representation.
- *
- * @param {any} value - Arbitrary data structure
- * @returns {any} Structurally cloned data structure with sorted object keys
- */
-function stableValue(value) {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((key) => [key, stableValue(value[key])]),
-  );
-}
-
-/**
- * Formats a value as deterministic, pretty-printed JSON with sorted keys and a trailing newline.
- *
- * @param {any} value - Data structure to serialize
- * @returns {string} Deterministic JSON string
- */
-function json(value) {
-  return `${JSON.stringify(stableValue(value), null, 2)}\n`;
-}
-
-/**
- * Matches recognized credential material that must never appear in release
- * input, rendered evidence, or published manifests: PostgreSQL URLs, PEM
- * private keys, and Stripe-style secret keys. Shared by release input
- * validation and the manifest secret-exclusion scan.
- */
 const credentialMaterialPattern =
   /postgres(?:ql)?:\/\/|-----BEGIN [A-Z ]+PRIVATE KEY-----|sk_(?:test|live)_/i;
 
-/**
- * Reports whether a serialized document embeds recognized credential material.
- *
- * @param {string} serialized - Text (typically serialized JSON) to scan
- * @returns {boolean} True when credential material is present
- */
 export function containsCredentialMaterial(serialized) {
   return credentialMaterialPattern.test(serialized);
 }
 
-/** Publishable PostHog project tokens are `phc_`-prefixed, url-safe, and bounded. */
 const posthogProjectTokenPattern = /^phc_[A-Za-z0-9_-]{8,200}$/;
 
-/**
- * Validates the optional improvement-reporting settings of a staging release.
- *
- * Reporting is optional deployment configuration, never a release prerequisite:
- * a release without a maintainer destination deploys normally and simply fails
- * closed for both categories. When a destination is supplied the publishable
- * project token and the matching ingestion origin must both be present and
- * usable, so a half-configured release cannot claim reporting works. The token
- * authorizes event ingestion only; it is not a personal API key and carries no
- * project administration.
- *
- * @param {object} runtime - Raw `runtime` section of the release input
- * @returns {object} Reporting keys to merge into the validated runtime section
- * @throws {TypeError} If the destination is half-configured or invalid
- */
 function reportingRuntime(runtime) {
   const token = optionalString(
     runtime.reporting_posthog_project_token,
@@ -312,7 +213,6 @@ function reportingRuntime(runtime) {
   return {
     ...(host === undefined ? {} : { reporting_posthog_host: host }),
     ...(token === undefined ? {} : { reporting_posthog_project_token: token }),
-    // Normalized so the rendered Workers always declare one string value.
     reporting_forced_off:
       runtime.reporting_forced_off === undefined
         ? false
@@ -320,20 +220,6 @@ function reportingRuntime(runtime) {
   };
 }
 
-/**
- * Validates a non-secret release specification against structural and security invariants.
- * Enforces schema version 1, an allowed deployed environment, deployment mode ('bootstrap' or 'update'),
- * 40-character Git SHA, derived release ID ('<environment>-<12-char-sha>'), origin-only HTTPS URLs,
- * the shared sender address/name policy with a dotted sender domain, Neon scope,
- * and ISO 8601 restore point expiry. Rejects secrets, private keys, and connection strings.
- * Object storage defaults to R2; S3 selection requires a bucket and HTTPS origin,
- * with region us-east-1 and path-style addressing by default. Credentials stay
- * in provider-specific remote secrets, never this document. TikTok's optional media
- * prefix overrides the provider registry's default derived from the public API origin.
- * @param {unknown} input - Raw release specification object
- * @returns {object} Normalized, validated release specification
- * @throws {TypeError} If validation fails or forbidden secrets are present
- */
 export function validateReleaseSpec(input) {
   const spec = plainObject(input, "release input");
   const serialized = JSON.stringify(spec);
@@ -498,16 +384,6 @@ export function validateReleaseSpec(input) {
   };
 }
 
-/**
- * Validates post-apply OpenTofu IaC outputs against release specification invariants.
- * Ensures consistent resource names, valid Hyperdrive identifiers, environment-scoped R2 asset buckets,
- * and complete queue binding definitions across all supported workloads.
- *
- * @param {unknown} input - Raw OpenTofu JSON outputs object
- * @param {object} spec - Validated release specification
- * @returns {object} Validated, normalized IaC outputs bundle
- * @throws {TypeError} If outputs are malformed, inconsistent with the release spec, or contain unexpected values
- */
 export function validateIacOutputs(input, spec) {
   const outputs = plainObject(input, "IaC outputs");
   const resources = plainObject(outputValue(outputs, "release_resources"), "release_resources");
@@ -631,12 +507,6 @@ export function validateIacOutputs(input, spec) {
   };
 }
 
-/**
- * Builds environment variable string mappings for provider acceptance flags and OAuth client keys.
- *
- * @param {object} spec - Release specification object
- * @returns {Record<string, string>} Provider environment variables map
- */
 function providerVars(spec) {
   const values = {
     FACEBOOK_LIVE_ACCEPTED: String(spec.provider_acceptance.facebook),
@@ -657,33 +527,12 @@ function providerVars(spec) {
   return values;
 }
 
-/**
- * Immutably replaces or appends a named binding within a Wrangler configuration section.
- * Most binding tables identify entries by `binding`; `send_email` entries use `name`.
- *
- * @param {Array<object> | undefined} entries - Existing binding entries list
- * @param {string} identifier - Target binding name to replace
- * @param {object} replacement - New binding descriptor object
- * @param {string} [key="binding"] - Entry property holding the binding identifier
- * @returns {Array<object>} Updated binding entries list
- */
+/** Wrangler `send_email` entries are keyed by `name`; other binding tables by `binding`. */
 function replaceBinding(entries, identifier, replacement, key = "binding") {
   const filtered = (entries ?? []).filter((entry) => entry[key] !== identifier);
   return [...filtered, replacement];
 }
 
-/**
- * Renders concrete Cloudflare Wrangler configuration trees for all four release Workers.
- * Injects selected environment variables, Hyperdrive bindings, the selected object storage settings, queue producers,
- * allowed CORS origins, sender-restricted MAIL bindings on API and Automation, Zero Trust Access bindings,
- * and per-version preview URLs on the API Worker (the stable workers.dev route stays disabled).
- * S3 deployments omit the unused ASSETS binding; omitted provider selection preserves R2.
- *
- * @param {Record<string, object>} sourceConfigs - Base source Wrangler configurations loaded from disk
- * @param {object} spec - Validated release specification
- * @param {object} iac - Validated post-apply IaC outputs
- * @returns {{ api: object, automation: object, state: object, frontend: object }} Complete rendered Wrangler configurations
- */
 export function renderWranglerConfigs(sourceConfigs, spec, iac) {
   const state = structuredClone(sourceConfigs.state);
   const automation = structuredClone(sourceConfigs.automation);
@@ -699,7 +548,6 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
     ),
   });
   // Vite selects Cloudflare environments at build time, before flattening.
-  // Retain only the reviewed environment; never inherit local API_ORIGIN.
   frontend.env = {
     [spec.environment]: {
       name: frontend.name,
@@ -734,11 +582,7 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
   }
   const commonVars = {
     ENVIRONMENT: spec.environment,
-    // Coarse deployment label; managed releases are always the maintainer's own
-    // Cloudflare deployment, so the same value reaches API and Automation.
     DEPLOYMENT_CATEGORY: "managed",
-    // Optional improvement reporting. Absent settings leave both categories
-    // reporting `destination_unavailable` instead of failing deployment.
     ...(spec.runtime.reporting_posthog_host
       ? {
           REPORTING_POSTHOG_HOST: spec.runtime.reporting_posthog_host,
@@ -814,12 +658,8 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
     { binding: "DB_AUTHENTICATED", id: iac.authenticated_hyperdrive_id },
     { binding: "DB_SYSTEM", id: iac.system_hyperdrive_id },
   ];
-  // `preview_urls` is a Worker-level subdomain setting written by
-  // `wrangler deploy` (and `wrangler triggers deploy`, which the API release
-  // never runs). Enabling it on the rendered API config makes the immutable
-  // per-version URLs that version smoke fetches routable while the stable
-  // `workers.dev` route stays disabled. Secret versions created by
-  // `wrangler versions secret bulk` inherit the setting.
+  // `preview_urls` is a Worker-level setting written by `wrangler deploy`; secret
+  // versions created by `wrangler versions secret bulk` inherit it.
   api.preview_urls = true;
 
   return {
@@ -829,15 +669,6 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
     frontend: stableValue(frontend),
   };
 }
-/**
- * Loads and validates both the release input and OpenTofu post-apply IaC output files.
- *
- * @param {object} params - File path parameters
- * @param {string} params.iacOutputsPath - Path to OpenTofu post-apply JSON outputs
- * @param {string} params.inputPath - Path to release specification JSON
- * @returns {Promise<{ iac: object, spec: object }>} Validated IaC outputs and release specification
- * @throws {TypeError} If files cannot be parsed as JSON or fail validation
- */
 export async function loadReleaseInputs({ iacOutputsPath, inputPath }) {
   const [inputSource, outputSource] = await Promise.all([
     readFile(inputPath, "utf8"),
@@ -855,13 +686,6 @@ export async function loadReleaseInputs({ iacOutputsPath, inputPath }) {
   return { iac: validateIacOutputs(rawOutputs, spec), spec };
 }
 
-/**
- * Loads and validates a release specification JSON file from disk.
- *
- * @param {string} inputPath - Filesystem path to release specification JSON
- * @returns {Promise<object>} Validated release specification object
- * @throws {TypeError} If reading, parsing, or validation fails
- */
 export async function loadReleaseSpec(inputPath) {
   let rawInput;
   try {
@@ -872,12 +696,6 @@ export async function loadReleaseSpec(inputPath) {
   return validateReleaseSpec(rawInput);
 }
 
-/**
- * Loads and parses source Wrangler configurations for all four release Workers.
- *
- * @param {string} repoRoot - Repository root directory path
- * @returns {Promise<Record<string, object>>} Parsed source Wrangler configurations
- */
 async function loadSourceConfigs(repoRoot) {
   return Object.fromEntries(
     await Promise.all(
@@ -889,11 +707,6 @@ async function loadSourceConfigs(repoRoot) {
   );
 }
 
-/**
- * Rebases a filesystem-relative Wrangler path from its source config directory
- * to the rendered directory. Nonstrings, empty values, and absolute paths pass
- * through; callers must exclude registry image references before rebasing.
- */
 function rewriteConfigRelativePath(configDir, sourceDir, value) {
   if (typeof value !== "string" || value === "" || path.isAbsolute(value)) {
     return value;
@@ -901,22 +714,7 @@ function rewriteConfigRelativePath(configDir, sourceDir, value) {
   return path.relative(configDir, path.resolve(sourceDir, value)).split(path.sep).join("/");
 }
 
-/**
- * Rewrites schema, script, asset directory, and container relative paths
- * and generates a composite SHA-256 config digest.
- *
- * Wrangler resolves those paths against the directory holding the config file,
- * so a rendered config that kept the source paths would look for the media
- * processor Dockerfile beside the rendered file instead of in the Worker
- * directory.
- *
- * @param {object} params - Render options
- * @param {string} params.outDir - Output directory for rendered artifacts
- * @param {string} params.repoRoot - Repository root directory path
- * @param {object} params.spec - Validated release specification
- * @param {object} params.iac - Validated IaC outputs
- * @returns {Promise<{ config_digest: string, paths: Record<string, string> }>} Config SHA-256 digest and paths
- */
+/** Wrangler resolves relative paths against the directory holding the config file. */
 export async function writeRenderedConfigs({ outDir, repoRoot, spec, iac }) {
   const sourceConfigs = await loadSourceConfigs(repoRoot);
   const configs = renderWranglerConfigs(sourceConfigs, spec, iac);
@@ -948,25 +746,19 @@ export async function writeRenderedConfigs({ outDir, repoRoot, spec, iac }) {
       );
     }
     const outputPath = path.join(configDir, `${worker}.json`);
-    await writeFile(outputPath, json(configs[worker]), { mode: 0o600 });
+    await writeFile(outputPath, stableJson(configs[worker]), { mode: 0o600 });
     paths[worker] = outputPath;
   }
   const digest = createHash("sha256")
     .update(
-      ["state", "automation", "api", "frontend"].map((worker) => json(configs[worker])).join("\0"),
+      ["state", "automation", "api", "frontend"]
+        .map((worker) => stableJson(configs[worker]))
+        .join("\0"),
     )
     .digest("hex");
   return { config_digest: digest, paths };
 }
 
-/**
- * Normalizes a Neon PostgreSQL endpoint hostname, stripping any `-pooler` suffix.
- * Validates domain structure (must be `ep-<id>[.region].neon.tech`).
- *
- * @param {string} hostname - Neon endpoint hostname
- * @returns {string} Normalized direct endpoint hostname without pooler suffix
- * @throws {Error} If hostname does not target a valid Neon endpoint
- */
 export function normalizeNeonDatabaseHostname(hostname) {
   const labels = hostname.toLowerCase().replace(trailingDotPattern, "").split(".");
   if (
@@ -981,14 +773,6 @@ export function normalizeNeonDatabaseHostname(hostname) {
   return labels.join(".");
 }
 
-/**
- * Validates that a database connection string is a trimmed, complete TLS PostgreSQL URL targeting a Neon endpoint.
- *
- * @param {string | undefined} value - Connection string to validate
- * @param {string} name - Variable name for error reporting
- * @returns {{ connectionString: string, hostname: string }} Validated connection string and normalized endpoint hostname
- * @throws {Error} If connection string is missing, invalid URL, not TLS, or targets non-Neon host
- */
 function validatedDatabaseUrl(value, name) {
   const connectionString = value?.trim();
   if (!connectionString) throw new Error(`${name} is required`);
@@ -1015,14 +799,6 @@ function validatedDatabaseUrl(value, name) {
   };
 }
 
-/**
- * Validates the database environment variables, ensuring system and authenticated database URLs
- * target the exact same Neon database compute endpoint.
- *
- * @param {Record<string, string | undefined>} environment - Environment lookup source
- * @returns {string} System database connection string
- * @throws {Error} If URLs are missing, malformed, or point to mismatched Neon endpoints
- */
 export function validateDatabaseEnvironment(environment) {
   const system = validatedDatabaseUrl(
     environment.MELTIPLY_SYSTEM_DATABASE_URL,
@@ -1040,16 +816,7 @@ export function validateDatabaseEnvironment(environment) {
   return system.connectionString;
 }
 
-/**
- * Computes the remote secret names each Worker requires for a release: selected
- * object storage credentials, encryption keys, and the API session and first-owner bootstrap secrets,
- * provider-specific credentials enabled in provider acceptance. Mail delivery uses the native
- * send_email binding, so no delivery credential is required.
- *
- * @param {object} spec - Release specification object
- * @returns {{ api: Array<string>, automation: Array<string>, state: Array<string>, frontend: Array<string> }} Required secret names by worker
- */
-function requiredRemoteSecrets(spec) {
+export function requiredRemoteSecrets(spec) {
   const storage =
     spec.runtime.object_storage_provider === "s3"
       ? ["S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"]
@@ -1066,22 +833,6 @@ function requiredRemoteSecrets(spec) {
   return { api: api.sort(), automation: automation.sort(), state: [], frontend: [] };
 }
 
-/**
- * Runs release preflight checks: verifies git HEAD commit matches release spec git_sha,
- * asserts a clean tracked working tree and pinned Wrangler CLI version via Bun without downloading tools,
- * and validates Cloudflare credentials plus both database login identities and role attributes.
- * The CI/release toolchain stays pinned together so reviewed evidence cannot drift.
- *
- * @param {object} params - Preflight parameters
- * @param {Function} [params.clientFactory] - Injectable PostgreSQL client factory
- * @param {Record<string, string | undefined>} params.environment - Environment variable lookup
- * @param {boolean} params.offline - Flag indicating offline mode (skips remote account/token checks)
- * @param {string} params.repoRoot - Repository root directory path
- * @param {(cmd: string, args: Array<string>, opts?: object) => Promise<object>} params.runCommand - Subprocess command runner
- * @param {object} params.spec - Validated release specification
- * @returns {Promise<object>} Preflight status summary object
- * @throws {Error} If commit mismatch, dirty checkout, wrong Wrangler version, or credentials fail validation
- */
 export async function preflightRelease({
   clientFactory,
   environment,
@@ -1090,19 +841,12 @@ export async function preflightRelease({
   runCommand,
   spec,
 }) {
-  const [head, status, wranglerVersion] = await Promise.all([
-    runCommand("git", ["rev-parse", "HEAD"], { cwd: repoRoot }),
-    runCommand("git", ["status", "--porcelain", "--untracked-files=no"], {
-      cwd: repoRoot,
-    }),
+  const [, wranglerVersion] = await Promise.all([
+    verifyReleaseCheckout({ repoRoot, runCommand, spec }),
     runCommand("bun", ["run", "--no-install", "wrangler", "--version"], {
       cwd: repoRoot,
     }),
   ]);
-  if (head.stdout.trim() !== spec.git_sha) {
-    throw new Error("release git_sha does not match the checked-out commit");
-  }
-  if (status.stdout.trim()) throw new Error("tracked working tree changes are not releasable");
   if (!wranglerVersionPattern.test(wranglerVersion.stdout.trim())) {
     throw new Error("release requires Wrangler 4.148.0");
   }
@@ -1135,14 +879,6 @@ export async function preflightRelease({
   };
 }
 
-/**
- * Sanitizes an error message or string representation by redacting known sensitive environment secrets
- * (Cloudflare API token, database URLs, Neon API key, Terraform HTTP backend password).
- *
- * @param {unknown} error - Caught error or message
- * @param {Record<string, string | undefined>} environment - Environment lookup holding secrets to redact
- * @returns {string} Error message string with sensitive credentials replaced by `[REDACTED]`
- */
 export function redactError(error, environment) {
   let message = error instanceof Error ? error.message : String(error);
   const values = [
@@ -1157,11 +893,3 @@ export function redactError(error, environment) {
   for (const value of values) message = message.split(value).join("[REDACTED]");
   return message;
 }
-
-export const releaseInternals = {
-  json,
-  queueBindings,
-  requiredRemoteSecrets,
-  stableValue,
-  workerConfigs,
-};

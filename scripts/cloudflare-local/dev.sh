@@ -1,24 +1,9 @@
 #!/usr/bin/env bash
-# Starts the local Worker, app, and unified public-site development services in
-# isolated process groups. A service failure or Ctrl-C stops every group that
-# this invocation owns, preventing a live frontend from waiting on a dead
-# backend.
-#
-# An optional Cloudflare Quick Tunnel makes the stack reachable from any network.
-# When enabled, the tunnel origin becomes the canonical frontend origin for the
-# whole run. That is only coherent because the
-# app Worker already proxies `/api/*` to the API Worker (service binding when
-# deployed, API_ORIGIN locally), so a single public hostname serves the SPA and
-# the API on one origin: no CORS, and the Better Auth session cookie stays a
-# first-party cookie. Set MELTIPLY_DEV_TUNNEL=1 to opt into public origins.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 bun="${BUN:-bun}"
-# Services whose exit ends the run.
 service_pids=()
-# Helpers that must be reaped on exit but must not end the run when they finish
-# (the tunnel readiness probe completes successfully by design).
 cleanup_pids=()
 cleanup_started=0
 tunnel_log_dir="$repo_root/.wrangler/logs"
@@ -28,10 +13,6 @@ stack_lock="$repo_root/.wrangler/dev.lock"
 stack_owner="$repo_root/.wrangler/dev.pid"
 owns_stack=0
 
-# Serializes launches for this checkout and replaces its previous supervisor.
-# The lock descriptor validates the recorded PID before signaling it, avoiding
-# stale-PID kills. Waits up to 15 seconds for its service groups to shut down;
-# unrelated port listeners are never killed, and failed shutdown aborts startup.
 claim_stack() {
   mkdir -p "$repo_root/.wrangler"
   exec 8>"$repo_root/.wrangler/dev-start.lock"
@@ -47,8 +28,6 @@ claim_stack() {
       kill -TERM "$owner" 2>/dev/null || true
     fi
     if ! flock -w 15 9; then
-      # Orphaned children from an older launcher may still hold the lock even
-      # after the recorded owner died. Terminate them and retry once.
       local holder fd_path
       for fd_path in /proc/[0-9]*/fd/9; do
         [[ -e "$fd_path" ]] || continue
@@ -68,12 +47,7 @@ claim_stack() {
   exec 8>&-
 }
 
-# Loads local defaults and derives the public origins shared by every dev
-# service. Existing environment values win so callers can run isolated stacks
-# with alternate ports or container tunnel transport; exports the resulting
-# values to all children, preserving explicit tunnel settings over root .env.
 load_stack_environment() {
-  # Preserve explicit caller settings over checkout-local .env defaults.
   local -a caller_overrides=()
   local name
   for name in APP_URL PUBLIC_SITE_URL ALLOWED_ORIGINS \
@@ -116,8 +90,6 @@ load_stack_environment() {
   local_frontend_origin="$APP_URL"
   local_api_origin="http://$dev_host:$api_port"
   local_public_origin="$PUBLIC_SITE_URL"
-  # Read after the .env source so the summary agrees with the hostnames
-  # tunnel-hostname.mjs derives, which read the environment at call time.
   DEV_TUNNEL_DOMAIN="${MELTIPLY_TUNNEL_DOMAIN:-}"
 }
 
@@ -133,8 +105,6 @@ launch_quick_tunnel() {
   mkdir -p "$tunnel_log_dir"
   : >"$log"
 
-  # setsid makes the connector its own group leader, so the shared cleanup
-  # reaps the tunnel with the same signal path used for wrangler and Vite.
   setsid "$repo_root/scripts/cloudflare-local/dev-tunnel.sh" run "$port" \
     >"$log" 2>&1 9>&- &
   local pid=$!
@@ -157,9 +127,6 @@ launch_quick_tunnel() {
 # @return 0 with tunnel_urls[app] and tunnel_urls[public] set.
 launch_named_tunnel() {
   local config log="$tunnel_log_dir/named-tunnel.log" name
-  # Provision this branch's tunnel and its DNS records on demand, so a new
-  # branch needs no manual step. Idempotent: an existing tunnel or record is
-  # the desired end state.
   "$repo_root/scripts/cloudflare-local/dev-tunnel.sh" setup || return 1
   name="$(node "$repo_root/scripts/cloudflare-local/tunnel-hostname.mjs" \
     --tunnel-name)"
@@ -167,8 +134,6 @@ launch_named_tunnel() {
   config="$("$repo_root/scripts/cloudflare-local/tunnel-config.sh" \
     write "$frontend_dev_port" "$public_dev_port")" || return 1
 
-  # Validate the ingress rules with cloudflared before relying on them, so a
-  # typo fails here rather than as a connector that routes nothing.
   if ! "$repo_root/scripts/cloudflare-local/tunnel-config.sh" validate; then
     printf 'Generated tunnel configuration is invalid: %s\n' "$config" >&2
     return 1
@@ -186,33 +151,17 @@ launch_named_tunnel() {
     "$repo_root/scripts/cloudflare-local/tunnel-hostname.mjs" --kind public)"
 }
 
-# Re-derives every shared origin from the published tunnel hostnames.
-#
-# The local frontend origin stays in ALLOWED_ORIGINS alongside the public one so
-# a browser that has not yet been redirected — and direct API calls from the
-# loopback ports — remain authorized. The Worker reads these through the
-# WRANGLER_DEV_* channel because dev-backend.sh re-sources the root .env, which
-# would otherwise overwrite the tunnel values with that file's empty defaults.
 apply_tunnel_origins() {
   local app_url=${tunnel_urls[app]}
   local public_url=${tunnel_urls[public]}
 
   export APP_URL="$app_url"
-  # Same-origin by design: the app Worker forwards /api/* to the API Worker, so
-  # the browser never makes a cross-origin request and the session cookie is
-  # first-party over the tunnel's HTTPS.
   export ALLOWED_ORIGINS="$local_frontend_origin,$app_url"
   export WRANGLER_DEV_ALLOWED_ORIGINS="$ALLOWED_ORIGINS"
   export WRANGLER_DEV_APP_URL="$app_url"
   export PUBLIC_SITE_URL="$public_url"
 }
 
-# Confirms the public route works end to end once DNS has propagated.
-#
-# The probe deliberately sends an Origin header: it exercises the API's
-# ALLOWED_ORIGINS check, which is the wiring that otherwise only surfaces in a
-# browser on the first write. Runs detached so a slow tunnel never delays the
-# stack, and reports a single conclusive line either way.
 probe_tunnel() {
   local app_url=$1 code=000 redirect="" response
   command -v curl >/dev/null 2>&1 || return 0
@@ -226,9 +175,7 @@ probe_tunnel() {
       printf 'Tunnel live: app and API reachable at %s\n' "$app_url"
       return 0
     fi
-    # Cloudflare Access sits in front of the public hostname and redirects
-    # unauthenticated probes to its login page. That 302 still proves the
-    # request traversed the tunnel; a 200 here would require Access credentials.
+    # Cloudflare Access redirects unauthenticated requests to its login page.
     if [[ "$code" == '302' && "$redirect" == https://*.cloudflareaccess.com/* ]]; then
       printf 'Tunnel live: %s is reachable behind Cloudflare Access (HTTP 302)\n' \
         "$app_url"
@@ -242,19 +189,8 @@ probe_tunnel() {
     "$tunnel_log_dir" >&2
 }
 
-# Publishes the app and unified public site and promotes the app hostname to
-# the canonical origin.
-#
-# Quick Tunnels are the default, and the only mode that needs no cleanup.
-# Cloudflare reaps a Quick Tunnel and its DNS record roughly five minutes after
-# the connector disconnects, so a container that is cut off leaves nothing
-# behind. A named tunnel is the opposite: it deliberately outlives the process,
-# and without a teardown step it would leak one tunnel plus two CNAMEs per
-# branch forever, so it is opt-in only.
-#
-# Returns 1 only when a connector is present and started but cannot publish,
-# which must fail the run rather than silently handing back a local-only stack
-# the caller believes is public.
+# Cloudflare reaps a Quick Tunnel and its DNS record about five minutes after the
+# connector disconnects; a named tunnel persists.
 start_tunnel() {
   if [[ "${MELTIPLY_DEV_TUNNEL:-0}" == "0" ]]; then
     printf 'Dev tunnel disabled (set MELTIPLY_DEV_TUNNEL=1 to publish public origins).\n'
@@ -301,8 +237,6 @@ start_tunnel() {
   apply_tunnel_origins
 }
 
-# States the cost of a named tunnel before creating one, because nothing in
-# this repository will ever delete it again.
 warn_named_tunnel_leaks() {
   cat >&2 <<'LEAK'
 MELTIPLY_DEV_TUNNEL_MODE=named opts out of Cloudflare's automatic cleanup.
@@ -311,8 +245,6 @@ this container off leaves one tunnel and two CNAMEs behind per branch.
 LEAK
 }
 
-# Reports the app/API and unified public-site origins, with docs as a path on
-# the public site rather than a separate service. Omits unpublished tunnel URLs.
 print_stack_summary() {
   if [[ -n "${tunnel_urls[app]+published}" ]]; then
     if [[ "$tunnel_mode" == "named" ]]; then
@@ -329,17 +261,11 @@ print_stack_summary() {
     "$local_frontend_origin" "$local_api_origin" "$local_public_origin"
 }
 
-# Terminates one service session by its leader PID. Each child is launched with
-# setsid, so signaling the negative PID reaches Wrangler/workerd or the Vite/
-# Astro descendants without touching the caller's terminal process group.
 terminate_service_group() {
   local pid=$1
   kill -TERM -- "-$pid" >/dev/null 2>&1 || true
 }
 
-# Stops all services launched by this invocation and reaps them before exit.
-# It is idempotent because EXIT follows INT/TERM handlers; the original status
-# is preserved so a failed backend makes make dev fail rather than hang.
 cleanup() {
   local exit_status=$?
   ((cleanup_started)) && return 0
@@ -360,8 +286,6 @@ cleanup() {
   return "$exit_status"
 }
 
-# Converts an interactive interrupt into a conventional shell exit status after
-# cleanup. SIGTERM uses 143; Ctrl-C uses 130, while EXIT preserves child errors.
 exit_after_signal() {
   local status=$1
   cleanup
@@ -369,7 +293,6 @@ exit_after_signal() {
 }
 
 load_stack_environment
-# Fail fast when the frontend Worker's /api/* proxy would dial the wrong port.
 "$repo_root/scripts/cloudflare-local/frontend-api-origin.sh" "$api_dev_port"
 trap cleanup EXIT
 trap 'exit_after_signal 130' INT
@@ -391,9 +314,7 @@ service_pids+=("$!")
 setsid bash -c 'cd "$1"; exec "$2" run --no-install dev --port "$3" --strictPort' _ \
   "$repo_root/frontend/app" "$bun" "$frontend_dev_port" 9>&- &
 service_pids+=("$!")
-# ASTRO_DEV_BACKGROUND pins the dev server to the foreground: Astro detects
-# agentic shells and otherwise self-daemonizes, whose clean exit would make
-# wait -n tear down the whole stack.
+# Astro self-daemonizes in agentic shells unless ASTRO_DEV_BACKGROUND is set.
 setsid bash -c 'cd "$1"; exec env ASTRO_DEV_BACKGROUND=1 "$2" run --no-install dev --host "$3" --port "$4"' _ \
   "$repo_root/frontend/public" "$bun" "$FRONTEND_DEV_HOST" "$public_dev_port" 9>&- &
 service_pids+=("$!")

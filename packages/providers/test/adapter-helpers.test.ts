@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { confirmedFailure, isHttp404, malformed } from "../src/adapter-helpers";
-import { classifyProviderFailure, isUncertainFailure, ProviderAdapterError } from "../src/failures";
-import { codePointLength, firstNonEmptyLine } from "../src/meta-common";
+import {
+  classifyProviderFailure,
+  isHttp404,
+  isUncertainFailure,
+  malformed,
+  ProviderAdapterError,
+  rejection,
+} from "../src/failures";
+import { confirmedFailure } from "../src/results";
+import { codePointLength, firstNonEmptyLine } from "../src/values";
 
 describe("shared provider adapter helpers", () => {
   it("classifies malformed responses with the side-effect boundary", () => {
@@ -23,7 +30,7 @@ describe("shared provider adapter helpers", () => {
     expect(isHttp404(new Error("provider_http_404"))).toBe(false);
   });
 
-  it("classifies uncertain failures consistently with optional rate-limit inclusion", () => {
+  it("classifies uncertain failures consistently", () => {
     const ambiguous = classifyProviderFailure({ sideEffectPossible: true, timedOut: true });
     const timeout = classifyProviderFailure({ timedOut: true });
     const transient = classifyProviderFailure({ status: 503 });
@@ -34,18 +41,17 @@ describe("shared provider adapter helpers", () => {
     expect(isUncertainFailure(timeout)).toBe(true);
     expect(isUncertainFailure(transient)).toBe(true);
     expect(isUncertainFailure(rateLimit)).toBe(false);
-    expect(isUncertainFailure(rateLimit, true)).toBe(true);
-    expect(isUncertainFailure(deterministic, true)).toBe(false);
+    expect(isUncertainFailure(deterministic)).toBe(false);
   });
 
-  it("builds confirmedFailure from either a ProviderFailure or code+status", () => {
+  it("builds confirmedFailure from a ProviderFailure", () => {
     const existing = classifyProviderFailure({ code: "tiktok_denied", status: 422 });
     expect(confirmedFailure(existing, "publish:1")).toEqual({
       failure: existing,
       outcome: "confirmed_failure",
       providerOperationId: "publish:1",
     });
-    expect(confirmedFailure("instagram_reply_invalid", 400)).toMatchObject({
+    expect(confirmedFailure(rejection("instagram_reply_invalid", 400))).toMatchObject({
       failure: { classification: "deterministic", code: "instagram_reply_invalid" },
       outcome: "confirmed_failure",
     });

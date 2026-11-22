@@ -1,6 +1,4 @@
-import { malformed, requiredIdentifier } from "../adapter-helpers";
-import { classifyProviderFailure, ProviderAdapterError } from "../failures";
-import { bearer, boundedString, metricValue, record, validatePageInput } from "../meta-common";
+import { malformed } from "../failures";
 import type {
   ProviderAccountAnalytics,
   ProviderAnalyticsRecord,
@@ -11,22 +9,22 @@ import type {
   ProviderRequestContext,
 } from "../types";
 import {
+  bearer,
+  boundedString,
+  metricValue,
+  record,
+  requiredIdentifier,
+  validateSnapshotPage,
+} from "../values";
+import {
   YOUTUBE_ANALYTICS_ORIGIN,
   YOUTUBE_API_ORIGIN,
   youtubeAccountId,
   type GoogleRequest,
 } from "./types";
 
-/**
- * Builds the YouTube channel and per-video analytics methods
- * (`getAccountAnalytics`, `listAnalytics`).
- */
 export function createYouTubeAnalytics(googleRequest: GoogleRequest, now: () => Date) {
   return {
-    /**
-     * Reads the authenticated channel's lifetime subscriber and video counters.
-     * Hidden subscriber counts are rejected so the chart never invents a value.
-     */
     async getAccountAnalytics(
       context: ProviderRequestContext,
       credentials: ProviderCredentials,
@@ -34,7 +32,7 @@ export function createYouTubeAnalytics(googleRequest: GoogleRequest, now: () => 
       const url = new URL("/youtube/v3/channels", YOUTUBE_API_ORIGIN);
       url.searchParams.set("part", "statistics");
       url.searchParams.set("mine", "true");
-      const response = await googleRequest<unknown>(context, {
+      const response = await googleRequest(context, {
         headers: bearer(credentials.accessToken),
         method: "GET",
         url: url.toString(),
@@ -53,26 +51,13 @@ export function createYouTubeAnalytics(googleRequest: GoogleRequest, now: () => 
       };
     },
 
-    /**
-     * Reads lifetime views, likes, comments, and shares for one uploaded video
-     * from the YouTube Analytics API. An empty report returns no rows; every
-     * requested metric must be present when a row exists.
-     */
     async listAnalytics(
       context: ProviderRequestContext,
       credentials: ProviderCredentials,
       lookup: ProviderPublicationLookup,
       page: ProviderPageInput,
     ): Promise<ProviderPage<ProviderAnalyticsRecord>> {
-      validatePageInput("youtube", page);
-      if (page.cursor) {
-        throw new ProviderAdapterError(
-          classifyProviderFailure({
-            code: "youtube_analytics_not_paginated",
-            status: 400,
-          }),
-        );
-      }
+      validateSnapshotPage("youtube", page);
       const providerPostId = requiredIdentifier(lookup.providerPostId, "youtube_video_id_required");
       const channelId = youtubeAccountId(credentials);
       const url = new URL("/v2/reports", YOUTUBE_ANALYTICS_ORIGIN);
@@ -81,7 +66,7 @@ export function createYouTubeAnalytics(googleRequest: GoogleRequest, now: () => 
       url.searchParams.set("endDate", now().toISOString().slice(0, 10));
       url.searchParams.set("metrics", "views,likes,comments,shares");
       url.searchParams.set("filters", `video==${providerPostId}`);
-      const response = await googleRequest<unknown>(context, {
+      const response = await googleRequest(context, {
         headers: bearer(credentials.accessToken),
         method: "GET",
         url: url.toString(),

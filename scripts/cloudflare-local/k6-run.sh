@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# Run the real local API k6 scenario against a live Worker stack.
-# Uses the grafana/k6 container (no host binary required).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# Shared Compose boundary: picks up the devcontainer overlay and scoped
-# COMPOSE_PROJECT_NAME so `up prometheus` joins the same stack as the API.
 compose=("$repo_root/scripts/cloudflare-local/compose.sh")
 
 base_url="${BASE_URL:-http://127.0.0.1:8787}"
@@ -88,10 +84,6 @@ wait_for_api() {
   return 1
 }
 
-# Returns when Prometheus is already serving, or starts it through the shared
-# Compose boundary (project-scoped, overlay-aware) when the baseline file
-# exists. Degrades to skip_prometheus instead of failing the run: k6 without
-# remote-write still produces valid local output.
 ensure_prometheus() {
   if [[ "$skip_prometheus" == "1" ]]; then
     return 0
@@ -138,9 +130,7 @@ fi
 k6_args=(run)
 if [[ "$skip_prometheus" != "1" ]]; then
   docker_args+=(-e "K6_PROMETHEUS_RW_SERVER_URL=$prometheus_rw_url")
-  # Native histogram export segfaults in the ARM64 k6 image during the final
-  # flush on the hosted runner. Standard remote-write histograms preserve the
-  # load/observability contract without crashing the job.
+  # Native histogram export segfaults in the ARM64 k6 image during the final flush.
   docker_args+=(-e "K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM=false")
   k6_args+=(-o experimental-prometheus-rw)
 fi

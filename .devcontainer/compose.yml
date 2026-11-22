@@ -1,5 +1,4 @@
-# The inner daemon's host namespace is this devcontainer, not the outer host.
-# Services use its loopback; no outer-host ports or Docker socket are exposed.
+# The inner Docker daemon's host network namespace is this devcontainer, not the outer host.
 x-worktree-labels: &worktree-labels
   wtdc.owner.workspace: "${MELTIPLY_DEVCONTAINER_WORKSPACE:?Owning worktree path is required}"
 

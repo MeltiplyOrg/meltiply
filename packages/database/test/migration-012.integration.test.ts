@@ -14,24 +14,12 @@ const adminUrl = integrationDatabaseUrl(
 const migrationsDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../migrations");
 const databaseName = `meltiply_migration_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
 
-/**
- * Replaces the database path in an administrative connection URL.
- *
- * @param url - PostgreSQL connection URL.
- * @param database - Target database name.
- * @returns Connection URL for the target database.
- */
 function databaseUrl(url: string, database: string): string {
   const parsed = new URL(url);
   parsed.pathname = `/${database}`;
   return parsed.toString();
 }
 
-/**
- * Reads checked-in migrations in filename order.
- *
- * @returns Migration file names and SQL sources.
- */
 async function loadMigrations(): Promise<{ name: string; source: string }[]> {
   const names = (await readdir(migrationsDirectory))
     .filter((name) => /^\d{3}_.*\.sql$/.test(name))

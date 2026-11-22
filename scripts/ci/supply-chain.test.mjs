@@ -12,14 +12,12 @@ import {
   javascriptCatalog,
 } from "./supply-chain.mjs";
 
-/** Writes installed package metadata; fixtures exercise real Node resolution, not mocked graphs. */
 function manifest(root, directory, metadata) {
   const path = join(root, directory, "package.json");
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(metadata));
 }
 
-/** Creates an isolated workspace fixture and removes all files after its test. */
 function fixture(context, metadata) {
   const root = mkdtempSync(join(tmpdir(), "supply-chain-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
@@ -27,7 +25,6 @@ function fixture(context, metadata) {
   return root;
 }
 
-// An unknown SPDX expression must never silently pass the production license gate.
 test("license policy fails closed on an unreviewed expression", () => {
   assert.throws(
     () => assertAllowedLicenses({ "GPL-3.0-only": [] }, ["MIT"], "fixture"),
@@ -35,7 +32,6 @@ test("license policy fails closed on an unreviewed expression", () => {
   );
 });
 
-// SPDX alternatives need one approved option; conjunctions need every obligation.
 test("license policy evaluates SPDX alternatives, precedence, and exceptions", () => {
   const allowed = ["MIT", "Apache-2.0"];
   for (const expression of [
@@ -58,7 +54,6 @@ test("license policy evaluates SPDX alternatives, precedence, and exceptions", (
   }
 });
 
-// A reviewed development tool must not approve another version, package, or production use.
 test("development license exceptions cannot broaden into general approvals", () => {
   const license = "LicenseRef-Reviewed-Tool";
   const entry = { name: "tool", versions: ["1.0.0"] };
@@ -80,7 +75,6 @@ test("development license exceptions cannot broaden into general approvals", () 
   );
 });
 
-// Missing manifest metadata is recoverable only for the reviewed version and unchanged license bytes.
 test("license metadata corrections are pinned to the package and upstream text", (context) => {
   const root = fixture(context, { dependencies: { tool: "1.0.0" } });
   manifest(root, "node_modules/tool", { name: "tool", version: "1.0.0" });
@@ -106,8 +100,6 @@ test("license metadata corrections are pinned to the package and upstream text",
   assert.throws(() => javascriptCatalog(root, options), /missing license metadata/);
 });
 
-// Exercise isolated symlinks, workspace-only roots, peers, cycles, multiple versions,
-// export-hidden manifests, and dev-only exclusion in one consumer-visible inventory.
 test("inventory follows installed production edges across isolated workspaces", (context) => {
   const root = fixture(context, {
     workspaces: ["packages/*"],
@@ -167,7 +159,6 @@ test("inventory follows installed production edges across isolated workspaces", 
   );
 });
 
-// An optional declaration wins over a required declaration for the same package.
 test("absent optional binaries are excluded but installed unlicensed binaries fail", (context) => {
   const root = fixture(context, {
     dependencies: { native: "1.0.0" },
@@ -178,7 +169,6 @@ test("absent optional binaries are excluded but installed unlicensed binaries fa
   assert.throws(() => javascriptCatalog(root), /missing license metadata: native@1\.0\.0/);
 });
 
-// Required runtime dependencies and peers must fail closed when installation is incomplete.
 test("missing required runtime edges cannot silently shrink the SBOM", (context) => {
   const root = fixture(context, { dependencies: { runtime: "1.0.0" } });
   assert.throws(() => javascriptCatalog(root), /Missing dependency runtime/);
@@ -213,7 +203,6 @@ test("CycloneDX inventory is deterministic, unique, and path-free", () => {
   assert.doesNotMatch(JSON.stringify(bom), /private\/workspace|node_modules/);
 });
 
-// Compound and custom terms must not be represented as nonexistent SPDX identifiers.
 test("SBOM preserves alternative licenses and reviewed custom terms", () => {
   const terms = ["(MPL-2.0 OR Apache-2.0)", "LicenseRef-React-Doctor", "PolyForm-Shield-1.0.0"];
   const components = javascriptComponents(

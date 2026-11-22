@@ -6,12 +6,6 @@ import { markdownLines, maskInlineCode, trackedMarkdownFiles } from "./markdown-
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
-/**
- * Prose patterns that record change history instead of current truth. Each is a
- * defect under the documentation discipline in AGENTS.md: a dated note, a
- * revision marker, or an explicit supersession chain means the superseded text
- * should have been edited or deleted.
- */
 const forbiddenPatterns = [
   {
     pattern: /\bImplementation note\s*\(\d{4}-?\d{2}-?\d{2}/iu,
@@ -39,10 +33,6 @@ const forbiddenPatterns = [
   },
 ];
 
-/**
- * Documentation that must never be trimmed by heuristic or agent edits.
- * Legal notices and the verbatim license text are obligations, not prose.
- */
 const exempt = [
   /^LICENSE\.md$/u,
   /^THIRD_PARTY_NOTICES\.md$/u,
@@ -51,23 +41,10 @@ const exempt = [
   /^CHANGELOG\.md$/u,
 ];
 
-/**
- * Returns whether a path is exempt from the discipline scan.
- *
- * @param {string} path - Repository-relative path
- * @returns {boolean} True when the file is exempt
- */
 function isExempt(path) {
   return exempt.some((pattern) => pattern.test(path));
 }
 
-/**
- * Scans tracked Markdown for documentation-discipline violations.
- *
- * @param {string} root - Repository root
- * @param {Array<string>} files - Repository-relative Markdown paths
- * @returns {Array<string>} Sorted `path:line: reason` findings
- */
 export function collectDisciplineFindings(root, files) {
   const findings = [];
   for (const file of files) {
@@ -87,12 +64,6 @@ export function collectDisciplineFindings(root, files) {
   return findings.sort();
 }
 
-/**
- * Gate entrypoint: fails when a doc records history instead of current truth.
- *
- * @returns {{ files: number }} Number of scanned files
- * @throws {Error} When findings exist
- */
 export function runDocumentationDisciplineGate() {
   const files = trackedMarkdownFiles(repositoryRoot);
   const findings = collectDisciplineFindings(repositoryRoot, files);

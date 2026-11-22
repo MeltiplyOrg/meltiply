@@ -1,13 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Cause } from "effect";
+import { Cause, Effect } from "effect";
 import { DatabaseError, InvalidRequestError } from "@meltiply/domain";
 
 import {
-  acquireClient,
   createHyperdrivePoolCache,
-  DatabaseService,
-  createDatabaseServiceLive,
-  createDatabaseServiceTest,
   serializeAuthenticatedClaims,
   withAuthenticatedTransactionEffect,
   withTransactionEffect,
@@ -28,8 +24,6 @@ class FakeClient implements TransactionClient {
     if (text === "COMMIT" && this.failCommit) throw new Error("commit failed");
     if (this.failQuery && text !== "BEGIN" && text !== "COMMIT" && text !== "ROLLBACK")
       throw new Error("query failed");
-    // Mirrors node-postgres' QueryResult so callers can read any field the real
-    // driver returns instead of only `rows`.
     return { command: "SELECT", fields: [], oid: 0, rowCount: 0, rows: [] as Row[] };
   }
 
@@ -77,7 +71,7 @@ describe("database transactions", () => {
   });
 });
 
-describe("Effect database transactions and DatabaseService", () => {
+describe("Effect database transactions", () => {
   it("withTransactionEffect executes queries and commits on success", async () => {
     const client = new FakeClient();
     const result = await Effect.runPromise(
@@ -106,8 +100,6 @@ describe("Effect database transactions and DatabaseService", () => {
     );
 
     expect(failureExit._tag).toBe("Failure");
-    // "Preserves error" is the claim, so the caller must still observe the
-    // original failure rather than a rollback or transaction error.
     if (failureExit._tag === "Failure") {
       expect(Cause.squash(failureExit.cause)).toBe(operationError);
     }
@@ -218,149 +210,17 @@ describe("Effect database transactions and DatabaseService", () => {
     expect(error).toBeInstanceOf(InvalidRequestError);
   });
 
-  it("acquireClient provides scoped client connection released on scope exit", async () => {
+  it("withTransactionEffect maps query failures to DatabaseError and keeps the client reusable", async () => {
     const client = new FakeClient();
-    const program = Effect.scoped(
-      acquireClient({ connect: async () => client }).pipe(
-        Effect.flatMap((conn) => conn.query("SELECT 42")),
+    client.failQuery = true;
+    const error = await Effect.runPromise(
+      Effect.flip(
+        withTransactionEffect({ connect: async () => client }, (tx) => tx.query("SELECT 1")),
       ),
     );
-
-    await Effect.runPromise(program);
-    expect(client.calls).toEqual([{ text: "SELECT 42", values: undefined }]);
+    expect(error).toBeInstanceOf(DatabaseError);
     expect(client.released).toBe(true);
-  });
-
-  it("DatabaseService live layer works with pool", async () => {
-    const client = new FakeClient();
-    const liveLayer = createDatabaseServiceLive({
-      connect: async () => client,
-    });
-
-    const program = Effect.gen(function* () {
-      const db = yield* DatabaseService;
-      const txRes = yield* db.withTransaction((tx) =>
-        tx.query("SELECT 1").pipe(Effect.map(() => "tx-ok")),
-      );
-      const authRes = yield* db.withAuthenticatedTransaction(
-        { org_id: "org-1", sub: "u-1" },
-        (tx) => tx.query("SELECT 2").pipe(Effect.map(() => "auth-ok")),
-      );
-      const scopedRes = yield* Effect.scoped(
-        db
-          .acquireClient()
-          .pipe(
-            Effect.flatMap((conn) => conn.query("SELECT 3").pipe(Effect.map(() => "scoped-ok"))),
-          ),
-      );
-      return { authRes, scopedRes, txRes };
-    }).pipe(Effect.provide(liveLayer));
-
-    const result = await Effect.runPromise(program);
-    expect(result).toEqual({
-      authRes: "auth-ok",
-      scopedRes: "scoped-ok",
-      txRes: "tx-ok",
-    });
-  });
-
-  it("DatabaseService live layer fails closed on invalid HyperdriveBinding", async () => {
-    const invalidLayer = createDatabaseServiceLive({
-      connectionString: "",
-    });
-
-    const txExit = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const db = yield* DatabaseService;
-        return yield* db.withTransaction((tx) => tx.query("SELECT 1"));
-      }).pipe(Effect.provide(invalidLayer)),
-    );
-    expect(txExit._tag).toBe("Failure");
-
-    const authExit = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const db = yield* DatabaseService;
-        return yield* db.withAuthenticatedTransaction({ sub: "u1" }, (tx) => tx.query("SELECT 1"));
-      }).pipe(Effect.provide(invalidLayer)),
-    );
-    expect(authExit._tag).toBe("Failure");
-
-    const acquireExit = await Effect.runPromiseExit(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const db = yield* DatabaseService;
-          return yield* db.acquireClient();
-        }).pipe(Effect.provide(invalidLayer)),
-      ),
-    );
-    expect(acquireExit._tag).toBe("Failure");
-
-    // Query failure in wrapTransactionClient
-    const failClient = new FakeClient();
-    failClient.failQuery = true;
-    const queryExit = await Effect.runPromiseExit(
-      withTransactionEffect({ connect: async () => failClient }, (tx) => tx.query("SELECT 1")),
-    );
-    expect(queryExit._tag).toBe("Failure");
-
-    // Connection failure in acquireClient
-    const acquireFailExit = await Effect.runPromiseExit(
-      Effect.scoped(
-        acquireClient({
-          connect: async () => {
-            throw new Error("acquire connect failed");
-          },
-        }),
-      ),
-    );
-    expect(acquireFailExit._tag).toBe("Failure");
-  });
-
-  it("DatabaseService test layer provides default doubles and accepts overrides", async () => {
-    const defaultLayer = createDatabaseServiceTest();
-
-    const defaultProgram = Effect.gen(function* () {
-      const db = yield* DatabaseService;
-      const txRes = yield* db.withTransaction((tx) =>
-        tx.query("SELECT 1").pipe(Effect.map((res) => res.rows.length)),
-      );
-      const authRes = yield* db.withAuthenticatedTransaction({ sub: "u1" }, (tx) =>
-        tx.query("SELECT 2").pipe(Effect.map((res) => res.rows.length)),
-      );
-      const scopedRes = yield* Effect.scoped(
-        db
-          .acquireClient()
-          .pipe(
-            Effect.flatMap((conn) =>
-              conn.query("SELECT 3").pipe(Effect.map((res) => res.rows.length)),
-            ),
-          ),
-      );
-      return { authRes, scopedRes, txRes };
-    }).pipe(Effect.provide(defaultLayer));
-
-    const defaultResult = await Effect.runPromise(defaultProgram);
-    expect(defaultResult).toEqual({
-      authRes: 0,
-      scopedRes: 0,
-      txRes: 0,
-    });
-
-    const overriddenLayer = createDatabaseServiceTest({
-      withTransaction: () => Effect.fail(new DatabaseError({ message: "custom db error" })),
-    });
-
-    const customExit = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const db = yield* DatabaseService;
-        return yield* db.withTransaction((tx) => tx.query("SELECT 1"));
-      }).pipe(Effect.provide(overriddenLayer)),
-    );
-
-    expect(customExit._tag).toBe("Failure");
-    if (customExit._tag === "Failure") {
-      expect(customExit.cause.toString()).toContain("custom db error");
-    }
+    expect(client.destroyed).toBe(false);
   });
 
   it("caches Hyperdrive pools per connection string and isolates request-owned pools", async () => {

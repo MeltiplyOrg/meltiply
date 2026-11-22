@@ -22,8 +22,6 @@ function close(server) {
   });
 }
 
-// Finds a port that is free right now so the selection is predictable; OS
-// assigned ports above the reserved set keep the expected value deterministic.
 async function freePort() {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const probe = createServer();
@@ -31,16 +29,11 @@ async function freePort() {
     const address = probe.address();
     await close(probe);
     if (!address || typeof address !== "object") continue;
-    // Stay clear of the reserved ports (3001, 3100, 3200, 4317, 4318, 5433,
-    // 9090, 9091, 9464) and of the port the scanner would otherwise probe.
     if (address.port > 20_000) return address.port;
   }
   throw new Error("could not find a free high port for the scanner fixture");
 }
 
-// The scanner is deterministic apart from port occupancy, so a free preferred
-// port pins the chosen value exactly: returning any other port (a hardcoded
-// default, an unrelated offset) must fail rather than merely differ.
 test("keeps a free preferred port", async () => {
   const preferred = await freePort();
   const { stdout } = await execFileAsync(process.execPath, [scriptPath, String(preferred)]);
@@ -48,8 +41,6 @@ test("keeps a free preferred port", async () => {
 });
 
 test("selects the next bindable port when the preferred port is occupied", async (context) => {
-  // Bind a port whose successor is also free, so "skip exactly one" is a
-  // deterministic expectation rather than a race with a busy neighbour.
   let occupied;
   let next;
   for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -76,7 +67,6 @@ test("selects the next bindable port when the preferred port is occupied", async
   assert(occupied, "could not reserve a port with a free successor");
 
   const { stdout } = await execFileAsync(process.execPath, [scriptPath, String(next - 1)]);
-  // Occupied means "skip by one", not "pick any other port".
   assert.equal(Number(stdout.trim()), next);
 });
 
@@ -84,8 +74,6 @@ test("skips ports reserved by services that start later", async () => {
   const { stdout } = await execFileAsync(process.execPath, [scriptPath, "3001"]);
   const selectedPort = Number(stdout.trim());
 
-  // 3001 is reserved for a service that starts after the frontend, so the scan
-  // must land on the immediately following port.
   assert.equal(selectedPort, 3002);
 });
 

@@ -1,16 +1,15 @@
-/**
- * Codebase-wide `meltiply/*` lint rules that encode mistake classes this
- * repository has already fixed once, so they cannot return silently.
- *
- * Loaded as an Oxlint JS plugin (`lint.jsPlugins` in the root vite.config.ts).
- * Rules are syntactic: JS plugins cannot use type information.
- */
-
 const PLATFORM_IDS = new Set(["tiktok", "youtube", "instagram", "facebook", "threads"]);
-const auditReferencePattern = /\bAUD-\d+\b|\bissue #\d+\b|\bpre-migration\b/i;
+const historyReferencePattern = /\bAUD-\d+\b|\bissue #\d+\b|\(#\d+\)|\bpre-migration\b/i;
+const jsdocTagPattern = /^\s*\*?\s*@(param|returns?|throws|type|typedef|template)\b/m;
+const bannerPattern = /^[\s*/=\-#~_─━═]{6,}$|^[\s]*[=\-─━═]{4,}.*[=\-─━═]{4,}\s*$/;
+const commentedCodePattern =
+  /^\s*(?:(?:const|let|var|import|export|return|await|throw)\s.*[;{)]|(?:if|for|while)\s*\(.*\)\s*\{?|[\w.]+\(.*\);)\s*$/;
+const toolDirectivePattern =
+  /^\s*(?:prettier-ignore|eslint-|oxlint-|@ts-|istanbul|c8|v8|vite-ignore|webpackChunkName|@vite-ignore|#__PURE__|@__PURE__|global\s)/;
 const messageClassifierMethods = new Set(["includes", "startsWith", "endsWith", "match", "test"]);
+const docCommentAllowedPattern = /\/packages\/[^/]+\/src\//;
+const vendoredPattern = /\/frontend\/app\/src\/components\/evilcharts\//;
 
-/** True when `node` reads `<something>.message` or a local named `message`, optionally through `.toLowerCase()`/`.toUpperCase()`/`.trim()`. */
 function readsErrorMessage(node) {
   if (node?.type === "CallExpression" && node.callee.type === "MemberExpression") {
     const name = node.callee.property?.name;
@@ -27,12 +26,10 @@ function readsErrorMessage(node) {
   );
 }
 
-/** True for a string literal naming a supported Platform. */
 function isPlatformLiteral(node) {
   return node?.type === "Literal" && typeof node.value === "string" && PLATFORM_IDS.has(node.value);
 }
 
-/** True for `x.query(...)`, `client.query(...)`, or a bare `query(...)` call. */
 function isQueryCall(node) {
   const callee = node.callee;
   if (callee.type === "Identifier") return callee.name === "query";
@@ -44,7 +41,6 @@ function isQueryCall(node) {
   );
 }
 
-/** True when `expression` contains a conditional or logical expression anywhere in its tree. */
 function containsBranch(expression) {
   if (!expression || typeof expression !== "object") return false;
   if (expression.type === "ConditionalExpression" || expression.type === "LogicalExpression") {
@@ -54,286 +50,235 @@ function containsBranch(expression) {
   return false;
 }
 
-/** Normalizes a filename to forward slashes for path matching. */
-function normalizedFilename(context) {
+function isMemberCall(node, objectName, propertyName) {
+  return (
+    node?.type === "CallExpression" &&
+    node.callee.type === "MemberExpression" &&
+    node.callee.object?.type === "Identifier" &&
+    node.callee.object.name === objectName &&
+    node.callee.property?.name === propertyName
+  );
+}
+
+function filenameOf(context) {
   return String(context.filename ?? "").replaceAll("\\", "/");
+}
+
+function rule(message, create) {
+  return {
+    meta: { type: "problem", messages: { restricted: message } },
+    create(context) {
+      return create(context, (target) =>
+        context.report(
+          target.loc && !target.type
+            ? { loc: target.loc, messageId: "restricted" }
+            : { node: target, messageId: "restricted" },
+        ),
+      );
+    },
+  };
+}
+
+function commentRule(message, matches) {
+  return rule(message, (context, report) => ({
+    Program() {
+      for (const comment of context.sourceCode.getAllComments()) {
+        if (matches(comment, context)) report({ loc: comment.loc });
+      }
+    },
+  }));
+}
+
+function isToolDirective(comment) {
+  return toolDirectivePattern.test(comment.value);
+}
+
+function isLicenseHeader(comment) {
+  return /@license|SPDX-License-Identifier|Copyright \(c\)/i.test(comment.value);
+}
+
+function isExportDocComment(comment, context) {
+  const token = context.sourceCode.getTokenAfter(comment, { includeComments: false });
+  return token?.type === "Keyword" && token.value === "export";
 }
 
 const codebasePlugin = {
   meta: { name: "meltiply" },
   rules: {
-    /**
-     * Bans `value as unknown as T`. A double assertion discards every type
-     * check between two unrelated shapes; build a typed value (a test
-     * builder, a schema decode, or a narrow port type) instead.
-     */
-    "no-unknown-double-cast": {
-      meta: {
-        type: "problem",
-        messages: {
-          restricted:
-            "Do not cast through `unknown`. Build a typed value (typed test builder, schema decode, or a narrow port type) instead.",
+    "no-unknown-double-cast": rule(
+      "Do not cast through `unknown`. Build a typed value (typed test builder, schema decode, or a narrow port type) instead.",
+      (_context, report) => ({
+        TSAsExpression(node) {
+          const inner = node.expression;
+          if (
+            inner?.type === "TSAsExpression" &&
+            inner.typeAnnotation?.type === "TSUnknownKeyword"
+          ) {
+            report(node);
+          }
         },
-      },
-      create(context) {
-        return {
-          TSAsExpression(node) {
-            const inner = node.expression;
-            if (
-              inner?.type === "TSAsExpression" &&
-              inner.typeAnnotation?.type === "TSUnknownKeyword"
-            ) {
-              context.report({ node, messageId: "restricted" });
-            }
-          },
-        };
-      },
-    },
+      }),
+    ),
 
-    /**
-     * Bans classifying errors by substring-matching their message text.
-     * Message wording is not a contract; a rewording silently reclassifies a
-     * failure. Branch on an error class, `_tag`, or a typed error code.
-     */
-    "no-error-message-classification": {
-      meta: {
-        type: "problem",
-        messages: {
-          restricted:
-            "Do not classify errors by message text. Branch on an error class, `_tag`, or a typed error code.",
+    "no-error-message-classification": rule(
+      "Do not classify errors by message text. Branch on an error class, `_tag`, or a typed error code.",
+      (_context, report) => ({
+        CallExpression(node) {
+          const callee = node.callee;
+          if (
+            callee.type !== "MemberExpression" ||
+            callee.computed ||
+            !messageClassifierMethods.has(callee.property?.name)
+          ) {
+            return;
+          }
+          const classifies =
+            callee.property.name === "test"
+              ? node.arguments.some((argument) => readsErrorMessage(argument))
+              : readsErrorMessage(callee.object);
+          if (classifies) report(node);
         },
-      },
-      create(context) {
-        return {
-          CallExpression(node) {
-            const callee = node.callee;
-            if (
-              callee.type !== "MemberExpression" ||
-              callee.computed ||
-              !messageClassifierMethods.has(callee.property?.name)
-            ) {
-              return;
-            }
-            if (callee.property.name === "test") {
-              if (node.arguments.some((argument) => readsErrorMessage(argument))) {
-                context.report({ node, messageId: "restricted" });
-              }
-              return;
-            }
-            if (readsErrorMessage(callee.object)) {
-              context.report({ node, messageId: "restricted" });
-            }
-          },
-        };
-      },
-    },
+      }),
+    ),
 
-    /**
-     * Requires the shared `errorMessage(cause, fallback)` helper from
-     * `@meltiply/domain` instead of re-implementing
-     * `cause instanceof Error ? cause.message : fallback` at each boundary.
-     */
-    "prefer-error-message-helper": {
-      meta: {
-        type: "suggestion",
-        messages: {
-          restricted:
-            "Use errorMessage(cause, fallback) from @meltiply/domain instead of an inline `instanceof Error ? .message :` ternary.",
+    "prefer-error-message-helper": rule(
+      "Use errorMessage(cause, fallback) from @meltiply/domain instead of an inline `instanceof Error ? .message :` ternary.",
+      (_context, report) => ({
+        ConditionalExpression(node) {
+          const test = node.test;
+          if (
+            test?.type === "BinaryExpression" &&
+            test.operator === "instanceof" &&
+            test.right?.type === "Identifier" &&
+            test.right.name === "Error" &&
+            readsErrorMessage(node.consequent)
+          ) {
+            report(node);
+          }
         },
-      },
-      create(context) {
-        return {
-          ConditionalExpression(node) {
-            const test = node.test;
-            if (
-              test?.type === "BinaryExpression" &&
-              test.operator === "instanceof" &&
-              test.right?.type === "Identifier" &&
-              test.right.name === "Error" &&
-              readsErrorMessage(node.consequent)
-            ) {
-              context.report({ node, messageId: "restricted" });
-            }
-          },
-        };
-      },
-    },
+      }),
+    ),
 
-    /**
-     * Bans re-declaring the Platform roster. `PLATFORM_IDS` in
-     * `@meltiply/domain` is the single source; a copied list silently misses a
-     * newly supported Platform.
-     */
-    "no-platform-roster-literal": {
-      meta: {
-        type: "problem",
-        messages: {
-          restricted:
-            "Do not re-declare the Platform roster. Import PLATFORM_IDS from @meltiply/domain (or derive from it).",
-        },
-      },
-      create(context) {
-        if (normalizedFilename(context).endsWith("packages/domain/src/index.ts")) return {};
+    "no-platform-roster-literal": rule(
+      "Do not re-declare the Platform roster. Import PLATFORM_IDS from @meltiply/domain (or derive from it).",
+      (context, report) => {
+        if (filenameOf(context).endsWith("packages/domain/src/index.ts")) return {};
         return {
           ArrayExpression(node) {
-            const platforms = node.elements.filter(isPlatformLiteral);
-            if (platforms.length >= 3) context.report({ node, messageId: "restricted" });
+            if (node.elements.filter(isPlatformLiteral).length >= 3) report(node);
           },
         };
       },
-    },
+    ),
 
-    /**
-     * Bans building SQL text with a conditional fragment inside a `query()`
-     * template. Branching SQL text licenses injection the day a branch takes
-     * a value; select between complete literal statements instead.
-     */
-    "no-sql-conditional-fragment": {
-      meta: {
-        type: "problem",
-        messages: {
-          restricted:
-            "Do not branch inside SQL template text. Select between two complete literal statements, and pass data as $n parameters.",
+    "no-sql-conditional-fragment": rule(
+      "Do not branch inside SQL template text. Select between two complete literal statements, and pass data as $n parameters.",
+      (_context, report) => ({
+        CallExpression(node) {
+          if (!isQueryCall(node)) return;
+          const text = node.arguments[0];
+          if (text?.type === "TemplateLiteral" && text.expressions.some(containsBranch)) {
+            report(text);
+          }
         },
-      },
-      create(context) {
-        return {
-          CallExpression(node) {
-            if (!isQueryCall(node)) return;
-            const text = node.arguments[0];
-            if (text?.type === "TemplateLiteral" && text.expressions.some(containsBranch)) {
-              context.report({ node: text, messageId: "restricted" });
-            }
-          },
-        };
-      },
-    },
+      }),
+    ),
 
-    /**
-     * Bans `[...text].length`, which allocates one array element per code
-     * point just to count them. Use the shared zero-allocation
-     * `codePointLength(text)` from @meltiply/domain.
-     */
-    "no-codepoint-spread-length": {
-      meta: {
-        type: "suggestion",
-        messages: {
-          restricted:
-            "Use codePointLength(text) from @meltiply/domain instead of allocating `[...text].length`.",
+    "no-codepoint-spread-length": rule(
+      "Use codePointLength(text) from @meltiply/domain instead of allocating `[...text].length`.",
+      (_context, report) => ({
+        MemberExpression(node) {
+          if (
+            !node.computed &&
+            node.property?.type === "Identifier" &&
+            node.property.name === "length" &&
+            node.object?.type === "ArrayExpression" &&
+            node.object.elements.length === 1 &&
+            node.object.elements[0]?.type === "SpreadElement"
+          ) {
+            report(node);
+          }
         },
-      },
-      create(context) {
-        return {
-          MemberExpression(node) {
-            if (
-              !node.computed &&
-              node.property?.type === "Identifier" &&
-              node.property.name === "length" &&
-              node.object?.type === "ArrayExpression" &&
-              node.object.elements.length === 1 &&
-              node.object.elements[0]?.type === "SpreadElement"
-            ) {
-              context.report({ node, messageId: "restricted" });
-            }
-          },
-        };
-      },
-    },
+      }),
+    ),
 
-    /**
-     * Bans `JSON.parse(raw) as T` for any `T` other than `unknown`. Parsed JSON
-     * is untrusted until a schema or guard narrows it.
-     */
-    "no-json-parse-cast": {
-      meta: {
-        type: "problem",
-        messages: {
-          restricted:
-            "Parsed JSON is untrusted. Assign it as `unknown` and narrow with a schema or type guard instead of asserting a type.",
+    "no-json-parse-cast": rule(
+      "Parsed JSON is untrusted. Assign it as `unknown` and narrow with a schema or type guard instead of asserting a type.",
+      (_context, report) => ({
+        TSAsExpression(node) {
+          if (
+            isMemberCall(node.expression, "JSON", "parse") &&
+            node.typeAnnotation?.type !== "TSUnknownKeyword"
+          ) {
+            report(node);
+          }
         },
-      },
-      create(context) {
-        return {
-          TSAsExpression(node) {
-            const parsed = node.expression;
-            if (
-              parsed?.type === "CallExpression" &&
-              parsed.callee.type === "MemberExpression" &&
-              parsed.callee.object?.type === "Identifier" &&
-              parsed.callee.object.name === "JSON" &&
-              parsed.callee.property?.name === "parse" &&
-              node.typeAnnotation?.type !== "TSUnknownKeyword"
-            ) {
-              context.report({ node, messageId: "restricted" });
-            }
-          },
-        };
-      },
-    },
+      }),
+    ),
 
-    /**
-     * Bans React keys derived from the clock. `Date.now()` collides within a
-     * millisecond and changes identity on every render path that rebuilds it.
-     */
-    "no-time-derived-key": {
-      meta: {
-        type: "problem",
-        messages: {
-          restricted:
-            "Do not derive identities from Date.now(). Use crypto.randomUUID() or a stable domain id.",
+    "no-time-derived-key": rule(
+      "Do not derive identities from Date.now(). Use crypto.randomUUID() or a stable domain id.",
+      (_context, report) => ({
+        TemplateLiteral(node) {
+          if (!node.expressions.some((expression) => isMemberCall(expression, "Date", "now"))) {
+            return;
+          }
+          const parent = node.parent;
+          const isKeyAttribute =
+            parent?.type === "JSXExpressionContainer" &&
+            parent.parent?.type === "JSXAttribute" &&
+            parent.parent.name?.name === "key";
+          const isKeyProperty =
+            parent?.type === "Property" &&
+            parent.key?.type === "Identifier" &&
+            parent.key.name === "key";
+          if (isKeyAttribute || isKeyProperty) report(node);
         },
-      },
-      create(context) {
-        return {
-          TemplateLiteral(node) {
-            const usesClock = node.expressions.some(
-              (expression) =>
-                expression.type === "CallExpression" &&
-                expression.callee.type === "MemberExpression" &&
-                expression.callee.object?.type === "Identifier" &&
-                expression.callee.object.name === "Date" &&
-                expression.callee.property?.name === "now",
-            );
-            if (!usesClock) return;
-            const parent = node.parent;
-            const isKeyAttribute =
-              parent?.type === "JSXExpressionContainer" &&
-              parent.parent?.type === "JSXAttribute" &&
-              parent.parent.name?.name === "key";
-            const isKeyProperty =
-              parent?.type === "Property" &&
-              parent.key?.type === "Identifier" &&
-              parent.key.name === "key";
-            if (isKeyAttribute || isKeyProperty) context.report({ node, messageId: "restricted" });
-          },
-        };
-      },
-    },
+      }),
+    ),
 
-    /**
-     * Bans comments that cite audit IDs, issue numbers, or migration history.
-     * Comments state current contracts; history belongs in Git.
-     */
-    "no-history-comments": {
-      meta: {
-        type: "suggestion",
-        messages: {
-          restricted:
-            "Comments state current behavior. Remove audit IDs, issue numbers, and migration history; Git records history.",
+    "no-export-star": rule(
+      "List public exports explicitly. `export *` leaks internals and hides import cycles.",
+      (_context, report) => ({
+        ExportAllDeclaration(node) {
+          report(node);
         },
+      }),
+    ),
+
+    "no-history-comments": commentRule(
+      "Comments state current behavior. Remove audit IDs, issue numbers, and migration history; Git records history.",
+      (comment) => historyReferencePattern.test(comment.value),
+    ),
+
+    "no-jsdoc-type-tags": commentRule(
+      "Do not narrate signatures with @param/@returns/@throws/@type tags. Names and types carry the contract.",
+      (comment) => comment.type === "Block" && jsdocTagPattern.test(comment.value),
+    ),
+
+    "no-doc-comment-outside-package-contract": commentRule(
+      "Doc comments belong only on exported packages/* contracts. Rename, extract, or type the code so it needs no prose.",
+      (comment, context) => {
+        if (comment.type !== "Block" || !comment.value.startsWith("*")) return false;
+        if (isLicenseHeader(comment) || isToolDirective(comment)) return false;
+        const filename = filenameOf(context);
+        if (vendoredPattern.test(filename)) return false;
+        return !(docCommentAllowedPattern.test(filename) && isExportDocComment(comment, context));
       },
-      create(context) {
-        return {
-          Program() {
-            for (const comment of context.sourceCode.getAllComments()) {
-              if (auditReferencePattern.test(comment.value)) {
-                context.report({ loc: comment.loc, messageId: "restricted" });
-              }
-            }
-          },
-        };
-      },
-    },
+    ),
+
+    "no-banner-comments": commentRule(
+      "Do not divide files with banner comments. Split the module instead.",
+      (comment) => comment.value.split("\n").some((line) => bannerPattern.test(line.trim())),
+    ),
+
+    "no-commented-out-code": commentRule(
+      "Delete commented-out code. Git keeps history.",
+      (comment) =>
+        comment.type === "Line" &&
+        !isToolDirective(comment) &&
+        commentedCodePattern.test(comment.value),
+    ),
   },
 };
 

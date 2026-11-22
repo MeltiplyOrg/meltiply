@@ -55,7 +55,6 @@ test("mutation guard requires explicit apply, exact SHA, and plan digest", () =>
   }
 });
 
-/** A valid approval or confirmation from staging cannot authorize production. */
 test("production mutation intent and approvals cannot be borrowed from staging", () => {
   const production = { ...spec, environment: "production" };
   assert.throws(
@@ -170,8 +169,6 @@ test("approval loading enforces expected job and reviewed plan", async (context)
     }),
     /missing required jobs/,
   );
-  // The loader returns the decoded, name-sorted records — not just any two
-  // entries — so a mutant that returned placeholders could not pass.
   const loadedPair = await loadApprovalMetadata({
     expectedNames: new Set(["staging-release-approval", "staging-traffic-approval"]),
     paths: [file, trafficFile],

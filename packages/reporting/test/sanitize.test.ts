@@ -9,14 +9,6 @@ import {
   usageProperties,
 } from "../src/sanitize";
 
-/**
- * Sanitization cases.
- *
- * These prove the allowlist itself, using deliberate sensitive canaries. They are
- * supplementary: the integration suites assert the same canaries never reach the
- * bytes a real capture receiver actually receives.
- */
-
 const context = { appVersion: "1.0.0-target.0", deploymentCategory: "selfhosted" } as const;
 
 const usageInput = {

@@ -51,55 +51,29 @@ export const store = {
   listeners: new Set<() => void>(),
   options: undefined as Partial<SileoOptions> | undefined,
 
-  /** Notifies every mounted viewport after a committed notification-list change. */
   emit() {
     for (const fn of this.listeners) fn();
   },
 
-  /** Replaces the immutable list snapshot and synchronously notifies subscribed viewports. */
   update(fn: (prev: SileoItem[]) => SileoItem[]) {
     this.toasts = fn(this.toasts);
     this.emit();
   },
 };
 
-/**
- * Subscribes a React store consumer to toast list changes.
- *
- * @param listener - Callback invoked whenever `store.toasts` updates.
- * @returns Cleanup function removing the listener.
- */
 export function subscribeStore(listener: () => void): () => void {
   store.listeners.add(listener);
   return () => store.listeners.delete(listener);
 }
 
-/**
- * Returns the live client toast array for `useSyncExternalStore`.
- *
- * @returns Current toast array in the global Sileo store.
- */
 export function getStoreSnapshot(): SileoItem[] {
   return store.toasts;
 }
 
-/**
- * Returns a stable empty array during SSR before hydration.
- *
- * @returns Empty `SileoItem` list.
- */
 export function getServerStoreSnapshot(): SileoItem[] {
   return EMPTY_TOASTS;
 }
 
-/**
- * Marks a toast instance as exiting and removes it after the exit transition.
- * Matching runs on `instanceId` rather than the shared `id` so a replacement
- * emitted under the same `id` during `EXIT_DURATION` is never swept out by
- * the exiting instance's delayed removal.
- *
- * @param item - Exact `SileoItem` record to dismiss.
- */
 export function dismissToast(item: SileoItem): void {
   const live = store.toasts.find((t) => t.instanceId === item.instanceId);
   if (!live || live.exiting) return;
@@ -114,14 +88,6 @@ export function dismissToast(item: SileoItem): void {
   );
 }
 
-/**
- * Computes expand and collapse delays for a toast's autopilot cycle, clamped
- * to the toast's total lifetime.
- *
- * @param opts - Toast options including optional autopilot overrides.
- * @param duration - Total toast visibility duration in milliseconds, or null for persistent toasts.
- * @returns Resolved `expandDelayMs` and `collapseDelayMs` values.
- */
 function resolveAutopilot(
   opts: InternalSileoOptions,
   duration: number | null,
@@ -135,14 +101,6 @@ function resolveAutopilot(
   };
 }
 
-/**
- * Constructs a normalized `SileoItem` record with a fresh `instanceId` so
- * repeated emissions to the same `id` trigger Sileo's morphing refresh cycle.
- *
- * @param merged - Merged global and callsite options.
- * @param id - Target toast identifier.
- * @returns Complete `SileoItem` entry ready for store insertion.
- */
 function buildSileoItem(merged: InternalSileoOptions, id: string): SileoItem {
   const duration = merged.duration === undefined ? DEFAULT_TOAST_DURATION : merged.duration;
   const auto = resolveAutopilot(merged, duration);
@@ -155,12 +113,6 @@ function buildSileoItem(merged: InternalSileoOptions, id: string): SileoItem {
   };
 }
 
-/**
- * Creates or morphs an existing toast in the shared Sileo store.
- *
- * @param options - Toast content, state, and timing configuration.
- * @returns Object containing the resolved toast `id` and `duration`.
- */
 function createToast(options: InternalSileoOptions): {
   id: string;
   duration: number | null;
@@ -188,15 +140,6 @@ function createToast(options: InternalSileoOptions): {
 
 type ToastVariant = "default" | "success" | "error" | "warning" | "info";
 
-/**
- * Pushes action feedback into the shared Sileo store. A headline and meaningful
- * supporting detail are required so every notification can expand and morph;
- * descriptions identify the affected object, copied value, or recovery action.
- *
- * @param title - Short outcome headline (e.g. "Post scheduled").
- * @param options.description - Supporting detail shown in the expanded body.
- * @param options.variant - Semantic state (`default` maps to `info`).
- */
 export function toast(
   title: string,
   options: { description: string; variant?: ToastVariant },

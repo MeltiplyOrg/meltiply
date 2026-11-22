@@ -5,21 +5,11 @@ import { resolve } from "node:path";
 const codeFencePattern = /^\s{0,3}(`{3,}|~{3,})/u;
 const closingFencePattern = /^\s{0,3}(`{3,}|~{3,})\s*$/u;
 
-/**
- * Vendored third-party agent skill directories excluded from repository Markdown
- * gates, matching the ignore scope in `vite.config.ts` and `knip.json`.
- */
 const vendoredMarkdownPrefixes = [".agents/", ".claude/", ".opencode/", ".kiro/", ".omp/"];
 
 /**
- * Masks fenced code blocks with empty strings while preserving 1:1 line indices.
- *
- * Follows CommonMark closing fence rules: a closing fence uses the same fence
- * character, has at least as many characters as the opener, and carries no info
- * string (only optional leading/trailing whitespace).
- *
- * @param {string} content - Full Markdown file content
- * @returns {Array<string>} Array of lines with fenced blocks replaced by ""
+ * CommonMark: a closing fence repeats the opening character at least as many times
+ * and carries no info string.
  */
 export function markdownLines(content) {
   let fence;
@@ -41,14 +31,7 @@ export function markdownLines(content) {
   });
 }
 
-/**
- * Replaces backtick-delimited inline code spans with spaces of equal length.
- * A span opens with a run of backticks and closes with the next run of the exact
- * same length, so ``a `b` c`` masks as one span. Unmatched runs stay literal.
- *
- * @param {string} line - Single Markdown line
- * @returns {string} Line with inline code spans replaced by spaces
- */
+/** CommonMark: a code span closes at the next backtick run of the same length. */
 export function maskInlineCode(line) {
   let masked = "";
   let index = 0;
@@ -85,14 +68,6 @@ export function maskInlineCode(line) {
   return masked;
 }
 
-/**
- * Lists existing Git-tracked repository Markdown files, excluding vendored
- * third-party agent skill directories (`.agents/**`, `.claude/**`, etc.) and
- * deduplicating symlinked aliases (such as `CLAUDE.md` -> `AGENTS.md`).
- *
- * @param {string} repositoryRoot - Absolute repository root directory path
- * @returns {Array<string>} Repository-relative Markdown file paths
- */
 export function trackedMarkdownFiles(repositoryRoot) {
   const seen = new Set();
   return execFileSync("git", ["ls-files", "-z", "--", ":(glob)**/*.md"], {

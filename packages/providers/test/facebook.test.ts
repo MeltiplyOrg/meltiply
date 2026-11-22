@@ -688,7 +688,7 @@ describe("createFacebookAdapter", () => {
     expect(connection.accessToken).toBe("page-access-secret");
     expect(connection.account.id).toBe("page-1");
     expect(connection.expiresAt).toBeUndefined();
-    const refreshed = await provider.refreshAccessToken!(context, connection.refreshToken!);
+    const refreshed = await provider.refreshAccessToken!(context, connection.refreshToken ?? "");
     expect(refreshed.accessToken).toBe("rotated-page-secret");
     expect(refreshed.expiresAt).toBeUndefined();
     expect(refreshed.refreshToken).toBe(

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Shared local-Wrangler environment handling. Source this after `set -euo pipefail`.
 
 load_local_env() {
   local env_file=$1
@@ -7,7 +6,6 @@ load_local_env() {
   local -a inherited_wrangler_env=()
   [[ -f "$env_file" ]] || return 0
 
-  # Command-line Worker overrides are more specific than repository defaults.
   while IFS= read -r name; do
     inherited_wrangler_env+=("$name=${!name}")
   done < <(compgen -v WRANGLER_DEV_)
@@ -22,10 +20,6 @@ load_local_env() {
   done
 }
 
-# Derive the same host, bind address, and CORS origins as `make dev` when a
-# Worker launcher runs on its own. Explicit process or `.env` values take
-# precedence. Signing keys default to loopback on the selected API port so
-# protected public tunnels do not require a browser Access session in the Worker.
 configure_local_wrangler_network() {
   local repo_root=$1
   local frontend_port=$2
@@ -51,14 +45,10 @@ append_local_wrangler_env_file() {
   wrangler_args_ref+=(--env-file "$env_file")
 }
 
-# Append public origin and trusted key-fetch overrides to the named Wrangler
-# argument array. Explicit local overrides win; no credential values are emitted.
 append_local_wrangler_overrides() {
   local args_name=$1
   local -n wrangler_args_ref="$args_name"
 
-  # The config's local origins stay authoritative even when the root `.env`
-  # keeps browser settings blank. These are non-secret command-line variables.
   local allowed_origins="${WRANGLER_DEV_ALLOWED_ORIGINS:-http://localhost:3000}"
   local frontend_url="${WRANGLER_DEV_APP_URL:-http://localhost:3000}"
   local jwks_url="${WRANGLER_DEV_BETTER_AUTH_JWKS_URL:-http://127.0.0.1:8787/api/auth/jwks}"
@@ -223,14 +213,10 @@ launch_local_wrangler_backend() {
     exit 1
   fi
 
-  # Container callers need the Docker-facing listener's signed S3 endpoint;
-  # the shared launcher supplies it without widening the API's configured bind.
   configure_local_r2_endpoint_host "$containers_enabled"
-  # The gateway reports its final signed authority after allocating the relay.
   printf '%s using http://%s:%s\n' \
     "$banner_label" "${WRANGLER_DEV_IP:-127.0.0.1}" "$wrangler_port"
 
-  # The sourced `.env` may contain shell, so re-anchor relative paths.
   cd "$repo_root"
   local wrangler_args=(dev) config
   for config in "$@"; do

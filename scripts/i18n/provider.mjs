@@ -1,17 +1,8 @@
 import { isRetryableStatus } from "./retry.mjs";
 
-/** Default per-request timeout for one translation provider completion. */
 export const DEFAULT_TIMEOUT_MS = 120_000;
 
-/**
- * Provider failure with enough classification for retry, fallback, and
- * actionable terminal errors. Messages never include the prompt or credentials.
- */
 export class ProviderError extends Error {
-  /**
-   * @param {string} message Safe, actionable description.
-   * @param {{status?: number, kind?: "auth" | "transient" | "malformed" | "provider", retryable?: boolean, cause?: unknown}} [options]
-   */
   constructor(message, { status, kind = "provider", retryable = false, cause } = {}) {
     super(message, { cause });
     this.name = "ProviderError";
@@ -21,18 +12,6 @@ export class ProviderError extends Error {
   }
 }
 
-/**
- * Maps an HTTP failure from a translation provider to a classified `ProviderError`
- * with a bounded response body suffix (at most 500 characters). Provider-specific
- * status overrides (such as 401/403 auth guidance or 404 model-pull guidance) may
- * be supplied via `overrides`.
- *
- * @param {string} providerName - Human-readable provider label (e.g., `"Ollama"`, `"Workers AI"`).
- * @param {number} status - HTTP status code.
- * @param {string} body - Raw response body used for a bounded error suffix.
- * @param {Record<number, {message: string, kind?: "auth" | "transient" | "malformed" | "provider", retryable?: boolean}>} [overrides] - Optional status-specific messages and classifications.
- * @returns {ProviderError} Classified provider error.
- */
 export function createStatusError(providerName, status, body, overrides = {}) {
   const detail = body.trim().slice(0, 500);
   const suffix = detail ? `: ${detail}` : "";
@@ -61,17 +40,6 @@ export function createStatusError(providerName, status, body, overrides = {}) {
   });
 }
 
-/**
- * Accepts only the bare JSON array a translation provider was asked for.
- * Reasoning text, markdown fences, prose, or non-string entries are malformed
- * output: the fallback model gets a chance instead of a partial catalog. When
- * the prompt carries Shipi18n's string array, the returned length must match it
- * too, so a truncated batch cannot escape the fallback path.
- *
- * @param {string} text Raw model text.
- * @param {number | undefined} expectedCount Number of strings in the batch.
- * @throws {ProviderError} When the output is not a correctly sized string array.
- */
 export function assertTranslationArray(text, expectedCount) {
   let parsed;
   try {
@@ -96,14 +64,6 @@ export function assertTranslationArray(text, expectedCount) {
   }
 }
 
-/**
- * Reads the batch size from Shipi18n's user prompt. When the marker is absent
- * or the array cannot be parsed, length validation is skipped rather than
- * failing a request the adapter does not fully understand.
- *
- * @param {string} prompt Shipi18n batch prompt.
- * @returns {number | undefined} Number of strings the model must return.
- */
 export function expectedTranslationCount(prompt) {
   const marker = "STRINGS TO TRANSLATE (JSON array):";
   const markerIndex = prompt.indexOf(marker);

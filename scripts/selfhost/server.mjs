@@ -14,10 +14,7 @@ import { reportingBindings } from "./reporting.mjs";
 const root = resolve(import.meta.dirname, "../..");
 const dist = resolve(root, "dist/selfhost");
 const metadata = JSON.parse(await readFile(resolve(dist, "metadata.json"), "utf8"));
-/** Maintainer improvement-reporting destination baked into this image; empty when none is provisioned. */
 const imageReporting = JSON.parse(await readFile(resolve(dist, "reporting.json"), "utf8"));
-// The provider decides which storage settings are required, so it is resolved
-// before the settings that depend on it are validated.
 const objectStorageProvider = z
   .enum(["r2", "s3"])
   .parse(process.env.OBJECT_STORAGE_PROVIDER || "r2");
@@ -45,7 +42,6 @@ const config = z
     SELFHOST_REQUIRE_EMAIL_VERIFICATION: z.enum(["true", "false"]).optional(),
   })
   .parse(process.env);
-/** Credentials for the bundled R2 binding; absent when an operator selected S3. */
 const r2Credentials =
   objectStorageProvider === "r2"
     ? z
@@ -107,7 +103,6 @@ const enqueueSchema = z
   .object({ queue: z.string(), messages: z.array(z.unknown()).max(100) })
   .strict();
 
-/** Handles private binding calls only; it is a Miniflare host callback, not a network listener. */
 async function host(request) {
   try {
     const path = new URL(request.url).pathname;
@@ -125,7 +120,6 @@ async function host(request) {
       const message = mailSchema.parse(payload);
       const from = typeof message.from === "string" ? message.from : message.from.email;
       if (from !== config.MAIL_FROM_ADDRESS) return new Response(null, { status: 403 });
-      /** Maps Cloudflare structured identities onto Nodemailer's explicit address fields. */
       const smtpAddress = (value) =>
         typeof value === "string" ? value : { address: value.email, name: value.name ?? "" };
       const receipt = await mail.sendMail({
@@ -151,8 +145,6 @@ const bindings = {
   DATABASE_POOL_MODE: "request",
   VERSION: process.env.VERSION || "selfhost",
   APP_URL: new URL(config.APP_URL).origin,
-  // The public origin may sit behind an authenticating reverse proxy, so the
-  // Worker fetches its own JWKS over loopback instead of the browser URL.
   BETTER_AUTH_JWKS_URL: "http://127.0.0.1:8080/api/auth/jwks",
   OPERATOR_HOSTNAME: new URL(config.APP_URL).hostname,
   BETTER_AUTH_SECRET: config.BETTER_AUTH_SECRET,
@@ -203,25 +195,9 @@ for (const name of [
 ]) {
   if (process.env[name]) bindings[name] = process.env[name];
 }
-// Improvement reporting destination: the released image ships the maintainer's
-// publishable project token and matching ingestion origin so an operator needs
-// no PostHog account. An explicit value in `.env.selfhost` wins, and an empty
-// value with no image default keeps reporting off; either way nothing is
-// transmitted until the Installation Owner opts in and the destination validates.
 Object.assign(bindings, reportingBindings(imageReporting, process.env));
-// The Compose deployment is the self-hosted target; the label never identifies
-// the operator, host, or installation.
 bindings.DEPLOYMENT_CATEGORY = "selfhosted";
 
-// Object storage defaults to the bundled local R2 binding. An operator who
-// runs against an external S3-compatible service sets OBJECT_STORAGE_PROVIDER=s3
-// plus the S3_* settings in .env.selfhost; the same Workers code then reads,
-// writes, and signs there instead. Startup rejects missing or malformed settings
-// rather than letting the stack boot with every asset request failing: the S3
-// settings whenever S3 is selected, and the R2 credentials whenever R2 is
-// (`r2Credentials` above). Origin trust rules (HTTPS, origin only) stay with the
-// signer and surface through /api/v1/ready, so they are reported there rather
-// than duplicated here.
 if (objectStorageProvider === "s3") {
   z.object({
     S3_ACCESS_KEY_ID: z.string().min(1),
@@ -242,12 +218,6 @@ for (const name of [
 ]) {
   if (process.env[name]) bindings[name] = process.env[name];
 }
-/**
- * The bundled local R2 bucket and the credentials its SigV4 gateway accepts.
- *
- * Only the R2 provider reads this bucket, so an S3 deployment binds no bucket at
- * all instead of leaving an unused one behind.
- */
 const bundledR2 = r2Credentials
   ? {
       ASSETS: {
@@ -259,21 +229,12 @@ const bundledR2 = r2Credentials
       },
     }
   : null;
-/** Creates direct PostgreSQL URLs, keeping passwords escaped and distinct RLS/system roles intact. */
 function databaseUrl(role, password) {
   const url = new URL("postgresql://postgres:5432/meltiply");
   url.username = role;
   url.password = password;
   return url.href;
 }
-/**
- * The only bindings the restart probe needs.
- *
- * It is granted object storage settings and nothing else: the probe must not
- * receive the session secret, the provider credentials, or the operator secret
- * that the API and Automation workers legitimately hold. The R2 binding itself
- * arrives from this worker's own `r2Buckets` entry, not from here.
- */
 function diagnosticBindings() {
   const granted = {};
   for (const name of [
@@ -298,7 +259,6 @@ function diagnosticBindings() {
   return granted;
 }
 
-/** Points at immutable Wrangler output; imports/chunks are resolved by the runtime, never rebuilt at startup. */
 function worker(name) {
   const built = metadata[name];
   return {
@@ -329,10 +289,7 @@ const runtime = new Miniflare(
     workers: [
       {
         ...worker("frontend"),
-        // Miniflare's loopback entry validates Host and Origin against fetch
-        // triggers. The configured public origin is the authority the reverse
-        // proxy presents, so reserve a never-used path on that hostname to
-        // allowlist it without shadowing app, API, or signed R2 paths.
+        // Miniflare's loopback entry validates Host and Origin against fetch triggers.
         routes: [`${new URL(config.APP_URL).hostname}/__selfhost_origin_allow__/*`],
         serviceBindings: { API: "api" },
         assets: {
@@ -411,7 +368,6 @@ const control = await startControl(
 );
 let stopping = false;
 
-/** Dispatches all queues serially, preserving per-provider concurrency limits and avoiding unbounded work. */
 async function dispatch() {
   while (!stopping) {
     jobs.schedule("schedule-hourly", 3600000, "0 * * * *");
@@ -442,7 +398,6 @@ async function dispatch() {
   }
 }
 
-/** Streams requests/responses with backpressure; only signed S3 paths can enter runtime-internal routes. */
 function listener() {
   return createServer(async (incoming, outgoing) => {
     try {
@@ -478,7 +433,7 @@ function listener() {
           headers.set(name, Array.isArray(value) ? value.join(", ") : value);
       }
       headers.set("cf-connecting-ip", incoming.socket.remoteAddress || "unknown");
-      // The internal runtime transport must not replace SigV4's signed public authority.
+      // SigV4 signs the public authority.
       headers.set("host", url.host);
       if (url.pathname.startsWith("/cdn-cgi/local/r2/s3/")) {
         headers.set("MF-Proxy-Shared-Secret", proxySecret);
@@ -488,8 +443,6 @@ function listener() {
       outgoing.on("close", () => {
         if (!outgoing.writableFinished) controller.abort();
       });
-      // Preserve HTTP redirects for the browser, including recovery credentials
-      // in callback locations; internal fetch must not consume those redirects.
       const init = {
         method: incoming.method,
         headers,
@@ -545,7 +498,6 @@ dispatching.catch((error) => {
 });
 console.log(JSON.stringify({ event: "selfhost_ready", runtime: "workerd" }));
 
-/** Stops ingress, drains the active job, then closes the runtime and durable broker; Compose allows ten minutes. */
 async function shutdown(code = 0) {
   if (stopping) return;
   stopping = true;

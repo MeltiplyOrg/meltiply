@@ -33,8 +33,6 @@ test("bootstrap treats only the Worker-not-found API code as an unprovisioned Wo
     true,
   );
   assert.equal(isMissingWorker("workers.api.error.script_not_found [code: 10007]"), true);
-  // Prose that mentions a missing script, or a different API code, is a real
-  // failure: bootstrap must not proceed past a permission or network error.
   assert.equal(isMissingWorker(new Error("Worker script not found in cache")), false);
   assert.equal(
     isMissingWorker(new Error("Authentication error: worker does not exist [code: 10000]")),
@@ -280,7 +278,6 @@ for (const environment of ["staging", "production"]) {
     const secretTag = `${spec.release_id}-automation-secrets`;
     let versions = [{ id: version, tag: "previous" }];
     let activeVersion = version;
-    // Simulate Wrangler state transitions after Bun's local-binary command prefix.
     async function runCommand(_command, args, options = {}) {
       const wrangler = args.slice(3);
       if (wrangler[0] === "versions" && wrangler[1] === "list") {
@@ -400,8 +397,6 @@ for (const environment of ["staging", "production"]) {
     });
 
     assert.equal(deployed.version_id, secretVersion);
-    // Evidence must name exactly the secrets written from the reviewed bundle, and
-    // never their values: a count alone would accept any three names.
     const secretsEvidence = await readFile(
       path.join(outDir, "worker-automation-secrets.json"),
       "utf8",

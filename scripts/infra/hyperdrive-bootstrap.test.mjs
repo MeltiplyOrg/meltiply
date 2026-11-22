@@ -22,7 +22,6 @@ const environment = {
     "postgres://meltiply_system:system-secret@db.example.test/meltiply?sslmode=verify-full",
 };
 
-/** Models both protected PostgreSQL sessions; overrides only the selected catalog view. */
 function roleClientFactory({ connection, missing, bypass, identity, superuser = false } = {}) {
   return async (url) => {
     const role = new URL(url).username;
@@ -120,9 +119,6 @@ test("bootstrap creates missing configurations without exposing credentials", as
     ["GET", "POST", "GET", "POST"],
   );
   const requestBodies = calls.flatMap(({ init }) => (init.body ? [JSON.parse(init.body)] : []));
-  // The origin block is what makes a Hyperdrive configuration usable: a body
-  // that named the configuration but omitted its database host/user/password
-  // must fail here rather than at first query.
   assert.deepEqual(requestBodies, [
     {
       caching: { disabled: true },

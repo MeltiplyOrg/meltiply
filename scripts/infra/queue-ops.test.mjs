@@ -246,8 +246,6 @@ test("dry-run hashes JSON messages and immediately retries their leases", async 
   assert.equal(result.applied, false);
   assert.equal(result.outcome, "dry_run");
   assert.equal(result.message_count, 1);
-  // The digest is the SHA-256 of `content-type NUL body`, which is what makes a
-  // later audit comparable; any other 64-character string must fail.
   assert.equal(
     result.messages[0].digest,
     createHash("sha256").update(`json\0${encodedBody}`).digest("hex"),
@@ -288,8 +286,6 @@ test("apply pushes decoded JSON before acknowledging the DLQ lease", async () =>
 
   assert.equal(result.applied, true);
   assert.equal(result.outcome, "completed");
-  // Applied replay must report the counts the operator reads: one message was
-  // rewritten to the source workload and one DLQ lease was acknowledged.
   assert.equal(result.message_count, 1);
   assert.equal(result.replayed_count, 1);
   assert.equal(result.acknowledged_count, 1);

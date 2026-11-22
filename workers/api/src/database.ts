@@ -8,7 +8,7 @@ import {
   type Pool,
 } from "@meltiply/database";
 
-import { AccessDenied, DatabaseError } from "@meltiply/domain";
+import { ActiveOrganizationRequiredError, DatabaseError } from "@meltiply/domain";
 
 import type { ApiWorkerEnv } from "./env";
 
@@ -110,17 +110,19 @@ export function withSystemTransactionEffect<A, E, R>(
  * Defense-in-depth check confirming the database agrees the caller is an active member.
  *
  * @param client - Active tenant-scoped EffectTransactionClient.
- * @returns Effect resolving to the active organization UUID string or failing with AccessDenied.
+ * @returns Effect resolving to the active organization UUID string or failing with ActiveOrganizationRequiredError.
  */
 export function activeOrganizationIdEffect(
   client: EffectTransactionClient,
-): Effect.Effect<string, AccessDenied | DatabaseError> {
+): Effect.Effect<string, ActiveOrganizationRequiredError | DatabaseError> {
   return client.query<{ id: string }>("SELECT public.auth_active_org_id()::text AS id").pipe(
     Effect.flatMap((result) => {
       const id = result.rows[0]?.id;
       if (!id) {
         return Effect.fail(
-          new AccessDenied("The authenticated identity is not an active organization member."),
+          new ActiveOrganizationRequiredError({
+            message: "The authenticated identity is not an active organization member.",
+          }),
         );
       }
       return Effect.succeed(id);

@@ -1,14 +1,8 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { readJsonFile, sha256 } from "./release-guard.mjs";
-import { releaseInternals } from "./release-lib.mjs";
+import { stableJson } from "../lib/stable-json.mjs";
 
-/**
- * Builds the selected production bundle from the reviewed Wrangler source, then
- * rebases Vite's flattened deploy config into private release scratch. Assets
- * remain in frontend/app/dist, outside the publishable evidence directory.
- * Throws before upload if Vite changed the reviewed identity or routing.
- */
 export async function buildFrontend({
   configPath,
   environment,
@@ -63,17 +57,11 @@ export async function buildFrontend({
     )
     .split(path.sep)
     .join("/");
-  const content = releaseInternals.json(built);
+  const content = stableJson(built);
   await writeFile(target, content, { mode: 0o600 });
   return { configPath: target, build_config_digest: sha256(content) };
 }
 
-/**
- * Refuses domain mutation or manifest publication without frontend candidate and
- * full deployment evidence for this release, reviewed name, and exact source /
- * generated config bytes. Missing or mismatched artifacts name the frontend step.
- * Returns the validated evidence pair; never contacts or mutates a provider.
- */
 export async function assertFrontendReleaseEvidence({ iac, outDir, spec }) {
   try {
     const candidate = await readJsonFile(

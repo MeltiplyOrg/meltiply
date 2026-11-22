@@ -70,11 +70,6 @@ export interface ObjectStore {
    * staging namespace is the store's core job, so a store that cannot copy
    * cannot fulfill the contract and must fail at wiring time instead of
    * silently skipping the promotion step.
-   *
-   * @param sourceKey - Existing source object key.
-   * @param destinationKey - Destination object key; never written when present.
-   * @param options - `ifSourceEtagMatches` conditional source ETag, `contentType` written metadata, `ifDestinationAbsent` guards the destination.
-   * @returns Metadata of the copied object, or `null` when the source ETag did not match or the destination already exists.
    */
   copyObject(
     sourceKey: string,
@@ -198,12 +193,6 @@ export function toStorageError(
   return new StorageUnavailableError({ message });
 }
 
-/**
- * Adapts a Promise-based MultipartUpload handle into an EffectMultipartUpload handle.
- *
- * @param upload - Raw MultipartUpload handle from the storage driver.
- * @returns EffectMultipartUpload handle returning typed Effects.
- */
 function wrapMultipartUpload(upload: MultipartUpload): EffectMultipartUpload {
   return {
     abort: () =>
@@ -256,23 +245,10 @@ export abstract class EffectObjectStore implements ObjectStore {
   abstract readRange(key: string, offset: number, maximumBytes: number): Promise<Uint8Array | null>;
   abstract resumeMultipartUpload(key: string, uploadId: string): MultipartUpload;
 
-  /**
-   * Reads the first N bytes of an object by delegating to `readRange(key, 0, maximumBytes)`.
-   *
-   * @param key - Storage object key.
-   * @param maximumBytes - Number of prefix bytes to read (up to 1 MiB).
-   * @returns Byte buffer if the object exists, or null.
-   */
   readPrefix(key: string, maximumBytes: number): Promise<Uint8Array | null> {
     return this.readRange(key, 0, maximumBytes);
   }
 
-  /**
-   * Retrieves metadata for an object as a typed Effect, returning null if missing.
-   *
-   * @param key - Storage object key.
-   * @returns Effect resolving to ObjectMetadata if found, or null.
-   */
   headEffect(
     key: string,
   ): Effect.Effect<ObjectMetadata | null, StorageUnavailableError | InvalidRequestError> {
@@ -285,9 +261,6 @@ export abstract class EffectObjectStore implements ObjectStore {
   /**
    * Retrieves metadata for an object as a typed Effect, failing with NotFoundError if not found.
    * Distinguishes non-existent objects from transient storage unavailability.
-   *
-   * @param key - Storage object key.
-   * @returns Effect resolving to ObjectMetadata, or failing with NotFoundError.
    */
   getMetadataEffect(
     key: string,
@@ -297,8 +270,6 @@ export abstract class EffectObjectStore implements ObjectStore {
         if (!meta) {
           return Effect.fail(
             new NotFoundError({
-              entityId: key,
-              entityType: "storage_object",
               message: `Storage object not found: ${key}`,
             }),
           );
@@ -308,12 +279,6 @@ export abstract class EffectObjectStore implements ObjectStore {
     );
   }
 
-  /**
-   * Deletes an object from the bucket as a typed Effect.
-   *
-   * @param key - Storage object key to delete.
-   * @returns Effect resolving on successful deletion.
-   */
   deleteEffect(key: string): Effect.Effect<void, StorageUnavailableError | InvalidRequestError> {
     return Effect.tryPromise({
       catch: (cause) => toStorageError(cause, "Failed to delete storage object"),
@@ -321,13 +286,6 @@ export abstract class EffectObjectStore implements ObjectStore {
     });
   }
 
-  /**
-   * Reads the first N bytes of an object as a typed Effect.
-   *
-   * @param key - Storage object key.
-   * @param maximumBytes - Number of prefix bytes to read (up to 1 MiB).
-   * @returns Effect resolving to byte buffer if object exists, or null.
-   */
   readPrefixEffect(
     key: string,
     maximumBytes: number,
@@ -335,12 +293,6 @@ export abstract class EffectObjectStore implements ObjectStore {
     return this.readRangeEffect(key, 0, maximumBytes);
   }
 
-  /**
-   * Opens the whole object for streaming as a typed Effect.
-   *
-   * @param key - Storage object key.
-   * @returns Effect resolving to the streaming body, or null when absent.
-   */
   readEffect(
     key: string,
   ): Effect.Effect<ObjectBody | null, StorageUnavailableError | InvalidRequestError> {
@@ -350,14 +302,6 @@ export abstract class EffectObjectStore implements ObjectStore {
     });
   }
 
-  /**
-   * Reads a bounded slice of an object as a typed Effect.
-   *
-   * @param key - Storage object key.
-   * @param offset - Non-negative start byte offset.
-   * @param maximumBytes - Length of slice to read (between 1 and 1,048,576 bytes).
-   * @returns Effect resolving to byte buffer if found, or null.
-   */
   readRangeEffect(
     key: string,
     offset: number,
@@ -369,13 +313,6 @@ export abstract class EffectObjectStore implements ObjectStore {
     });
   }
 
-  /**
-   * Initiates a multipart upload session as a typed Effect.
-   *
-   * @param key - Destination object key.
-   * @param contentType - MIME content type of the upload.
-   * @returns Effect resolving to EffectMultipartUpload handle.
-   */
   createMultipartUploadEffect(
     key: string,
     contentType: string,
@@ -392,10 +329,6 @@ export abstract class EffectObjectStore implements ObjectStore {
    * Enters the Effect error boundary before touching the provider so a
    * synchronous throw from `resumeMultipartUpload` becomes a typed failure
    * instead of escaping as a defect. `resume("k","u")` resolves to the handle.
-   *
-   * @param key - Destination object key.
-   * @param uploadId - Active multipart upload ID.
-   * @returns Effect resolving to the EffectMultipartUpload controller handle.
    */
   resumeMultipartUploadEffect(
     key: string,

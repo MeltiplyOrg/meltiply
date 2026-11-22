@@ -1,15 +1,4 @@
 #!/usr/bin/env node
-/**
- * `.astro` companion to the `boundaries/*` oxlint rules: oxlint cannot parse
- * landing/docs/shared Astro surfaces. Its frontmatter is sliced at the `---`
- * fences and parsed with `oxc-parser` (the Rust parser behind Vite+ —
- * TypeScript 7 removed its programmatic API);
- * names/allowlists come from `lint/ui-contract-lib.mjs` like the plugin.
- * Flags app-dir specifiers, Radix, deep @meltiply/ui internals, cross-workspace
- * paths, and canonical-basename clones. Raw interactive markup is NOT banned —
- * landing/docs ship sanctioned script-driven native controls.
- * Usage: `node lint/astro-ui-contract.mjs [dir …]` — exit 0 when clean.
- */
 import { readdirSync, readFileSync } from "node:fs";
 import { parseSync } from "oxc-parser";
 import { dirname, join, resolve } from "node:path";
@@ -41,7 +30,6 @@ const SKIP = Object.freeze({
 });
 const COMPONENT_EXT = /\.(astro|tsx|jsx)$/;
 
-/** Returns violation objects for one .astro file's source. */
 export function checkAstroSource(source, file) {
   const filename = normalizePath(file);
   const violations = [];
@@ -86,8 +74,6 @@ export function checkAstroSource(source, file) {
         resolved === null ||
         filename.match(frontendWorkspacePattern)?.[1] ===
           resolved.match(frontendWorkspacePattern)?.[1];
-      // Sanctioned app files are fine from inside frontend/app (relative) or
-      // via the app-only @/ alias; anything else hits the retired namespace.
       if (!sanctioned || !sameWs) {
         flag(
           "obsoleteSpecifier",
@@ -131,7 +117,6 @@ export function checkAstroSource(source, file) {
   return violations;
 }
 
-/** Recursively collects .astro files under dir. */
 function collect(dir) {
   const out = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

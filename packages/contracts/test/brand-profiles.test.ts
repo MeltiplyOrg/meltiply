@@ -33,12 +33,6 @@ const brandProfileFixture = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
-/**
- * Every operation whose request schema carries a `brand_profile_id` property.
- * Descending from `properties` (not `required`) keeps the required-field check
- * meaningful: a field that is declared but optional still has to be found here
- * and then rejected by the assertion below.
- */
 function brandOwnedMutations(document: ContractDocument): string[] {
   const owned: string[] = [];
   for (const pathItem of Object.values(document.paths)) {
@@ -59,21 +53,12 @@ function brandOwnedMutations(document: ContractDocument): string[] {
   return owned.sort();
 }
 
-/**
- * Resolves a dereferenced component schema by name, failing if it is absent.
- * Its structural JsonSchema type supports the brand-profile contract assertions.
- */
 function schemaOf(document: ContractDocument, name: string): JsonSchema {
   const schema: JsonSchema | undefined = document.components?.schemas?.[name];
   expect(schema, `components.schemas.${name}`).toBeDefined();
   return schema!;
 }
 
-/**
- * Collects the effective query parameters of one operation by merging
- * path-item-level and operation-level parameter lists, mirroring OpenAPI
- * parameter inheritance. Fails the test when the operation is absent.
- */
 function queryParameters(
   document: ContractDocument,
   path: string,
@@ -87,10 +72,6 @@ function queryParameters(
   );
 }
 
-/**
- * Finds the brand_profile_id query parameter of one operation, or undefined
- * when the operation does not declare one.
- */
 function brandProfileQueryParameter(
   document: ContractDocument,
   path: string,
@@ -149,13 +130,6 @@ describe("brand profile contract", async () => {
     }
   });
 
-  /**
-   * Locks the nullable short description contract so every Brand Profile response
-   * carries either a 280-character plain-text summary or null. The field is always
-   * present in the response (never omitted) and stays optional on write payloads.
-   * This lets the Channels board describe a profile without inventing client-only
-   * profile metadata.
-   */
   it("exposes a nullable short description on every brand profile", () => {
     const schema = schemaOf(document, "BrandProfile");
     expect(schema.required).toContain("description");
@@ -165,10 +139,6 @@ describe("brand profile contract", async () => {
     });
   });
 
-  /**
-   * Keeps profile creation focused on a name and accessible color while accepting
-   * a nullable short description; updates must retain their partial-patch shape.
-   */
   it("requires name and color while accepting an optional short description", () => {
     const create = schemaOf(document, "CreateBrandProfileRequest");
     expect(create.required).toEqual(expect.arrayContaining(["name", "color"]));
@@ -249,12 +219,6 @@ describe("brand profile contract", async () => {
     });
   });
 
-  /**
-   * Exercises the generated validator with the optional description payload so
-   * the OpenAPI limit protects both creation and description-only updates. Each
-   * rejection asserts the failing keyword and field, so an unrelated validation
-   * failure (for example a missing required sibling) cannot satisfy it.
-   */
   it("accepts and rejects brand profile payloads at the validator seam", () => {
     expect(
       validator.validateRequest("createBrandProfile", {

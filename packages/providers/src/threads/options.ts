@@ -1,7 +1,6 @@
 import type { components } from "@meltiply/contracts/schema";
-import { codePointLength, secureUrl } from "./meta-common";
+import { codePointLength, secureUrl } from "../values";
 
-/** Provider-native container options share the public contract rather than duplicating a large wire model. */
 export type ThreadsPublishOptions = components["schemas"]["ThreadsPublishOptions"];
 export type ThreadsPostOptions = components["schemas"]["ThreadsPostOptions"];
 
@@ -31,7 +30,6 @@ const replyControls = new Set([
   "followers_only",
 ]);
 
-/** Requires a plain JSON object with only the explicit keys; used before every nested type refinement. */
 function object(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
   return (
     !!value &&
@@ -41,7 +39,6 @@ function object(value: unknown, keys: readonly string[]): value is Record<string
   );
 }
 
-/** Checks bounded Unicode draft text; publication additionally requires a nonempty value. */
 function text(value: unknown, maximum: number, allowEmpty = false): value is string {
   return (
     typeof value === "string" &&
@@ -50,7 +47,6 @@ function text(value: unknown, maximum: number, allowEmpty = false): value is str
   );
 }
 
-/** Validates offsets against the actual attached text; out-of-range styling/spoilers never reach Meta. */
 function range(value: Record<string, unknown>, maximum: number): boolean {
   return (
     typeof value.offset === "number" &&
@@ -63,11 +59,7 @@ function range(value: Record<string, unknown>, maximum: number): boolean {
   );
 }
 
-/**
- * Validates bounded, exact-key draft intent without requiring completed poll,
- * GIF, or long-text fields. Draft URLs are inert strings: they are validated
- * before publication, never fetched while saving a partially typed draft.
- */
+/** Exact-key, bounded draft intent; completeness and URL validity are checked by `parseThreadsOptions`. */
 export function parseThreadsPostOptions(value: unknown): ThreadsPostOptions | null {
   if (
     !object(value, [
@@ -157,20 +149,16 @@ export function parseThreadsPostOptions(value: unknown): ThreadsPostOptions | nu
         return null;
     }
   }
-  // Every field, discriminant, nested key, and element has been checked above.
   return value;
 }
 
-/**
- * Refines a structurally valid draft into complete native container options.
- * Blank fields and malformed external references remain saveable draft intent
- * but cannot reach Meta. Content/attachment compatibility is checked separately.
- */
+/** Refines a saveable draft into complete container options; `threadsOptionsIssue` checks content compatibility. */
 export function parseThreadsOptions(value: unknown): ThreadsPublishOptions | null {
   const options = parseThreadsPostOptions(value);
   if (!options) return null;
+  const fields: Record<string, unknown> = options;
   for (const [key, limit] of stringLimits) {
-    const field = options[key as keyof typeof options];
+    const field = fields[key];
     if (field === undefined) continue;
     if (
       !text(field, limit) ||
@@ -253,7 +241,7 @@ export function parseThreadsOptions(value: unknown): ThreadsPublishOptions | nul
   };
 }
 
-/** Returns a user-visible incompatibility before creating any remote container or repost. */
+/** A user-visible incompatibility, checked before any remote container or repost exists. */
 export function threadsOptionsIssue(
   options: ThreadsPublishOptions,
   caption: string,
@@ -307,7 +295,7 @@ export function threadsOptionsIssue(
   return null;
 }
 
-/** Serializes only validated options on the parent container; carousel children never receive post-level flags. */
+/** Applies post-level options; carousel children never receive them. */
 export function applyThreadsOptions(
   parameters: URLSearchParams,
   options: ThreadsPublishOptions,

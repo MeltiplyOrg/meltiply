@@ -22,7 +22,6 @@ verify_phase() {
   esac
 }
 
-# Binds plans and applies to one explicitly selected release commit.
 verify_release_sha() {
   [[ "${MELTIPLY_RELEASE_SHA:-}" =~ ^[0-9a-f]{40}$ ]] ||
     fail "MELTIPLY_RELEASE_SHA must contain exactly 40 lowercase hex characters"
@@ -44,8 +43,6 @@ verify_release_sha() {
     fail "reviewed-sha does not match MELTIPLY_RELEASE_SHA"
 }
 
-# Requires an explicit protected input/backend pair and binds their exact bytes to this release directory.
-# Reuse with another installation, commit, or backend fails before any provider operation.
 verify_release_context() {
   : "${MELTIPLY_RELEASE_INPUT:?MELTIPLY_RELEASE_INPUT must point to protected release input JSON}"
   : "${MELTIPLY_TF_BACKEND_CONFIG:?MELTIPLY_TF_BACKEND_CONFIG must point to protected backend.hcl}"
@@ -75,8 +72,6 @@ verify_release_context() {
     fail "protected release input or backend does not match the reviewed release context"
 }
 
-# Domain attachment requires the reviewed frontend code and its full deployment.
-# Run before backend initialization as well as apply; missing evidence never reaches a provider.
 verify_frontend_deployment() {
   [[ "$phase" == "domain" ]] || return 0
   node --input-type=module -e '
@@ -156,9 +151,6 @@ apply_transition() {
   cp -- "$outputs" "$release_dir/iac-outputs.json"
   chmod 600 "$outputs" "$release_dir/iac-outputs.json"
 
-  # The redacted summary and digest are sufficient durable evidence. The raw
-  # plan and full plan JSON are deleted immediately after their one approved
-  # application and are never eligible for artifact publication.
   rm -f -- "$plan_file" "$release_dir/$phase-plan.json"
 }
 

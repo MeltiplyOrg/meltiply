@@ -16,11 +16,6 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const policyPath = join(repositoryRoot, "scripts/ci/allowed-licenses.json");
 const defaultOutputPath = join(repositoryRoot, "artifacts/sbom.cdx.json");
 
-/**
- * Resolves an installed dependency through Node's search paths, including Bun's
- * isolated workspace symlinks and export-hidden manifests. Missing optional
- * edges are excluded; missing required edges fail instead of shrinking coverage.
- */
 function dependencyManifest(parent, name, optional) {
   if (isBuiltin(name)) return undefined;
   const searchPaths = createRequire(parent).resolve.paths(name) ?? [];
@@ -32,11 +27,6 @@ function dependencyManifest(parent, name, optional) {
   throw new Error(`Missing dependency ${name} required by ${parent}`);
 }
 
-/**
- * Reads declared licensing or a reviewed package/version/declaration correction.
- * Missing or non-SPDX metadata is corrected only when the installed upstream
- * license file matches its SHA-256; changed text or versions fail closed.
- */
 function packageLicense(pkg, manifestPath, corrections) {
   const declared = typeof pkg.license === "string" ? pkg.license : pkg.license?.type;
   const correction = corrections.find(
@@ -51,19 +41,6 @@ function packageLicense(pkg, manifestPath, corrections) {
   return correction.license;
 }
 
-/**
- * Inventories runtime dependencies of every workspace; includeDevelopment also
- * follows workspace devDependencies, never third-party development dependencies.
- * Optional platform packages may be absent, but required edges and license
- * metadata must exist or match a reviewed, hash-pinned upstream license file.
- * An optional synchronous onPackage visitor receives each resolved third-party
- * manifest and its normalized license for artifact notice generation. It runs
- * only for reachable packages; development-only dependencies remain excluded.
- *
- * `workspaceRoot` defaults to `root`. Pass the repository root when `root` is a
- * single workspace so private workspace packages are skipped as local code
- * instead of being rejected for missing third-party license metadata.
- */
 export function javascriptCatalog(
   root = repositoryRoot,
   { includeDevelopment = false, licenseMetadata = [], onPackage, workspaceRoot = root } = {},
@@ -94,11 +71,6 @@ export function javascriptCatalog(
   const visited = new Set();
   const catalog = {};
 
-  /**
-   * Visits each installed manifest once. Workspace development edges are included
-   * only for the development inventory; optional declarations override required
-   * ones, and production excludes optional peers installed only as dev tools.
-   */
   function visit(path) {
     if (visited.has(path)) return;
     visited.add(path);
@@ -153,11 +125,6 @@ export function javascriptCatalog(
   return catalog;
 }
 
-/**
- * Evaluates parsed SPDX choices without weakening the approved-license policy:
- * OR permits one approved alternative, AND requires both, and WITH exceptions
- * and legacy "+" variants require their own explicitly approved identifiers.
- */
 function approvedSpdxNode(node, allowed) {
   if ("conjunction" in node) {
     return node.conjunction === "or"
@@ -168,12 +135,6 @@ function approvedSpdxNode(node, allowed) {
   return allowed.has(identifier);
 }
 
-/**
- * Rejects unapproved SPDX expressions and unreviewed custom terms. OR needs one
- * approved alternative; AND needs both. Package/version/license exceptions can
- * approve custom terms only when every affected entry matches, never globally.
- * Call production without exceptions so development approvals cannot leak in.
- */
 export function assertAllowedLicenses(catalog, allowed, ecosystem, exceptions = []) {
   const approved = new Set(allowed);
   const rejected = Object.keys(catalog)
@@ -206,11 +167,6 @@ export function assertAllowedLicenses(catalog, allowed, ecosystem, exceptions = 
   }
 }
 
-/**
- * Preserves compound SPDX expressions and exceptions in CycloneDX. Reviewed
- * non-SPDX terms and LicenseRef identifiers use license.name, never a false SPDX
- * license.id. The policy gate must approve the catalog before serialization.
- */
 function componentLicense(license) {
   if (license.startsWith("LicenseRef-")) return [{ license: { name: license } }];
   try {
@@ -221,12 +177,6 @@ function componentLicense(license) {
   }
 }
 
-/**
- * Encodes package name segments for Package URL (purl) generation, correctly escaping scoped npm packages.
- *
- * @param {string} name - Raw npm package name
- * @returns {string} URI-encoded purl name component
- */
 function purlName(name) {
   return name
     .split("/")
@@ -234,12 +184,6 @@ function purlName(name) {
     .join("/");
 }
 
-/**
- * Converts a reachable JavaScript license catalog into an array of CycloneDX component descriptors.
- *
- * @param {Record<string, Array<{ name: string, versions: Array<string> }>>} catalog - Filtered reachable license catalog
- * @returns {Array<object>} List of CycloneDX library component objects with package URLs and licenses
- */
 export function javascriptComponents(catalog) {
   const components = [];
   for (const [license, packages] of Object.entries(catalog)) {
@@ -260,14 +204,6 @@ export function javascriptComponents(catalog) {
   return components;
 }
 
-/**
- * Builds a deterministic CycloneDX 1.6 Software Bill of Materials (SBOM) document.
- * Deduplicates and sorts components alphabetically by bom-ref.
- *
- * @param {Array<object>} components - CycloneDX component objects
- * @param {string} version - Root application version string
- * @returns {object} Full CycloneDX 1.6 SBOM object
- */
 export function cycloneDxBom(components, version) {
   const unique = new Map();
   for (const component of components) unique.set(component["bom-ref"], component);
@@ -298,13 +234,6 @@ export function cycloneDxBom(components, version) {
   };
 }
 
-/**
- * Resolves the destination path for the SBOM artifact from CLI arguments or returns the default path.
- *
- * @param {Array<string>} argv - CLI arguments
- * @returns {string} Absolute output file path
- * @throws {TypeError} If CLI arguments are invalid
- */
 function outputPath(argv) {
   if (argv.length === 0) return defaultOutputPath;
   if (argv.length !== 2 || argv[0] !== "--output" || !argv[1]) {
@@ -313,15 +242,6 @@ function outputPath(argv) {
   return resolve(repositoryRoot, argv[1]);
 }
 
-/**
- * Validates production licenses without exceptions, then runtime plus workspace
- * development licenses with narrowly reviewed tool approvals. Writes a complete
- * deterministic CycloneDX SBOM with mode 0o600 only after both inventories pass.
- *
- * @param {Array<string>} [argv=process.argv.slice(2)] - Command line options
- * @returns {{ components: number, output: string }} Count of components included and output file path
- * @throws {Error} If dependency license is unapproved or required metadata is missing
- */
 export function runSupplyChainGate(argv = process.argv.slice(2)) {
   const policy = JSON.parse(readFileSync(policyPath, "utf8"));
   const packageMetadata = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));

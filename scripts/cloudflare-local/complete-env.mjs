@@ -1,6 +1,3 @@
-// Completes a private local environment file before setup starts services. Missing or
-// blank application secrets receive cryptographic random values once; existing values
-// are never rotated. Secret values stay in the file and are never printed or exported.
 import { randomBytes } from "node:crypto";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { parseEnv } from "node:util";

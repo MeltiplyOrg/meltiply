@@ -5,12 +5,11 @@ import {
   type PlatformCapability,
 } from "@meltiply/domain";
 
-import { createFacebookAdapter } from "./facebook";
-import { createInstagramAdapter } from "./instagram";
+import { createFacebookAdapter } from "./facebook/adapter";
+import { createInstagramAdapter } from "./instagram/adapter";
 import { PROVIDER_LIMITS } from "./limits";
-import { assertHttpsOrLoopbackUrl } from "./meta-common";
-import { createThreadsAdapter } from "./threads";
-import { createTikTokAdapter } from "./tiktok";
+import { createThreadsAdapter } from "./threads/adapter";
+import { createTikTokAdapter } from "./tiktok/adapter";
 import type {
   ProviderAdapter,
   ProviderAnalyticsMetric,
@@ -18,9 +17,9 @@ import type {
   ProviderPublicationStatus,
   ProviderRequestContext,
 } from "./types";
-import { createYouTubeAdapter } from "./youtube";
+import { assertHttpsOrLoopbackUrl } from "./values";
+import { createYouTubeAdapter } from "./youtube/adapter";
 
-/** Draft caption constraints are independent of credentials and runtime activation. */
 const captionLimits: Readonly<Record<Platform, number | null>> = {
   facebook: PROVIDER_LIMITS.facebook.maxCaptionCodePoints,
   instagram: PROVIDER_LIMITS.instagram.maxCaptionCodePoints,
@@ -29,7 +28,6 @@ const captionLimits: Readonly<Record<Platform, number | null>> = {
   youtube: PROVIDER_LIMITS.youtube.maxCaptionCodePoints,
 };
 
-/** Deeply freezes a static capability descriptor so shared references stay immutable. */
 function freezeCapability(capability: PlatformCapability): PlatformCapability {
   Object.freeze(capability.accepted_mime_types);
   Object.freeze(capability.asset_types);
@@ -38,7 +36,6 @@ function freezeCapability(capability: PlatformCapability): PlatformCapability {
   return Object.freeze(capability);
 }
 
-/** Pre-frozen unconfigured capability descriptors indexed by analytics mode and platform. */
 function makeUnconfiguredCapabilities(
   analytics: boolean,
 ): Readonly<Record<Platform, PlatformCapability>> {
@@ -69,28 +66,131 @@ function makeUnconfiguredCapabilities(
 const unconfiguredWithAnalytics = makeUnconfiguredCapabilities(true);
 const unconfiguredWithoutAnalytics = makeUnconfiguredCapabilities(false);
 
-export * from "./effect";
-export * from "./failures";
-export * from "./facebook";
-export * from "./facebook-options";
-export * from "./threads-options";
-export * from "./instagram-content";
-export * from "./http";
-export * from "./instagram";
-export * from "./instagram-options";
+export {
+  cancelPublicationEffect,
+  createProviderServiceLive,
+  createProviderServiceTest,
+  exchangeAuthorizationCodeEffect,
+  getAccountAnalyticsEffect,
+  getPublicationRequirementsEffect,
+  isRetryableFailure,
+  listAnalyticsEffect,
+  listCommentsEffect,
+  lookupPublicationEffect,
+  providerCallEffect,
+  ProviderService,
+  publishEffect,
+  readRetrySchedule,
+  refreshAccessTokenEffect,
+  replyEffect,
+  revokeEffect,
+  withReadRetry,
+  type ProviderAdapterSource,
+  type ProviderServiceShape,
+} from "./effect";
+export {
+  classifyProviderFailure,
+  failureDiagnostic,
+  normalizeProviderFailure,
+  ProviderAdapterError,
+  type ProviderAdapterErrorOptions,
+  type ProviderFailureInput,
+  type ProviderRequestDiagnostic,
+} from "./failures";
+export { createFacebookAdapter, type FacebookAdapterOptions } from "./facebook/adapter";
+export {
+  facebookOptimizationGoals,
+  facebookOptionsToWire,
+  resolveFacebookPostType,
+} from "./facebook/options";
+export {
+  ProviderHttpClient,
+  type ProviderErrorDiagnosis,
+  type ProviderHttpClientOptions,
+  type ProviderHttpMethod,
+  type ProviderHttpRequest,
+  type ProviderHttpResponse,
+  type ProviderHttpResponseType,
+} from "./http";
+export { createInstagramAdapter, type InstagramAdapterOptions } from "./instagram/adapter";
+export {
+  applyInstagramContent,
+  defaultInstagramPostType,
+  instagramContentIssue,
+  parseInstagramContent,
+  resolveInstagramOptions,
+  type InstagramContentOptions,
+  type InstagramMediaKind,
+  type ResolvedInstagramOptions,
+} from "./instagram/options";
 export { PROVIDER_LIMITS } from "./limits";
-export * from "./rate-limit";
-export * from "./threads";
-export * from "./tiktok";
-export type * from "./types";
-export * from "./validator";
-export * from "./youtube";
+export { extractRateLimitBudget, type RateLimitBudget } from "./rate-limit";
+export { createThreadsAdapter, type ThreadsAdapterOptions } from "./threads/adapter";
+export {
+  applyThreadsOptions,
+  parseThreadsOptions,
+  parseThreadsPostOptions,
+  threadsOptionsIssue,
+  type ThreadsPostOptions,
+  type ThreadsPublishOptions,
+} from "./threads/options";
+export { createTikTokAdapter, type TikTokAdapterOptions } from "./tiktok/adapter";
+export type {
+  FacebookABTestOptions,
+  FacebookLinkCard,
+  FacebookOptimizationGoal,
+  FacebookPostType,
+  FacebookPublishOptions,
+  InstagramPostType,
+  InstagramPublishOptions,
+  InstagramTrialGraduation,
+  OAuthAccountSelection,
+  OAuthAuthorizationInput,
+  OAuthConnection,
+  OAuthExchangeInput,
+  OAuthExchangeResult,
+  ProviderAccountAnalytics,
+  ProviderAdapter,
+  ProviderAnalyticsMetric,
+  ProviderAnalyticsRecord,
+  ProviderBroadcastInfo,
+  ProviderCommentRecord,
+  ProviderCredentials,
+  ProviderFailure,
+  ProviderFailureClass,
+  ProviderMedia,
+  ProviderMediaMetadata,
+  ProviderOperationMetadata,
+  ProviderOperationResult,
+  ProviderPage,
+  ProviderPageInput,
+  ProviderPublicationLookup,
+  ProviderPublicationRequirements,
+  ProviderPublicationStatus,
+  ProviderPublishOptions,
+  ProviderRemoteMedia,
+  ProviderReplyInput,
+  ProviderRequestContext,
+  ProviderRetryPolicy,
+  ProviderStreamMedia,
+  ProviderTokenSet,
+  ProviderTransferMode,
+  PublishInput,
+  TikTokPrivacyLevel,
+  TikTokPublicationRequirements,
+  TikTokPublishOptions,
+  YouTubePrivacyStatus,
+  YouTubePublishOptions,
+} from "./types";
+export {
+  captionLength,
+  composeCaption,
+  validatePublishInput,
+  type CaptionSource,
+  type ValidationIssue,
+} from "./validator";
+export { createYouTubeAdapter, type YouTubeAdapterOptions } from "./youtube/adapter";
 
-/**
- * Wraps a provider adapter method so `context.metadata` is cleared before
- * invocation and any rate-limit budget extracted during execution is attached
- * to the returned result.
- */
 function wrapWithMetadata<
   Args extends readonly unknown[],
   R extends ProviderOperationResult | ProviderPublicationStatus,
@@ -469,7 +569,7 @@ export function createProviderRegistryFromEnvironment(
     registry.register(
       "tiktok",
       createTikTokAdapter({
-        clientKey: tiktokClientKey,
+        clientId: tiktokClientKey,
         clientSecret: tiktokClientSecret,
         mediaUrlPrefix: tiktokMediaUrlPrefix || `${publicUrl.origin}/api/v1/provider-media/`,
         redirectUri: `${publicUrl.origin}${oauthCallbackPath("tiktok")}`,

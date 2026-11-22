@@ -6,7 +6,6 @@ import { test } from "node:test";
 
 import { createWorkerConfigSession } from "./worker-config-session.mjs";
 
-/** Creates a disposable checkout with real relative Worker/source dependencies. */
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), "meltiply-session-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -19,7 +18,6 @@ async function fixture(t) {
   return { root, config };
 }
 
-/** Existing local secrets stay intact while sessions use independently owned envs. */
 test("existing Worker env files survive concurrent session creation and cleanup", async (t) => {
   const { root, config } = await fixture(t);
   const localEnv = join(dirname(config), ".dev.vars");
@@ -51,7 +49,6 @@ test("existing Worker env files survive concurrent session creation and cleanup"
   assert.equal((await stat(localEnv)).ino, original.ino);
 });
 
-/** Config-relative imports resolve and source edits remain visible without copying code. */
 test("isolated configs preserve relative source and shared-package paths", async (t) => {
   const { root, config } = await fixture(t);
   const session = await createWorkerConfigSession(root, [config], "SECRET=session\n");
@@ -67,7 +64,6 @@ test("isolated configs preserve relative source and shared-package paths", async
   assert.equal(await readFile(config, "utf8"), '{"main":"src/index.js"}');
 });
 
-/** External configs cannot escape the owned mirror or expose unrelated env directories. */
 test("rejects a config outside the checkout", async (t) => {
   const { root } = await fixture(t);
   await assert.rejects(

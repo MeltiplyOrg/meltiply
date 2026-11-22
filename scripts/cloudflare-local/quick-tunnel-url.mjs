@@ -1,35 +1,15 @@
 #!/usr/bin/env node
-// Reads the public origin that `cloudflared` assigns to a Quick Tunnel.
-//
-// A Quick Tunnel has no configuration file and no API to poll: the connector
-// prints the randomly generated `https://<words>.trycloudflare.com` hostname to
-// its own stderr a few seconds after start. `make dev` therefore has to turn
-// that unstructured log into a value it can export as the canonical frontend
-// origin. This helper owns that translation so the dev launcher only deals
-// with a URL or a diagnostic.
-//
-// Usage: quick-tunnel-url.mjs --log <path> [--pid <pid>] [--timeout <seconds>]
 import { readFileSync } from "node:fs";
 
 /**
- * Matches the random Quick Tunnel origin inside connector log output. The
- * hostname is always hyphen-separated lowercase words under `trycloudflare.com`,
- * so this deliberately excludes the surrounding box-drawing characters and the
- * trailing punctuation cloudflared pads the line with.
+ * cloudflared prints the Quick Tunnel origin inside box-drawing characters and
+ * trailing padding; it has no API to query it.
  */
 const quickTunnelOrigin = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
 const pollIntervalMs = 250;
 const defaultTimeoutSeconds = 90;
 const logTailLines = 20;
 
-/**
- * Parses `--log`, `--pid`, and `--timeout` from argv.
- *
- * @param {string[]} argv Arguments after the script name.
- * @returns {{logPath: string, pid: number|undefined, timeoutSeconds: number}}
- *   Validated options. `pid` is undefined when liveness is not tracked.
- * @throws {Error} On an unknown flag or a missing/invalid value.
- */
 function parseArguments(argv) {
   const options = {
     logPath: undefined,
@@ -72,16 +52,6 @@ function parseArguments(argv) {
   return options;
 }
 
-/**
- * Scans connector log output for the first Quick Tunnel origin.
- *
- * A missing log file is an expected state while the connector is still starting
- * up, so it yields `null` rather than throwing; any other read failure is a
- * real error the caller must see.
- *
- * @param {string} logPath Path to the file capturing the connector's output.
- * @returns {string|null} The origin, or null when the log has none yet.
- */
 function readQuickTunnelOrigin(logPath) {
   let contents;
   try {
@@ -94,14 +64,8 @@ function readQuickTunnelOrigin(logPath) {
 }
 
 /**
- * Reports whether the supervised connector process is still running.
- *
- * Signal 0 performs the permission and existence checks without delivering a
- * signal. EPERM means the process exists but belongs to another user, which
- * still counts as alive; ESRCH means it is gone.
- *
- * @param {number|undefined} pid Process id to probe, or undefined to skip.
- * @returns {boolean} True when the process is alive or was never supplied.
+ * Signal 0 checks existence without delivering a signal; EPERM means the process
+ * exists under another user.
  */
 function isRunning(pid) {
   if (pid === undefined) return true;
@@ -113,12 +77,6 @@ function isRunning(pid) {
   }
 }
 
-/**
- * Builds the trailing connector log excerpt shown with a failure.
- *
- * @param {string} logPath Path to the file capturing the connector's output.
- * @returns {string} Newline-separated last lines, or a note when unreadable.
- */
 function logTail(logPath) {
   try {
     return readFileSync(logPath, "utf8")
@@ -131,18 +89,6 @@ function logTail(logPath) {
   }
 }
 
-/**
- * Waits for the connector to publish its Quick Tunnel origin.
- *
- * Polls the log because the hostname is only knowable from connector output.
- * Bails out early when the supervised process dies so a broken tunnel reports
- * its own log instead of burning the whole timeout.
- *
- * @param {{logPath: string, pid: number|undefined, timeoutSeconds: number}} options
- *   Parsed CLI options.
- * @returns {Promise<string>} The published origin.
- * @throws {Error} When the connector exits early or the timeout elapses.
- */
 async function awaitQuickTunnelOrigin(options) {
   const deadline = Date.now() + options.timeoutSeconds * 1000;
 

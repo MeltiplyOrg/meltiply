@@ -7,35 +7,12 @@ import { useDialogOpenerFocus } from "./dialog-opener-focus";
 import { Button } from "./button";
 import { dialogChrome } from "./dialog-chrome";
 
-/**
- * Root of the centered dialog type: a compact modal in the middle of the
- * screen that pops up bottom-up. Use it for forms and short focused tasks;
- * large inspection panels use `SideDialog`, confirmations `CenterAlertDialog`.
- * Direct alias for Radix Dialog `Root`.
- */
 export const CenterDialog = DialogPrimitive.Root;
 
-/**
- * Interactive button or element that toggles the dialog open state on click.
- * Direct alias for Radix Dialog `Trigger`.
- */
 export const CenterDialogTrigger = DialogPrimitive.Trigger;
 
-/**
- * Portals dialog overlay and content to the document body to prevent stacking context clipping.
- * Direct alias for Radix Dialog `Portal`.
- */
 const DialogPortal = DialogPrimitive.Portal;
 
-/**
- * Fullscreen backdrop overlay behind the active modal dialog.
- *
- * Implements backdrop blur and darkened background token with fade in/out animation transitions.
- *
- * @param className - Optional styling class overrides.
- * @param props - Radix Dialog Overlay properties.
- * @param ref - Forwarded DOM reference to the overlay element.
- */
 const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
@@ -52,32 +29,9 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 export interface CenterDialogContentProps extends React.ComponentPropsWithoutRef<
   typeof DialogPrimitive.Content
 > {
-  /**
-   * Accessible name for the canonical close button. Callers pass their
-   * localized label; the default keeps standalone usage understandable.
-   * @defaultValue `"Close"`
-   */
   closeLabel?: string;
 }
 
-/**
- * Centered modal that morphs between the two boxes when it hands off to or from
- * another centered dialog: the box changes size in place while its content
- * slides sideways, so a step between dialogs reads as one surface reshaping.
- * Opening with no dialog behind it pops up bottom-up, and the last dialog to
- * close pops out to the bottom. Radix retains content through exit, traps
- * focus, and restores it on close. Shared CSS owns the implemented transitions;
- * callers customize content and layout without duplicating the primitive.
- * The surface bounds itself to the dynamic viewport and owns native overflow;
- * short screens and software-keyboard resizes never put form actions offscreen.
- *
- * Shares `dialogChrome` with `CenterAlertDialogContent`; only the width differs.
- * This ordinary Dialog primitive keeps outside-click and Escape dismissal,
- * while the destructive AlertDialog variant blocks outside dismissal. The
- * canonical ghost icon Button carries the caller's localized close label.
- * Controlled callers restore focus to the element that opened the dialog even
- * without a `CenterDialogTrigger`.
- */
 export const CenterDialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   CenterDialogContentProps
@@ -119,13 +73,6 @@ export const CenterDialogContent = React.forwardRef<
 );
 CenterDialogContent.displayName = DialogPrimitive.Content.displayName;
 
-/**
- * Left-edge modal navigation frame using the same Radix dialog stack as centered
- * forms. Owns the scrim, close control, focus trap, nested Escape arbitration,
- * scroll locking and opener restoration without scrolling the workspace.
- * Labels and navigation content belong to the caller; shared CSS retains both
- * panel and scrim through their 300ms exit before Radix unmounts the portal.
- */
 export function NavigationDialogContent({
   children,
   title,
@@ -183,13 +130,6 @@ export function NavigationDialogContent({
   );
 }
 
-/**
- * Header section of a dialog containing title and description elements with
- * left alignment at every width, matching `CenterAlertDialogHeader`.
- *
- * @param className - Class overrides for header alignment and spacing.
- * @param props - HTML div attributes forwarded to the header container.
- */
 export const CenterDialogHeader = ({
   className,
   ...props
@@ -198,14 +138,6 @@ export const CenterDialogHeader = ({
 );
 CenterDialogHeader.displayName = "CenterDialogHeader";
 
-/**
- * Footer action container positioned at the bottom of the dialog.
- *
- * Stacks action buttons vertically on mobile screens and aligns them to the right on desktop views.
- *
- * @param className - Class overrides for action alignment.
- * @param props - HTML div attributes forwarded to the footer container.
- */
 export const CenterDialogFooter = ({
   className,
   ...props
@@ -214,15 +146,6 @@ export const CenterDialogFooter = ({
 );
 CenterDialogFooter.displayName = "CenterDialogFooter";
 
-/**
- * Accessible title heading for the dialog.
- *
- * Automatically announces itself as the modal's primary label for screen readers via aria-labelledby.
- *
- * @param className - Class overrides for typography or text colors.
- * @param props - Radix Dialog Title properties.
- * @param ref - Forwarded DOM reference to the title heading element.
- */
 export const CenterDialogTitle = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Title>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
@@ -231,15 +154,6 @@ export const CenterDialogTitle = React.forwardRef<
 ));
 CenterDialogTitle.displayName = DialogPrimitive.Title.displayName;
 
-/**
- * Accessible description paragraph providing secondary explanatory text for the dialog modal.
- *
- * Linked to the dialog container via aria-describedby for accessibility.
- *
- * @param className - Class overrides for description text styles.
- * @param props - Radix Dialog Description properties.
- * @param ref - Forwarded DOM reference to the description element.
- */
 export const CenterDialogDescription = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Description>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Description>

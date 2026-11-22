@@ -47,7 +47,6 @@ add_missing_example_keys() {
   done <"$example"
 }
 
-
 if [[ "$skip_dependencies" == false ]]; then
   if ! command -v bun >/dev/null 2>&1 || [[ "$(bun --version)" != "1.4.2" ]]; then
     echo "Bun 1.4.2 is required alongside Node.js 24.18.0." >&2
@@ -66,8 +65,6 @@ add_missing_example_keys .env.example
 node ./scripts/cloudflare-local/complete-env.mjs .env
 
 if [[ "$skip_image_pull" == false ]]; then
-  # Pull through the shared Compose boundary so a devcontainer resolves the
-  # same scoped project and overlay the database lifecycle uses.
   ./scripts/cloudflare-local/compose.sh pull postgres
 else
   echo "skipped explicit compose image pull"

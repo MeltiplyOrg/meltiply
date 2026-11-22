@@ -11,15 +11,8 @@ const defaultLocaleRoot = join(repositoryRoot, "frontend/app/src/locales");
 const locksPath = join(repositoryRoot, ".shipi18n/locks.json");
 
 /**
- * Runs Shipi18n's deterministic check over the committed locale tree.
- * Intentionally identical terms come from the shared glossary, so the catalog
- * test, generation prompt, and CI gate cannot drift apart. Structural rules the
- * product requires (unexpected placeholders, missing or collapsed plurals,
- * untranslated values) are escalated because Shipi18n treats them as advisory
- * by default.
- *
- * @param {{localeRoot?: string}} [options] Locale tree override for process tests.
- * @returns {number} Shipi18n's exit code (0 pass, 1 findings, 2 usage/config).
+ * Shipi18n treats placeholder, plural, and untranslated findings as advisory by
+ * default.
  */
 export function runCheck({ localeRoot = defaultLocaleRoot } = {}) {
   const root = resolve(localeRoot);
@@ -61,13 +54,6 @@ export function runCheck({ localeRoot = defaultLocaleRoot } = {}) {
   return result.status ?? 1;
 }
 
-/**
- * Parses the wrapper's small argument surface: an optional locale root used by
- * the process-level smoke test.
- *
- * @param {string[]} argv Process arguments after the script name.
- * @returns {{localeRoot: string}}
- */
 function parseArguments(argv) {
   let localeRoot = defaultLocaleRoot;
   for (const argument of argv) {

@@ -2,34 +2,11 @@
 import themeBootstrapRuntime from "./theme-bootstrap.js?raw";
 import { renderThemeBootstrap } from "./theme-bootstrap-source";
 
-/**
- * Before-paint theme bootstrap shared by both public sites. The checked-in
- * runtime is embedded inline so it runs before paint; `renderThemeBootstrap`
- * injects the shared preference constants and this host's palette mode.
- * ConsentBootstrap runs first; optional stores are read/written only with
- * functional consent. A validated link choice controls this document without
- * granting consent, and the page-intent attribute preserves transferred choices
- * through hydration. The runtime installs one delegated click listener for
- * marked anchors and configured `siteUrls` origins, re-reading the current
- * explicit choice on every click so retargeting never uses a stale palette.
- * Each run (Astro client-side swaps re-execute this script) first dispatches
- * `meltiply:theme-link-reset`, letting the previous run detach before the new
- * listener registers.
- */
 interface Props {
-  mode: "class" | "data-theme";
-  /**
-   * Site origins whose links receive the theme transfer parameter even
-   * without `data-theme-link` (e.g. the landing origin on docs pages).
-   */
   siteUrls?: readonly string[];
 }
 
-const { mode, siteUrls = [] } = Astro.props;
-const themeBootstrapScript = renderThemeBootstrap(themeBootstrapRuntime, {
-  mode,
-  siteUrls,
-});
+const themeBootstrapScript = renderThemeBootstrap(themeBootstrapRuntime, Astro.props);
 ---
 
 <script is:inline set:html={themeBootstrapScript}></script>

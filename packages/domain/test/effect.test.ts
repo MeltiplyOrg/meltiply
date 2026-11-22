@@ -4,155 +4,41 @@ import { Effect, Fiber } from "effect";
 import {
   ActiveOrganizationRequiredError,
   AuthenticationRequiredError,
-  ConflictError,
   DatabaseError,
   ForbiddenError,
   InvalidRequestError,
   NotFoundError,
-  ProviderError,
-  ProviderRateLimitError,
-  ProviderTransientError,
-  QuotaExceededError,
-  RateLimitExceededError,
   RequestContext,
   StorageUnavailableError,
-  ValidationError,
-  makeRequestContext,
 } from "../src";
 
 describe("Effect v4 Domain Tagged Errors", () => {
-  it("constructs recoverable tagged errors with correct _tag, status, and code", () => {
-    const notFound = new NotFoundError({
-      message: "Distribution not found",
-      entityId: "dist_123",
-    });
-    expect(notFound._tag).toBe("NotFoundError");
-    expect(notFound.status).toBe(404);
-    expect(notFound.code).toBe("not_found");
-    expect(notFound.message).toBe("Distribution not found");
-    expect(notFound.entityId).toBe("dist_123");
-
-    const authReq = new AuthenticationRequiredError({
-      message: "Missing bearer token",
-    });
-    expect(authReq._tag).toBe("AuthenticationRequiredError");
-    expect(authReq.status).toBe(401);
-    expect(authReq.code).toBe("authentication_required");
-
-    const activeOrg = new ActiveOrganizationRequiredError({
-      message: "The authenticated identity is not an active organization member.",
-    });
-    expect(activeOrg._tag).toBe("ActiveOrganizationRequiredError");
-    expect(activeOrg.status).toBe(403);
-    expect(activeOrg.code).toBe("active_organization_required");
-
-    const forbidden = new ForbiddenError({
-      message: "Insufficient permissions",
-    });
-    expect(forbidden.status).toBe(403);
-    expect(forbidden.code).toBe("forbidden");
-
-    const invalidReq = new InvalidRequestError({
-      message: "Invalid limit parameter",
-    });
-    expect(invalidReq.status).toBe(400);
-    expect(invalidReq.code).toBe("invalid_request");
-
-    const validation = new ValidationError({
-      message: "Payload validation failed",
-      issues: [{ field: "name", message: "Required" }],
-    });
-    expect(validation.status).toBe(422);
-    expect(validation.code).toBe("validation_error");
-    expect(validation.issues).toEqual([{ field: "name", message: "Required" }]);
-
-    const conflict = new ConflictError({
-      message: "Resource modified concurrently",
-    });
-    expect(conflict.status).toBe(409);
-    expect(conflict.code).toBe("conflict");
-
-    const invalidState = new ConflictError({
-      code: "invalid_state",
-      message: "Distribution was already sent",
-    });
-    expect(invalidState.status).toBe(409);
-    expect(invalidState.code).toBe("invalid_state");
-
-    const quota = new QuotaExceededError({
-      message: "Monthly distribution limit reached",
-    });
-    expect(quota.status).toBe(403);
-    expect(quota.code).toBe("quota_exceeded");
-
-    const rateLimit = new RateLimitExceededError({
-      message: "Too many requests",
-      retryAfterSeconds: 30,
-    });
-    expect(rateLimit.status).toBe(429);
-    expect(rateLimit.code).toBe("rate_limited");
-    expect(rateLimit.retryAfterSeconds).toBe(30);
-
-    const providerRateLimit = new ProviderRateLimitError({
-      message: "Instagram rate limit reached",
-      provider: "instagram",
-      retryAfterSeconds: 60,
-    });
-    expect(providerRateLimit.status).toBe(429);
-    expect(providerRateLimit.code).toBe("provider_rate_limited");
-    expect(providerRateLimit.provider).toBe("instagram");
-
-    const providerErr = new ProviderError({
-      message: "OAuth token revoked",
-      provider: "tiktok",
-    });
-    expect(providerErr.status).toBe(502);
-    expect(providerErr.code).toBe("provider_error");
-
-    const providerTransient = new ProviderTransientError({
-      message: "Upstream timeout",
-      provider: "youtube",
-    });
-    expect(providerTransient.status).toBe(502);
-    expect(providerTransient.code).toBe("provider_unavailable");
-
-    const storage = new StorageUnavailableError({
-      message: "R2 bucket unavailable",
-    });
-    expect(storage.status).toBe(503);
-    expect(storage.code).toBe("service_unavailable");
-
-    const db = new DatabaseError({
-      message: "Connection pool exhausted",
-    });
-    expect(db.status).toBe(500);
-    expect(db.code).toBe("internal_error");
+  it.each([
+    [new InvalidRequestError({ message: "m" }), 400, "invalid_request"],
+    [new AuthenticationRequiredError({ message: "m" }), 401, "authentication_required"],
+    [new ActiveOrganizationRequiredError({ message: "m" }), 403, "active_organization_required"],
+    [new ForbiddenError({ message: "m" }), 403, "forbidden"],
+    [new NotFoundError({ message: "m" }), 404, "not_found"],
+    [new StorageUnavailableError({ message: "m" }), 503, "service_unavailable"],
+    [new DatabaseError({ message: "m" }), 500, "internal_error"],
+  ])("maps %o to its HTTP contract", (error, status, code) => {
+    expect(error.status).toBe(status);
+    expect(error.code).toBe(code);
+    expect(error.message).toBe("m");
   });
 
-  it("yields and catches tagged errors cleanly in Effect.gen", async () => {
+  it("yields and catches tagged errors in Effect.gen", async () => {
     const program = Effect.gen(function* () {
-      yield* new NotFoundError({
-        message: "User not found",
-        entityId: "u_1",
-      });
+      yield* new NotFoundError({ message: "User not found" });
       return "unreachable";
-    }).pipe(
-      Effect.catchTag("NotFoundError", (err) => Effect.succeed(`recovered: ${err.entityId}`)),
-    );
+    }).pipe(Effect.catchTag("NotFoundError", (err) => Effect.succeed(`recovered: ${err.message}`)));
 
-    const result = await Effect.runPromise(program);
-    expect(result).toBe("recovered: u_1");
+    expect(await Effect.runPromise(program)).toBe("recovered: User not found");
   });
 });
 
 describe("RequestContext Scope & Isolation", () => {
   it("proves request context does not leak between concurrent requests", async () => {
-    // Requests in one Worker isolate share a single Effect runtime, so the
-    // interleaving must happen inside one runtime: two independent
-    // `runPromise` calls never share mutable state and could not expose a
-    // process-wide context store. Each fiber reads the service before and
-    // after a suspension point so a global-store implementation would show the
-    // sibling's identifiers on the second read.
     const request = (requestId: string, delay: number) =>
       Effect.gen(function* () {
         const ctx = yield* RequestContext;
@@ -164,6 +50,7 @@ describe("RequestContext Scope & Isolation", () => {
       }).pipe(
         Effect.provideService(RequestContext, {
           requestId,
+          session: null,
           traceId: `trace-${requestId}`,
           tenantId: `org-${requestId}`,
         }),
@@ -176,21 +63,5 @@ describe("RequestContext Scope & Isolation", () => {
     });
 
     expect(await Effect.runPromise(program)).toEqual(["req-A", "req-B"]);
-  });
-
-  it("makeRequestContext populates immutable request context data", () => {
-    const data = makeRequestContext({
-      requestId: "req-123",
-      traceId: "trace-456",
-      tenantId: "org-789",
-      session: { role: "admin" },
-    });
-    expect(data.requestId).toBe("req-123");
-    expect(data.traceId).toBe("trace-456");
-    expect(data.tenantId).toBe("org-789");
-    expect(data.session).toEqual({ role: "admin" });
-    // An absent session must normalize to null so callers can test presence
-    // rather than cope with both undefined and null.
-    expect(makeRequestContext({ requestId: "req-1", traceId: "trace-1" }).session).toBeNull();
   });
 });

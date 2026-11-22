@@ -1,17 +1,13 @@
-import { confirmedFailure, isHttp404, malformed, unknownResult } from "../adapter-helpers";
-import { classifyProviderFailure, isUncertainFailure, ProviderAdapterError } from "../failures";
-import type { ProviderHttpResponse } from "../http";
-import { IDEMPOTENCY_KEY_MAX_CHARS } from "../limits";
 import {
-  bearer,
-  boundedString,
-  codePointLength,
-  firstNonEmptyLine,
-  normalizeContentType,
-  providerIdentifier,
-  record,
-  required,
-} from "../meta-common";
+  classifyProviderFailure,
+  isHttp404,
+  isUncertainFailure,
+  malformed,
+  ProviderAdapterError,
+  rejection,
+} from "../failures";
+import type { ProviderHttpResponse } from "../http";
+import { confirmedFailure, unknownResult } from "../results";
 import type {
   ProviderCredentials,
   ProviderFailure,
@@ -24,13 +20,23 @@ import type {
   YouTubePrivacyStatus,
 } from "../types";
 import {
+  bearer,
+  boundedString,
+  codePointLength,
+  firstNonEmptyLine,
+  normalizeContentType,
+  providerIdentifier,
+  record,
+  requireIdempotencyKey,
+} from "../values";
+import {
   YOUTUBE_API_ORIGIN,
   YOUTUBE_LIMITS,
-  YOUTUBE_VIDEO_ORIGIN,
   validateSessionUri,
   youtubeAccountId,
   youtubeOperationId,
   youtubeVideoId,
+  youtubeWatchUrl,
   type GoogleRequest,
   type YouTubeOperation,
 } from "./types";
@@ -69,7 +75,7 @@ type UploadOutcome =
  * title/description/tag/media/options bounds.
  */
 function parseYouTubeUploadInput(input: PublishInput): UploadInput {
-  required("idempotencyKey", input.idempotencyKey, IDEMPOTENCY_KEY_MAX_CHARS);
+  requireIdempotencyKey(input.idempotencyKey);
   const description = input.caption.trim();
   const title = firstNonEmptyLine(description);
   const [media] = input.media;
@@ -277,7 +283,7 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
     session: { fileSize: number; sessionUri: string },
     sideEffectOnVideoId: boolean,
   ): Promise<SessionProbe> => {
-    const response = await googleRequest<unknown>(context, {
+    const response = await googleRequest(context, {
       acceptedStatuses: [308],
       headers: {
         ...bearer(credentials.accessToken),
@@ -352,9 +358,9 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
         let start = offset;
         let resumes = 0;
         while (true) {
-          let response: ProviderHttpResponse<unknown>;
+          let response: ProviderHttpResponse;
           try {
-            response = await googleRequest<unknown>(context, {
+            response = await googleRequest(context, {
               acceptedStatuses: [308],
               body: chunk.subarray(start - chunkStart),
               headers: {
@@ -383,7 +389,8 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
               probe = await probeSession(context, credentials, session, true);
             } catch (probeCause) {
               if (!(probeCause instanceof ProviderAdapterError)) throw probeCause;
-              return isUncertainFailure(probeCause.failure, true)
+              return isUncertainFailure(probeCause.failure) ||
+                probeCause.failure.classification === "rate_limit"
                 ? interrupted(probeCause.failure, start)
                 : failed(probeCause.failure);
             }
@@ -483,7 +490,7 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
     url.searchParams.set("id", id);
     let response;
     try {
-      response = await googleRequest<unknown>(context, {
+      response = await googleRequest(context, {
         headers: bearer(credentials.accessToken),
         method: "GET",
         url: url.toString(),
@@ -511,13 +518,16 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
     }
     if (channelId !== youtubeAccountId(credentials)) {
       return {
-        result: confirmedFailure("youtube_channel_mismatch", 409, retainedOperationId),
+        result: confirmedFailure(rejection("youtube_channel_mismatch", 409), retainedOperationId),
         state: "failed",
       };
     }
     if (["deleted", "failed", "rejected"].includes(uploadStatus) || processingStatus === "failed") {
       return {
-        result: confirmedFailure("youtube_video_processing_failed", 422, retainedOperationId),
+        result: confirmedFailure(
+          rejection("youtube_video_processing_failed", 422),
+          retainedOperationId,
+        ),
         state: "failed",
       };
     }
@@ -530,7 +540,7 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
           outcome: "confirmed_success",
           providerOperationId: retainedOperationId,
           providerPostId: id,
-          providerUrl: `${YOUTUBE_VIDEO_ORIGIN}/${encodeURIComponent(id)}`,
+          providerUrl: youtubeWatchUrl(id),
         },
         state: "published",
       };
@@ -538,10 +548,6 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
     return { providerOperationId: retainedOperationId, state: "processing" };
   };
 
-  /**
-   * Continues an open resumable upload session inside reconciliation using
-   * replayed Asset bytes without issuing a second initiation POST.
-   */
   const continueSession = async (
     context: ProviderRequestContext,
     credentials: ProviderCredentials,
@@ -555,7 +561,10 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
       !["video/mp4", "video/quicktime"].includes(contentType)
     ) {
       return {
-        result: confirmedFailure("youtube_media_invalid", 400, youtubeOperationId(operation)),
+        result: confirmedFailure(
+          rejection("youtube_media_invalid", 400),
+          youtubeOperationId(operation),
+        ),
         state: "failed",
       };
     }
@@ -598,7 +607,7 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
     if (outcome.kind === "interrupted") {
       return {
         result: unknownResult(
-          outcome.failure,
+          outcome.failure.code,
           youtubeOperationId({
             acknowledged: Math.max(outcome.acknowledged, retainedAcknowledged),
             fileSize: operation.fileSize,
@@ -615,10 +624,6 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
     };
   };
 
-  /**
-   * Probes an open resumable upload session or delegates to `continueSession`
-   * when replayable media is provided.
-   */
   const lookupSession = async (
     context: ProviderRequestContext,
     credentials: ProviderCredentials,
@@ -649,13 +654,7 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
             })
           : youtubeOperationId(operation);
       return {
-        result: unknownResult(
-          classifyProviderFailure({
-            code: "youtube_upload_incomplete",
-            sideEffectPossible: true,
-          }),
-          retained,
-        ),
+        result: unknownResult("youtube_upload_incomplete", retained),
         state: "unknown",
       };
     }
@@ -665,7 +664,6 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
     };
   };
 
-  /** Initiates one resumable upload session and streams bounded chunks to Google. */
   const publishVideo = async (
     context: ProviderRequestContext,
     credentials: ProviderCredentials,
@@ -675,7 +673,7 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
     const initiationUrl = new URL("/upload/youtube/v3/videos", YOUTUBE_API_ORIGIN);
     initiationUrl.searchParams.set("uploadType", "resumable");
     initiationUrl.searchParams.set("part", "snippet,status");
-    const initiation = await googleRequest<undefined>(context, {
+    const initiation = await googleRequest(context, {
       body: JSON.stringify({
         snippet: {
           categoryId,
@@ -723,7 +721,7 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
     }
     if (outcome.kind === "interrupted") {
       return unknownResult(
-        outcome.failure,
+        outcome.failure.code,
         youtubeOperationId({
           acknowledged: outcome.acknowledged,
           fileSize: upload.fileSize,

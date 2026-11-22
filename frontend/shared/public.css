@@ -1,10 +1,3 @@
-/*
- * Shared public-site primitives. Marketing surfaces (landing and docs) layer
- * these skip-link, header, brand, and control rules on top of `tokens.css` and
- * `motion.css`; page-specific layout and responsive overrides stay in each
- * site's stylesheet. `--public-header-height` names the desktop header height
- * so sticky page chrome can offset itself without re-measuring.
- */
 :root {
   --public-header-height: 88px;
 }
@@ -55,9 +48,6 @@
   height: 34px;
   color: var(--ink);
 }
-/* `:where` keeps the small modifier at base `[data-brand-mark]` specificity so
- * downstream media-query overrides still win by source order, matching the
- * class cascade this replaced. */
 [data-brand-mark]:where([data-small]) {
   width: 25px;
   height: 25px;
@@ -138,7 +128,6 @@
   width: 17px;
   height: 17px;
 }
-/* Keep compact desktop controls, but use the workspace's 44px touch floor. */
 @media (pointer: coarse) {
   .button-small,
   .icon-button {
@@ -151,9 +140,6 @@
     min-height: 44px;
   }
 }
-/* One motion vocabulary for shared public controls; sites extend the selector
- * list for their own surfaces. Palette swaps suppress these transitions
- * through theme-transition.css; `--ease-enter` resolves from motion.css. */
 [data-brand-mark],
 .desktop-nav a,
 .icon-button,

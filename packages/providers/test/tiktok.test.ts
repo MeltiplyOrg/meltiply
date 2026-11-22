@@ -64,7 +64,7 @@ function sequence(...responders: Responder[]) {
 
 function adapter(fetcher: typeof fetch, now = new Date("2026-07-19T00:00:00Z")) {
   return createTikTokAdapter({
-    clientKey: "tiktok-client-key",
+    clientId: "tiktok-client-key",
     clientSecret: "tiktok-client-secret",
     fetch: fetcher,
     mediaUrlPrefix,

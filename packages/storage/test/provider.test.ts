@@ -12,7 +12,6 @@ import {
   type R2BucketLike,
 } from "../src";
 
-/** Minimal R2 binding double; provider selection only checks it is present. */
 const bucket: R2BucketLike = {
   createMultipartUpload: vi.fn(),
   delete: vi.fn(),
@@ -52,7 +51,6 @@ describe("objectStorageProvider", () => {
     expect(objectStorageProvider(s3Env)).toBe("s3");
     expect(createObjectStoreFromEnv(s3Env)).toBeInstanceOf(S3ObjectStore);
     expect(createObjectUrlSignerFromEnv(s3Env)).toBeInstanceOf(S3SigV4Signer);
-    // An S3 deployment never touches the R2 binding, even when one is bound.
     expect(createObjectStoreFromEnv({ ...s3Env, ASSETS: bucket })).toBeInstanceOf(S3ObjectStore);
   });
 
@@ -158,11 +156,6 @@ describe("objectStorageBindings", () => {
     expect(missing({ ...s3Env, S3_SECRET_ACCESS_KEY: "" })).toEqual(["S3_SECRET_ACCESS_KEY"]);
   });
 
-  /**
-   * Readiness has to agree with construction: reporting a rejected endpoint as
-   * ready would produce a green `/ready` probe over a deployment whose every
-   * asset request fails.
-   */
   it("reports settings the signer would reject as unavailable", () => {
     expect(missing({ ...s3Env, S3_ENDPOINT: "https://objects.example.com/prefix" })).toEqual([
       "S3_ENDPOINT",
@@ -171,7 +164,6 @@ describe("objectStorageBindings", () => {
       "S3_ENDPOINT",
     ]);
     expect(missing({ ...s3Env, S3_FORCE_PATH_STYLE: "maybe" })).toEqual(["S3_FORCE_PATH_STYLE"]);
-    // The same endpoint is acceptable in a development environment.
     expect(
       missing({
         ...s3Env,
@@ -180,8 +172,6 @@ describe("objectStorageBindings", () => {
       }),
     ).toEqual([]);
 
-    // Readiness is only trustworthy if construction rejects the same settings;
-    // otherwise a green probe could sit over a provider that cannot be built.
     expect(() =>
       createObjectStoreFromEnv({ ...s3Env, S3_ENDPOINT: "https://objects.example.com/prefix" }),
     ).toThrow("must not include");

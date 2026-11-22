@@ -7,11 +7,6 @@ import { fileURLToPath } from "node:url";
 
 import { generateWorkerTypes } from "./worker-types.mjs";
 
-/**
- * Builds a disposable workspace using installed Wrangler, with local secrets
- * and root dotenv toggles that would pollute generated consumer binding types.
- * Its checked-in var must survive while no secret key enters declarations.
- */
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), "worker-types-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -38,7 +33,6 @@ async function fixture(t) {
       vars: { FIXTURE_BINDING: "known" },
     }),
   );
-  // Local secrets that must never reach the generated declarations.
   await writeFile(join(workerDir, ".dev.vars"), "LOCAL_DEV_SECRET=abc123\n");
   await writeFile(join(workerDir, ".env"), "LOCAL_ENV_SECRET=def456\n");
   await writeFile(
@@ -52,12 +46,8 @@ async function fixture(t) {
   };
 }
 
-/** Env files must be masked inside the session mirror, not read or removed. */
 test("worker type generation ignores checkout env files and Cloudflare env", async (t) => {
   const { root, workerDir, output } = await fixture(t);
-  // Restore whatever the runner had, rather than deleting keys it may own:
-  // the generator is expected to neutralize them either way, and a caller's
-  // Cloudflare context must survive the test.
   const previous = new Map(
     ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_INCLUDE_PROCESS_ENV"].map((name) => [
       name,

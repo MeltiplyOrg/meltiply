@@ -13,7 +13,8 @@ import {
   writeEvidence,
 } from "../release/release-guard.mjs";
 import { readBoundedJsonResponse } from "../release/release-http.mjs";
-import { loadReleaseInputs, redactError, releaseInternals } from "../release/release-lib.mjs";
+import { stableJson } from "../lib/stable-json.mjs";
+import { loadReleaseInputs, redactError } from "../release/release-lib.mjs";
 
 const lineBreakPattern = /[\r\n]/;
 const uuidPattern = /[0-9a-f-]{36}/gi;
@@ -52,29 +53,12 @@ const SAFE_SIGNED_HEADERS = new Set([
 ]);
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
-/**
- * Asserts that a string is defined, non-empty, and trims surrounding whitespace.
- *
- * @param {string|undefined|null} value - Candidate string value
- * @param {string} name - Field name for error message
- * @returns {string} Trimmed non-empty string
- * @throws {Error} If value is missing or empty after trimming
- */
 function requiredString(value, name) {
   const normalized = value?.trim();
   if (!normalized) throw new Error(`${name} is required`);
   return normalized;
 }
 
-/**
- * Asserts that a value parses to a positive safe integer within maximum bounds.
- *
- * @param {unknown} value - Candidate numeric value or string representation
- * @param {string} name - Field name for error message
- * @param {number} maximum - Upper bound inclusive
- * @returns {number} Parsed positive integer
- * @throws {Error} If value is not a safe integer or falls outside 1..maximum
- */
 function positiveInteger(value, name, maximum) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) {
@@ -83,15 +67,6 @@ function positiveInteger(value, name, maximum) {
   return parsed;
 }
 
-/**
- * Extracts a non-flag option value following a specific CLI option switch.
- *
- * @param {Array<string>} args - Command line arguments
- * @param {number} index - Index of the option flag
- * @param {string} name - Option flag name
- * @returns {string} Option argument value
- * @throws {Error} If next argument is missing or starts with '--'
- */
 function optionValue(args, index, name) {
   const value = args[index + 1];
   if (!value || value.startsWith("--")) {
@@ -100,16 +75,6 @@ function optionValue(args, index, name) {
   return value;
 }
 
-/**
- * Parses and validates command-line arguments for the staging R2 acceptance probe.
- *
- * Enforces single-specification of options, validates --apply and --confirm mutual dependence,
- * asserts that multipart size exceeds 25 MiB threshold, and verifies safe JSON output filenames.
- *
- * @param {Array<string>} args - Process command-line arguments (process.argv.slice(2))
- * @returns {Readonly<{ apply: boolean, confirm: string|undefined, iacOutputsPath: string, inputPath: string, multipartBytes: number, outputPath: string, pollTimeoutMs: number }>} Validated immutable parsed arguments
- * @throws {Error} If options are duplicate, unknown, or values are invalid
- */
 export function parseR2AcceptanceArguments(args) {
   const values = new Map();
   let apply = false;
@@ -164,18 +129,6 @@ export function parseR2AcceptanceArguments(args) {
   });
 }
 
-/**
- * Binds parsed CLI arguments to verified release inputs and IaC target configuration.
- *
- * Enforces staging-only credentials and active IaC state, validates exact confirmation phrase on --apply,
- * and compiles cryptographic SHA-256 hashes of release inputs and IaC outputs.
- *
- * @param {object} parsed - Parsed CLI options from parseR2AcceptanceArguments
- * @param {{ iac: object, spec: object }} inputs - Loaded release inputs and IaC state
- * @param {string} [repoRoot=REPO_ROOT] - Repository root directory path
- * @returns {Readonly<object>} Bound immutable R2 acceptance execution options
- * @throws {Error} If IaC state is not active or confirmation phrase mismatches
- */
 export function prepareR2AcceptanceOptions(parsed, { iac, spec }, repoRoot = REPO_ROOT) {
   if (spec.environment !== "staging") {
     throw new Error("staging R2 acceptance requires a staging release input");
@@ -191,34 +144,22 @@ export function prepareR2AcceptanceOptions(parsed, { iac, spec }, repoRoot = REP
     browserOrigin: spec.app_url,
     bucketName: iac.assets_bucket,
     gitSha: spec.git_sha,
-    iacOutputsSha256: sha256(releaseInternals.json(iac)),
+    iacOutputsSha256: sha256(stableJson(iac)),
     multipartBytes: parsed.multipartBytes,
     outputPath: parsed.outputPath,
     pollTimeoutMs: parsed.pollTimeoutMs,
     r2Origin: `https://${spec.runtime.r2_account_id}.r2.cloudflarestorage.com`,
     releaseId: spec.release_id,
-    releaseInputSha256: sha256(releaseInternals.json(spec)),
+    releaseInputSha256: sha256(stableJson(spec)),
     releaseSpec: spec,
     repoRoot,
   });
 }
 
-/**
- * Validates whether a value conforms to safe alphanumeric request identifier constraints.
- *
- * @param {unknown} value - Candidate identifier string
- * @returns {string|undefined} Validated identifier string, or undefined if invalid
- */
 function safeIdentifier(value) {
   return typeof value === "string" && REQUEST_ID_PATTERN.test(value) ? value : undefined;
 }
 
-/**
- * Splits a comma-delimited HTTP header string into a normalized lowercase Set of token names.
- *
- * @param {string|null|undefined} value - Raw HTTP header value
- * @returns {Set<string>} Set of lowercase trimmed token strings
- */
 function headerTokens(value) {
   return new Set(
     (value ?? "")
@@ -228,12 +169,6 @@ function headerTokens(value) {
   );
 }
 
-/**
- * Safely parses an API error response body to extract its machine-readable error code.
- *
- * @param {Response} response - HTTP response object
- * @returns {Promise<string>} Extracted safe error code or fallback description
- */
 async function responseErrorCode(response) {
   try {
     const body = await readBoundedJsonResponse(
@@ -247,15 +182,6 @@ async function responseErrorCode(response) {
   }
 }
 
-/**
- * Executes an HTTP fetch request with an enforced timeout and disallows redirects.
- *
- * @param {typeof fetch} fetchImpl - HTTP client function
- * @param {URL|string} url - Target URL
- * @param {RequestInit} [init] - Fetch request options
- * @param {number} [timeoutMs=60000] - Timeout in milliseconds
- * @returns {Promise<Response>} HTTP response
- */
 async function timedFetch(fetchImpl, url, init, timeoutMs = REQUEST_TIMEOUT_MS) {
   return fetchImpl(url, {
     ...init,
@@ -264,15 +190,6 @@ async function timedFetch(fetchImpl, url, init, timeoutMs = REQUEST_TIMEOUT_MS) 
   });
 }
 
-/**
- * Computes an adaptive request timeout based on expected payload size and minimum transfer speed.
- *
- * Ensures slow networks or large multipart chunk transfers do not trigger premature aborts
- * while strictly bounding maximum wait time to 10 minutes.
- *
- * @param {number} bytes - Payload size in bytes
- * @returns {number} Milliseconds to allow for transfer
- */
 function transferTimeoutForBytes(bytes) {
   return Math.min(
     MAXIMUM_TRANSFER_TIMEOUT_MS,
@@ -283,18 +200,6 @@ function transferTimeoutForBytes(bytes) {
   );
 }
 
-/**
- * Asserts that a signed R2 URL conforms strictly to security and domain invariants.
- *
- * Enforces HTTPS scheme, matching R2 storage origin, absence of embedded credentials/hashes,
- * presence of AWS signature parameter, exact target bucket name match, and non-root object key path.
- *
- * @param {string} value - Signed URL string to inspect
- * @param {{ bucketName: string, origin: string }} target - Expected bucket and origin context
- * @param {string} label - Operation classification for error diagnostics
- * @returns {URL} Parsed and validated URL instance
- * @throws {Error} If URL violates security invariants or targets an unexpected bucket/origin
- */
 function validateTargetUrl(value, target, label) {
   const url = new URL(value);
   let bucket;
@@ -318,18 +223,6 @@ function validateTargetUrl(value, target, label) {
   return url;
 }
 
-/**
- * Extracts and records a required tracing request ID from HTTP response headers.
- *
- * Searches for 'x-request-id', 'x-amz-request-id', or Cloudflare 'cf-ray' headers,
- * asserting that at least one valid identifier is present to support request tracing.
- *
- * @param {Response} response - HTTP response object
- * @param {string} service - Service name for error diagnostics ("API", "R2 CORS", "R2 PUT", etc.)
- * @param {Set<string>} [requestIds] - Optional accumulator set to collect unique request IDs
- * @returns {string} Validated request ID
- * @throws {Error} If response omits all recognized request tracking headers
- */
 function requiredResponseRequestId(response, service, requestIds) {
   const requestId =
     safeIdentifier(response.headers.get("x-request-id")) ??
@@ -342,17 +235,6 @@ function requiredResponseRequestId(response, service, requestIds) {
   return requestId;
 }
 
-/**
- * Validates the structure, headers, and lifetime of an API-generated signed PUT request.
- *
- * Verifies HTTP method is PUT, validates the target R2 URL, ensures only safe signed headers
- * are passed, and asserts that the signed expiration is strictly in the future.
- *
- * @param {object} request - Signed request descriptor returned from API
- * @param {{ bucketName: string, origin: string }} target - Expected R2 bucket and origin
- * @returns {URL} Validated signed target URL
- * @throws {Error} If request method, headers, or expiry timestamp are invalid
- */
 function validateSignedRequest(request, target) {
   if (!request || request.method !== "PUT" || typeof request.url !== "string") {
     throw new Error("API returned an invalid signed PUT request");
@@ -377,21 +259,6 @@ function validateSignedRequest(request, target) {
   return url;
 }
 
-/**
- * Verifies that Cloudflare R2 responds correctly to a CORS preflight OPTIONS request.
- *
- * Sends an OPTIONS preflight for the signed PUT URL with the exact browser origin and
- * requested headers, asserting that R2 returns 200 OK, mirrors the exact staging browser origin,
- * permits the PUT method, and authorizes all signed request headers.
- *
- * @param {object} request - Signed PUT request descriptor
- * @param {string} browserOrigin - Expected frontend browser origin (e.g., https://staging.meltiply.com)
- * @param {{ bucketName: string, origin: string }} target - Expected R2 bucket and origin
- * @param {typeof fetch} [fetchImpl=fetch] - HTTP client implementation
- * @param {Set<string>} [requestIds] - Request ID accumulator set
- * @returns {Promise<{ requestId: string }>} Traced preflight request ID
- * @throws {Error} If CORS preflight fails, returns wrong origin, or disallows required headers/methods
- */
 export async function verifySignedPutCors(
   request,
   browserOrigin,
@@ -431,23 +298,6 @@ export async function verifySignedPutCors(
   }
 }
 
-/**
- * Uploads payload bytes to a signed R2 PUT URL and verifies CORS and ETag response headers.
- *
- * Transmits the binary body with an adaptive transfer timeout, asserting that the upload succeeds,
- * mirrors the browser origin in CORS headers, and exposes the required ETag header.
- *
- * @param {object} options - Upload options
- * @param {Uint8Array} options.body - Binary payload bytes to upload
- * @param {string} options.browserOrigin - Frontend origin for CORS verification
- * @param {{ bucketName: string, origin: string }} options.target - Expected R2 target configuration
- * @param {typeof fetch} [options.fetchImpl=fetch] - HTTP client implementation
- * @param {object} options.request - Signed request containing URL and headers
- * @param {Set<string>} [options.requestIds] - Request ID accumulator
- * @param {boolean} [options.requireEtag=false] - Whether an explicit ETag is strictly required (for multipart parts)
- * @returns {Promise<{ etag: string|null, requestId: string }>} Upload ETag and tracing request ID
- * @throws {Error} If upload fails, origin is omitted, or required ETag is missing
- */
 export async function uploadSignedPart({
   body,
   browserOrigin,
@@ -493,22 +343,6 @@ export async function uploadSignedPart({
   }
 }
 
-/**
- * Verifies that Cloudflare R2 enforces exact signed Content-Length limits by rejecting oversized uploads.
- *
- * Appends an extra byte to the payload and verifies that R2 immediately returns 403 Forbidden,
- * proving that presigned URL size constraints cannot be breached.
- *
- * @param {object} options - Size rejection probe options
- * @param {Uint8Array} options.body - Base payload bytes
- * @param {string} options.browserOrigin - Origin header value
- * @param {{ bucketName: string, origin: string }} options.target - Target R2 bucket and origin
- * @param {typeof fetch} options.fetchImpl - HTTP client implementation
- * @param {object} options.request - Signed request descriptor
- * @param {Set<string>} options.requestIds - Request ID accumulator
- * @returns {Promise<{ requestId: string }>} Traced request ID
- * @throws {Error} If R2 does not return 403 Forbidden
- */
 async function verifySignedSizeRejection({
   body,
   browserOrigin,
@@ -536,18 +370,6 @@ async function verifySignedSizeRejection({
   }
 }
 
-/**
- * Constructs an authenticated HTTP API client bound to the staging environment and release probe context.
- *
- * Injects the bearer token from the environment, sets standard headers and idempotency keys,
- * validates operation IDs, records attempted/completed operations, and decodes JSON responses with size bounds.
- *
- * @param {object} options - Probe execution options containing apiOrigin
- * @param {object} dependencies - Injected runtime dependencies containing environment and fetchImpl
- * @param {Set<string>} evidenceRequestIds - Set accumulating all server request IDs for audit evidence
- * @param {{ attempted: Set<string>, completed: Set<string> }} operations - Operation tracking object
- * @returns {(operationId: string, method: string, path: string, options?: { body?: unknown, expected?: Array<number>, idempotencyKey?: string }) => Promise<{ requestId: string, status: number, value: any }>} Bound API request function
- */
 function makeApiClient(options, dependencies, evidenceRequestIds, operations) {
   const fetchImpl = dependencies.fetchImpl ?? fetch;
   const token = requiredString(
@@ -604,33 +426,13 @@ function makeApiClient(options, dependencies, evidenceRequestIds, operations) {
   };
 }
 
-// Valid 67-byte 1x1 8-bit grayscale PNG (signature + IHDR + IDAT + IEND with valid CRCs).
 const VALID_1X1_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==";
 
-/**
- * Generates a valid 67-byte 1x1 pixel PNG binary image buffer (signature, IHDR,
- * deflated IDAT scanline, and IEND with valid CRCs).
- *
- * Used as test payload for single PUT upload, asset processing, and CORS acceptance tests.
- *
- * @returns {Uint8Array} Binary PNG file buffer
- */
 function pngFixture() {
   return new Uint8Array(Buffer.from(VALID_1X1_PNG_BASE64, "base64"));
 }
 
-/**
- * Generates deterministically chunked binary bytes for a specific MP4 video part.
- *
- * Prepends a standard ISO base media file format ftyp box to part 1 and fills remaining
- * bytes with zeros up to the part size or file boundary.
- *
- * @param {number} partNumber - 1-based part index
- * @param {number} partSize - Configured chunk size in bytes
- * @param {number} fileSize - Total file size in bytes
- * @returns {Uint8Array} Binary payload buffer for the video part
- */
 function videoPart(partNumber, partSize, fileSize) {
   const start = (partNumber - 1) * partSize;
   const length = Math.min(partSize, fileSize - start);
@@ -643,20 +445,6 @@ function videoPart(partNumber, partSize, fileSize) {
   return bytes;
 }
 
-/**
- * Downloads a presigned R2 object, verifies size constraints, and computes its SHA-256 digest.
- *
- * Streams response chunks while enforcing that total received bytes do not exceed expectedBytes,
- * calculating an incremental SHA-256 hash to verify end-to-end data integrity.
- *
- * @param {string} urlValue - Presigned download URL
- * @param {{ bucketName: string, origin: string }} target - Target bucket and origin
- * @param {number} expectedBytes - Expected object byte length
- * @param {typeof fetch} fetchImpl - HTTP client implementation
- * @param {Set<string>} [requestIds] - Request ID accumulator
- * @returns {Promise<{ bytes: number, requestId: string, sha256: string }>} Transferred byte count, traced request ID, and hex SHA-256 digest
- * @throws {Error} If download fails or exceeds expected size
- */
 async function downloadDigest(urlValue, target, expectedBytes, fetchImpl, requestIds) {
   const url = validateTargetUrl(urlValue, target, "download");
   const response = await timedFetch(
@@ -689,16 +477,6 @@ async function downloadDigest(urlValue, target, expectedBytes, fetchImpl, reques
   }
 }
 
-/**
- * Polls the asset processing status until it reaches 'ready' or throws on failure/timeout.
- *
- * @param {Function} apiRequest - Authenticated API request client
- * @param {string} assetId - Target asset UUID
- * @param {object} options - Probe options containing pollTimeoutMs
- * @param {object} dependencies - Injected runtime dependencies (now, sleep)
- * @returns {Promise<object>} Ready asset record
- * @throws {Error} If processing enters 'failed' state or exceeds polling timeout
- */
 async function pollAsset(apiRequest, assetId, options, dependencies) {
   const deadline = dependencies.now() + options.pollTimeoutMs;
   while (dependencies.now() < deadline) {
@@ -712,16 +490,6 @@ async function pollAsset(apiRequest, assetId, options, dependencies) {
   throw new Error("staging asset processing timed out");
 }
 
-/**
- * Polls an asset endpoint until it returns a 404 Not Found, confirming complete deletion.
- *
- * @param {Function} apiRequest - Authenticated API request client
- * @param {string} assetId - Target asset UUID
- * @param {object} options - Probe options containing pollTimeoutMs
- * @param {object} dependencies - Injected runtime dependencies (now, sleep)
- * @returns {Promise<void>} Resolves when asset is confirmed deleted
- * @throws {Error} If deletion polling times out before returning 404
- */
 async function pollDeleted(apiRequest, assetId, options, dependencies) {
   const deadline = dependencies.now() + options.pollTimeoutMs;
   while (dependencies.now() < deadline) {
@@ -734,17 +502,6 @@ async function pollDeleted(apiRequest, assetId, options, dependencies) {
   throw new Error("staging asset deletion timed out");
 }
 
-/**
- * Constructs standard input payload parameters for creating an asset upload session.
- *
- * @param {object} options - Session parameters
- * @param {string} options.assetType - Asset category ("image" or "video")
- * @param {string} options.contentType - MIME type (e.g. "image/png", "video/mp4")
- * @param {number} options.fileSize - File size in bytes
- * @param {string} options.filename - Base filename
- * @param {string} options.releaseId - Release identifier for metadata tagging
- * @returns {object} Formatted asset upload session request body
- */
 function uploadInput({ assetType, contentType, fileSize, filename, releaseId }) {
   return {
     asset_type: assetType,
@@ -757,17 +514,6 @@ function uploadInput({ assetType, contentType, fileSize, filename, releaseId }) 
   };
 }
 
-/**
- * Asserts structural and behavioral consistency of an upload session against request parameters.
- *
- * Validates selected upload strategy (single <= 25 MiB, multipart > 25 MiB), session status,
- * content type, file size, future expiration timestamp, and multipart chunking bounds.
- *
- * @param {object} asset - Associated asset record
- * @param {object} session - Created upload session object
- * @param {object} input - Original session creation input
- * @throws {Error} If session metadata or multipart chunk parameters violate invariants
- */
 function validateUploadSession(asset, session, input) {
   const expectedStrategy = input.file_size <= MULTIPART_THRESHOLD_BYTES ? "single" : "multipart";
   if (
@@ -806,16 +552,6 @@ function validateUploadSession(asset, session, input) {
   }
 }
 
-/**
- * Initiates an asset upload session with the staging API and registers created resources for cleanup.
- *
- * @param {Function} apiRequest - Authenticated API request client
- * @param {object} input - Session creation parameters from uploadInput
- * @param {string} idempotencyKey - Unique idempotency key for the request
- * @param {Array<{ assetId?: string, sessionId?: string }>} resources - Mutable accumulator for rollback tracking
- * @returns {Promise<{ asset: object, session: object }>} Created asset and upload session objects
- * @throws {Error} If API returns invalid UUIDs or session validation fails
- */
 async function createSession(apiRequest, input, idempotencyKey, resources) {
   const response = await apiRequest("createUploadSession", "POST", "/asset-upload-sessions", {
     body: input,
@@ -836,22 +572,11 @@ async function createSession(apiRequest, input, idempotencyKey, resources) {
   return { asset, session };
 }
 
-/**
- * Removes a successfully deleted asset from the pending cleanup tracker.
- *
- * @param {Array<{ assetId?: string, sessionId?: string }>} resources - Cleanup tracker list
- * @param {string} assetId - Cleaned asset identifier
- */
 function markResourceClean(resources, assetId) {
   const index = resources.findIndex((resource) => resource.assetId === assetId);
   if (index >= 0) resources.splice(index, 1);
 }
 
-/**
- * Filters out entries from the resources array whose identifiers have already been cleaned up.
- *
- * @param {Array<{ assetId?: string, sessionId?: string }>} resources - Mutable resources tracking array
- */
 function pruneCleanResources(resources) {
   for (let index = resources.length - 1; index >= 0; index -= 1) {
     const resource = resources[index];
@@ -859,19 +584,6 @@ function pruneCleanResources(resources) {
   }
 }
 
-/**
- * Reversely iterates through outstanding asset upload sessions and assets to ensure total rollback cleanup.
- *
- * Attempts to abort any pending multipart sessions first (handling 409 conflict if already completed),
- * then deletes created assets and polls for 404 confirmation. Captures all encountered errors
- * to allow best-effort cleanup across all accumulated resources.
- *
- * @param {Function} apiRequest - Authenticated API request client
- * @param {Array<{ assetId?: string, sessionId?: string }>} resources - Tracking array of created resources
- * @param {object} options - Probe options with gitSha
- * @param {object} dependencies - Runtime dependencies (now, sleep)
- * @returns {Promise<Array<Error>>} Array of errors encountered during cleanup
- */
 async function cleanupResources(apiRequest, resources, options, dependencies) {
   const errors = [];
   for (const resource of [...resources].reverse()) {
@@ -915,16 +627,6 @@ async function cleanupResources(apiRequest, resources, options, dependencies) {
   return errors;
 }
 
-/**
- * Deletes an asset via the API and polls until it is confirmed deleted (404).
- *
- * @param {Function} apiRequest - Authenticated API request client
- * @param {string} assetId - Asset UUID to delete
- * @param {string} key - Idempotency key for deletion
- * @param {object} options - Probe options
- * @param {object} dependencies - Runtime dependencies
- * @returns {Promise<void>}
- */
 async function deleteAsset(apiRequest, assetId, key, options, dependencies) {
   await apiRequest("deleteAsset", "DELETE", `/assets/${assetId}`, {
     expected: [202, 204],
@@ -933,26 +635,6 @@ async function deleteAsset(apiRequest, assetId, key, options, dependencies) {
   await pollDeleted(apiRequest, assetId, options, dependencies);
 }
 
-/**
- * Completes an upload session, polls for completion, downloads the object, verifies digest parity, and deletes it.
- *
- * Verifies end-to-end processing pipeline: session completion -> ready state -> presigned download URL
- * -> byte-for-byte stream digest verification -> asset deletion.
- *
- * @param {object} params - Completion parameters
- * @param {Function} params.apiRequest - Authenticated API request client
- * @param {string} params.assetId - Asset UUID
- * @param {Array<{ etag: string, part_number: number }>} [params.completedParts] - Multipart part descriptors
- * @param {object} params.dependencies - Runtime dependencies (fetchImpl, now, sleep)
- * @param {string} params.expectedDigest - Expected hex SHA-256 hash of object
- * @param {number} params.expectedSize - Expected byte length
- * @param {object} params.options - Probe options
- * @param {Set<string>} params.r2RequestIds - R2 request ID tracker
- * @param {Array<object>} params.resources - Cleanup tracker
- * @param {string} params.sessionId - Upload session ID
- * @returns {Promise<{ bytes: number, requestId: string, sha256: string }>} Download verification metrics
- * @throws {Error} If downloaded bytes or SHA-256 digest do not match expected values
- */
 async function completeAndVerify({
   apiRequest,
   assetId,
@@ -998,16 +680,6 @@ async function completeAndVerify({
   return downloaded;
 }
 
-/**
- * Executes the single-part upload test case verifying CORS preflight, signed size rejection, upload, completion, and deletion.
- *
- * @param {Function} apiRequest - Authenticated API client
- * @param {object} options - Probe options
- * @param {object} dependencies - Runtime dependencies
- * @param {Set<string>} r2RequestIds - R2 request ID tracker
- * @param {Array<object>} resources - Resource tracker
- * @returns {Promise<{ bytes: number, name: string }>} Test case execution summary
- */
 async function singleUploadCase(apiRequest, options, dependencies, r2RequestIds, resources) {
   const bytes = pngFixture();
   const expectedDigest = createHash("sha256").update(bytes).digest("hex");
@@ -1070,18 +742,6 @@ async function singleUploadCase(apiRequest, options, dependencies, r2RequestIds,
   };
 }
 
-/**
- * Requests presigned PUT URLs for multipart upload parts in batches of up to 100 parts.
- *
- * Enforces that the API returns signed URLs for all requested parts and sorts them by part number.
- *
- * @param {Function} apiRequest - Authenticated API client
- * @param {object} session - Multipart upload session record
- * @param {string} gitSha - Current release Git SHA for idempotency keys
- * @param {Array<number>} [requestedParts] - Specific part numbers to sign, defaulting to all parts
- * @returns {Promise<Array<{ part_number: number, url: string, headers: Record<string, string> }>>} Sorted array of signed part descriptors
- * @throws {Error} If API fails to sign all requested parts
- */
 async function signMultipartParts(apiRequest, session, gitSha, requestedParts) {
   const partNumbers =
     requestedParts ?? Array.from({ length: session.multipart.part_count }, (_, index) => index + 1);
@@ -1111,20 +771,6 @@ async function signMultipartParts(apiRequest, session, gitSha, requestedParts) {
   return signedParts.sort((left, right) => left.part_number - right.part_number);
 }
 
-/**
- * Executes the multipart complete probe test case for large uploads exceeding 25 MiB.
- *
- * Exercises chunked video uploading across a sliding window of presigned part URLs,
- * uploads all binary chunks, completes the multipart session, polls ready state, downloads
- * the compiled object from R2, verifies bit-for-bit SHA-256 parity, and deletes the asset.
- *
- * @param {Function} apiRequest - Authenticated API client
- * @param {object} options - Probe options
- * @param {object} dependencies - Runtime dependencies
- * @param {Set<string>} r2RequestIds - R2 request ID tracker
- * @param {Array<object>} resources - Resource tracker
- * @returns {Promise<{ bytes: number, name: string }>} Test case execution summary
- */
 async function multipartCompleteCase(apiRequest, options, dependencies, r2RequestIds, resources) {
   const { asset, session } = await createSession(
     apiRequest,
@@ -1145,8 +791,6 @@ async function multipartCompleteCase(apiRequest, options, dependencies, r2Reques
     bucketName: options.bucketName,
     origin: options.r2Origin,
   };
-  // Keep only a few upload waves signed at once so long probes refresh URLs
-  // without paying for one signing request per sequential part.
   const signingWindowParts = Math.min(100, session.multipart.max_parallel_parts * 4);
   const expected = createHash("sha256");
   const completedParts = [];
@@ -1218,20 +862,6 @@ async function multipartCompleteCase(apiRequest, options, dependencies, r2Reques
   };
 }
 
-/**
- * Executes the multipart abort probe test case verifying cleanup and rejection of stale upload URLs.
- *
- * Initializes a multipart session, uploads an initial part, issues an abort request,
- * verifies that the session status becomes 'aborted', and asserts that subsequent PUT attempts
- * using the previously signed part URL are rejected by R2 with a 404 Not Found.
- *
- * @param {Function} apiRequest - Authenticated API client
- * @param {object} options - Probe options
- * @param {object} dependencies - Runtime dependencies
- * @param {Set<string>} r2RequestIds - R2 request ID tracker
- * @param {Array<object>} resources - Resource tracker
- * @returns {Promise<{ bytes: number, name: string }>} Test case execution summary
- */
 async function multipartAbortCase(apiRequest, options, dependencies, r2RequestIds, resources) {
   const { asset, session } = await createSession(
     apiRequest,
@@ -1306,14 +936,6 @@ async function multipartAbortCase(apiRequest, options, dependencies, r2RequestId
   };
 }
 
-/**
- * Verifies that the API rejects asset upload requests exceeding the maximum media threshold with HTTP 413.
- *
- * @param {Function} apiRequest - Authenticated API client
- * @param {object} options - Probe options
- * @returns {Promise<{ bytes: number, name: string }>} Test case execution summary
- * @throws {Error} If API does not respond with status 413 Payload Too Large
- */
 async function oversizedCase(apiRequest, options) {
   const response = await apiRequest("createUploadSession", "POST", "/asset-upload-sessions", {
     body: uploadInput({
@@ -1330,14 +952,6 @@ async function oversizedCase(apiRequest, options) {
   return { bytes: MAX_MEDIA_BYTES + 1, name: "oversized-rejection" };
 }
 
-/**
- * Verifies that the staging API health endpoint responds with expected environment and Git SHA.
- *
- * @param {Function} apiRequest - Authenticated API request client
- * @param {object} options - Probe options with gitSha
- * @returns {Promise<{ environment: string, version: string }>} Validated health report
- * @throws {Error} If health status is not ok or version/environment mismatch the release
- */
 async function verifyStagingTarget(apiRequest, options) {
   const response = await apiRequest("getHealth", "GET", "/health");
   if (
@@ -1350,17 +964,6 @@ async function verifyStagingTarget(apiRequest, options) {
   return { environment: "staging", version: options.gitSha };
 }
 
-/**
- * Verifies the explicitly configured staging user and active workspace before mutation.
- * Both identifiers must be UUIDs and match the authenticated `/users/me` response.
- * Upload admission remains authoritative at the API; quota failures enter the same
- * cleanup/evidence path as other probe failures, without a removed billing endpoint.
- *
- * @param {Function} apiRequest - Authenticated API request client
- * @param {Record<string, string | undefined>} environment - Process environment
- * @returns {Promise<{ organization_id: string, user_id: string }>} Verified identity
- * @throws {Error} If configuration or the authenticated identity does not match
- */
 async function verifyAcceptanceIdentity(apiRequest, environment) {
   const expectedUserId = requiredString(
     environment.MELTIPLY_STAGING_ACCEPTANCE_USER_ID,
@@ -1383,15 +986,6 @@ async function verifyAcceptanceIdentity(apiRequest, environment) {
   return { organization_id: expectedOrganizationId, user_id: expectedUserId };
 }
 
-/**
- * Redacts secrets, bearer tokens, and presigned R2 URLs from error messages.
- *
- * Prevents credential leaks to logs or evidence files during probe failures.
- *
- * @param {unknown} error - Error thrown during execution
- * @param {Record<string, string | undefined>} environment - Process environment containing secrets
- * @returns {string} Redacted error message
- */
 function safeError(error, environment) {
   let message = redactError(error, environment);
   const secrets = [environment.MELTIPLY_STAGING_BEARER_TOKEN]
@@ -1401,22 +995,10 @@ function safeError(error, environment) {
   return message.replace(signedUrlPattern, "[SIGNED_URL]");
 }
 
-/**
- * Returns a sorted copy of an array of string values.
- *
- * @param {Iterable<string>} values - Input strings
- * @returns {Array<string>} Sorted array
- */
 function sorted(values) {
   return [...values].sort();
 }
 
-/**
- * Sanitizes and deterministically sorts remaining resource IDs for inclusion in failure evidence.
- *
- * @param {Array<{ assetId?: string, sessionId?: string }>} resources - Unresolved resources
- * @returns {Array<object>} Sorted list of sanitized resource descriptors
- */
 function safeResources(resources) {
   return resources
     .map((resource) => ({
@@ -1426,14 +1008,6 @@ function safeResources(resources) {
     .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
 }
 
-/**
- * Assembles the standard baseline metadata fields for R2 acceptance evidence records.
- *
- * @param {object} options - Probe options
- * @param {string} probeId - Unique UUID for this probe run
- * @param {string} startedAt - ISO 8601 start timestamp
- * @returns {object} Baseline evidence envelope
- */
 function baseEvidence(options, probeId, startedAt) {
   return {
     acceptance_type: "real-r2",
@@ -1455,31 +1029,10 @@ function baseEvidence(options, probeId, startedAt) {
   };
 }
 
-/**
- * Persists acceptance probe execution evidence to the designated output file path.
- *
- * @param {object} options - Probe options containing outputPath
- * @param {object} evidence - JSON-serializable evidence payload
- * @returns {Promise<void>}
- */
 function writeAttemptEvidence(options, evidence) {
   return writeEvidence(dirname(options.outputPath), basename(options.outputPath), evidence);
 }
 
-/**
- * Orchestrates the full Cloudflare R2 staging acceptance probe suite.
- *
- * When run in dry-run mode (without --apply), returns target metadata and ready status.
- * When applied, verifies git checkout cleanliness, validates API health and dedicated paid identity,
- * exercises single-part upload, multipart upload, multipart abort with stale URL rejection,
- * and oversized upload rejection, verifies billing and quota reconciliation, cleans up all
- * temporary assets/sessions, and records atomic private evidence.
- *
- * @param {object} options - Bound acceptance options from prepareR2AcceptanceOptions
- * @param {object} [injected={}] - Injectable runtime dependencies for testing
- * @returns {Promise<object>} Acceptance evidence record (dry-run or passed/failed probe report)
- * @throws {Error|AggregateError} If probe fails or resources fail to clean up
- */
 export async function runR2Acceptance(options, injected = {}) {
   if (!options.apply) {
     return {
@@ -1604,13 +1157,6 @@ export async function runR2Acceptance(options, injected = {}) {
   }
 }
 
-/**
- * Command-line entrypoint for executing the R2 staging acceptance probe script.
- *
- * Parses arguments, loads inputs, runs the probe, and logs JSON results.
- *
- * @returns {Promise<void>}
- */
 async function main() {
   const parsed = parseR2AcceptanceArguments(process.argv.slice(2));
   if (parsed.apply) await rm(parsed.outputPath, { force: true });

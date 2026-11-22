@@ -2,11 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { Effect } from "effect";
 
 import { effectLoggerLayer, type LogContext } from "../src";
-
-// Every case logs with `environment: "test"`, which makes the sink attempt a
-// local Loki push. Stub the transport so the suite never performs real
-// network I/O, and restore centrally so a failing assertion cannot leave
-// `console.*`/`fetch` mocked for the cases after it.
 beforeEach(() => {
   vi.stubGlobal(
     "fetch",
@@ -72,8 +67,6 @@ describe("Effect Observability Logger Integration", () => {
     const logged = JSON.parse(line);
     expect(logged.level).toBe("error");
     expect(logged.context.event).toBe("auth_failure");
-    // The claim in this case's name is redaction, so the annotation carrying a
-    // credential must reach the line masked rather than verbatim.
     expect(logged.context.access_token).toBe("[REDACTED]");
     expect(line).not.toContain("provider-access-secret");
 
@@ -126,8 +119,6 @@ describe("Effect Observability Logger Integration", () => {
     };
 
     const error = Object.assign(new Error("Connection timeout"), {
-      // The case name promises the code is bridged; without a code on the
-      // thrown value the `error_code` branch is never reached.
       code: "database_timeout",
     });
     error.name = "DatabaseTimeoutError";

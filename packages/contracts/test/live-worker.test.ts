@@ -11,11 +11,6 @@ interface LiveCase {
   status: number;
 }
 
-/**
- * Unauthenticated probes of the local Worker. The cases are the only operations
- * whose documented behaviour is observable without a credential; every other
- * operation is exercised by the authenticated suites.
- */
 const cases: LiveCase[] = [
   {
     operationId: "getHealth",

@@ -61,12 +61,6 @@ interface SileoProps {
   onDismiss?: () => void;
 }
 
-/**
- * Snapshot of the painted toast payload. Upstream Sileo renders from a
- * committed `View` rather than live props so a refresh morph (collapse →
- * swap → expand) never flashes incoming copy mid-flight; the same stage
- * also carries `fill` so the SVG surface crossfades color with content.
- */
 interface SileoView {
   title?: string;
   description?: ReactNode | string;
@@ -96,7 +90,6 @@ const SPRING = {
   duration: DURATION_S,
 };
 
-/** Reduced-motion travel: geometry commits instantly; only opacity fades remain. */
 const INSTANT = { duration: 0 } as const;
 
 const STATE_ICON: Record<SileoState, ReactNode> = {
@@ -108,27 +101,11 @@ const STATE_ICON: Record<SileoState, ReactNode> = {
   action: <ArrowRight className="size-3.5" aria-hidden="true" />,
 };
 
-/**
- * Reads the viewport-width ceiling sileo.css applies to `[data-sileo-toast]`
- * (`100vw - 24px` of side gutter). Used as the geometry fallback whenever the
- * toast element is not measurable (jsdom, display-none), matching the cap the
- * CSS `min()` computes from the same gutter.
- *
- * @returns Maximum rendered toast width in CSS pixels, or Infinity without a viewport.
- */
 function viewportToastCap(): number {
   if (typeof window === "undefined") return Number.POSITIVE_INFINITY;
   return Math.max(0, window.innerWidth - VIEWPORT_GUTTER);
 }
 
-/**
- * Renders the SVG Gaussian-blur + alpha-threshold filter that fuses Sileo's
- * header pill and expandable body into a single continuous liquid silhouette.
- *
- * @param props.filterId - Unique DOM id referenced by the SVG group's `filter` attribute.
- * @param props.blur - Standard deviation derived from the toast's corner radius.
- * @returns Memoized `<defs>` block containing the metaball filter pipeline.
- */
 const GooeyDefs = memo(function GooeyDefs({
   filterId,
   blur,
@@ -159,24 +136,6 @@ const GooeyDefs = memo(function GooeyDefs({
   );
 });
 
-/**
- * Physics-based morphing toast surface adapted from `hiaaryan/sileo` to
- * Meltiply's shared token palette.
- *
- * Renders a compact header pill (`[data-sileo-header]`) and an expandable
- * body (`[data-sileo-content]`) backed by two spring-animated `<m.rect>`
- * shapes fused through `<GooeyDefs>`. When `pinned` is true (e.g. for an
- * interactive cookie consent prompt), the body stays open until an explicit
- * action transitions it into a confirmation status or closes it.
- *
- * The caller `width` acts as a ceiling rather than a fixed size: sileo.css
- * clamps the element to the viewport through `--sileo-width`, and a
- * ResizeObserver mirrors the rendered box back into the SVG canvas, pill,
- * and header geometry so narrow screens keep the whole toast on-screen.
- *
- * @param props - Toast state, copy, alignment, and lifecycle handlers.
- * @returns Memoized Sileo toast element.
- */
 export const Sileo = memo(function Sileo({
   id,
   fill = "var(--sileo-fill)",
@@ -205,8 +164,6 @@ export const Sileo = memo(function Sileo({
   onMouseLeave,
   onDismiss,
 }: SileoProps): ReactElement {
-  // Incoming payload; the committed `view` state below is what paints, so
-  // header/body/fill can stage behind a collapse before swapping.
   const next: SileoView = useMemo(
     () => ({ title, description, state, icon, styles, button, fill }),
     [title, description, state, icon, styles, button, fill],
@@ -220,8 +177,6 @@ export const Sileo = memo(function Sileo({
   const [ready, setReady] = useState(false);
   const [pillWidth, setPillWidth] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
-  // Rendered toast box width: seeded from the caller width so SSR and
-  // hydration geometry match, then synced to the CSS-clamped element below.
   const [boxWidth, setBoxWidth] = useState(width);
   const prefersReducedMotion = useReducedMotionPreference();
 
@@ -252,17 +207,11 @@ export const Sileo = memo(function Sileo({
   const pillRafRef = useRef(0);
   const pillObservedRef = useRef<Element | null>(null);
 
-  // Outgoing header copy stays mounted for `HEADER_EXIT_MS` so the badge/title
-  // crossfades instead of hard-swapping; `prev` renders behind `current`.
   const [headerLayer, setHeaderLayer] = useState<{
     current: { key: string; view: SileoView };
     prev: { key: string; view: SileoView } | null;
   }>({ current: { key: headerKey, view }, prev: null });
 
-  // Crossfade bookkeeping as a render-phase state adjustment: a headerKey
-  // change demotes the outgoing layer to `prev` (which exits over
-  // HEADER_EXIT_MS) while the new layer enters; same key swaps the view in
-  // place without adding another animation path.
   if (headerLayer.current.key === headerKey) {
     if (headerLayer.current.view !== view) {
       setHeaderLayer((state) => ({
@@ -277,9 +226,6 @@ export const Sileo = memo(function Sileo({
     });
   }
 
-  // Commits the staged refresh payload; called by the swap timer and by the
-  // root transitionend listener so the view lands exactly when the collapse
-  // finishes (whichever comes first), never while a morph is still pending.
   const commitPendingView = useCallback(() => {
     if (swapTimerRef.current) {
       clearTimeout(swapTimerRef.current);
@@ -292,10 +238,6 @@ export const Sileo = memo(function Sileo({
     setApplied(pending.key);
   }, []);
 
-  // Keep JS-drawn geometry aligned with the box the viewport clamp actually
-  // produced; otherwise the SVG canvas, pill, and header paint at the raw
-  // caller width and stick out of narrow viewports. `offsetWidth` is 0 before
-  // layout (and in jsdom), so the CSS cap formula stands in for the measurement.
   useLayoutEffect(() => {
     const el = rootRef.current;
     if (!el) return;
@@ -310,9 +252,6 @@ export const Sileo = memo(function Sileo({
     return () => ro.disconnect();
   }, [width]);
 
-  // Measures the header pill synchronously so a remounted inner (key change)
-  // paints with the correct width on its first frame; the observer then keeps
-  // pill width live for subsequent text/layout growth, batched through rAF.
   useLayoutEffect(() => {
     const el = innerRef.current;
     const header = headerRef.current;
@@ -351,9 +290,6 @@ export const Sileo = memo(function Sileo({
       pillObservedRef.current = el;
     }
 
-    // The observer itself is ref-owned and survives re-runs (the unmount effect
-    // disconnects it), so this run releases exactly the element it registered:
-    // clearing the tracking ref lets the next run observe the current pill.
     return () => {
       pillRoRef.current?.unobserve(el);
       if (pillObservedRef.current === el) pillObservedRef.current = null;
@@ -369,9 +305,6 @@ export const Sileo = memo(function Sileo({
     };
   }, []);
 
-  // Measures body height synchronously so newly committed content sizes the
-  // canvas on the same commit instead of one frame late; the observer then
-  // feeds live resizes (pinned forms toggling controls) rAF-batched.
   useLayoutEffect(() => {
     let rafId = 0;
     const el = contentRef.current;
@@ -397,11 +330,6 @@ export const Sileo = memo(function Sileo({
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // The header layer sync lives in the render phase above (React's
-  // "adjusting state when props change" pattern) so the outgoing layer is
-  // already demoted when this commit paints — an effect here would paint one
-  // frame with the new key on the old layer first.
-
   useEffect(() => {
     if (!headerLayer.prev) return;
     clearTimeout(headerExitRef.current ?? undefined);
@@ -415,16 +343,7 @@ export const Sileo = memo(function Sileo({
     };
   }, [headerLayer.prev]);
 
-  // Staged refresh lifecycle, matching upstream Sileo: a new `refreshKey`
-  // while open collapses the body and stages the incoming view for
-  // SWAP_COLLAPSE_MS (or until the collapse transition ends), while a refresh
-  // received collapsed or still pinned commits immediately. Pinned form
-  // controls must not wait behind a hidden copy. Same-key updates replace any
-  // staged payload without restarting the implemented collapse timer.
   useEffect(() => {
-    // The staged morph lifecycle must commit/collapse synchronously inside
-    // this effect (upstream parity), so the paint decisions live inside this
-    // local routine; timers and transitionend use `commitPendingView`.
     const applyRefresh = () => {
       if (refreshKey === undefined) {
         pendingRef.current = null;
@@ -466,9 +385,6 @@ export const Sileo = memo(function Sileo({
     applyRefresh();
   }, [pinned, open, refreshKey, next, applied, view, commitPendingView]);
 
-  // Re-arm only after the incoming view commits. Unpinning a consent prompt
-  // changes these dependencies before the swap finishes; expanding at that
-  // point would cancel the collapse and jump straight to the new body size.
   useEffect(() => {
     clearTimeout(autoExpandRef.current ?? undefined);
     clearTimeout(autoCollapseRef.current ?? undefined);
@@ -479,8 +395,6 @@ export const Sileo = memo(function Sileo({
     if (autoExpandDelayMs == null && autoCollapseDelayMs == null) return;
 
     autoCollapseActiveRef.current = true;
-    // Sub-frame timer keeps the expand on the external-callback path; 1ms is
-    // below one paint frame so a delay of 0 still expands "immediately".
     autoExpandRef.current = window.setTimeout(
       () => setIsExpanded(true),
       Math.max(1, autoExpandDelayMs ?? 1),
@@ -503,10 +417,6 @@ export const Sileo = memo(function Sileo({
   const minExpanded = HEIGHT * MIN_EXPAND_RATIO;
   const rawExpanded = hasDesc ? Math.max(minExpanded, HEIGHT + contentHeight) : minExpanded;
 
-  // Freeze the expanded canvas height on the last open measurement so a
-  // collapse keeps drawing one fused silhouette while the body springs up;
-  // unfrozen it would shrink the SVG instantly and paint two pills. Rendered
-  // as render-phase state (refs may not be read during render).
   const [frozen, setFrozen] = useState({ open, expanded: rawExpanded });
   if (open !== frozen.open) {
     setFrozen({ open, expanded: rawExpanded });
@@ -557,10 +467,6 @@ export const Sileo = memo(function Sileo({
     [view.button],
   );
 
-  // Commits the staged payload as soon as the collapse actually finishes
-  // (height/transform transitions settle) instead of waiting out the full
-  // SWAP_COLLAPSE_MS timer; bubbled transitionend events are filtered to the
-  // properties the morph itself animates.
   const handleTransitionEnd: TransitionEventHandler<HTMLDivElement> = useCallback(
     (e) => {
       if (e.propertyName !== "height" && e.propertyName !== "transform") {
@@ -639,8 +545,6 @@ export const Sileo = memo(function Sileo({
       className={className}
       style={
         {
-          // Caller width is a ceiling; the CSS `min()` owns the actual clamp
-          // and the ResizeObserver feeds the rendered box back as `boxWidth`.
           "--sileo-width": `${width}px`,
           height: `${open ? expanded : HEIGHT}px`,
         } as CSSProperties
@@ -670,10 +574,6 @@ export const Sileo = memo(function Sileo({
           <GooeyDefs filterId={filterId} blur={blur} />
           <g filter={`url(#${filterId})`}>
             <LazyMotion features={domAnimation} strict>
-              {/* The animated keys are SVG geometry attributes on a `<rect>`,
-                  not CSS layout properties: a rect's x/width/height drive the
-                  shape the gooey filter morphs, so they repaint the SVG instead
-                  of reflowing the document and have no transform equivalent. */}
               <m.rect
                 data-sileo-pill
                 rx={resolvedRoundness}
@@ -762,16 +662,6 @@ export const Sileo = memo(function Sileo({
   );
 });
 
-/**
- * Fixed-position Sileo toast viewport rendering all active notifications from
- * the shared store. Pauses dismissal timers while the pointer hovers over a
- * toast, while retaining the existing spring and morph lifecycle.
- *
- * @param props.children - Optional child tree rendered alongside the viewport.
- * Notifications always occupy the bottom-right corner and expand upward.
- * @param props.options - Default content and timing options merged into every toast.
- * @returns One fixed bottom-right viewport containing the shared notification list.
- */
 export function Toaster({
   children,
   options,

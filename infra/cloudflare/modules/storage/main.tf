@@ -39,20 +39,6 @@ resource "cloudflare_r2_bucket_lifecycle" "assets" {
   bucket_name  = cloudflare_r2_bucket.assets.name
   jurisdiction = cloudflare_r2_bucket.assets.jurisdiction
 
-  # Both rules are backstops for uploads that no database row will ever claim.
-  # Ownership lives in PostgreSQL: the Asset's orphan clock drives reclamation of
-  # completed objects, and this bucket never deletes an object on its own authority.
-  #
-  # Rule 1 aborts multipart uploads that were never completed. An incomplete
-  # upload has no object and no row, so only the bucket can reclaim its parts.
-  # It keeps an empty prefix so it also covers multipart sessions created outside
-  # the staging namespace.
-  #
-  # Rule 2 expires completed objects that are still in the upload-writable
-  # staging/ namespace. Promotion copies retained bytes into the ready
-  # <org_id>/<asset_id>/ namespace before an attachment counts as ready, so a
-  # staging object is always transient: either promoted and superseded by the
-  # ready copy, or abandoned. Ready and rendition keys are never expired here.
   rules = [
     {
       id      = "abort-incomplete-multipart"

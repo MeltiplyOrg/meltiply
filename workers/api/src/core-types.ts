@@ -1,6 +1,6 @@
 import type { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
-import type { DatabaseError, DomainError } from "@meltiply/domain";
+import type { DatabaseError, ActiveOrganizationRequiredError } from "@meltiply/domain";
 import type { components } from "@meltiply/contracts/schema";
 
 import type { ApiWorkerEnv } from "./env";
@@ -99,7 +99,7 @@ export interface IdempotentResult<T> {
   value: T;
 }
 
-export type CoreServiceError = CoreApiError | DomainError | DatabaseError;
+export type CoreServiceError = CoreApiError | ActiveOrganizationRequiredError | DatabaseError;
 
 export interface CoreApiService {
   /**

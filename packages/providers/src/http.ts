@@ -1,53 +1,44 @@
 import type { Effect } from "effect";
 import type { Platform } from "@meltiply/domain";
+
+import { providerCallEffect } from "./effect";
 import {
   classifyProviderFailure,
   ProviderAdapterError,
-  type ProviderAdapterErrorOptions,
+  type ProviderFailureInput,
+  type ProviderRequestDiagnostic,
 } from "./failures";
-import { providerCallEffect } from "./effect";
-import { extractRateLimitBudget, type RateLimitBudget } from "./rate-limit";
+import { extractRateLimitBudget } from "./rate-limit";
 import type { ProviderRequestContext } from "./types";
 
 export type ProviderHttpMethod = "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
 export type ProviderHttpResponseType = "empty" | "json" | "json_or_empty";
 
-export interface ProviderHttpRequest<
-  R extends ProviderHttpResponseType = ProviderHttpResponseType,
-> {
+export interface ProviderHttpRequest {
   acceptedStatuses?: readonly number[];
   body?: BodyInit;
   /**
-   * Optional sanitizer invoked with the bounded, JSON-parsed body of a
-   * non-accepted error response. It may return a ProviderErrorDiagnosis whose
-   * sanitized code and quota/rate-limit flags refine the status-derived
-   * failure classification. The raw body never leaves this boundary: only the
-   * returned diagnosis reaches the thrown ProviderAdapterError.
+   * Refines the status-derived classification of a non-accepted response from
+   * its bounded, parsed body. Only the returned diagnosis leaves the client.
    */
   classifyErrorBody?: (status: number, body: unknown) => ProviderErrorDiagnosis | undefined;
   headers?: HeadersInit;
   method: ProviderHttpMethod;
-  responseType?: R;
-  /** Converts unsafe JSON integer literals to their exact decimal strings before precision can be lost. */
+  responseType?: ProviderHttpResponseType;
+  /** Keeps JSON integers beyond `Number.MAX_SAFE_INTEGER` as their exact decimal strings. */
   preserveLargeIntegers?: boolean;
   sideEffectPossible?: boolean;
   url: string;
 }
 
-/**
- * Provider-specific diagnosis extracted from a safely parsed error body.
- * `code` is a sanitized failure code; `quotaExceeded`/`rateLimited` reclassify
- * status-derived 'auth' failures as 'quota'/'rate_limit' when the provider's
- * documented error reason proves that condition (e.g. Google 403 reasons).
- */
 export interface ProviderErrorDiagnosis {
   code?: string;
   quotaExceeded?: boolean;
   rateLimited?: boolean;
 }
 
-export interface ProviderHttpResponse<T> {
-  body: T;
+export interface ProviderHttpResponse {
+  body: unknown;
   headers: Headers;
   status: number;
 }
@@ -57,22 +48,20 @@ export interface ProviderHttpClientOptions {
   fetch?: typeof fetch;
   maximumResponseBytes?: number;
   now?: () => Date;
-  /** Platform whose canonical rate-limit header parser attaches to responses. */
+  /** Selects the rate-limit header parser whose budget is recorded on the request context. */
   platform?: Platform;
-  /** Explicit override for custom/test rate-limit extractors; takes precedence over `platform`. */
-  rateLimitBudget?: (headers: Headers) => RateLimitBudget | null;
   timeoutMilliseconds?: number;
 }
 
 const defaultMaximumResponseBytes = 256 * 1024;
+const maximumResponseBytesCeiling = 1024 * 1024;
 const defaultTimeoutMilliseconds = 30_000;
+const timeoutMillisecondsCeiling = 120_000;
+const maxRetryAfterSeconds = 86_400;
+const maxAcceptedStatuses = 10;
+const unsafeIntegerSourcePattern = /^-?\d+$/;
 const utf8Decoder = new TextDecoder();
 
-/**
- * Asserts that a number is an integer within inclusive minimum and maximum bounds.
- * Used for strict validation of client configuration settings like byte limits and timeouts.
- * Returns the validated integer. Throws RangeError if value is non-integer or out of bounds.
- */
 function boundedInteger(name: string, value: number, minimum: number, maximum: number): number {
   if (!Number.isInteger(value) || value < minimum || value > maximum) {
     throw new RangeError(`${name} must be between ${minimum} and ${maximum}`);
@@ -80,12 +69,6 @@ function boundedInteger(name: string, value: number, minimum: number, maximum: n
   return value;
 }
 
-/**
- * Validates and canonicalizes an allowed HTTPS origin URL string.
- * Requires https: scheme with no userinfo, path other than root '/', query, or fragment.
- * Returns the canonical origin string (e.g. 'https://graph.facebook.com').
- * Throws TypeError if the URL violates strict origin invariants.
- */
 function origin(value: string): string {
   const url = new URL(value);
   if (
@@ -102,11 +85,6 @@ function origin(value: string): string {
   return url.origin;
 }
 
-/**
- * Validates an outbound provider request URL against configured allowed origins.
- * Guards against SSRF and unauthorized host navigation by enforcing HTTPS and membership in allowedOrigins.
- * Returns parsed URL object. Throws TypeError if scheme is not https: or origin is not allowed.
- */
 function requestUrl(value: string, allowedOrigins: ReadonlySet<string>): URL {
   const url = new URL(value);
   if (
@@ -121,15 +99,10 @@ function requestUrl(value: string, allowedOrigins: ReadonlySet<string>): URL {
   return url;
 }
 
-/**
- * Validates and indexes acceptable non-2xx HTTP status codes for a request.
- * Enforces a maximum of 10 unique integer HTTP status codes within the 200..599 range.
- * Returns a Set of valid HTTP status codes. Throws TypeError on invalid status values.
- */
 function acceptedStatuses(values: readonly number[] | undefined): Set<number> {
   if (!values) return new Set();
   if (
-    values.length > 10 ||
+    values.length > maxAcceptedStatuses ||
     new Set(values).size !== values.length ||
     values.some((value) => !Number.isInteger(value) || value < 200 || value > 599)
   ) {
@@ -138,27 +111,18 @@ function acceptedStatuses(values: readonly number[] | undefined): Set<number> {
   return new Set(values);
 }
 
-/**
- * Parses a provider Retry-After header into a positive integer number of seconds.
- * Accepts either decimal second durations or HTTP-date strings relative to now, bounded to 86,400s (24h).
- * Returns ceil-rounded integer seconds, or undefined if header is missing, malformed, or out of bounds.
- */
+/** `Retry-After` is either delay-seconds or an HTTP-date (RFC 9110 §10.2.3). */
 function retryAfterSeconds(value: string | null, now: Date): number | undefined {
   if (!value) return undefined;
   const numeric = Number(value);
   const seconds = Number.isFinite(numeric)
     ? Math.ceil(numeric)
     : Math.ceil((new Date(value).getTime() - now.getTime()) / 1_000);
-  return Number.isInteger(seconds) && seconds >= 0 && seconds <= 86_400 ? seconds : undefined;
+  return Number.isInteger(seconds) && seconds >= 0 && seconds <= maxRetryAfterSeconds
+    ? seconds
+    : undefined;
 }
 
-/**
- * Streams an HTTP response body into memory with strict byte limit enforcement.
- * Inspects Content-Length upfront, avoids an extra full-body copy when the
- * response arrives in a single chunk, and grows a single buffer on multi-chunk
- * streams while terminating early if bytes exceed maximumBytes.
- * Returns Uint8Array of body bytes. Throws TypeError if size exceeds limit.
- */
 async function boundedBody(response: Response, maximumBytes: number): Promise<Uint8Array> {
   const rawLength = response.headers.get("Content-Length");
   const contentLength = rawLength === null ? Number.NaN : Number(rawLength);
@@ -189,13 +153,15 @@ async function boundedBody(response: Response, maximumBytes: number): Promise<Ui
           length = nextLength;
           continue;
         }
-        const capacity = Math.min(maximumBytes, Math.max(nextLength, singleChunk.byteLength * 2));
-        buffer = new Uint8Array(capacity);
+        buffer = new Uint8Array(
+          Math.min(maximumBytes, Math.max(nextLength, singleChunk.byteLength * 2)),
+        );
         buffer.set(singleChunk, 0);
         singleChunk = undefined;
       } else if (nextLength > buffer.byteLength) {
-        const capacity = Math.min(maximumBytes, Math.max(nextLength, buffer.byteLength * 2));
-        const grown = new Uint8Array(capacity);
+        const grown = new Uint8Array(
+          Math.min(maximumBytes, Math.max(nextLength, buffer.byteLength * 2)),
+        );
         grown.set(buffer.subarray(0, length), 0);
         buffer = grown;
       }
@@ -210,10 +176,6 @@ async function boundedBody(response: Response, maximumBytes: number): Promise<Ui
   return length === buffer.byteLength ? buffer : buffer.subarray(0, length);
 }
 
-/**
- * Decodes bounded UTF-8 bytes as JSON using the shared module-level decoder.
- * Optionally preserves unsafe integer literals as their exact decimal strings.
- */
 function parseJsonBytes(bytes: Uint8Array, preserveLargeIntegers = false): unknown {
   return JSON.parse(
     utf8Decoder.decode(bytes),
@@ -223,61 +185,46 @@ function parseJsonBytes(bytes: Uint8Array, preserveLargeIntegers = false): unkno
           Number.isInteger(value) &&
           !Number.isSafeInteger(value) &&
           source?.source &&
-          /^-?\d+$/.test(source.source)
+          unsafeIntegerSourcePattern.test(source.source)
             ? source.source
             : value
       : undefined,
   );
 }
 
-/**
- * Cancels the readable stream of an unused or rejected response body.
- * Safely frees underlying network resources without throwing unhandled rejection errors.
- */
 async function cancelBody(response: Response): Promise<void> {
   try {
     await response.body?.cancel();
   } catch {
-    // The response is already unusable; preserve its protocol outcome.
+    return;
   }
 }
 
-/**
- * Helper to construct a ProviderAdapterError from classified failure attributes.
- * Synthesizes status, timeout, code, parsed-body diagnosis, and ambiguity flags.
- * Optional causes and credential-free request facts reach sanitized error logs;
- * public classification and retry behavior remain unchanged.
- */
-function adapterError(
-  input: {
-    code: string;
-    malformedResponse?: boolean;
-    quotaExceeded?: boolean;
-    rateLimited?: boolean;
-    retryAfterSeconds?: number;
-    sideEffectPossible: boolean;
-    status?: number;
-    timedOut?: boolean;
-  },
-  options?: ProviderAdapterErrorOptions,
+function failure(
+  input: ProviderFailureInput,
+  request: ProviderRequestDiagnostic,
+  cause?: unknown,
 ): ProviderAdapterError {
-  return new ProviderAdapterError(classifyProviderFailure(input), options);
+  return new ProviderAdapterError(classifyProviderFailure(input), {
+    ...(cause === undefined ? {} : { cause }),
+    request,
+  });
 }
 
+/**
+ * Fetch boundary for every provider call: HTTPS origin allowlist, no redirects,
+ * timeout and caller abort, bounded bodies, JSON decoding, and failure
+ * classification. Rate-limit budgets from response headers are written to
+ * `context.metadata`.
+ */
 export class ProviderHttpClient {
   readonly #allowedOrigins: ReadonlySet<string>;
   readonly #fetch: typeof fetch;
   readonly #maximumResponseBytes: number;
   readonly #now: () => Date;
-  readonly #rateLimitBudget: ((headers: Headers) => RateLimitBudget | null) | undefined;
+  readonly #platform: Platform | undefined;
   readonly #timeoutMilliseconds: number;
 
-  /**
-   * Initializes a hardened ProviderHttpClient scoped to a set of canonical HTTPS origins.
-   * Validates unique allowed origins, configures response byte ceilings (up to 1 MiB),
-   * request timeouts (up to 120s), and optional rate limit budget extractors.
-   * Throws TypeError on duplicate or invalid origins, or RangeError on out-of-bound limits.
-   */
   constructor(options: ProviderHttpClientOptions) {
     const origins = options.allowedOrigins.map(origin);
     if (origins.length < 1 || new Set(origins).size !== origins.length) {
@@ -289,57 +236,26 @@ export class ProviderHttpClient {
       "maximumResponseBytes",
       options.maximumResponseBytes ?? defaultMaximumResponseBytes,
       1,
-      1024 * 1024,
+      maximumResponseBytesCeiling,
     );
     this.#timeoutMilliseconds = boundedInteger(
       "timeoutMilliseconds",
       options.timeoutMilliseconds ?? defaultTimeoutMilliseconds,
       1,
-      120_000,
+      timeoutMillisecondsCeiling,
     );
     this.#now = options.now ?? (() => new Date());
-    const platform = options.platform;
-    this.#rateLimitBudget =
-      options.rateLimitBudget ??
-      (platform ? (headers) => extractRateLimitBudget(platform, headers) : undefined);
+    this.#platform = options.platform;
   }
 
-  /**
-   * Executes a hardened HTTP request against an allowed provider endpoint.
-   * Denies redirects that the caller did not explicitly accept as protocol
-   * status (`redirect: 'manual'` plus an explicit 3xx failure, because the
-   * Workers runtime has no 'error' mode), applies timeout abortion, response
-   * byte bounds, JSON decoding, status code validation, and rate limit budget
-   * extraction into context metadata. Calls fetch with the global receiver
-   * required by Workers, rather than exposing this client as its receiver.
-   * Returns typed ProviderHttpResponse containing decoded body, headers, and status code.
-   * Throws ProviderAdapterError on HTTP failure, redirect, timeout, or malformed JSON;
-   * internal causes and origin/method/status facts are retained for sanitized logs.
-   * JSON parse errors are summarized because native messages can contain response bytes.
-   */
-  request(
-    context: ProviderRequestContext,
-    request: ProviderHttpRequest<"empty">,
-  ): Promise<ProviderHttpResponse<undefined>>;
-  request<T = unknown>(
-    context: ProviderRequestContext,
-    request: ProviderHttpRequest<"json_or_empty">,
-  ): Promise<ProviderHttpResponse<T | undefined>>;
-  request<T = unknown>(
-    context: ProviderRequestContext,
-    request: ProviderHttpRequest<"json">,
-  ): Promise<ProviderHttpResponse<T>>;
-  request<T = unknown>(
+  async request(
     context: ProviderRequestContext,
     request: ProviderHttpRequest,
-  ): Promise<ProviderHttpResponse<T>>;
-  async request<T = unknown>(
-    context: ProviderRequestContext,
-    request: ProviderHttpRequest,
-  ): Promise<ProviderHttpResponse<T | undefined>> {
+  ): Promise<ProviderHttpResponse> {
     const url = requestUrl(request.url, this.#allowedOrigins);
     const accepted = acceptedStatuses(request.acceptedStatuses);
     const sideEffectPossible = request.sideEffectPossible === true;
+    const diagnostic: ProviderRequestDiagnostic = { method: request.method, origin: url.origin };
     const controller = new AbortController();
     let timedOut = false;
     const abort = () => controller.abort(context.signal?.reason);
@@ -363,70 +279,42 @@ export class ProviderHttpClient {
         cache: "no-store",
         headers,
         method: request.method,
-        // Workers implements only 'follow' and 'manual'; 'error' throws a
-        // TypeError before any socket is opened. Redirects are therefore denied
-        // explicitly below, which also keeps the bearer token and any write from
-        // reaching a host the allowlist never approved.
+        // Workers supports only "follow" and "manual"; redirects are rejected below.
         redirect: "manual",
         signal: controller.signal,
       });
     } catch (cause) {
-      const abortFailure =
+      const aborted =
         timedOut ||
         (cause instanceof DOMException && ["AbortError", "TimeoutError"].includes(cause.name));
       cleanup();
-      throw adapterError(
+      throw failure(
         {
-          code: abortFailure ? "provider_http_timeout" : "provider_http_request_failed",
+          code: aborted ? "provider_http_timeout" : "provider_http_request_failed",
           sideEffectPossible,
-          ...(abortFailure ? { timedOut: true } : {}),
+          ...(aborted ? { timedOut: true } : {}),
         },
-        { cause, request: { method: request.method, origin: url.origin } },
+        diagnostic,
+        cause,
       );
     }
 
     try {
-      const rateLimitBudget = this.#rateLimitBudget?.(response.headers);
+      const rateLimitBudget = this.#platform
+        ? extractRateLimitBudget(this.#platform, response.headers)
+        : null;
       context.metadata = rateLimitBudget ? { rateLimitBudget } : undefined;
+      const responseDiagnostic = { ...diagnostic, status_code: response.status };
       if (response.status >= 300 && response.status < 400 && !accepted.has(response.status)) {
         await cancelBody(response);
-        throw adapterError(
-          {
-            code: "provider_http_redirect",
-            sideEffectPossible,
-            status: response.status,
-          },
-          {
-            request: {
-              method: request.method,
-              origin: url.origin,
-              status_code: response.status,
-            },
-          },
+        throw failure(
+          { code: "provider_http_redirect", sideEffectPossible, status: response.status },
+          responseDiagnostic,
         );
       }
       if (!response.ok && !accepted.has(response.status)) {
-        let diagnosis: ProviderErrorDiagnosis | undefined;
-        if (request.classifyErrorBody) {
-          // Read the error body through the same byte bound as success
-          // responses, then hand only the parsed value to the sanitizer so raw
-          // provider payloads are never retained in the failure.
-          let parsed: unknown;
-          try {
-            const bytes = await boundedBody(response, this.#maximumResponseBytes);
-            parsed = bytes.byteLength === 0 ? undefined : parseJsonBytes(bytes);
-          } catch {
-            await cancelBody(response);
-          }
-          try {
-            diagnosis = request.classifyErrorBody(response.status, parsed);
-          } catch {
-            diagnosis = undefined;
-          }
-        } else {
-          await cancelBody(response);
-        }
-        throw adapterError(
+        const diagnosis = await this.#diagnose(response, request.classifyErrorBody);
+        throw failure(
           {
             code: diagnosis?.code ?? `provider_http_${response.status}`,
             quotaExceeded: diagnosis?.quotaExceeded,
@@ -435,67 +323,42 @@ export class ProviderHttpClient {
             sideEffectPossible,
             status: response.status,
           },
-          {
-            request: {
-              method: request.method,
-              origin: url.origin,
-              status_code: response.status,
-            },
-          },
+          responseDiagnostic,
         );
       }
 
       const responseType = request.responseType ?? "json";
+      const empty = { body: undefined, headers: response.headers, status: response.status };
       if (responseType === "empty") {
         await cancelBody(response);
-        return {
-          body: undefined,
-          headers: response.headers,
-          status: response.status,
-        };
+        return empty;
       }
       try {
         const bytes = await boundedBody(response, this.#maximumResponseBytes);
-        if (bytes.byteLength === 0 && responseType === "json_or_empty") {
-          return {
-            body: undefined,
-            headers: response.headers,
-            status: response.status,
-          };
-        }
-        if (bytes.byteLength === 0) {
-          throw new TypeError("provider response is empty");
-        }
-        const contentType = response.headers.get("Content-Type")?.toLowerCase();
-        if (!contentType?.includes("application/json")) {
+        if (bytes.byteLength === 0 && responseType === "json_or_empty") return empty;
+        if (bytes.byteLength === 0) throw new TypeError("provider response is empty");
+        if (!response.headers.get("Content-Type")?.toLowerCase().includes("application/json")) {
           throw new TypeError("provider response is not JSON");
         }
         return {
-          body: parseJsonBytes(bytes, request.preserveLargeIntegers) as T,
+          body: parseJsonBytes(bytes, request.preserveLargeIntegers),
           headers: response.headers,
           status: response.status,
         };
       } catch (cause) {
-        const abortFailure = controller.signal.aborted;
-        throw adapterError(
+        const aborted = controller.signal.aborted;
+        throw failure(
           {
-            code: abortFailure ? "provider_http_timeout" : "provider_http_malformed_response",
+            code: aborted ? "provider_http_timeout" : "provider_http_malformed_response",
             sideEffectPossible,
             status: response.status,
-            ...(abortFailure ? { timedOut: true } : { malformedResponse: true }),
+            ...(aborted ? { timedOut: true } : { malformedResponse: true }),
           },
-          {
-            // JSON.parse may quote provider response bytes in its exception.
-            cause:
-              cause instanceof SyntaxError
-                ? new SyntaxError("Provider response is not valid JSON")
-                : cause,
-            request: {
-              method: request.method,
-              origin: url.origin,
-              status_code: response.status,
-            },
-          },
+          responseDiagnostic,
+          // JSON.parse messages can quote response bytes.
+          cause instanceof SyntaxError
+            ? new SyntaxError("Provider response is not valid JSON")
+            : cause,
         );
       }
     } finally {
@@ -503,38 +366,32 @@ export class ProviderHttpClient {
     }
   }
 
-  /**
-   * Effect-wrapped hardened HTTP request against an allowed provider endpoint.
-   * Delegates to the shared provider-call lift so transport composes without
-   * Promise/throw flows: the Effect fiber's interruption aborts the underlying
-   * fetch via the child context signal, and caller-provided abort signals are
-   * forwarded too. Provider transport failures surface as the original
-   * ProviderAdapterError (preserving classification, retryAfterSeconds, and
-   * ambiguous outcomes); unexpected throws become sanitized deterministic
-   * provider_unexpected failures without retaining the raw error.
-   * Returns Effect resolving to the typed ProviderHttpResponse. Example:
-   * `client.requestEffect(ctx, { method: "GET", url })` → `Effect<ProviderHttpResponse<T>, ProviderAdapterError>`.
-   */
   requestEffect(
     context: ProviderRequestContext,
-    request: ProviderHttpRequest<"empty">,
-  ): Effect.Effect<ProviderHttpResponse<undefined>, ProviderAdapterError>;
-  requestEffect<T = unknown>(
-    context: ProviderRequestContext,
-    request: ProviderHttpRequest<"json_or_empty">,
-  ): Effect.Effect<ProviderHttpResponse<T | undefined>, ProviderAdapterError>;
-  requestEffect<T = unknown>(
-    context: ProviderRequestContext,
-    request: ProviderHttpRequest<"json">,
-  ): Effect.Effect<ProviderHttpResponse<T>, ProviderAdapterError>;
-  requestEffect<T = unknown>(
-    context: ProviderRequestContext,
     request: ProviderHttpRequest,
-  ): Effect.Effect<ProviderHttpResponse<T>, ProviderAdapterError>;
-  requestEffect<T = unknown>(
-    context: ProviderRequestContext,
-    request: ProviderHttpRequest,
-  ): Effect.Effect<ProviderHttpResponse<T | undefined>, ProviderAdapterError> {
-    return providerCallEffect(context, (child) => this.request<T>(child, request));
+  ): Effect.Effect<ProviderHttpResponse, ProviderAdapterError> {
+    return providerCallEffect(context, (child) => this.request(child, request));
+  }
+
+  async #diagnose(
+    response: Response,
+    classifyErrorBody: ProviderHttpRequest["classifyErrorBody"],
+  ): Promise<ProviderErrorDiagnosis | undefined> {
+    if (!classifyErrorBody) {
+      await cancelBody(response);
+      return undefined;
+    }
+    let parsed: unknown;
+    try {
+      const bytes = await boundedBody(response, this.#maximumResponseBytes);
+      parsed = bytes.byteLength === 0 ? undefined : parseJsonBytes(bytes);
+    } catch {
+      await cancelBody(response);
+    }
+    try {
+      return classifyErrorBody(response.status, parsed);
+    } catch {
+      return undefined;
+    }
   }
 }

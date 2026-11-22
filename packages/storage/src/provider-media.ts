@@ -1,11 +1,3 @@
-/**
- * Shared verified-domain provider-media URL signing and verification.
- *
- * The Automation Worker signs `<APP_URL>/api/v1/provider-media/<key>?expires=<unix>&signature=<b64url>`
- * URLs for remote-ingest Platforms; the API Worker verifies the HMAC-SHA256 signature and streams
- * the private object. Keeping the route prefix, canonical payload, and constant-time crypto in
- * `@meltiply/storage` guarantees both workers stay byte-identical without duplicated code.
- */
 import { normalizeSegment } from "./keys";
 
 export const PROVIDER_MEDIA_ROUTE_PREFIX = "/api/v1/provider-media/";
@@ -16,10 +8,6 @@ const textEncoder = new TextEncoder();
 
 /**
  * Canonical signing payload bound into every provider-media URL signature.
- *
- * @param expiresAtSeconds - Unix seconds after which the URL stops verifying.
- * @param key - Object key the bearer may read.
- * @returns Versioned canonical `v1\n<expires>\n<key>` string.
  */
 export function providerMediaPayload(expiresAtSeconds: number, key: string): string {
   return `meltiply-provider-media-v1\n${expiresAtSeconds}\n${key}`;
@@ -48,11 +36,6 @@ function base64UrlDecode(value: string): Uint8Array<ArrayBuffer> | undefined {
 
 /**
  * Computes the Base64url HMAC-SHA256 bearer signature for a provider-media URL.
- *
- * @param secret - Raw HMAC signing secret (`TOKEN_ENCRYPTION_KEY`).
- * @param expiresAtSeconds - Unix seconds after which the signature expires.
- * @param key - Object key authorized by the signature.
- * @returns Unpadded Base64url HMAC-SHA256 digest.
  */
 export async function signProviderMediaSignature(
   secret: string,
@@ -76,12 +59,6 @@ export async function signProviderMediaSignature(
 
 /**
  * Verifies a provider-media HMAC-SHA256 bearer signature in constant time.
- *
- * @param secret - Raw HMAC signing secret (`TOKEN_ENCRYPTION_KEY`), or undefined.
- * @param expiresAtSeconds - Signed expiry claim from the URL.
- * @param key - Signed object key claim from the URL path.
- * @param signature - Base64url signature from the `signature` query parameter.
- * @returns True only when the signature authenticates the expiry and key claims.
  */
 export async function verifyProviderMediaSignature(
   secret: string | undefined,
@@ -109,9 +86,6 @@ export async function verifyProviderMediaSignature(
 /**
  * Builds a signed verified-domain provider-media URL on `appOrigin`, or returns
  * `undefined` when signing prerequisites (HTTPS credential-free origin, secret) are absent.
- *
- * @param input - App origin, signing secret, validated object key, and expiry instant in Unix seconds.
- * @returns Signed URL string or `undefined` when verified delivery is unavailable.
  */
 export async function signProviderMediaUrl(input: {
   readonly appUrl?: string;

@@ -1,27 +1,33 @@
-import { malformed, requiredIdentifier } from "../adapter-helpers";
+import { malformed } from "../failures";
 import type { ProviderErrorDiagnosis, ProviderHttpRequest, ProviderHttpResponse } from "../http";
 import { PROVIDER_LIMITS } from "../limits";
-import { boundedString, providerIdentifier, record, secureUrl } from "../meta-common";
 import type { ProviderCredentials, ProviderRequestContext } from "../types";
+import {
+  boundedString,
+  providerIdentifier,
+  record,
+  requiredIdentifier,
+  secureUrl,
+} from "../values";
 
 export const YOUTUBE_API_ORIGIN = "https://www.googleapis.com";
 export const YOUTUBE_ANALYTICS_ORIGIN = "https://youtubeanalytics.googleapis.com";
 export const YOUTUBE_TOKEN_ORIGIN = "https://oauth2.googleapis.com";
 export const YOUTUBE_AUTHORIZATION_ORIGIN = "https://accounts.google.com";
-export const YOUTUBE_VIDEO_ORIGIN = "https://youtu.be";
 export const YOUTUBE_LIMITS = PROVIDER_LIMITS.youtube;
 
-/** Leave room for both byte offsets within the Worker's 512-character operation identity limit. */
+/** The automation Worker persists operation identities of at most 512 characters. */
 const maximumOperationIdLength = 512;
 const maximumSessionUriLength =
   maximumOperationIdLength -
   `submitted:${YOUTUBE_LIMITS.maxVideoBytes}:${YOUTUBE_LIMITS.maxVideoBytes}:`.length;
 
 const videoOperationPattern = /^video:(.+)$/;
+const broadcastOperationPattern = /^(live|ended_live):(.+)$/;
 const sessionOperationPattern = /^(session|submitted):([1-9]\d*):(?:(\d+):)?(https:\/\/.+)$/;
 const invalidOperationCharactersPattern = /[\u0000-\u001f\u007f\s]/;
 
-/** Upload and channel identity are required; Analytics access is optional. */
+/** Upload and channel identity are required to connect; the remaining scopes are optional. */
 export const YOUTUBE_PUBLISHING_SCOPES = [
   "https://www.googleapis.com/auth/youtube.upload",
   "https://www.googleapis.com/auth/youtube.readonly",
@@ -35,26 +41,26 @@ export const YOUTUBE_CONFIGURED_SCOPES = [
   "https://www.googleapis.com/auth/youtube.force-ssl",
 ] as const;
 
-export type GoogleRequest = <T = unknown>(
+/** A provider request whose error bodies are diagnosed with Google's documented error reasons. */
+export type GoogleRequest = (
   context: ProviderRequestContext,
   request: Omit<ProviderHttpRequest, "classifyErrorBody">,
-) => Promise<ProviderHttpResponse<T>>;
+) => Promise<ProviderHttpResponse>;
 
 export type YouTubeOperation =
   | { id: string; phase: "video" }
   | { fileSize: number; sessionUri: string; phase: "session" }
   | { acknowledged: number; fileSize: number; sessionUri: string; phase: "submitted" };
 
-/** Extracts and validates the required YouTube channel identifier from credentials. */
 export function youtubeAccountId(credentials: ProviderCredentials): string {
   return requiredIdentifier(credentials.accountId, "youtube_channel_required");
 }
 
-/**
- * Extracts a safe failure diagnosis from a parsed Google API error body.
- * Quota reasons map to `youtube_quota_exceeded` (non-retryable quota); per-user
- * rate reasons map to `youtube_rate_limited`. Raw payloads never leave here.
- */
+export function youtubeWatchUrl(id: string): string {
+  return `https://youtu.be/${encodeURIComponent(id)}`;
+}
+
+/** Google 403s carry quota and rate-limit reasons that must not classify as auth failures. */
 export function googleErrorDiagnosis(
   _status: number,
   body: unknown,
@@ -75,11 +81,7 @@ export function googleErrorDiagnosis(
   return undefined;
 }
 
-/**
- * Validates Google's opaque resumable `Location` URI without reconstructing its
- * query. Returns the canonical session URI string bounded so every retained
- * offset fits inside the Worker's 512-character operation identity limit.
- */
+/** Google's resumable `Location` URI is opaque; it is validated, never reconstructed. */
 export function validateSessionUri(value: string | null): string {
   const url = secureUrl(value);
   if (!url) throw malformed();
@@ -97,10 +99,6 @@ export function validateSessionUri(value: string | null): string {
   return normalized;
 }
 
-/**
- * Formats a durable upload identity with its phase, byte size/offset and
- * Google's complete session URI, or the final video ID.
- */
 export function youtubeOperationId(operation: YouTubeOperation): string {
   return operation.phase === "video"
     ? `video:${operation.id}`
@@ -109,10 +107,6 @@ export function youtubeOperationId(operation: YouTubeOperation): string {
       : `submitted:${operation.fileSize}:${operation.acknowledged}:${operation.sessionUri}`;
 }
 
-/**
- * Parses a durable upload identity, validating byte bounds and the retained
- * Google session URI before any recovery request.
- */
 export function parseYouTubeOperationId(value: unknown): YouTubeOperation | undefined {
   const normalized = boundedString(value, maximumOperationIdLength);
   if (!normalized || invalidOperationCharactersPattern.test(normalized)) return undefined;
@@ -144,9 +138,25 @@ export function parseYouTubeOperationId(value: unknown): YouTubeOperation | unde
   }
 }
 
-/** Extracts and validates a YouTube video identifier from a videos.insert or videos.list body. */
 export function youtubeVideoId(value: unknown, sideEffectPossible = false): string {
   const id = providerIdentifier(record(value)?.id);
   if (!id) throw malformed(sideEffectPossible);
   return id;
+}
+
+/** `live:` is an open broadcast; `ended_live:` is the terminal identity kept after it ends. */
+export interface BroadcastOperation {
+  id: string;
+  phase: "live" | "ended_live";
+}
+
+export function broadcastOperationId(operation: BroadcastOperation): string {
+  return `${operation.phase}:${operation.id}`;
+}
+
+export function parseBroadcastOperationId(value: unknown): BroadcastOperation | undefined {
+  const match = typeof value === "string" ? value.trim().match(broadcastOperationPattern) : null;
+  const id = providerIdentifier(match?.[2]);
+  const phase = match?.[1];
+  return id && (phase === "live" || phase === "ended_live") ? { id, phase } : undefined;
 }

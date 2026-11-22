@@ -3,12 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 /**
- * Mirrors selected Worker config directories in a private temporary repo layout.
- * Configs are copied; source/dependency paths remain links to the live checkout.
- * Env files are hidden throughout the mirrored ancestor directories; supplied
- * session secrets replace them only at selected configs. This also prevents
- * Bun's root dotenv bootstrap from reintroducing checkout secrets or toggles.
- * Cleanup removes only this owned tree, including on failed preparation.
+ * Env files stay hidden throughout the mirrored ancestors because Bun's root dotenv
+ * bootstrap would otherwise reintroduce checkout secrets.
  */
 export async function createWorkerConfigSession(repoRoot, configPaths, envText) {
   const root = resolve(repoRoot);
@@ -30,7 +26,6 @@ export async function createWorkerConfigSession(repoRoot, configPaths, envText) 
   }
   const sessionRoot = await mkdtemp(join(tmpdir(), "meltiply-worker-session-"));
 
-  /** Preserves relative config paths while isolating env lookup at selected dirs. */
   async function mirror(directory) {
     const target = resolve(sessionRoot, directory);
     await mkdir(target, { recursive: true });

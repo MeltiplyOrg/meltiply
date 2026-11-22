@@ -17,7 +17,6 @@ const secretsVersionId = "22222222-2222-2222-2222-222222222222";
 const previousVersionId = "33333333-3333-3333-3333-333333333333";
 const tag = `staging-${gitSha.slice(0, 12)}-api-secrets`;
 
-/** Supplies a valid reviewed bootstrap release; overrides exercise identity and mode guards. */
 function releaseInput(overrides = {}) {
   return {
     schema_version: 1,
@@ -48,10 +47,6 @@ function releaseInput(overrides = {}) {
   };
 }
 
-// Deterministic control-plane stub: serves release-bound versions view and
-// deployment status payloads without touching Cloudflare. `bindings` maps a
-// version UUID to the VERSION binding SHA it reports; unknown IDs bind the
-// release SHA. `releaseTag` selects the installation's reviewed candidate.
 function controlPlane({ bindings = {}, traffic, releaseTag = tag } = {}) {
   return function runCommand(command, args) {
     assert.equal(command, "bun");
@@ -85,7 +80,6 @@ function controlPlane({ bindings = {}, traffic, releaseTag = tag } = {}) {
   };
 }
 
-/** Starts an ephemeral real HTTP endpoint and registers owned-server cleanup for each scenario. */
 async function withServer(context, handler) {
   const server = createServer(handler);
   server.listen(0, "127.0.0.1");
@@ -95,7 +89,6 @@ async function withServer(context, handler) {
   return `http://127.0.0.1:${port}`;
 }
 
-/** Redirects release HTTPS probes to a local server while preserving headers, cancellation and redirect policy. */
 function healthFetch(origin) {
   return function fetchImpl(input, init) {
     const url = new URL(input instanceof Request ? input.url : input);
@@ -106,7 +99,6 @@ function healthFetch(origin) {
   };
 }
 
-/** Writes release-bound candidate/secret evidence; overrides model corruption without remote mutations. */
 async function seedCandidate(outDir, spec, overrides = {}) {
   await mkdir(path.join(outDir, "wrangler"), { recursive: true });
   const base = {
@@ -144,7 +136,6 @@ async function seedCandidate(outDir, spec, overrides = {}) {
   );
 }
 
-/** A production probe accepts production health and rejects a staging endpoint at the same origin. */
 test("health probe matches the released environment rather than assuming staging", async () => {
   for (const environment of ["production", "staging"]) {
     const probe = fetchHealth({
@@ -166,7 +157,6 @@ test("health probe matches the released environment rather than assuming staging
   }
 });
 
-/** Both immutable and live smoke compare health against the selected production installation. */
 test("production version and live smoke reject a staging endpoint", async (context) => {
   const outDir = await mkdtemp(path.join(tmpdir(), "meltiply-production-smoke-"));
   context.after(() => rm(outDir, { force: true, recursive: true }));
@@ -213,7 +203,6 @@ test("production version and live smoke reject a staging endpoint", async (conte
   await assert.rejects(smokeLiveApi(params), /production contract/);
 });
 
-/** The public contract version is accepted independently of the deployment's pinned Git SHA. */
 test("health probe accepts the contract version without confusing application identity", async (context) => {
   const origin = await withServer(context, (_request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
@@ -240,7 +229,6 @@ test("health probe accepts the contract version without confusing application id
   });
 });
 
-/** Malformed or non-staging health responses cannot authorize release promotion. */
 test("health probe rejects mismatched and malformed envelopes", async (context) => {
   const spec = validateReleaseSpec(releaseInput());
   const cases = [
@@ -251,7 +239,7 @@ test("health probe rejects mismatched and malformed envelopes", async (context) 
         status: "ok",
         version: gitSha,
       },
-    ], // wrong env
+    ],
     [
       {
         contract_version: contractVersion,
@@ -259,7 +247,7 @@ test("health probe rejects mismatched and malformed envelopes", async (context) 
         status: "degraded",
         version: gitSha,
       },
-    ], // not ok
+    ],
     [
       {
         contract_version: contractVersion,
@@ -267,7 +255,7 @@ test("health probe rejects mismatched and malformed envelopes", async (context) 
         status: "ok",
         version: "not-a-sha",
       },
-    ], // unpinned application
+    ],
     [
       {
         contract_version: contractVersion,
@@ -276,11 +264,11 @@ test("health probe rejects mismatched and malformed envelopes", async (context) 
         version: gitSha,
         debug: 1,
       },
-    ], // extra key
-    [{ contract_version: contractVersion, environment: "staging", version: gitSha }], // missing status
-    [{ environment: "staging", status: "ok", version: gitSha }], // missing contract version
-    [{ contract_version: "", environment: "staging", status: "ok", version: gitSha }], // empty contract version
-    [{ contract_version: 3, environment: "staging", status: "ok", version: gitSha }], // non-string contract version
+    ],
+    [{ contract_version: contractVersion, environment: "staging", version: gitSha }],
+    [{ environment: "staging", status: "ok", version: gitSha }],
+    [{ contract_version: "", environment: "staging", status: "ok", version: gitSha }],
+    [{ contract_version: 3, environment: "staging", status: "ok", version: gitSha }],
   ];
   for (const [payload] of cases) {
     const origin = await withServer(context, (_request, response) => {
@@ -294,9 +282,6 @@ test("health probe rejects mismatched and malformed envelopes", async (context) 
         origin: spec.app_url,
         requestBudgetMs: 5000,
       }),
-      // Each payload breaks exactly one clause of the staging envelope, which
-      // is validated (not version-filtered) here, so the failure must name the
-      // envelope contract.
       /API health response is not the staging contract/,
     );
   }
@@ -314,7 +299,6 @@ test("health probe rejects mismatched and malformed envelopes", async (context) 
   );
 });
 
-/** Missing or mismatched identity evidence and foreign health SHAs fail before smoke publication. */
 test("version smoke fails closed on evidence, binding, and health drift", async (context) => {
   const outDir = await mkdtemp(path.join(tmpdir(), "meltiply-smoke-"));
   context.after(() => rm(outDir, { force: true, recursive: true }));
@@ -337,7 +321,6 @@ test("version smoke fails closed on evidence, binding, and health drift", async 
     spec,
   };
 
-  // Missing evidence files fail closed.
   await assert.rejects(
     smokeVersionCandidate({ ...base, outDir }),
     /API candidate evidence|ENOENT|must contain valid JSON/,
@@ -345,7 +328,6 @@ test("version smoke fails closed on evidence, binding, and health drift", async 
 
   await seedCandidate(outDir, spec);
 
-  // Candidate evidence from another release is rejected.
   const tamperedDir = await mkdtemp(path.join(tmpdir(), "meltiply-smoke-"));
   context.after(() => rm(tamperedDir, { force: true, recursive: true }));
   await seedCandidate(tamperedDir, spec, {
@@ -356,7 +338,6 @@ test("version smoke fails closed on evidence, binding, and health drift", async 
     /does not match the release/,
   );
 
-  // A VERSION binding pinned to another SHA fails the control-plane check.
   await assert.rejects(
     smokeVersionCandidate({
       ...base,
@@ -368,7 +349,6 @@ test("version smoke fails closed on evidence, binding, and health drift", async 
     /VERSION binding does not match/,
   );
 
-  // A health payload serving the wrong release is terminal without retry.
   let hits = 0;
   const wrongOrigin = await withServer(context, (_request, response) => {
     hits += 1;
@@ -393,7 +373,6 @@ test("version smoke fails closed on evidence, binding, and health drift", async 
   assert.equal(hits, 1);
 });
 
-/** Partial canaries accept modern or legacy health only from the verified previous SHA. */
 for (const legacy of [false, true]) {
   test(`update live smoke accepts the previous ${legacy ? "legacy" : "versioned"} health response`, async (context) => {
     const outDir = await mkdtemp(path.join(tmpdir(), "meltiply-smoke-"));
@@ -421,9 +400,6 @@ for (const legacy of [false, true]) {
       { mode: 0o600 },
     );
 
-    // During a 5% rollout the hostname may legitimately serve the previous
-    // release; the control plane binds that version's SHA so a third-party
-    // version still fails closed.
     const origin = await withServer(context, (_request, response) => {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
@@ -457,7 +433,6 @@ for (const legacy of [false, true]) {
   });
 }
 
-/** Legacy handling cannot authorize candidate/full-rollout, foreign, or malformed health responses. */
 test("legacy health remains rejected outside the previous partial-rollout version", async (context) => {
   for (const scenario of [
     { name: "candidate", candidate: true, version: gitSha },
@@ -532,7 +507,6 @@ test("legacy health remains rejected outside the previous partial-rollout versio
   }
 });
 
-/** Mode, traffic and serving-version guards prevent stale or foreign live deployments from passing. */
 test("live smoke rejects wrong mode, stale traffic, and foreign versions", async (context) => {
   const outDir = await mkdtemp(path.join(tmpdir(), "meltiply-smoke-"));
   context.after(() => rm(outDir, { force: true, recursive: true }));
@@ -574,7 +548,6 @@ test("live smoke rejects wrong mode, stale traffic, and foreign versions", async
     spec,
   };
 
-  // Bootstrap forbids --percentage; update requires it.
   await assert.rejects(smokeLiveApi({ ...params, percentage: 25 }), /does not accept --percentage/);
   await assert.rejects(
     smokeLiveApi({
@@ -584,7 +557,6 @@ test("live smoke rejects wrong mode, stale traffic, and foreign versions", async
     /requires --percentage/,
   );
 
-  // Control-plane traffic that diverges from deployment evidence fails closed.
   await assert.rejects(
     smokeLiveApi({
       ...params,
@@ -598,7 +570,6 @@ test("live smoke rejects wrong mode, stale traffic, and foreign versions", async
     /does not match the release traffic set/,
   );
 
-  // A hostname serving a version outside the release set is rejected.
   const foreign = await withServer(context, (_request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(
@@ -616,10 +587,6 @@ test("live smoke rejects wrong mode, stale traffic, and foreign versions", async
   );
 });
 
-/**
- * A real TCP reset must consume one bounded retry, not become a terminal
- * health-contract violation; zero pacing keeps this transition deterministic.
- */
 test("version smoke retries a transport reset before recording healthy evidence", async (context) => {
   const outDir = await mkdtemp(path.join(tmpdir(), "meltiply-smoke-"));
   context.after(() => rm(outDir, { force: true, recursive: true }));

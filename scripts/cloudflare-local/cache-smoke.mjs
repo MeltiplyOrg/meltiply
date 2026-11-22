@@ -4,15 +4,24 @@ import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
 import { managedOwnerCookie } from "../../frontend/app/e2e/cache-smoke.mjs";
 import { cacheSmoke } from "../lib/cache-smoke.mjs";
+import { LOCAL_ADMIN_URL } from "../lib/integration-database.ts";
 
-const origin = "http://127.0.0.1:8787";
-const frontendOrigin = "http://127.0.0.1:3000";
+const apiPort = process.env.WRANGLER_DEV_PORT ?? "8787";
+const frontendPort = "3000";
+const origin = `http://127.0.0.1:${apiPort}`;
+const frontendOrigin = `http://127.0.0.1:${frontendPort}`;
 const children = [];
-const pool = new pg.Pool({
-  connectionString:
-    "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable",
-});
-/** Starts only owned process groups; output stays in the hosted job for diagnostics. */
+const pool = new pg.Pool({ connectionString: LOCAL_ADMIN_URL });
+
+function signalGroup(pid, signal) {
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function start(command, args, env = {}) {
   const child = spawn(command, args, {
     detached: true,
@@ -22,7 +31,7 @@ function start(command, args, env = {}) {
   children.push(child);
   return child;
 }
-/** Waits for an actual HTTP response with a fixed startup deadline, rejecting early process exits. */
+
 async function ready(url, child) {
   for (let attempt = 0; attempt < 120; attempt++) {
     assert.equal(child.exitCode, null, `Runtime exited before ${url}`);
@@ -36,6 +45,7 @@ async function ready(url, child) {
   }
   throw new Error(`Runtime did not become ready: ${url}`);
 }
+
 try {
   await pool.query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements");
   const backend = start("bash", ["scripts/cloudflare-local/dev-backend.sh"], {
@@ -53,7 +63,7 @@ try {
     "--host",
     "127.0.0.1",
     "--port",
-    "3000",
+    frontendPort,
     "--strictPort",
   ]);
   await ready(frontendOrigin, frontend);
@@ -67,23 +77,11 @@ try {
   });
 } finally {
   for (const child of children) {
-    if (child.pid) {
-      try {
-        process.kill(-child.pid, "SIGTERM");
-      } catch {
-        /* Already stopped. */
-      }
-    }
+    if (child.pid) signalGroup(child.pid, "SIGTERM");
   }
   await pool.end();
   await delay(2000);
   for (const child of children) {
-    if (child.pid) {
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch {
-        /* Already stopped. */
-      }
-    }
+    if (child.pid) signalGroup(child.pid, "SIGKILL");
   }
 }

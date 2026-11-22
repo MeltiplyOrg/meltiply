@@ -9,11 +9,6 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  /* Cap the consent panel below the viewport so a short screen scrolls the
-     body instead of pushing options or actions out of reach. The 104px
-     reserve covers the Sileo header (40px), toast padding (14+16px), and the
-     fixed viewport inset (16px top + bottom). */
-  max-height: calc(100vh - 104px);
   max-height: calc(100dvh - 104px);
   overflow-y: auto;
   overscroll-behavior: contain;

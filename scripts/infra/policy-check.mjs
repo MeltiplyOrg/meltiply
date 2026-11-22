@@ -33,13 +33,6 @@ const localDatabaseBindingPattern = /localConnectionString/;
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const infrastructureRoot = join(repositoryRoot, "infra/cloudflare");
 
-/**
- * Recursively locates all Terraform/OpenTofu source files (*.tf) within a directory hierarchy.
- * Ignores vendor cache directories such as `.terraform`.
- *
- * @param {string} directory - Absolute or relative path of the root directory to search
- * @returns {Promise<Array<string>>} Array of absolute paths to discovered .tf files
- */
 async function filesBelow(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
@@ -55,68 +48,22 @@ async function filesBelow(directory) {
   return files;
 }
 
-/**
- * Asserts that a text source matches a required regular expression pattern.
- * If the pattern does not match, appends the failure message to the failures list.
- *
- * @param {Array<string>} failures - Accumulator array for failure descriptions
- * @param {string} source - Source code or configuration text to check
- * @param {RegExp} pattern - Regular expression that must match
- * @param {string} message - Descriptive error message if assertion fails
- * @returns {void}
- */
 function requirePattern(failures, source, pattern, message) {
   if (!pattern.test(source)) failures.push(message);
 }
 
-/**
- * Asserts that a text source does NOT match a forbidden regular expression pattern.
- * If the pattern matches, appends the failure message to the failures list.
- *
- * @param {Array<string>} failures - Accumulator array for failure descriptions
- * @param {string} source - Source code or configuration text to check
- * @param {RegExp} pattern - Forbidden regular expression pattern
- * @param {string} message - Descriptive error message if assertion fails
- * @returns {void}
- */
 function rejectPattern(failures, source, pattern, message) {
   if (pattern.test(source)) failures.push(message);
 }
 
-/**
- * Validates that a numeric value is an integer within an inclusive range [minimum, maximum].
- *
- * @param {unknown} value - Value to validate
- * @param {number} minimum - Lower bound (inclusive)
- * @param {number} maximum - Upper bound (inclusive)
- * @returns {boolean} True if value is an integer within [minimum, maximum]
- */
 function integerBetween(value, minimum, maximum) {
   return Number.isInteger(value) && value >= minimum && value <= maximum;
 }
 
-/**
- * Determines whether a planned OpenTofu resource change includes actions other than deletion
- * (e.g. create, update, or replace), indicating active resource configuration to evaluate.
- *
- * @param {object} change - OpenTofu resource change record
- * @returns {boolean} True if the change introduces or modifies resource attributes
- */
 function isChanged(change) {
   return change.change?.actions?.some((action) => action !== "delete");
 }
 
-/**
- * Enforces static security, reliability, and architectural policies across Terraform/OpenTofu files
- * and production Wrangler configuration files.
- * Verifies lock-capable HTTP backend, disabled Hyperdrive caching, mandatory DLQs on workload consumers,
- * 14-day queue message retention, complete delivery/backpressure bounds, pull-only DLQ consumers,
- * explicit R2 CORS origins, grouped Zero Trust Access verifier bindings, hardened cookies (HttpOnly,
- * SameSite strict, binding cookie), module tagging (AUD-045), and prohibits secret variables in state,
- * account-wide USD budget alert misuse, public R2 domains, or primary asset auto-deletion.
- *
- * @returns {Promise<{ failures: Array<string>, files: Array<string> }>} Object containing collected policy failures and relative paths of examined files
- */
 export async function checkStaticPolicy() {
   const failures = [];
   const files = await filesBelow(infrastructureRoot);
@@ -244,16 +191,6 @@ export async function checkStaticPolicy() {
   };
 }
 
-/**
- * Evaluates an OpenTofu JSON execution plan for operational and security policy violations.
- * Rejects secret-bearing Hyperdrive resources or public R2 bucket domains, enforces explicit
- * boolean queue delivery pause state, validates retention bounds (4-14 days), ensures DLQ
- * assignment for push consumers, and checks that consumer batch/concurrency/timeout settings
- * stay within bounded limits.
- *
- * @param {object} plan - Parsed OpenTofu JSON execution plan
- * @returns {Array<string>} Array of policy violation failure messages (empty if compliant)
- */
 export function checkPlanPolicy(plan) {
   const failures = [];
   for (const change of plan.resource_changes ?? []) {

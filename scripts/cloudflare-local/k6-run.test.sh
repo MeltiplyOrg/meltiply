@@ -29,9 +29,6 @@ exit 0
 EOF
 chmod +x "$fixture/bin/docker"
 
-# Prometheus becomes ready only after the runner starts it through the shared
-# Compose boundary, so the orchestration branch is exercised instead of being
-# short-circuited by an always-ready stub.
 cat >"$fixture/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -52,8 +49,6 @@ chmod +x "$fixture/bin/curl"
 printf '// k6 fixture\n' >"$fixture/scripts/cloudflare-local/k6/api-local.js"
 cp "$repo_root/scripts/cloudflare-local/k6-run.sh" \
   "$fixture/repo/scripts/cloudflare-local/k6-run.sh"
-# k6-run reaches Prometheus through the real shared boundary, so the fixture
-# checkout needs the helper and a baseline compose file next to it.
 cp "$repo_root/scripts/cloudflare-local/compose.sh" \
   "$fixture/repo/scripts/cloudflare-local/compose.sh"
 cp "$fixture/scripts/cloudflare-local/k6/api-local.js" \
@@ -71,7 +66,6 @@ export PATH="$fixture/bin:$PATH"
   ./scripts/cloudflare-local/k6-run.sh --ci --vus 2 --duration 5s
 )
 
-# The runner must bring Prometheus up through Compose before remote-writing.
 grep -Fq 'up -d prometheus' "$COMMAND_LOG"
 grep -Fq 'docker run' "$COMMAND_LOG"
 grep -Fq 'experimental-prometheus-rw' "$COMMAND_LOG"

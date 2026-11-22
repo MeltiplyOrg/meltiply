@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic checks for shared-runner teardown behavior.
 set -euo pipefail
 
-# Baseline cases model a host checkout; later cases inject container identity.
-# Never inherit a real stack's topology or CI cleanup handles into the fixture.
 unset COMPOSE_PROJECT_NAME MELTIPLY_DEVCONTAINER MELTIPLY_DEVCONTAINER_CONFIG \
   MELTIPLY_TEARDOWN_DOCKER_READY MELTIPLY_CI_KEEP_LOCK \
   MELTIPLY_CI_CLEANUP_MARKER MELTIPLY_CI_LOCK_RELEASE MELTIPLY_CI_LOCK_HOLDER \
@@ -13,7 +10,6 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fixture="$(mktemp -d)"
 leaked_pid=
 port_pid=
-# Reap only fixture-owned process groups, including failures in the port case.
 cleanup_fixture() {
   local pid
   for pid in "${leaked_pid:-}" "${port_pid:-}"; do
@@ -31,9 +27,6 @@ mkdir -p "$fixture/bin" "$repo_fixture/scripts/cloudflare-local" \
   "$repo_fixture/.devcontainer"
 cp "$repo_root/scripts/cloudflare-local/teardown.sh" \
   "$repo_fixture/scripts/cloudflare-local/teardown.sh"
-# teardown routes every Compose call through the shared boundary, so the
-# fixture checkout needs the real helper plus the devcontainer overlay it
-# requires under MELTIPLY_DEVCONTAINER=1.
 cp "$repo_root/scripts/cloudflare-local/compose.sh" \
   "$repo_fixture/scripts/cloudflare-local/compose.sh"
 printf 'services: {}\n' >"$repo_fixture/.devcontainer/compose.yml"
@@ -48,16 +41,6 @@ services:
     image: postgres:18.6-alpine
 EOF
 
-# Docker stub backed by a daemon resource table (RESOURCES, pipe-delimited:
-# container|id|name|image|compose-project|devcontainer-project,
-# volume|name|project). It honors real filter semantics — compose label
-# filters match the recorded compose project, the devcontainer owner label
-# filter matches the recorded devcontainer project, name filters match by
-# substring exactly like the daemon, ancestor filters match the recorded
-# image — so an unscoped sweep returns foreign resources and this suite can
-# prove teardown never queries or removes them. `down` prunes only the
-# resolved project's own rows; STUB_DOWN_NOOP=1 simulates a `down` that
-# leaves leftovers behind for the label-scoped force-remove path.
 cat >"$fixture/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -191,8 +174,6 @@ esac
 EOF
 chmod +x "$fixture/bin/docker"
 
-# Keep real port listeners and generic tunnel/processor process matches out of
-# this hermetic suite. Only fixture-rooted patterns reach the native pgrep.
 export TEARDOWN_FIXTURE_ROOT="$fixture"
 TEARDOWN_REAL_PGREP="$(command -v pgrep)"
 export TEARDOWN_REAL_PGREP
@@ -217,13 +198,6 @@ export PATH="$fixture/bin:$PATH"
 export COMMAND_LOG="$fixture/commands.log"
 export RESOURCES="$fixture/resources.tsv"
 
-# Seeds one daemon table holding two sibling projects plus resources that only
-# an unsafe query would reach: a name-prefix sibling (meltiply-cloudflare-2,
-# matched by any loose name= filter), processor containers from both projects
-# (matched by any ancestor= sweep), and the devcontainer owners that carry the
-# meltiply.devcontainer.project label — the identity compose.sh resolves under
-# MELTIPLY_DEVCONTAINER=1. Neither owner belongs to a Compose project (empty
-# column five), so no project-scoped down or sweep may ever reap them.
 seed_resources() {
   cat >"$RESOURCES" <<'EOF'
 container|c-own-postgres|meltiply-cloudflare-postgres-1|postgres18|meltiply-cloudflare|
@@ -239,7 +213,6 @@ volume|meltiply-deadbeef_postgres|meltiply-deadbeef
 EOF
 }
 
-# Asserts a resource row is absent from the daemon table after teardown.
 assert_removed() {
   if grep -Fq "$1" "$RESOURCES"; then
     echo "resource should have been removed: $1" >&2
@@ -248,7 +221,6 @@ assert_removed() {
   fi
 }
 
-# Asserts a resource row survived teardown.
 assert_kept() {
   if ! grep -Fq "$1" "$RESOURCES"; then
     echo "resource wrongly removed: $1" >&2
@@ -257,7 +229,6 @@ assert_kept() {
   fi
 }
 
-# Run 1: `down` clears every own-project resource; nothing needs force-rm.
 seed_resources
 : >"$COMMAND_LOG"
 (
@@ -273,8 +244,6 @@ for id in c-foreign c-prefix-sib c-proc-foreign c-owner-deadbeef c-owner-cafebab
   assert_kept "$id"
 done
 assert_kept 'meltiply-deadbeef_postgres'
-# The scoped Compose `down` is the primary path and must actually run; the
-# force-remove fallback must not be reached while `down` succeeds.
 grep -Eq '^docker compose .* down ' "$COMMAND_LOG" ||
   { echo "teardown never ran a project-scoped compose down" >&2; cat "$COMMAND_LOG" >&2; exit 1; }
 if grep -q '^docker rm -f' "$COMMAND_LOG"; then
@@ -282,7 +251,6 @@ if grep -q '^docker rm -f' "$COMMAND_LOG"; then
   cat "$COMMAND_LOG" >&2
   exit 1
 fi
-# Bound docker call count — protect against EMFILE regressions.
 calls="$(grep -c '^docker ' "$COMMAND_LOG" || true)"
 if [[ "$calls" -gt 12 ]]; then
   echo "too many docker calls ($calls); teardown must stay FD-cheap" >&2
@@ -290,8 +258,6 @@ if [[ "$calls" -gt 12 ]]; then
   exit 1
 fi
 
-# Run 2: `down` leaves leftovers behind → the label-scoped force-remove path
-# must reap only this project's rows.
 seed_resources
 : >"$COMMAND_LOG"
 (
@@ -307,8 +273,6 @@ for id in c-foreign c-prefix-sib c-proc-foreign c-owner-deadbeef c-owner-cafebab
   assert_kept "$id"
 done
 assert_kept 'meltiply-deadbeef_postgres'
-# A no-op `down` must be followed by the label-scoped force-remove of exactly
-# this project's leftovers, which is what proves the fallback path exists.
 grep -q '^docker rm -f' "$COMMAND_LOG" ||
   { echo "force-remove fallback never reaped the leftover rows" >&2; cat "$COMMAND_LOG" >&2; exit 1; }
 calls="$(grep -c '^docker ' "$COMMAND_LOG" || true)"
@@ -318,12 +282,6 @@ if [[ "$calls" -gt 12 ]]; then
   exit 1
 fi
 
-# Run 3: a devcontainer teardown is bound to its own COMPOSE_PROJECT_NAME.
-# meltiply-deadbeef shares the meltiply- prefix with the baseline project and
-# carries its own processor container, so any unscoped down, name filter, or
-# ancestor sweep would visibly reap baseline rows from the table. The inner
-# daemon cannot see its outer devcontainer; teardown must not require an owner
-# lookup, and unrelated labeled resources must still survive.
 seed_resources
 : >"$COMMAND_LOG"
 (
@@ -341,8 +299,6 @@ for id in c-own-postgres c-own-tempo c-proc-own c-prefix-sib c-owner-deadbeef c-
 done
 assert_kept 'meltiply-cloudflare_postgres'
 
-# Run 4: devcontainer without COMPOSE_PROJECT_NAME must fail closed — nonzero
-# exit and zero docker calls, before any cleanup can reach the daemon.
 : >"$COMMAND_LOG"
 if (
   cd "$repo_fixture"
@@ -358,7 +314,6 @@ if [[ -s "$COMMAND_LOG" ]]; then
   exit 1
 fi
 
-# A leak from a sibling CI checkout must be reaped by this checkout's teardown.
 leaked_path="$fixture/ci-workspaces/previous/node_modules/.bin/wrangler"
 setsid bash -c 'exec -a "$1" sleep 30' _ "$leaked_path" &
 leaked_pid=$!
@@ -385,8 +340,6 @@ fi
 wait "$leaked_pid" 2>/dev/null || true
 leaked_pid=
 
-# A wedged listener on a fixed stack port (argv no longer matching wrangler/
-# workerd) must still be reaped by the port-based net.
 setsid bash -c 'exec -a /tmp/wedged-listener sleep 30' &
 port_pid=$!
 (
@@ -400,7 +353,6 @@ fi
 wait "$port_pid" 2>/dev/null || true
 port_pid=
 
-# Teardown must disarm the cancellation trap before doing Docker work.
 marker="$fixture/cloudflare-active"
 touch "$marker"
 (

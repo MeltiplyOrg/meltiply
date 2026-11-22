@@ -77,8 +77,7 @@ jobs:
           bash scripts/cloudflare-local/database.sh reset
           status=0
           bun run --cwd frontend/app test:e2e e2e/posts-publication.spec.ts --project publication --trace on --retries 0 || status=1
-          # Each Playwright run clears test-results, so keep this journey's traces
-          # before the next journey overwrites them.
+          # Each Playwright run clears test-results.
           mkdir -p artifacts/publishing/publication
           cp -R frontend/app/test-results/. artifacts/publishing/publication/ 2>/dev/null || true
           exit "$status"
@@ -401,8 +400,6 @@ jobs:
         run: npx --yes react-doctor@0.9.18 frontend/app --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
       - name: Start fresh device authorization acceptance database
         if: inputs.lane == 'device-authorization'
-        # Integration suites deliberately exhaust fixture quotas and browser
-        # acceptance must start from the deterministic seed.
         run: bash scripts/cloudflare-local/database.sh reset
       - name: Install device authorization browser
         if: inputs.lane == 'device-authorization'
@@ -422,9 +419,6 @@ jobs:
           WRANGLER_DEV_ENABLE_CONTAINERS: "false"
         run: |
           mkdir -p artifacts/device-auth
-          # Build with the loopback application origin so the preview Worker
-          # proxies /api/* to the local API origin instead of a deployed service
-          # binding. The full gate's build has no APP_URL and is not reusable.
           bun run --cwd frontend/app build:production
           setsid ./scripts/cloudflare-local/dev-backend.sh >artifacts/device-auth/backend.log 2>&1 &
           echo $! > "$RUNNER_TEMP/device-backend.pid"
@@ -662,9 +656,6 @@ jobs:
             rm -f "$RUNNER_TEMP/device-backend.pid"
           fi
       - name: Start fresh browser acceptance database
-        # The complete application gate deliberately exercises ownership
-        # transfer, suspension, and quota-boundary fixtures. Browser acceptance
-        # needs the deterministic seed, not the gate's exhausted state.
         if: inputs.lane == 'cloudflare-full'
         run: bash scripts/cloudflare-local/database.sh reset
       - name: Exercise navigation focus and reconnect assignment in the browser
@@ -681,24 +672,13 @@ jobs:
         env:
           MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
           MELTIPLY_E2E_ACCEPTANCE: "1"
-          # Controlled loopback receiver the journey starts itself; the
-          # acceptance configs point both Workers at the same origin.
           MELTIPLY_E2E_EGRESS_URL: http://127.0.0.1:9787
-          # Origin of the API Worker, which exposes the acceptance scheduled
-          # trigger the journey uses to drain the real reporting queue.
           MELTIPLY_E2E_API_BASE_URL: http://127.0.0.1:8787
         run: |
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
           status=0
-          # The journey resumes optional onboarding for the seeded Owner, so it
-          # needs the deterministic seed from the reset above, not an empty
-          # installation. It disables screenshots and traces itself because it
-          # types a password and a session credential; assertions are its
-          # evidence, and this step must not add capture flags back.
           bun run --cwd frontend/app test:e2e e2e/onboarding-reporting.spec.ts \
             --project onboarding --trace off --retries 0 || status=1
-          # Nothing from this journey is published: no screenshot, trace, or
-          # captured report body may leave the runner.
           rm -rf frontend/app/test-results/onboarding-reporting*
           exit "$status"
       - uses: actions/setup-go@v6
@@ -766,7 +746,7 @@ jobs:
             cat "$RUNNER_TEMP/processor.log" >&2
             exit 1
           fi
-          # Miniflare transfers R2 body streams between threads; this needs Node, not Bun.
+          # Miniflare transfers R2 body streams between threads, which needs Node, not Bun.
           bun build scripts/selfhost/storage-pipeline-check.ts --target=node \
             --external miniflare --external pg --external effect --external zod \
             --outfile=scripts/selfhost/.storage-pipeline-check.mjs
@@ -814,8 +794,6 @@ jobs:
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
       - name: Start fresh Queue acceptance database
         if: inputs.lane == 'publishing-queues'
-        # Integration suites deliberately exercise exhausted quotas. Browser
-        # acceptance starts with fresh seeded data, never relaxed production limits.
         run: bash scripts/cloudflare-local/database.sh reset
       - name: Install Queue acceptance browser
         if: inputs.lane == 'publishing-queues'
@@ -907,13 +885,9 @@ jobs:
           WRANGLER_DEV_APP_URL: http://127.0.0.1:3000
         run: |
           mkdir -p ../../artifacts/performance
-          # The production preview proxies /api/* to the local Worker. Measure a
-          # working application, not a preview whose auth reads fail with 502.
           setsid ../../scripts/cloudflare-local/dev-backend.sh >../../artifacts/performance/backend.log 2>&1 &
           backend_pid=$!
-          # Cloudflare compresses text assets at the edge; the Vite preview does
-          # not. Serve the built client with production-like brotli/gzip so the
-          # budget measures the application rather than an encoding artifact.
+          # Cloudflare compresses text assets at the edge; the Vite preview does not.
           setsid node ../../scripts/ci/lighthouse-preview.mjs --root dist/client --port 3000 >../../artifacts/performance/preview.log 2>&1 &
           preview_pid=$!
           cleanup() {

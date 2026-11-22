@@ -6,9 +6,6 @@ import { checkPlanPolicy, checkStaticPolicy } from "./policy-check.mjs";
 test("checked-in infrastructure satisfies static policy", async () => {
   const result = await checkStaticPolicy();
   assert.deepEqual(result.failures, []);
-  // Static policy reads source text, so its coverage is the file set. Assert the
-  // property that matters — the scan descends into nested modules, and reports
-  // deterministically — rather than pinning today's list of paths.
   assert.ok(
     result.files.some((file) => file.startsWith("infra/cloudflare/modules/")),
     "static policy must descend into infra/cloudflare/modules",

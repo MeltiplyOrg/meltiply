@@ -186,3 +186,99 @@ ruleTester.run("meltiply/no-history-comments", rule("no-history-comments"), {
     },
   ],
 });
+
+const packageFile = `${repositoryRoot}packages/domain/src/example.ts`;
+const scriptFile = `${repositoryRoot}scripts/ci/example.mjs`;
+
+ruleTester.run("meltiply/no-export-star", rule("no-export-star"), {
+  valid: [{ code: "export { a, type B } from './a';", filename: packageFile }],
+  invalid: [
+    { code: "export * from './a';", filename: packageFile, errors: [{ messageId: "restricted" }] },
+  ],
+});
+
+ruleTester.run("meltiply/no-jsdoc-type-tags", rule("no-jsdoc-type-tags"), {
+  valid: [
+    { code: "/** Encrypts a token for storage. */\nexport function f() {}", filename: packageFile },
+  ],
+  invalid: [
+    {
+      code: "/**\n * Encrypts.\n * @param value - Plain text.\n */\nexport function f(value) {}",
+      filename: packageFile,
+      errors: [{ messageId: "restricted" }],
+    },
+    {
+      code: "/** @returns {string} */\nfunction f() {}",
+      filename: scriptFile,
+      errors: [{ messageId: "restricted" }],
+    },
+  ],
+});
+
+ruleTester.run(
+  "meltiply/no-doc-comment-outside-package-contract",
+  rule("no-doc-comment-outside-package-contract"),
+  {
+    valid: [
+      {
+        code: "/** Encrypts a token for storage. */\nexport function f() {}",
+        filename: packageFile,
+      },
+      { code: "/** @license MIT */\nconst a = 1;", filename: workerFile },
+      { code: "// Vendor rejects batches above 50 items.\nconst a = 1;", filename: workerFile },
+      {
+        code: "/** Vendored chart. */\nexport const a = 1;",
+        filename: `${repositoryRoot}frontend/app/src/components/evilcharts/chart.tsx`,
+      },
+    ],
+    invalid: [
+      {
+        code: "/** Loads the user. */\nexport function f() {}",
+        filename: workerFile,
+        errors: [{ messageId: "restricted" }],
+      },
+      {
+        code: "/** Internal helper. */\nfunction f() {}",
+        filename: packageFile,
+        errors: [{ messageId: "restricted" }],
+      },
+    ],
+  },
+);
+
+ruleTester.run("meltiply/no-banner-comments", rule("no-banner-comments"), {
+  valid: [
+    { code: "// Vendor rejects batches above 50 items.\nconst a = 1;", filename: workerFile },
+  ],
+  invalid: [
+    {
+      code: "// ---------------------------------\nconst a = 1;",
+      filename: workerFile,
+      errors: [{ messageId: "restricted" }],
+    },
+    {
+      code: "// ===== Helpers =====\nconst a = 1;",
+      filename: workerFile,
+      errors: [{ messageId: "restricted" }],
+    },
+  ],
+});
+
+ruleTester.run("meltiply/no-commented-out-code", rule("no-commented-out-code"), {
+  valid: [
+    { code: "// Vendor rejects batches above 50 items.\nconst a = 1;", filename: workerFile },
+    { code: "// prettier-ignore\nconst a = 1;", filename: workerFile },
+  ],
+  invalid: [
+    {
+      code: "// const legacy = load();\nconst a = 1;",
+      filename: workerFile,
+      errors: [{ messageId: "restricted" }],
+    },
+    {
+      code: "// await client.query(sql);\nconst a = 1;",
+      filename: workerFile,
+      errors: [{ messageId: "restricted" }],
+    },
+  ],
+});

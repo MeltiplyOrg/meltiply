@@ -1,18 +1,12 @@
-import { addSeconds, malformed } from "../adapter-helpers";
-import { classifyProviderFailure, ProviderAdapterError } from "../failures";
-import type { ProviderHttpClient } from "../http";
-import { OAUTH_STATE_MAX_CHARS } from "../limits";
+import { malformed, rejected } from "../failures";
 import {
+  addSeconds,
   assertConfiguredRedirectUri,
-  bearer,
-  boundedString,
-  boundedText,
-  providerIdentifier,
-  record,
-  required,
-  secureUrl,
-} from "../meta-common";
-import { exchangeAuthorizationCodeForm } from "../oauth-helpers";
+  authorizationCodeUrl,
+  exchangeAuthorizationCodeForm,
+  postForm,
+} from "../oauth";
+import type { AdapterRuntime } from "../runtime";
 import type {
   OAuthAuthorizationInput,
   OAuthConnection,
@@ -20,6 +14,15 @@ import type {
   ProviderRequestContext,
   ProviderTokenSet,
 } from "../types";
+import {
+  bearer,
+  boundedString,
+  boundedText,
+  providerIdentifier,
+  record,
+  required,
+  secureUrl,
+} from "../values";
 import {
   YOUTUBE_API_ORIGIN,
   YOUTUBE_AUTHORIZATION_ORIGIN,
@@ -36,15 +39,6 @@ const scopePattern = /^[\x21\x23-\x5B\x5D-\x7E]+$/;
 const handlePrefixPattern = /^@/;
 const handlePattern = /^[A-Za-z0-9_.-]{1,100}$/;
 
-export interface YouTubeOAuthConfig {
-  clientId: string;
-  clientSecret: string;
-  configuredRedirectUri: string;
-  googleRequest: GoogleRequest;
-  http: ProviderHttpClient;
-  now: () => Date;
-}
-
 interface GoogleTokenResponse<RequireRefresh extends boolean> {
   accessToken: string;
   expiresAt: string;
@@ -52,7 +46,6 @@ interface GoogleTokenResponse<RequireRefresh extends boolean> {
   scopes?: string[];
 }
 
-/** Validates a PKCE `code_verifier` or `code_challenge` according to RFC 7636. */
 function pkce(name: string, value: string): string {
   const normalized = required(name, value, 128);
   if (!pkcePattern.test(normalized)) {
@@ -61,7 +54,6 @@ function pkce(name: string, value: string): string {
   return normalized;
 }
 
-/** Parses whitespace-delimited Google OAuth scope tokens with length and uniqueness bounds. */
 function scopeSet(value: unknown): Set<string> | undefined {
   const normalized = boundedString(value, 4_096);
   if (!normalized) return undefined;
@@ -76,12 +68,6 @@ function scopeSet(value: unknown): Set<string> | undefined {
   return new Set(scopes);
 }
 
-/**
- * Parses and verifies an OAuth 2.0 token response from Google's token endpoint.
- * Preserves explicit grants; omitted scopes stay absent so refresh callers
- * preserve stored grants. Return type guarantees `refreshToken` is a string
- * when `requireRefreshToken` is true, removing downstream non-null assertions.
- */
 function parseGoogleTokenResponse(
   value: unknown,
   now: Date,
@@ -119,46 +105,33 @@ function parseGoogleTokenResponse(
   };
 }
 
-/** Extracts a legitimate YouTube channel handle from `snippet.customUrl`. */
 function youtubeHandle(customUrl: unknown): string | undefined {
   if (typeof customUrl !== "string") return undefined;
   const normalized = customUrl.trim().replace(handlePrefixPattern, "");
   return normalized && handlePattern.test(normalized) ? normalized : undefined;
 }
 
-/**
- * Builds the YouTube OAuth handler methods (`authorizationUrl`,
- * `exchangeAuthorizationCode`, `refreshAccessToken`).
- */
-export function createYouTubeOAuth(config: YouTubeOAuthConfig) {
-  const { clientId, clientSecret, configuredRedirectUri, googleRequest, http, now } = config;
+export function createYouTubeOAuth(runtime: AdapterRuntime, googleRequest: GoogleRequest) {
+  const { clientId, clientSecret, redirectUri: configuredRedirectUri, http, now } = runtime;
 
   return {
-    /**
-     * Builds the Google OAuth v2 authorization URL with offline access, PKCE S256
-     * challenge, incremental grants, account selection and consent prompts, and the
-     * configured redirect URI, scopes, and state.
-     */
     authorizationUrl(input: OAuthAuthorizationInput): string {
-      assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
-      const url = new URL("/o/oauth2/v2/auth", YOUTUBE_AUTHORIZATION_ORIGIN);
-      url.searchParams.set("access_type", "offline");
-      url.searchParams.set("client_id", clientId);
-      url.searchParams.set("code_challenge", pkce("codeChallenge", input.codeChallenge));
-      url.searchParams.set("code_challenge_method", "S256");
-      url.searchParams.set("include_granted_scopes", "true");
-      url.searchParams.set("prompt", "consent select_account");
-      url.searchParams.set("redirect_uri", configuredRedirectUri);
-      url.searchParams.set("response_type", "code");
-      url.searchParams.set("scope", YOUTUBE_CONFIGURED_SCOPES.join(" "));
-      url.searchParams.set("state", required("state", input.state, OAUTH_STATE_MAX_CHARS));
-      return url.toString();
+      return authorizationCodeUrl(
+        `${YOUTUBE_AUTHORIZATION_ORIGIN}/o/oauth2/v2/auth`,
+        input,
+        configuredRedirectUri,
+        {
+          access_type: "offline",
+          client_id: clientId,
+          code_challenge: pkce("codeChallenge", input.codeChallenge),
+          code_challenge_method: "S256",
+          include_granted_scopes: "true",
+          prompt: "consent select_account",
+          scope: YOUTUBE_CONFIGURED_SCOPES.join(" "),
+        },
+      );
     },
 
-    /**
-     * Exchanges a PKCE authorization code for Google tokens and binds the
-     * connection to exactly one YouTube channel (`channels.list` `mine=true`).
-     */
     async exchangeAuthorizationCode(
       context: ProviderRequestContext,
       input: OAuthExchangeInput,
@@ -177,7 +150,7 @@ export function createYouTubeOAuth(config: YouTubeOAuthConfig) {
       channelUrl.searchParams.set("part", "id,snippet");
       channelUrl.searchParams.set("mine", "true");
       channelUrl.searchParams.set("maxResults", "2");
-      const channelResponse = await googleRequest<unknown>(context, {
+      const channelResponse = await googleRequest(context, {
         headers: bearer(tokens.accessToken),
         method: "GET",
         url: channelUrl.toString(),
@@ -188,12 +161,7 @@ export function createYouTubeOAuth(config: YouTubeOAuthConfig) {
         channelBody.items.length !== 1 ||
         channelBody.nextPageToken !== undefined
       ) {
-        throw new ProviderAdapterError(
-          classifyProviderFailure({
-            code: "youtube_channel_selection_required",
-            status: 409,
-          }),
-        );
+        throw rejected("youtube_channel_selection_required", 409);
       }
       const channel = record(channelBody.items[0]);
       const snippet = record(channel?.snippet);
@@ -220,7 +188,6 @@ export function createYouTubeOAuth(config: YouTubeOAuthConfig) {
       };
     },
 
-    /** Refreshes publishing grants; an omitted scope list preserves the stored grant in the consumer. */
     async refreshAccessToken(
       context: ProviderRequestContext,
       refreshToken: string,
@@ -230,19 +197,13 @@ export function createYouTubeOAuth(config: YouTubeOAuthConfig) {
         refreshToken,
         YOUTUBE_LIMITS.tokenMaxChars,
       );
-      const form = new URLSearchParams({
+      const body = await postForm(http, context, `${YOUTUBE_TOKEN_ORIGIN}/token`, {
         client_id: clientId,
         client_secret: clientSecret,
         grant_type: "refresh_token",
         refresh_token: currentRefreshToken,
       });
-      const response = await http.request<unknown>(context, {
-        body: form,
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        method: "POST",
-        url: `${YOUTUBE_TOKEN_ORIGIN}/token`,
-      });
-      const tokens = parseGoogleTokenResponse(response.body, now(), false);
+      const tokens = parseGoogleTokenResponse(body, now(), false);
       return {
         accessToken: tokens.accessToken,
         expiresAt: tokens.expiresAt,

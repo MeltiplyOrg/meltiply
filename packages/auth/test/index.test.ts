@@ -5,22 +5,14 @@ import { memoryAdapter } from "better-auth/adapters/memory";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
-import { Cause, Effect, Option } from "effect";
-import { AuthenticationRequiredError, ForbiddenError } from "@meltiply/domain";
-
 import {
   accessClaims,
-  AuthService,
   bearerToken,
-  createAccessTokenVerifier,
-  createAuthServiceLive,
-  createAuthServiceTest,
   createBetterAuth,
+  createCloudflareAccessTokenVerifier,
   createJwtVerifier,
   createRemoteJwtVerifier,
   jwtClaims,
-  verifyAccessTokenEffect,
-  verifyJwtTokenEffect,
   type AccessTokenVerifier,
   type JwtVerifier,
 } from "../src";
@@ -37,7 +29,7 @@ beforeAll(async () => {
   const { privateKey, publicKey } = await generateKeyPair("RS256");
   const publicJwk = await exportJWK(publicKey);
   publicJwk.kid = "test-key";
-  verifyAccess = createAccessTokenVerifier(
+  verifyAccess = createCloudflareAccessTokenVerifier(
     {
       audience: "operator-application-audience",
       teamDomain: "https://meltiply.cloudflareaccess.com",
@@ -57,8 +49,6 @@ beforeAll(async () => {
       .setIssuer("https://meltiply.cloudflareaccess.com")
       .setSubject("access-user-alpha")
       .sign(privateKey);
-  // Better Auth signs tenant JWTs with EdDSA (Ed25519) by default; the verifier
-  // pins issuer and audience so tokens minted for other surfaces are rejected.
   const jwtKeys = await generateKeyPair("EdDSA");
   jwtPrivateKey = jwtKeys.privateKey;
   const jwtPublicJwk = await exportJWK(jwtKeys.publicKey);
@@ -88,8 +78,6 @@ beforeAll(async () => {
       )
       .sign(key);
   };
-  // A real HTTP JWKS endpoint exercises the remote verifier's fetch path the
-  // same way the API Worker resolves the Better Auth /api/auth/jwks document.
   jwksServer = createServer((_request, response) => {
     response
       .writeHead(200, { "content-type": "application/json" })
@@ -134,8 +122,6 @@ describe("Better Auth JWT verification", () => {
       email: "alpha@example.test",
       subject: "user-alpha",
     });
-    // `toEqual` ignores undefined-valued keys, so assert the claim is absent
-    // rather than merely undefined.
     expect(identity).not.toHaveProperty("name");
   });
 
@@ -200,15 +186,12 @@ describe("Cloudflare Access verification", () => {
 
   it("rejects the wrong audience and non-identity service tokens", async () => {
     await expect(verifyAccess(await signAccess({ aud: ["other-application"] }))).rejects.toThrow();
-    // Isolate the identity-type guard: this token still carries a subject and
-    // email, so only `type !== "app"` can reject it.
     await expect(verifyAccess(await signAccess({ type: "service" }))).rejects.toThrow(
       "identity subject and email",
     );
     await expect(verifyAccess(await signAccess({ email: undefined }))).rejects.toThrow(
       "identity subject and email",
     );
-    // Isolate the subject guard the same way: email and type are valid.
     expect(() => accessClaims({ email: "operator@example.test", type: "app" })).toThrow(
       "identity subject and email",
     );
@@ -221,7 +204,7 @@ describe("Cloudflare Access verification", () => {
       "https://meltiply.cloudflareaccess.com/path",
     ]) {
       expect(() =>
-        createAccessTokenVerifier(
+        createCloudflareAccessTokenVerifier(
           { audience: "operator-application-audience", teamDomain },
           async () => {
             throw new Error("unused");
@@ -240,170 +223,10 @@ describe("bearerToken", () => {
   });
 });
 
-describe("Effect AuthService and verifier helpers", () => {
-  it("verifyJwtTokenEffect succeeds with a valid JWT and fails closed with AuthenticationRequiredError", async () => {
-    const identity = await Effect.runPromise(verifyJwtTokenEffect(verifyJwt, await signJwt()));
-    expect(identity.subject).toBe("user-alpha");
-
-    const invalidError = await Effect.runPromise(
-      Effect.flip(verifyJwtTokenEffect(verifyJwt, "invalid.jwt.token")),
-    );
-    expect(invalidError).toBeInstanceOf(AuthenticationRequiredError);
-  });
-
-  it("verifyAccessTokenEffect succeeds with valid token and fails closed with ForbiddenError", async () => {
-    const validToken = await signAccess();
-    const claims = await Effect.runPromise(verifyAccessTokenEffect(verifyAccess, validToken));
-    expect(claims.email).toBe("operator@example.test");
-
-    const invalidError = await Effect.runPromise(
-      Effect.flip(verifyAccessTokenEffect(verifyAccess, "invalid.jwt.token")),
-    );
-    expect(invalidError).toBeInstanceOf(ForbiddenError);
-  });
-
-  it("AuthService live layer verifies tenant JWTs and access tokens", async () => {
-    const liveLayer = createAuthServiceLive({
-      accessVerifier: verifyAccess,
-      jwtVerifier: verifyJwt,
-    });
-
-    const program = Effect.gen(function* () {
-      const auth = yield* AuthService;
-      const identity = yield* auth.verifyJwtToken(yield* Effect.promise(() => signJwt()));
-      const access = yield* auth.verifyAccessToken(yield* Effect.promise(() => signAccess()));
-      return { access, identity };
-    }).pipe(Effect.provide(liveLayer));
-
-    const result = await Effect.runPromise(program);
-    expect(result.identity.subject).toBe("user-alpha");
-    expect(result.access.email).toBe("operator@example.test");
-  });
-
-  it("AuthService live layer builds the JWT verifier from remote JWKS config", async () => {
-    const liveLayer = createAuthServiceLive({
-      jwt: {
-        audience: "meltiply-api",
-        issuer: "https://api.example.test/api/auth",
-        jwksUrl,
-      },
-    });
-
-    const identity = await Effect.runPromise(
-      Effect.gen(function* () {
-        const auth = yield* AuthService;
-        return yield* auth.verifyJwtToken(yield* Effect.promise(() => signJwt()));
-      }).pipe(Effect.provide(liveLayer)),
-    );
-
-    expect(identity).toEqual({
-      email: "alpha@example.test",
-      name: "Alpha User",
-      subject: "user-alpha",
-    });
-  });
-
-  it("AuthService live layer fails closed when verifiers are omitted or invalid", async () => {
-    const emptyLayer = createAuthServiceLive({});
-
-    const jwtExit = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const auth = yield* AuthService;
-        return yield* auth.verifyJwtToken("some-token");
-      }).pipe(Effect.provide(emptyLayer)),
-    );
-    expect(jwtExit._tag).toBe("Failure");
-    if (jwtExit._tag === "Failure") {
-      expect(Option.getOrThrow(Cause.findErrorOption(jwtExit.cause))).toMatchObject({
-        _tag: "AuthenticationRequiredError",
-      });
-    }
-
-    const accessExit = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const auth = yield* AuthService;
-        return yield* auth.verifyAccessToken("some-token");
-      }).pipe(Effect.provide(emptyLayer)),
-    );
-    expect(accessExit._tag).toBe("Failure");
-    if (accessExit._tag === "Failure") {
-      expect(Option.getOrThrow(Cause.findErrorOption(accessExit.cause))).toMatchObject({
-        _tag: "ForbiddenError",
-      });
-    }
-
-    // Invalid config shapes fail closed
-    const invalidConfigLayer = createAuthServiceLive({
-      access: {
-        audience: "",
-        teamDomain: "invalid-url",
-      },
-      jwt: {
-        audience: "",
-        issuer: "",
-        jwksUrl: new URL("https://api.example.test/api/auth/jwks"),
-      },
-    });
-
-    const invalidJwtExit = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const auth = yield* AuthService;
-        return yield* auth.verifyJwtToken("token");
-      }).pipe(Effect.provide(invalidConfigLayer)),
-    );
-    expect(invalidJwtExit._tag).toBe("Failure");
-
-    const invalidAccessExit = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const auth = yield* AuthService;
-        return yield* auth.verifyAccessToken("token");
-      }).pipe(Effect.provide(invalidConfigLayer)),
-    );
-    expect(invalidAccessExit._tag).toBe("Failure");
-  });
-
-  it("AuthService test layer provides default doubles and respects overrides", async () => {
-    const defaultLayer = createAuthServiceTest();
-
-    const defaultProgram = Effect.gen(function* () {
-      const auth = yield* AuthService;
-      const identity = yield* auth.verifyJwtToken("any-token");
-      const access = yield* auth.verifyAccessToken("any-token");
-      return { access, identity };
-    }).pipe(Effect.provide(defaultLayer));
-
-    const defaultResult = await Effect.runPromise(defaultProgram);
-    expect(defaultResult.identity.subject).toBe("mock-user");
-    expect(defaultResult.access.email).toBe("operator@example.test");
-
-    const overriddenLayer = createAuthServiceTest({
-      verifyJwtToken: () =>
-        Effect.fail(
-          new AuthenticationRequiredError({
-            message: "Custom JWT failure",
-          }),
-        ),
-    });
-
-    const customExit = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const auth = yield* AuthService;
-        return yield* auth.verifyJwtToken("token");
-      }).pipe(Effect.provide(overriddenLayer)),
-    );
-    expect(customExit._tag).toBe("Failure");
-    if (customExit._tag === "Failure") {
-      expect(customExit.cause.toString()).toContain("Custom JWT failure");
-    }
-  });
-});
-
 describe("Better Auth device protocol HTTP composition", () => {
   it("completes a CLI grant and keeps browser and CLI session lifecycles separate", async () => {
     const origin = "https://auth.example.test";
     const email = "device-user@example.test";
-    // Keep the database object: transaction commits replace its model arrays.
-    // Models must be pre-declared for the installed memory adapter.
     const database: {
       [model: string]: Record<string, unknown>[];
       session: Record<string, unknown>[];
@@ -433,14 +256,6 @@ describe("Better Auth device protocol HTTP composition", () => {
       trustedOrigins: [origin],
     });
 
-    /**
-     * Sends a same-origin JSON request to the real Better Auth HTTP handler.
-     *
-     * @param path - Auth API path.
-     * @param body - JSON request payload.
-     * @param headers - Optional request headers such as a session cookie.
-     * @returns The Better Auth HTTP response.
-     */
     const postJson = (
       path: string,
       body: Record<string, unknown>,
@@ -458,12 +273,6 @@ describe("Better Auth device protocol HTTP composition", () => {
         }),
       );
 
-    /**
-     * Reads a JSON response as a record without trusting its runtime shape.
-     *
-     * @param response - Successful auth response.
-     * @returns Parsed object with unknown-valued fields.
-     */
     const jsonRecord = async (response: Response): Promise<Record<string, unknown>> => {
       const value: unknown = await response.json();
       if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -472,12 +281,6 @@ describe("Better Auth device protocol HTTP composition", () => {
       return Object.fromEntries(Object.entries(value));
     };
 
-    /**
-     * Extracts the Better Auth session cookie from a response.
-     *
-     * @param response - Sign-up or sign-in response.
-     * @returns `name=value` pair for subsequent browser requests.
-     */
     const sessionCookie = (response: Response): string => {
       const header = response.headers
         .getSetCookie()
@@ -555,8 +358,6 @@ describe("Better Auth device protocol HTTP composition", () => {
     expect(cliSession.headers.get("set-auth-jwt")).toBeTruthy();
     const cliBody = await jsonRecord(cliSession);
     expect(cliBody.user).toMatchObject({ email });
-    // Pin the session object first: `not.toHaveProperty` on `undefined` would
-    // pass without proving the projection actually omitted the field.
     expect(cliBody.session).toMatchObject({ id: expect.any(String) });
     expect(cliBody.session).not.toHaveProperty("clientChannel");
     expect(database.session.find((session) => session.token === accessToken)?.clientChannel).toBe(
@@ -590,10 +391,6 @@ describe("Better Auth device protocol HTTP composition", () => {
       }),
     );
     expect((await jsonRecord(browserSession)).user).toMatchObject({ email });
-
-    // Password replacement revokes the original credential but must carry its
-    // hidden provenance forward, rather than accepting a body override or
-    // losing it when the public session projection omits the field.
     const changed = await postJson(
       "/api/auth/change-password",
       {

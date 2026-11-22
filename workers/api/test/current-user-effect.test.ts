@@ -223,7 +223,10 @@ describe("CurrentUserService (Effect v4 application service)", () => {
     const program = Effect.gen(function* () {
       const service = yield* CurrentUserService;
       return yield* service.getCurrentUser();
-    }).pipe(Effect.provide(liveLayer), Effect.provide(effectTracerLayer(context, mockExporter)));
+    }).pipe(
+      Effect.provide(liveLayer),
+      Effect.provide(effectTracerLayer(context, { exporter: mockExporter })),
+    );
 
     const result = await Effect.runPromise(program);
     expect(result).toEqual(mockProfile);

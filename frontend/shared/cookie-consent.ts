@@ -1,13 +1,13 @@
-/** The only optional purpose Meltiply implements: remembered preferences and local recovery. */
 export type ConsentCategory = "functional";
 
-/** Essential authentication and consent storage are not optional; no other optional purpose is installed. */
 export interface CookieConsent {
   functional: boolean;
 }
 
 export const consentCookieName = "meltiply-consent";
 export const consentLifetimeSeconds = 180 * 24 * 60 * 60;
+export const productionCookieDomain = "meltiply.com";
+export const functionalCookieNames = ["meltiply-theme"] as const;
 export const functionalStorageKeys = [
   "meltiply.theme",
   "meltiply.language",
@@ -22,49 +22,67 @@ export const functionalStoragePrefixes = [
 const consentChangeEvent = "meltiply:cookie-consent";
 let volatileConsent: CookieConsent | null = null;
 
-/**
- * Reads only the essential consent cookie; malformed, expired, or obsolete records
- * grant no optional purposes. Records written before the model narrowed to the one
- * implemented purpose stay valid: only `functional` is read, so a returning visitor
- * keeps an explicit decision instead of being re-prompted after an upgrade.
- */
-export function readCookieConsent(): CookieConsent | null {
-  if (typeof document === "undefined") return null;
-  if (volatileConsent !== null) return volatileConsent;
+function withBrowserStorage<T>(access: () => T, blocked: T): T {
   try {
-    const entry = document.cookie
-      .split(";")
-      .find((item) => item.trim().startsWith(`${consentCookieName}=`));
-    if (!entry) return null;
-    const value: unknown = JSON.parse(
-      decodeURIComponent(entry.trim().slice(consentCookieName.length + 1)),
-    );
-    if (typeof value !== "object" || value === null) return null;
-    if (
-      !("v" in value) ||
-      value.v !== 1 ||
-      !("expires" in value) ||
-      typeof value.expires !== "number" ||
-      !Number.isFinite(value.expires) ||
-      value.expires <= Date.now()
-    )
-      return null;
-    if (!("functional" in value) || typeof value.functional !== "boolean") return null;
-    return { functional: value.functional };
+    return access();
   } catch {
-    return null;
+    // localStorage and document.cookie throw a SecurityError when the browser blocks site data.
+    return blocked;
   }
 }
 
-/** Denies optional storage until a valid, explicit choice permits that purpose. */
+/** Writes a root-path cookie shared across production subdomains and host-scoped elsewhere. */
+export function writeSiteCookie(name: string, value: string, maxAgeSeconds: number): void {
+  const { hostname, protocol } = window.location;
+  const secure = protocol === "https:" ? "; Secure" : "";
+  const domain =
+    hostname === productionCookieDomain || hostname.endsWith(`.${productionCookieDomain}`)
+      ? `; Domain=${productionCookieDomain}`
+      : "";
+  withBrowserStorage(() => {
+    document.cookie = `${name}=${value}; Path=/; Max-Age=${maxAgeSeconds}; SameSite=Lax${secure}${domain}`;
+  }, undefined);
+}
+
+function parseConsent(raw: string): CookieConsent | null {
+  const value: unknown = JSON.parse(decodeURIComponent(raw));
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("v" in value) ||
+    value.v !== 1 ||
+    !("expires" in value) ||
+    typeof value.expires !== "number" ||
+    !Number.isFinite(value.expires) ||
+    value.expires <= Date.now() ||
+    !("functional" in value) ||
+    typeof value.functional !== "boolean"
+  )
+    return null;
+  return { functional: value.functional };
+}
+
+/** Reads the essential consent record; malformed, expired, or unversioned records grant nothing. */
+export function readCookieConsent(): CookieConsent | null {
+  if (typeof document === "undefined") return null;
+  if (volatileConsent !== null) return volatileConsent;
+  return withBrowserStorage(() => {
+    const prefix = `${consentCookieName}=`;
+    const entry = document.cookie
+      .split(";")
+      .map((item) => item.trim())
+      .find((item) => item.startsWith(prefix));
+    return entry === undefined ? null : parseConsent(entry.slice(prefix.length));
+  }, null);
+}
+
 export function hasCookieConsent(category: ConsentCategory): boolean {
   return readCookieConsent()?.[category] === true;
 }
 
-/** Removes only inventoried optional data on this origin and both scopes of the public theme cookie; auth is untouched. */
+/** Removes the inventoried optional records on this origin; authentication data is untouched. */
 export function clearFunctionalStorage(): void {
-  if (typeof window === "undefined") return;
-  try {
+  withBrowserStorage(() => {
     for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
       const key = window.localStorage.key(index);
       if (
@@ -74,92 +92,66 @@ export function clearFunctionalStorage(): void {
       )
         window.localStorage.removeItem(key);
     }
-  } catch {
-    // A restricted store cannot be cleaned, but gated readers never use it.
-  }
-  try {
-    document.cookie = "meltiply-theme=; Path=/; Max-Age=0; SameSite=Lax";
-    if (
-      window.location.hostname === "meltiply.com" ||
-      window.location.hostname.endsWith(".meltiply.com")
-    )
-      document.cookie =
-        "meltiply-theme=; Domain=meltiply.com; Path=/; Max-Age=0; SameSite=Lax; Secure";
-  } catch {
-    // Blocked cookies cannot be removed; consent-gated readers ignore them.
-  }
+  }, undefined);
+  for (const name of functionalCookieNames) writeSiteCookie(name, "", 0);
 }
 
-/** Saves an explicit choice for 180 days across production subdomains; denied cookie writes retain it only on this page. */
+function syncConsentAttributes(consent: CookieConsent | null): void {
+  const root = document.documentElement;
+  root.toggleAttribute("data-cookie-functional", consent?.functional === true);
+  root.toggleAttribute("data-cookie-decided", consent !== null);
+  if (consent?.functional !== true) clearFunctionalStorage();
+}
+
+/** Saves an explicit choice; when the browser refuses the cookie the choice holds for this page only. */
 export function writeCookieConsent(consent: CookieConsent): void {
   const encoded = encodeURIComponent(
-    JSON.stringify({
-      v: 1,
-      ...consent,
-      expires: Date.now() + consentLifetimeSeconds * 1000,
-    }),
+    JSON.stringify({ v: 1, ...consent, expires: Date.now() + consentLifetimeSeconds * 1000 }),
   );
-  volatileConsent = consent;
-  try {
-    const host = window.location.hostname;
-    const domain =
-      host === "meltiply.com" || host.endsWith(".meltiply.com") ? "; Domain=meltiply.com" : "";
-    const secure = window.location.protocol === "https:" ? "; Secure" : "";
-    document.cookie = `${consentCookieName}=${encoded}; Path=/; Max-Age=${consentLifetimeSeconds}; SameSite=Lax${secure}${domain}`;
-    if (
-      document.cookie.split(";").some((entry) => entry.trim() === `${consentCookieName}=${encoded}`)
-    )
-      volatileConsent = null;
-  } catch {
-    // Keep this page's decision when browser policy refuses persistence.
-  }
-  document.documentElement.toggleAttribute("data-cookie-functional", consent.functional);
-  document.documentElement.setAttribute("data-cookie-decided", "");
-  if (!consent.functional) clearFunctionalStorage();
+  writeSiteCookie(consentCookieName, encoded, consentLifetimeSeconds);
+  const persisted = withBrowserStorage(
+    () =>
+      document.cookie
+        .split(";")
+        .some((entry) => entry.trim() === `${consentCookieName}=${encoded}`),
+    false,
+  );
+  volatileConsent = persisted ? null : consent;
+  syncConsentAttributes(consent);
   window.dispatchEvent(new Event(consentChangeEvent));
 }
 
-/** Reads a functional preference only after consent; blocked/absent storage returns null without changing current-page state. */
 export function readFunctionalStorage(key: string): string | null {
   if (!hasCookieConsent("functional")) return null;
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
+  return withBrowserStorage(() => window.localStorage.getItem(key), null);
 }
 
-/** Persists optional convenience data only with consent; deleting an old record is always permitted. */
+/** Persists optional data only with consent; removing a record (`null`) is always permitted. */
 export function writeFunctionalStorage(key: string, value: string | null): void {
   if (value !== null && !hasCookieConsent("functional")) return;
-  try {
+  withBrowserStorage(() => {
     if (value === null) window.localStorage.removeItem(key);
     else window.localStorage.setItem(key, value);
-  } catch {
-    // In-memory controls and server-backed work remain usable without storage.
-  }
+  }, undefined);
 }
 
-/** Observes choices on this page and sibling-site changes on focus/visibility; withdrawal removes this origin's old optional records. */
+/**
+ * Observes choices made on this page and, on focus or visibility, on sibling sites. The listener
+ * runs only when the decision changes; leaving functional consent clears this origin's records.
+ */
 export function subscribeCookieConsent(listener: () => void): () => void {
-  let previous = JSON.stringify(readCookieConsent());
+  let previous = readCookieConsent();
+  syncConsentAttributes(previous);
   const check = () => {
     const current = readCookieConsent();
-    document.documentElement.toggleAttribute(
-      "data-cookie-functional",
-      current?.functional === true,
-    );
-    document.documentElement.toggleAttribute("data-cookie-decided", current !== null);
-    if (current?.functional !== true) clearFunctionalStorage();
-    const serialized = JSON.stringify(current);
-    if (serialized === previous) return;
-    previous = serialized;
+    if (current?.functional === previous?.functional) return;
+    previous = current;
+    syncConsentAttributes(current);
     listener();
   };
   const visible = () => {
     if (document.visibilityState === "visible") check();
   };
-  check();
   window.addEventListener(consentChangeEvent, check);
   window.addEventListener("focus", check);
   window.addEventListener("pageshow", check);

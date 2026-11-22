@@ -83,9 +83,6 @@ test("the primary Cloudflare schedule fixture is canonical and secret-free", asy
     ),
     canonicalCrons,
   );
-  // The digest is the canonical hash of the sorted schedule set, not merely any
-  // 64-character string: an empty set and the reviewed pair must both hash to
-  // their pinned values.
   assert.equal(
     scheduleSetDigest([]),
     "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
@@ -212,7 +209,6 @@ test("update Cron pause deploys an empty set and records only its digest", async
   await assert.rejects(readFile(path.join(outDir, "wrangler/automation-paused.json")), /ENOENT/);
 });
 
-/** Cron provider calls use the rendered production identity, never the legacy staging service. */
 test("production Cron pause addresses its reviewed Worker name", async (context) => {
   const outDir = await releaseDirectory(context);
   await writeFile(
@@ -245,7 +241,6 @@ test("production Cron pause addresses its reviewed Worker name", async (context)
   assert.equal(evidence.release_id, production.release_id);
 });
 
-// Activation evidence must reflect the canonical remote schedule, not subprocess argument spelling.
 test("Cron activation requires live smoke then proves the canonical set", async (context) => {
   const outDir = await releaseDirectory(context, "activate");
   const commands = [];
@@ -266,9 +261,6 @@ test("Cron activation requires live smoke then proves the canonical set", async 
   });
   assert.equal(result.status, "active");
   assert.equal(result.schedule_set_digest, scheduleSetDigest(canonicalCrons));
-  // Activation deploys the canonical triggers. Without this, an implementation
-  // that only records evidence would report "active" while the deployed Worker
-  // kept its paused (empty) schedule.
   assert.equal(commands.length, 1);
   const [command, ...args] = commands[0];
   assert.equal(command, "bun");

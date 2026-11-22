@@ -31,8 +31,6 @@ try {
 if (session.git_sha !== spec.git_sha || session.release_id !== spec.release_id) {
   throw new Error("Use a fresh release directory for a different release");
 }
-// An operator attestation binds review intent to exact bytes, not an authenticated
-// external identity. Filesystem permissions and deployment credentials remain the trust boundary.
 const evidence = validateApprovalMetadata(
   {
     schema_version: 1,

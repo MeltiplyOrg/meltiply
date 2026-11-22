@@ -21,12 +21,6 @@ const commandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("probe-read"), id: z.uuid(), organizationId: z.uuid() }).strict(),
 ]);
 
-/**
- * Private Unix-socket operations for container administrators, never public HTTP.
- * Probe writes use reserved diagnostic object/state names and nonexistent reply
- * identifiers; they cannot call a Provider. Read verifies restart recovery and
- * removes probe objects. The same socket supports queue recovery and token minting.
- */
 export async function startControl(runtime, jobs, queuePolicies, secret, systemDatabaseUrl) {
   const socket = "/tmp/meltiply-admin.sock";
   await rm(socket, { force: true });

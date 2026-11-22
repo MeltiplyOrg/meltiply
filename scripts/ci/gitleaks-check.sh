@@ -19,8 +19,6 @@ if printf 'token=%s%s%s\n' "$canary_prefix" "$canary_marker" "$canary_body" \
   exit 1
 fi
 
-# Scan every fetched commit and tag, including secrets removed by later commits.
-# The live canary above prevents a broken scanner from reporting a false pass.
 scan_args=(detect --config .gitleaks.toml --redact)
 range="--all"
 echo "secret scan: $range"

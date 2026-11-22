@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Exercise the real devcontainer config on a disposable GitHub-hosted runner.
-# Requires Docker and Dev Container CLI; creates placeholder credential mounts
-# but skips credential-dependent lifecycle setup. Never run on a developer host.
 set -euo pipefail
 [[ "${GITHUB_ACTIONS:-}" == true ]] || { echo 'Use a disposable GitHub Actions runner' >&2; exit 1; }
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,7 +7,6 @@ mkdir -p "$HOME/.omp" "$HOME/.config/gh" "$HOME/.config/.wrangler"
 touch "$HOME/.wakatime.cfg"
 container=''
 
-# Reports daemon logs on failure; the disposable runner owns all smoke resources.
 cleanup() {
   local status=$?
   if [[ "$status" != 0 && -n "$container" ]]; then
@@ -21,8 +17,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The CLI can return before the image entrypoint completes when hooks are skipped.
-# Wait for readiness after creation/restart; a dead container fails immediately.
+# The Dev Container CLI can return before the image entrypoint completes when hooks
+# are skipped.
 wait_for_docker() {
   local attempt
   for attempt in {1..60}; do
@@ -37,7 +33,6 @@ wait_for_docker() {
 docker run -d --name meltiply-outer-proof busybox:1.37.0 sleep 600 >/dev/null
 result="$(devcontainer up --workspace-folder "$repo_root" --skip-post-create)"
 container="$(jq -r .containerId <<<"$result")"
-# Credential-dependent hooks are skipped; invoke the same DinD bootstrap manually.
 docker exec "$container" bash /opt/meltiply-devcontainer/docker-init.sh
 wait_for_docker
 test "$(docker inspect --format '{{.HostConfig.Privileged}}' "$container")" = true

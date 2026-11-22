@@ -17,14 +17,6 @@ const maximumResponseBytes = 256 * 1024;
 const sevenDaysMs = 7 * 24 * 60 * 60 * 1_000;
 const thirtyDaysMs = 30 * 24 * 60 * 60 * 1_000;
 
-/**
- * Validates that an identifier string matches the allowed lowercase slug pattern (`^[a-z0-9-]{1,60}$`).
- *
- * @param {unknown} value - Identifier to test
- * @param {string} name - Contextual label for error reporting
- * @returns {string} The validated identifier
- * @throws {TypeError} If value is not a string or fails the pattern check
- */
 function identifier(value, name) {
   if (typeof value !== "string" || !identifierPattern.test(value)) {
     throw new TypeError(`${name} is invalid`);
@@ -32,14 +24,6 @@ function identifier(value, name) {
   return value;
 }
 
-/**
- * Validates that a string is a valid RFC3339 timestamp with parseable epoch value.
- *
- * @param {unknown} value - Timestamp candidate string
- * @param {string} name - Contextual label for error reporting
- * @returns {string} The validated RFC3339 timestamp string
- * @throws {TypeError} If value is not a string, fails RFC3339 regex, or cannot be parsed by Date
- */
 function timestamp(value, name) {
   if (
     typeof value !== "string" ||
@@ -51,15 +35,6 @@ function timestamp(value, name) {
   return value;
 }
 
-/**
- * Validates Neon API credentials and ensures project and branch environment variables
- * match the designated target project and branch in the release specification.
- *
- * @param {Record<string, string | undefined>} environment - Process environment variables
- * @param {object} spec - Release specification object
- * @returns {{ branchId: string, projectId: string, token: string }} Validated Neon configuration parameters
- * @throws {TypeError} If API key is missing or project/branch variables do not match the release spec
- */
 function protectedEnvironment(environment, spec) {
   const token = environment.NEON_API_KEY;
   if (
@@ -83,18 +58,6 @@ function protectedEnvironment(environment, spec) {
   };
 }
 
-/**
- * Performs an authenticated HTTP request against the Neon REST API with size-bounded JSON parsing.
- *
- * @param {object} params - Request options
- * @param {{ token: string }} params.environment - Object holding Neon API bearer token
- * @param {typeof fetch} params.fetchImpl - HTTP fetch implementation
- * @param {string} [params.method="GET"] - HTTP method
- * @param {string} params.pathname - API path to append to Neon base URL
- * @param {number} [params.requestTimeoutMs=15000] - Request timeout in milliseconds
- * @returns {Promise<any>} Parsed JSON response payload
- * @throws {Error} If HTTP response is not ok or exceeds maximum response size limit
- */
 async function neonRequest({
   environment,
   fetchImpl,
@@ -117,15 +80,6 @@ async function neonRequest({
   return readBoundedJsonResponse(response, maximumResponseBytes, "Neon API response");
 }
 
-/**
- * Validates the schema and attributes of a Neon snapshot record.
- * Verifies ISO timestamps, identifier formats, and enforces that expiration follows creation.
- *
- * @param {unknown} input - Raw snapshot record
- * @param {object} [expected={}] - Optional map of expected property values
- * @returns {{ created_at: string, expires_at: string, id: string, name: string, source_branch_id: string }} Validated snapshot record
- * @throws {TypeError} If snapshot structure, fields, or constraints are invalid
- */
 function validateSnapshot(input, expected = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new TypeError("Neon snapshot must be an object");
@@ -153,13 +107,6 @@ function validateSnapshot(input, expected = {}) {
   return snapshot;
 }
 
-/**
- * Validates a list of Neon snapshots returned from the list snapshots endpoint.
- *
- * @param {unknown} input - Raw JSON response from Neon snapshots listing endpoint
- * @returns {Array<object>} Validated snapshot records array
- * @throws {TypeError} If response is not an object containing a snapshots array
- */
 function parseSnapshotList(input) {
   if (!input || typeof input !== "object" || !Array.isArray(input.snapshots)) {
     throw new TypeError("Neon snapshot list response is invalid");
@@ -167,19 +114,6 @@ function parseSnapshotList(input) {
   return input.snapshots.map((snapshot) => validateSnapshot(snapshot));
 }
 
-/**
- * Validates a single Neon operation payload against project scope and execution invariants.
- *
- * Ensures the operation record belongs to the expected project, has a valid UUID,
- * valid RFC 3339 timestamps, recognized status enumeration, and non-negative
- * duration and failure metrics. Enforces that operations with status "finished" report
- * zero failures.
- *
- * @param {unknown} input - Raw Neon operation object or envelope containing an operation field
- * @param {string} projectId - Expected Neon project identifier to enforce tenant boundary
- * @returns {{ id: string, status: string }} Normalized lowercase operation ID and status
- * @throws {TypeError} If structure is invalid or finished operation reports failures
- */
 function parseOperation(input, projectId) {
   const operation = input?.operation ?? input;
   if (
@@ -214,18 +148,6 @@ function parseOperation(input, projectId) {
   return { id: operation.id.toLowerCase(), status: operation.status };
 }
 
-/**
- * Parses and validates the response from a Neon branch snapshot creation API call.
- *
- * Enforces exact response key containment (only "operations" and "snapshot"),
- * validates that at least one completion operation was scheduled, and verifies
- * that the returned snapshot matches the expected release snapshot name and source branch ID.
- *
- * @param {unknown} input - Decoded JSON payload from Neon snapshot creation endpoint
- * @param {{ branchId: string, name: string, projectId: string }} expected - Expected release metadata
- * @returns {{ operations: Array<{ id: string, status: string }>, snapshot: { created_at: string, expires_at: string, id: string, name: string, source_branch_id: string } }} Parsed operations and validated snapshot
- * @throws {TypeError} If response shape is invalid or missing required completion operations
- */
 export function parseCreateSnapshotResponse(input, expected) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new TypeError("Neon snapshot response must be an object");
@@ -248,17 +170,6 @@ export function parseCreateSnapshotResponse(input, expected) {
   };
 }
 
-/**
- * Parses and validates the response from a Neon operation status polling endpoint.
- *
- * Ensures the response envelope contains exclusively a single "operation" property,
- * delegating field validation and project isolation enforcement to parseOperation.
- *
- * @param {unknown} input - Decoded JSON response from GET /projects/:id/operations/:operation_id
- * @param {string} projectId - Expected Neon project identifier
- * @returns {{ id: string, status: string }} Normalized operation ID and current execution status
- * @throws {TypeError} If envelope contains unexpected keys or is not an operation object
- */
 function parseOperationResponse(input, projectId) {
   if (
     !input ||
@@ -271,23 +182,6 @@ function parseOperationResponse(input, projectId) {
   return parseOperation(input.operation, projectId);
 }
 
-/**
- * Queries Neon API for existing snapshots and retrieves one matching the release name.
- *
- * Enforces that at most one snapshot exists with the given release-scoped name.
- * If a matching snapshot is present, verifies that its source branch and expiration
- * timestamp exactly match the release specification to avoid ambiguity or reuse of conflicting state.
- *
- * @param {object} options - Snapshot search parameters
- * @param {string} options.branchId - Expected Neon source branch identifier
- * @param {{ token: string }} options.environment - Neon API authentication credentials
- * @param {string} options.expiresAt - Expected snapshot expiration timestamp
- * @param {typeof fetch} options.fetchImpl - HTTP client implementation
- * @param {string} options.name - Unique release snapshot name (e.g., meltiply-<release_id>)
- * @param {string} options.projectId - Neon project identifier
- * @returns {Promise<object|undefined>} Matching validated snapshot object, or undefined if none exists
- * @throws {TypeError} If duplicate snapshots exist or branch/expiry mismatch occurs
- */
 async function listNamedSnapshot({ branchId, environment, expiresAt, fetchImpl, name, projectId }) {
   const response = await neonRequest({
     environment,
@@ -309,18 +203,6 @@ async function listNamedSnapshot({ branchId, environment, expiresAt, fetchImpl, 
   return matches[0];
 }
 
-/**
- * Validates Neon branch endpoints and verifies exact database URL hostname parity.
- *
- * Scans branch endpoints returned by the Neon control plane to ensure that exactly
- * one active (non-disabled) endpoint matches the configured database hostname for
- * the target project and branch. Computes an immutable SHA-256 digest of the host.
- *
- * @param {unknown} input - Raw endpoints response payload from Neon API
- * @param {{ branchId: string, environment: Record<string, string | undefined>, projectId: string }} expected - Target environment and branch context
- * @returns {{ hostDigest: string, id: string }} SHA-256 digest of verified hostname and validated endpoint identifier
- * @throws {TypeError} If response is malformed or database URL does not match exactly one enabled endpoint
- */
 export function parseEndpointResponse(input, expected) {
   if (!input || typeof input !== "object" || !Array.isArray(input.endpoints)) {
     throw new TypeError("Neon endpoint response is invalid");
@@ -353,19 +235,6 @@ export function parseEndpointResponse(input, expected) {
   };
 }
 
-/**
- * Retrieves Neon branch endpoints via the control plane and verifies connection parity.
- *
- * Queries the Neon API for endpoints belonging to the specified project branch and
- * asserts that the release database connection string maps directly to a verified,
- * active branch endpoint.
- *
- * @param {object} options - Endpoint verification options
- * @param {Record<string, string | undefined>} options.environment - Process environment containing DATABASE_URL
- * @param {typeof fetch} options.fetchImpl - HTTP client implementation
- * @param {{ branchId: string, projectId: string, token: string }} options.neon - Protected Neon configuration
- * @returns {Promise<{ hostDigest: string, id: string }>} Validated endpoint ID and host digest
- */
 async function verifyDatabaseEndpoint({ environment, fetchImpl, neon }) {
   return parseEndpointResponse(
     await neonRequest({
@@ -381,22 +250,6 @@ async function verifyDatabaseEndpoint({ environment, fetchImpl, neon }) {
   );
 }
 
-/**
- * Polls asynchronous Neon operations until all complete successfully or timeout.
- *
- * Monitors long-running snapshot creation operations by polling Neon control-plane
- * endpoints with exponential/paced delays. Halts immediately on terminal failure statuses
- * (cancelled, error, failed, skipped) and bounds total waiting time to 15 minutes.
- *
- * @param {object} options - Operation polling options
- * @param {{ token: string }} options.environment - Protected Neon API credentials
- * @param {typeof fetch} options.fetchImpl - HTTP client implementation
- * @param {Array<{ id: string, status: string }>} options.operations - Operations to track
- * @param {(ms: number) => Promise<void>} options.pause - Pacing delay function
- * @param {string} options.projectId - Neon project identifier
- * @returns {Promise<void>} Resolves when all operations reach "finished" status
- * @throws {Error} If any operation fails or total execution exceeds the 15-minute deadline
- */
 async function waitForOperations({ environment, fetchImpl, operations, pause, projectId }) {
   const pending = operations;
   const deadline = performance.now() + 900_000;
@@ -426,20 +279,6 @@ async function waitForOperations({ environment, fetchImpl, operations, pause, pr
   }
 }
 
-/**
- * Asserts structural and cryptographic validity of restore-point evidence.
- *
- * Validates that restore-point evidence conforms strictly to schema version 1,
- * matches the release specification (git SHA, release ID, plan digest, Neon project/branch),
- * verifies phase-scoped operator review records (plain JSON matching commit and
- * plan digest, not authenticated identities), confirms snapshot lifetime
- * invariants, checks the composite SHA-256 snapshot digest, and verifies endpoint hostname digest parity.
- *
- * @param {unknown} evidence - Raw restore-point evidence object to validate
- * @param {object} [context] - Expected context containing approvals, environment, planDigest, and spec
- * @returns {object} Validated immutable restore-point evidence object
- * @throws {TypeError} If schema fields are invalid, expired, or cryptographic digests mismatch
- */
 function validateRestorePointEvidence(evidence, { approvals, environment, planDigest, spec } = {}) {
   const expectedKeys = [
     "approvals",
@@ -523,36 +362,6 @@ function validateRestorePointEvidence(evidence, { approvals, environment, planDi
   return evidence;
 }
 
-/**
- * Guarantees a verified Neon database snapshot restore point prior to mutating releases.
- *
- * Verifies that the configured restore point expiration is between 7 and 30 days in the future,
- * validates database endpoint hostname parity against the reviewed Neon branch, checks for
- * existing local evidence or completed remote snapshots to support idempotent reruns, triggers
- * snapshot creation, polls completion operations to finish, and persists canonical evidence atomically.
- *
- * **Recovery sequencing**: Restoring a Neon snapshot rolls back the database but does **not**
- * undo content already published to social providers (Facebook, Instagram, TikTok, etc.).
- * Before restoring, the operator must:
- * 1. Pause Queue delivery and Automation cron triggers to stop new writes and publications.
- * 2. Inspect the recovery point to identify which publications and analytics completed
- *    after the snapshot timestamp — these will vanish from the local database but remain
- *    live on provider platforms.
- * 3. After restoring, reconcile external provider state: mark already-published content
- *    as delivered and replay or discard any partially-processed queue messages.
- *
- * @param {object} options - Restore point creation options
- * @param {object} options.approvals - Operator reviews bound to the release commit, phase, and plan digest.
- * @param {Record<string, string | undefined>} options.environment - Runtime environment with credentials
- * @param {typeof fetch} [options.fetchImpl=fetch] - HTTP client implementation
- * @param {() => number} [options.now] - Epoch millisecond timestamp provider
- * @param {string} options.outDir - Output directory for atomic evidence persistence
- * @param {(ms: number) => Promise<void>} [options.pause] - Pacing delay provider
- * @param {string} options.planDigest - SHA-256 digest of verified release plan
- * @param {object} options.spec - Verified release specification
- * @returns {Promise<object>} Validated restore-point evidence record
- * @throws {TypeError|Error} If lifetime is invalid, endpoint mismatches, snapshot fails, or evidence is corrupted
- */
 export async function createRestorePoint({
   approvals,
   environment,
@@ -674,24 +483,6 @@ export async function createRestorePoint({
   return evidence;
 }
 
-/**
- * Asserts that a valid, active restore-point evidence file exists before mutating operations.
- *
- * Loads and cryptographically validates the local restore-point evidence file against
- * the current release specification, plan digest, and database environment. Verifies that
- * the database snapshot has at least the minimum required lifetime remaining (default 7 days).
- *
- * @param {object} options - Restore point requirement options
- * @param {object} options.approvals - Validated operator review records, not identity authentication.
- * @param {Record<string, string | undefined>} options.environment - Runtime environment
- * @param {number} [options.minimumRemainingMs=604800000] - Minimum remaining milliseconds before expiry (7 days)
- * @param {() => number} [options.now] - Current time provider
- * @param {string} options.outDir - Directory containing restore-point-evidence.json
- * @param {string} options.planDigest - Release plan digest
- * @param {object} options.spec - Release specification
- * @returns {Promise<object>} Validated restore-point evidence record
- * @throws {TypeError} If evidence is missing, invalid, or has insufficient remaining lifetime
- */
 export async function requireRestorePoint({
   approvals,
   environment,

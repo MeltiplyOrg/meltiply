@@ -1,6 +1,6 @@
 import type { components, PlatformCapability } from "@meltiply/contracts";
-import type { ThreadsPublishOptions } from "./threads-options";
-import type { InstagramContentOptions } from "./instagram-content";
+import type { ThreadsPublishOptions } from "./threads/options";
+import type { InstagramContentOptions } from "./instagram/options";
 
 import type { RateLimitBudget } from "./rate-limit";
 

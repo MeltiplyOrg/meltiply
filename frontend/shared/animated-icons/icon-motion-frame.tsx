@@ -8,12 +8,6 @@ type IconMotionFrameProps = Omit<AnimatedIconProps, "children" | "strokeWidth"> 
   children: (controls: LegacyAnimationControls) => ReactNode;
 };
 
-/**
- * Owns retained icons' shared sizing, hover forwarding, and animation loop.
- * Glyphs supply only their SVG geometry and animation variants.
- * DOM props and React 19 refs retain their existing precedence; explicit style
- * can override size. Lazy SVG features avoid shipping drag/layout machinery.
- */
 export function IconMotionFrame({
   size,
   className,

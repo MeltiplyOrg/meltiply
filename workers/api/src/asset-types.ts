@@ -4,7 +4,7 @@ import type { components } from "@meltiply/contracts/schema";
 import { isoDateTime } from "@meltiply/domain";
 import type {
   DatabaseError,
-  DomainError,
+  ActiveOrganizationRequiredError,
   InvalidRequestError,
   NotFoundError,
   StorageUnavailableError,
@@ -90,7 +90,7 @@ interface UploadSessionResult {
 
 export type AssetServiceError =
   | CoreApiError
-  | DomainError
+  | ActiveOrganizationRequiredError
   | DatabaseError
   | StorageUnavailableError
   | InvalidRequestError

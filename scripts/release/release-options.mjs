@@ -59,29 +59,10 @@ const definitions = {
   },
 };
 
-/**
- * Retrieves an option value from parsed CLI flags or falls back to an environment variable.
- *
- * @param {Map<string, string>} values - Parsed command-line options map
- * @param {string} name - CLI option name without '--' prefix
- * @param {string} environmentName - Corresponding environment variable key
- * @param {Record<string, string | undefined>} environment - Environment lookup source
- * @returns {string | undefined} Resolved option value, or undefined if unset in both
- */
 function environmentValue(values, name, environmentName, environment) {
   return values.get(name) ?? environment[environmentName];
 }
 
-/**
- * Renders deterministic per-command usage text for the environment-aware release CLI.
- *
- * Booleans render bare, value options render `--name <name>`, and repeatable
- * options render `...`; a command with no options renders only its name.
- *
- * @param {string} command - Release command name
- * @returns {string} Usage line such as "deploy --apply [--help] ..."
- * @throws {TypeError} If the command is unknown
- */
 export function releaseUsage(command) {
   const definition = definitions[command];
   if (!definition) {
@@ -95,16 +76,6 @@ export function releaseUsage(command) {
   return `${command}${flags.length > 0 ? " " : ""}${flags.join(" ")}`;
 }
 
-/**
- * Parses and strictly validates command-line arguments for the environment-aware release CLI.
- * Enforces command-specific option definitions, rejects duplicate arguments, enforces percentage bounds
- * (5, 25, 50, 100) for staged deployments, resolves filesystem paths, and collects repeatable approval metadata.
- *
- * @param {Array<string>} argv - CLI arguments starting with command name (e.g., ['deploy', '--apply', ...])
- * @param {Record<string, string | undefined>} environment - Process environment variables for fallbacks
- * @returns {object} Normalized release options object
- * @throws {TypeError} If unknown command, unrecognized option, duplicate flag, or missing required values occur
- */
 export function parseReleaseArguments(argv, environment) {
   const [command, ...rest] = argv;
   const definition = definitions[command];
@@ -137,7 +108,6 @@ export function parseReleaseArguments(argv, environment) {
     index += 1;
   }
 
-  // Usage is help-only: it must render before any required-option checks.
   if (booleans.has("help")) {
     return { command, help: true };
   }

@@ -1,5 +1,3 @@
-// Production Queue handler + workerd + PostgreSQL, with controlled Provider
-// transport for account serialization, bounded fanout and redelivery checks.
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
@@ -34,7 +32,6 @@ const providerRequest = z.object({
   caption: z.string(),
 });
 
-/** Verifies durable outcomes, per-account ordering and redelivery for one bounded batch mode. */
 async function verifyBatch(concurrency: 1 | 2) {
   const organizationId = randomUUID();
   const profiles = Array.from({ length: 4 }, () => randomUUID());

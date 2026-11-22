@@ -1,7 +1,5 @@
-# Hyperdrive origin passwords are write-only API values. Managing the
-# configuration resource directly would persist those values in state, so a
-# protected bootstrap command creates/rotates the configurations and this
-# module validates their non-secret control plane properties by ID.
+# Hyperdrive origin passwords are write-only API values that a managed
+# configuration resource would persist in state.
 data "cloudflare_hyperdrive_config" "authenticated" {
   account_id    = var.account_id
   hyperdrive_id = var.authenticated_config_id

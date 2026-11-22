@@ -1,6 +1,6 @@
 import type { components } from "@meltiply/contracts/schema";
-import type { FacebookOptimizationGoal, FacebookPostType, FacebookPublishOptions } from "./types";
-import { providerIdentifier } from "./meta-common";
+import type { FacebookOptimizationGoal, FacebookPostType, FacebookPublishOptions } from "../types";
+import { providerIdentifier } from "../values";
 
 const postTypes: readonly FacebookPostType[] = [
   "feed",
@@ -26,7 +26,6 @@ export const facebookOptimizationGoals: readonly FacebookOptimizationGoal[] = [
   "VIDEO_VIEWS_60S",
 ];
 
-/** Bounds credential-free Page links and HTTPS card artwork before Meta fetches them. */
 function pageLink(value: unknown, httpsOnly = false): boolean {
   if (typeof value !== "string" || !value || value.length > 2048 || !URL.canParse(value))
     return false;
@@ -39,10 +38,9 @@ function pageLink(value: unknown, httpsOnly = false): boolean {
 }
 
 /**
- * Resolves the Page publishing method against the target's ordered attachments.
- * One video defaults to a Reel; text and photos default to feed. Explicit
- * methods never fall back to another method or discard an attachment/link.
- * Returns null for incompatible choices; media facts are validated separately.
+ * Resolves the Page publishing method against the attachment kinds: one video
+ * defaults to a Reel, anything else to feed. An explicit method never falls back;
+ * incompatible choices return null.
  */
 export function resolveFacebookPostType(
   options: FacebookPublishOptions | undefined,
@@ -112,10 +110,7 @@ export function resolveFacebookPostType(
   return postType;
 }
 
-/**
- * Projects saved or frozen Page options to the public wire contract without
- * substituting answers for incomplete experiment drafts or changing order.
- */
+/** Projects saved options to the wire contract without filling incomplete experiment drafts. */
 export function facebookOptionsToWire(
   options: FacebookPublishOptions,
 ): components["schemas"]["FacebookPublishOptions"] {

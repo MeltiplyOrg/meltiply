@@ -32,7 +32,7 @@ describe("ProviderHttpClient", () => {
       }
       return Promise.resolve(json({ account_id: "facebook-page-1" }));
     };
-    const response = await client(fetcher).request<{ account_id: string }>(context, {
+    const response = await client(fetcher).request(context, {
       method: "GET",
       url: "https://api.provider.example/account",
     });
@@ -43,9 +43,7 @@ describe("ProviderHttpClient", () => {
     const fetcher = vi.fn<typeof fetch>(async () =>
       json({ items: [{ id: "item-1" }] }, { headers: { "X-Next-Cursor": "cursor-2" } }),
     );
-    const response = await client(fetcher).request<{
-      items: { id: string }[];
-    }>(context, {
+    const response = await client(fetcher).request(context, {
       headers: { Authorization: "Bearer provider-secret" },
       method: "GET",
       url: "https://api.provider.example/items?cursor=cursor-1",
@@ -64,23 +62,23 @@ describe("ProviderHttpClient", () => {
   });
 
   it("records extracted rate-limit metadata for success and error responses", async () => {
-    const extractor = vi.fn((headers: Headers) => {
-      const remaining = headers.get("X-RateLimit-Remaining");
-      return remaining === null
-        ? null
-        : {
-            percentUsed: null,
-            remaining: Number(remaining),
-            resetsInSeconds: 20,
-          };
-    });
     const requestContext: ProviderRequestContext = { ...context };
     const fetcher = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(json({ ok: true }, { headers: { "X-RateLimit-Remaining": "12" } }))
-      .mockResolvedValueOnce(json({}, { headers: { "X-RateLimit-Remaining": "0" }, status: 429 }))
+      .mockResolvedValueOnce(
+        json(
+          { ok: true },
+          { headers: { "X-RateLimit-Remaining": "12", "X-RateLimit-Reset": "20" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        json(
+          {},
+          { headers: { "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "20" }, status: 429 },
+        ),
+      )
       .mockResolvedValueOnce(json({ ok: true }));
-    const provider = client(fetcher, { rateLimitBudget: extractor });
+    const provider = client(fetcher, { platform: "tiktok" });
 
     await provider.request(requestContext, {
       method: "GET",
@@ -110,14 +108,13 @@ describe("ProviderHttpClient", () => {
       url: "https://api.provider.example/status",
     });
     expect(requestContext.metadata).toBeUndefined();
-    expect(extractor).toHaveBeenCalledTimes(3);
   });
 
   it("accepts an explicitly allowed empty protocol status", async () => {
     const fetcher = vi.fn<typeof fetch>(
       async () => new Response(null, { headers: { Range: "bytes=0-99" }, status: 308 }),
     );
-    const response = await client(fetcher).request<undefined>(context, {
+    const response = await client(fetcher).request(context, {
       acceptedStatuses: [308],
       method: "PUT",
       responseType: "json_or_empty",
@@ -443,7 +440,7 @@ describe("ProviderHttpClient", () => {
           { headers: { "Content-Type": "application/json" } },
         ),
     );
-    const response = await client(fetcher).request<{ items: { id: string }[] }>(context, {
+    const response = await client(fetcher).request(context, {
       method: "GET",
       url: "https://api.provider.example/chunked",
     });

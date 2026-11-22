@@ -326,7 +326,7 @@ describe("MailService (Effect surface)", () => {
     const program = Effect.gen(function* () {
       const service = yield* MailService;
       return yield* service.send(message);
-    }).pipe(Effect.provide(layer), Effect.provide(effectTracerLayer(context, exporter)));
+    }).pipe(Effect.provide(layer), Effect.provide(effectTracerLayer(context, { exporter })));
 
     await Effect.runPromise(program);
 

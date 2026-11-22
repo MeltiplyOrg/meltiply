@@ -9,7 +9,6 @@ const root = resolve(import.meta.dirname, "../..");
 const script = resolve(root, "scripts/ci/github-routing.mjs");
 const mapping = readFileSync(resolve(root, "scripts/ci/github-paths.json"));
 
-/** Creates an isolated Git history with real routing rules; cleanup never touches the checkout. */
 function fixture(t) {
   const dir = mkdtempSync(resolve(tmpdir(), "meltiply-routing-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -56,7 +55,6 @@ function fixture(t) {
   };
 }
 
-/** Supplies the default-branch push range without relying on hosted event fixtures. */
 function push(before) {
   return { before, ref: "refs/heads/master", repository: { default_branch: "master" } };
 }

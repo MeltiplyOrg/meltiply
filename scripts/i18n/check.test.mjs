@@ -9,10 +9,6 @@ import { tmpdir } from "node:os";
 const repositoryRoot = fileURLToPath(new URL("../..", import.meta.url));
 const temporaryRoots = [];
 
-/**
- * Writes a minimal locale tree. `glossary` overrides the default empty shared
- * glossary so tests can exercise ignore-key derivation.
- */
 function fixture({ en, es, glossary }) {
   const root = mkdtempSync(join(tmpdir(), "meltiply-i18n-check-"));
   temporaryRoots.push(root);
@@ -37,16 +33,6 @@ function fixture({ en, es, glossary }) {
   return root;
 }
 
-/**
- * Runs the wrapper against a fixture locale root in a child process, inside a
- * throwaway checkout holding copies of the wrapper and its helpers. The wrapper
- * resolves both `--locks` and its default locale root from its own file
- * location, so a copy is what keeps the run independent of the repository's
- * committed `.shipi18n/locks.json`; the fixture supplies its own locks there.
- *
- * @param {string} root Fixture locale tree.
- * @returns {import("node:child_process").SpawnSyncReturns<string>}
- */
 function runCheck(root) {
   const checkout = mkdtempSync(join(tmpdir(), "meltiply-i18n-checkout-"));
   temporaryRoots.push(checkout);
@@ -55,7 +41,6 @@ function runCheck(root) {
   for (const name of ["check.mjs", "glossary.mjs", "shipi18n.mjs"]) {
     copyFileSync(fileURLToPath(new URL(name, import.meta.url)), join(scripts, name));
   }
-  // `shipi18n.mjs` resolves the CLI through Node's module paths from the copy.
   symlinkSync(join(repositoryRoot, "node_modules"), join(checkout, "node_modules"), "dir");
   mkdirSync(join(checkout, ".shipi18n"), { recursive: true });
   writeFileSync(
@@ -63,9 +48,6 @@ function runCheck(root) {
     JSON.stringify({
       version: 1,
       locked: {
-        // Deliberately disagrees with the fixture translation: locks may only
-        // warn, so a clean tree must still pass and repository lock state can
-        // never decide this test's outcome.
         "es::ui::Hello": { sourceHash: "0".repeat(16), translationHash: "1".repeat(16) },
       },
     }),

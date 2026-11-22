@@ -1,19 +1,7 @@
 #!/usr/bin/env bash
-# Shared checks for the local Cloudflare Container runtime.
-#
-# Cloudflare runs containers on. `wrangler dev` and the engine smoke both build
-# and execute that image with the host Docker daemon, so a non-amd64 daemon
-# additionally needs QEMU user-mode emulation registered for x86-64. The
-# second prerequisite is the cgroup hierarchy: Docker's `--cpus`/`--memory`
-# are domain controllers, so container_cgroup_limits_ready reports a threaded
-# daemon cgroup before anything is built instead of letting the first
-# `docker run` fail with runc's opaque cgroup error. Source this after
-# `set -euo pipefail`; it only defines functions.
+# Docker's --cpus/--memory are cgroup v2 domain controllers; runc fails opaquely
+# under a threaded daemon cgroup.
 
-# Prints the processor's required image platform.
-#
-# Deployed containers and `wrangler dev` both run linux/amd64; the value is kept
-# in one place so a future platform change cannot leave a check behind.
 container_image_platform() {
   printf 'linux/amd64\n'
 }
@@ -114,8 +102,8 @@ container_cgroup_limits_ready() {
   case "$(cat "$cgroup_root/cgroup.type" 2>/dev/null)" in
   *threaded*) return 1 ;;
   esac
-  # A domain root still hands threaded cgroups to its children while threaded
-  # mode is enabled on its subtree, so the daemon's own parent is decisive.
+  # A domain root still hands threaded cgroups to its children while threaded mode is
+  # enabled on its subtree.
   case "$(cat "$(container_daemon_cgroup)/cgroup.type" 2>/dev/null)" in
   *threaded*) return 1 ;;
   esac

@@ -1,79 +1,26 @@
 import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
-import { Check, ChevronRight } from "lucide-react";
+import { Check } from "lucide-react";
 import { cn } from "@meltiply/ui/utils";
 import { SlidingHighlight } from "../primitives/sliding-highlight";
+import { useForwardedRef } from "../primitives/use-forwarded-ref";
 import {
   SEGMENTED_INDICATOR,
   SEGMENTED_ITEM,
   SEGMENTED_TRACK,
 } from "../primitives/segmented-chrome";
-/**
- * Root container for dropdown menus built on Radix DropdownMenu.
- *
- * Manages open/closed state, modal trapping, focus management, and keyboard navigation.
- *
- * @example
- * ```tsx
- * <DropdownMenu>
- *   <DropdownMenuTrigger asChild><Button variant="ghost">Options</Button></DropdownMenuTrigger>
- *   <DropdownMenuContent>
- *     <DropdownMenuItem onClick={handleEdit}>Edit</DropdownMenuItem>
- *     <DropdownMenuSeparator />
- *     <DropdownMenuItem onClick={handleDelete}>Delete</DropdownMenuItem>
- *   </DropdownMenuContent>
- * </DropdownMenu>
- * ```
- */
+
 export const DropdownMenu = DropdownMenuPrimitive.Root;
 
-/**
- * Interactive button or element that toggles the dropdown menu visibility.
- *
- * Usually wraps a button component via `asChild` prop.
- */
 export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 
-/**
- * Groups related {@link DropdownMenuItem} elements under an accessible category.
- */
-
-/**
- * Portals dropdown menu items into `document.body` to avoid clipping by overflow or z-index constraints.
- */
-
-/**
- * Root container for nested submenu flyouts within a dropdown menu.
- */
-
-/**
- * Container for grouping mutually exclusive {@link DropdownMenuRadioItem} components.
- *
- * Manages controlled (`value`, `onValueChange`) radio selection state. The
- * default variant is a plain Radix group; `segment` renders the shared segmented
- * track and a dedicated `SlidingHighlight` that travels to the checked item, so
- * no segment paints its own selected fill. Menu Content's hover pill excludes
- * these items; Radix still owns menu roving focus and keyboard behavior.
- *
- * @param variant - Plain group or a segmented preference row (default `default`).
- */
 export const DropdownMenuRadioGroup = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.RadioGroup>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioGroup> & {
     variant?: "default" | "segment";
   }
 >(({ className, children, variant = "default", ...props }, ref) => {
-  const groupRef = React.useRef<React.ElementRef<typeof DropdownMenuPrimitive.RadioGroup> | null>(
-    null,
-  );
-  const setRefs = React.useCallback(
-    (node: React.ElementRef<typeof DropdownMenuPrimitive.RadioGroup> | null) => {
-      groupRef.current = node;
-      if (typeof ref === "function") ref(node);
-      else if (ref) ref.current = node;
-    },
-    [ref],
-  );
+  const [groupRef, setRefs] = useForwardedRef(ref);
 
   return (
     <DropdownMenuPrimitive.RadioGroup
@@ -96,119 +43,11 @@ export const DropdownMenuRadioGroup = React.forwardRef<
 });
 DropdownMenuRadioGroup.displayName = DropdownMenuPrimitive.RadioGroup.displayName;
 
-/**
- * Submenu trigger item that reveals a nested {@link DropdownMenuSubContent} on
- * hover or ArrowRight; styled by the shared `[data-menu-item]` vocabulary so a
- * submenu row matches every other menu row.
- *
- * @param className - Optional CSS classes for custom styling.
- * @param children - Trigger label or content.
- * @param props - Radix SubTrigger props.
- * @param ref - Forwarded ref to the subtrigger element.
- * @returns Styled submenu trigger item.
- */
-const DropdownMenuSubTrigger = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.SubTrigger>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger>
->(({ className, children, ...props }, ref) => (
-  <DropdownMenuPrimitive.SubTrigger
-    ref={ref}
-    data-dropdown-item
-    data-menu-item=""
-    className={cn("cursor-default select-none pr-8", className)}
-    {...props}
-  >
-    {children}
-    <ChevronRight className="size-4" />
-  </DropdownMenuPrimitive.SubTrigger>
-));
-DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName;
-
-/**
- * Floating panel containing nested submenu items.
- *
- * Uses a stable Popper position with opacity-only entrance/exit feedback so the
- * submenu does not fight Radix's positioning transform during opening.
- *
- * @param className - Optional CSS classes for width, padding, or borders.
- * @param highlight - Renders the travelling highlight pill (defaults to true).
- *   Pass false to mark the surface data-menu-plain, whose shared rule paints
- *   each row's own hover/highlight fill instead of moving the pill.
- * @param props - Radix SubContent props.
- * @param ref - Forwarded ref.
- * @returns Styled submenu content overlay.
- */
-const DropdownMenuSubContent = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent> & { highlight?: boolean }
->(({ className, highlight = true, children, ...props }, ref) => {
-  const subContentRef = React.useRef<HTMLDivElement | null>(null);
-  const setRefs = React.useCallback(
-    (node: HTMLDivElement | null) => {
-      subContentRef.current = node;
-      if (typeof ref === "function") {
-        ref(node);
-      } else if (ref) {
-        ref.current = node;
-      }
-    },
-    [ref],
-  );
-
-  return (
-    <DropdownMenuPrimitive.SubContent
-      ref={setRefs}
-      data-menu-surface=""
-      data-menu-plain={highlight ? undefined : ""}
-      className={cn("relative z-50 select-none", className)}
-      {...props}
-    >
-      {highlight && (
-        <SlidingHighlight
-          containerRef={subContentRef}
-          itemSelector="[data-dropdown-item]:not([data-segment-item])"
-          deferUntilInteraction
-        />
-      )}
-      {children}
-    </DropdownMenuPrimitive.SubContent>
-  );
-});
-DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName;
-/**
- * Main floating popover menu panel rendered inside a {@link DropdownMenuPortal}.
- *
- * Uses a stable Popper position with opacity-only entrance/exit feedback so the
- * menu does not fight Radix's positioning transform during opening. The shared
- * `[data-menu-fit-trigger="dropdown"]` rule makes the panel at least as wide as
- * its trigger, so list menus under full-width filter controls align to them;
- * compact icon triggers keep the shared 200px floor.
- *
- * @param sideOffset - Distance in pixels from the trigger (defaults to 4px).
- * @param className - Optional CSS classes for custom width, max-height, or styling.
- * @param highlight - Renders the travelling highlight pill (defaults to true).
- *   Pass false to mark the surface data-menu-plain, whose shared rule paints
- *   each row's own hover/highlight fill instead of moving the pill.
- * @param props - Remaining Radix Content props.
- * @param ref - Forwarded ref.
- * @returns Styled portalled dropdown content container.
- */
 export const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content> & { highlight?: boolean }
 >(({ className, sideOffset = 4, highlight = true, children, ...props }, ref) => {
-  const contentRef = React.useRef<HTMLDivElement | null>(null);
-  const setRefs = React.useCallback(
-    (node: HTMLDivElement | null) => {
-      contentRef.current = node;
-      if (typeof ref === "function") {
-        ref(node);
-      } else if (ref) {
-        ref.current = node;
-      }
-    },
-    [ref],
-  );
+  const [contentRef, setRefs] = useForwardedRef(ref);
 
   return (
     <DropdownMenuPrimitive.Portal>
@@ -235,19 +74,6 @@ export const DropdownMenuContent = React.forwardRef<
 });
 DropdownMenuContent.displayName = DropdownMenuPrimitive.Content.displayName;
 
-/**
- * Actionable item within a dropdown menu.
- *
- * Chrome (row geometry, tokens, and hover suppression for the shared
- * `SlidingHighlight` pill) comes from the `[data-menu-item]` hook, so every
- * menu family — this one, `Select`, and page-composed panels — renders
- * identically.
- *
- * @param className - Optional CSS classes.
- * @param props - Radix Item props.
- * @param ref - Forwarded ref.
- * @returns Styled dropdown menu item.
- */
 export const DropdownMenuItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item>
@@ -262,19 +88,6 @@ export const DropdownMenuItem = React.forwardRef<
 ));
 DropdownMenuItem.displayName = DropdownMenuPrimitive.Item.displayName;
 
-/**
- * Toggleable checkbox item within a dropdown menu.
- *
- * Renders a right-aligned accent checkmark when `checked` is true, matching
- * {@link DropdownMenuRadioItem} and the item indicator inside `Select`.
- *
- * @param checked - Checked state (boolean or 'indeterminate').
- * @param className - Optional CSS classes.
- * @param children - Item label.
- * @param props - Radix CheckboxItem props.
- * @param ref - Forwarded ref.
- * @returns Styled dropdown checkbox item with indicator.
- */
 export const DropdownMenuCheckboxItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.CheckboxItem>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.CheckboxItem>
@@ -297,23 +110,6 @@ export const DropdownMenuCheckboxItem = React.forwardRef<
 ));
 DropdownMenuCheckboxItem.displayName = DropdownMenuPrimitive.CheckboxItem.displayName;
 
-/**
- * Selectable radio option within a {@link DropdownMenuRadioGroup}. The default
- * layout is a menu row with a right-aligned accent check; `segment` joins
- * compact horizontal choices inside a `segment` group, using the shared segmented
- * item chrome (24px on fine pointers, the shared 44px coarse minimum) and leaving
- * the checked fill to that group's travelling highlight. Radix retains menu
- * arrow-key navigation and checked semantics. Callers may prevent selection
- * dismissal for immediate preferences.
- *
- * @param value - Value of this radio option.
- * @param variant - `default` row or `segment` cell inside a segmented group.
- * @param className - Optional CSS classes.
- * @param children - Option label.
- * @param props - Radix RadioItem props.
- * @param ref - Forwarded ref.
- * @returns Styled dropdown radio item with indicator.
- */
 export const DropdownMenuRadioItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.RadioItem>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem> & {
@@ -349,51 +145,18 @@ export const DropdownMenuRadioItem = React.forwardRef<
 ));
 DropdownMenuRadioItem.displayName = DropdownMenuPrimitive.RadioItem.displayName;
 
-/**
- * Non-interactive category header label within a dropdown menu; styled by the
- * shared `[data-menu-label]` menu vocabulary.
- *
- * @param className - Optional CSS classes.
- * @param props - Radix Label props.
- * @param ref - Forwarded ref.
- * @returns Styled section label.
- */
 export const DropdownMenuLabel = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Label>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Label>
->(({ className, ...props }, ref) => (
-  <DropdownMenuPrimitive.Label ref={ref} data-menu-label="" className={className} {...props} />
-));
+>((props, ref) => <DropdownMenuPrimitive.Label ref={ref} data-menu-label="" {...props} />);
 DropdownMenuLabel.displayName = DropdownMenuPrimitive.Label.displayName;
 
-/**
- * Visual separator dividing items or groups within a dropdown menu; styled by
- * the shared `[data-menu-separator]` menu vocabulary.
- *
- * @param className - Optional CSS classes.
- * @param props - Radix Separator props.
- * @param ref - Forwarded ref.
- * @returns Styled menu separator line.
- */
 export const DropdownMenuSeparator = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Separator>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Separator>
->(({ className, ...props }, ref) => (
-  <DropdownMenuPrimitive.Separator
-    ref={ref}
-    data-menu-separator=""
-    className={className}
-    {...props}
-  />
-));
+>((props, ref) => <DropdownMenuPrimitive.Separator ref={ref} data-menu-separator="" {...props} />);
 DropdownMenuSeparator.displayName = DropdownMenuPrimitive.Separator.displayName;
 
-/**
- * Controlled checklist. An aggregate label adds a clearing row for collection
- * filters, where empty means all. Omitting it leaves explicit choices only.
- * Toggling values keeps the menu open; Radix owns keyboard navigation,
- * dismissal, and trigger restoration. Callers own selection semantics.
- */
 export function FilterChecklist<Value extends string>({
   value,
   onValueChange,

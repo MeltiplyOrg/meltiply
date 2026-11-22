@@ -10,7 +10,6 @@ const previous = "11111111-1111-4111-8111-111111111111";
 const candidate = "22222222-2222-4222-8222-222222222222";
 const digest = "b".repeat(64);
 
-/** Exercises the operator CLI with an isolated checkout and simulated command/provider boundary. */
 for (const environment of ["staging", "production"]) {
   for (const mode of ["bootstrap", "update"]) {
     test(`${environment} ${mode} builds, deploys, and recovers the reviewed frontend`, async (context) => {
@@ -136,7 +135,6 @@ for (const environment of ["staging", "production"]) {
         stderr: "",
         stdout: typeof value === "string" ? value : JSON.stringify(value),
       });
-      // Command injection models external Vite/Wrangler effects, not release internals.
       async function runCommand(command, args, options = {}) {
         if (command === "git") return ok(args[0] === "rev-parse" ? sha : "");
         if (args.includes(`build:${environment}`)) {
@@ -187,7 +185,7 @@ for (const environment of ["staging", "production"]) {
           assert.equal(config.vars.ENVIRONMENT, environment);
           assert.equal(config.vars.API_ORIGIN, undefined);
           assert.equal(path.basename(config.main), "index.js");
-          assert.ok(!wrangler.includes("--env")); // generated Vite config is already flattened
+          assert.ok(!wrangler.includes("--env"));
           versions.unshift({ id: candidate, tag });
           if (mode === "bootstrap") active = candidate;
           await writeFile(
@@ -250,7 +248,6 @@ for (const environment of ["staging", "production"]) {
       providerSha = "c".repeat(40);
       await assert.rejects(runReleaseCli(deploy, dependencies), /frontend VERSION binding/);
       providerSha = sha;
-      // Simulate interruption after Cloudflare succeeded but before local evidence persisted.
       await rm(path.join(outDir, "worker-frontend-candidate.json"));
       await rm(path.join(outDir, "worker-frontend-deployment.json"));
       await runReleaseCli(deploy, dependencies);

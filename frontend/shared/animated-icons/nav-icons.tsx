@@ -2,7 +2,6 @@ import { m as motion } from "motion/react";
 import type { AnimatedIconProps } from "./types";
 import { IconMotionFrame } from "./icon-motion-frame";
 
-/** Writing-square SVG with a pen-stroke loop; stroke defaults to 2 and IconMotionFrame owns interaction. */
 export function AnimatedSquarePen({ strokeWidth = 2, ...props }: AnimatedIconProps) {
   return (
     <IconMotionFrame {...props}>
@@ -36,7 +35,6 @@ export function AnimatedSquarePen({ strokeWidth = 2, ...props }: AnimatedIconPro
   );
 }
 
-/** Image SVG with a rising sun and drifting ridge; stroke defaults to 2 and overflow stays unclipped. */
 export function AnimatedImage({ strokeWidth = 2, ...props }: AnimatedIconProps) {
   return (
     <IconMotionFrame {...props}>
@@ -83,7 +81,6 @@ export function AnimatedImage({ strokeWidth = 2, ...props }: AnimatedIconProps) 
   );
 }
 
-/** Sharing-network SVG with staggered node pulses; stroke defaults to 2 and IconMotionFrame owns interaction. */
 export function AnimatedShare({ strokeWidth = 2, ...props }: AnimatedIconProps) {
   return (
     <IconMotionFrame {...props}>
@@ -173,7 +170,6 @@ export function AnimatedShare({ strokeWidth = 2, ...props }: AnimatedIconProps) 
   );
 }
 
-/** Layers SVG with independently lifted upper sheets; stroke defaults to 2 and overflow stays unclipped. */
 export function AnimatedLayers({ strokeWidth = 2, ...props }: AnimatedIconProps) {
   return (
     <IconMotionFrame {...props}>

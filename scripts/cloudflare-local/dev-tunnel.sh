@@ -1,23 +1,4 @@
 #!/usr/bin/env bash
-# Cloudflare Quick Tunnel helper for `make dev`.
-#
-# Quick Tunnels need no Cloudflare account: `cloudflared` dials the edge, is
-# assigned a random `https://<words>.trycloudflare.com` hostname, and forwards
-# every request to a single local origin. This script owns the two operations
-# the dev launcher needs and nothing else, so the tunnel flags live in exactly
-# one place.
-#
-#   dev-tunnel.sh binary            print the resolved cloudflared path
-#   dev-tunnel.sh run <port>        publish 127.0.0.1:<port> on a random hostname
-#   dev-tunnel.sh run-named <cfg> <name>
-#                                   publish the hostnames in a named tunnel's
-#                                   ingress configuration
-#   dev-tunnel.sh named-possible   exit 0 when a named tunnel can be provisioned
-#   dev-tunnel.sh setup             create the tunnel and its DNS records once
-#
-# `run` and `run-named` exec the connector so the caller's process group leader
-# *is* cloudflared; that is what lets `dev.sh` reap the tunnel with its existing
-# group teardown.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -33,12 +14,9 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 #   or a configured path override cannot be executed.
 resolve_cloudflared() {
   local candidate resolved
-  # An explicit override is authoritative: a configured path that is not
-  # executable is a misconfiguration, not a hint to keep searching PATH.
   for candidate in "${MELTIPLY_CLOUDFLARED_BIN:-}" "${CLOUDFLARED_BIN:-}"; do
     [[ -n "$candidate" ]] || continue
     if [[ "$candidate" != */* ]]; then
-      # A bare name behaves like the default PATH lookup below.
       if resolved="$(command -v "$candidate" 2>/dev/null)"; then
         printf '%s\n' "$resolved"
         return 0
@@ -51,7 +29,6 @@ resolve_cloudflared() {
     fi
     return 1
   done
-  # Default resolution: cloudflared from PATH.
   if resolved="$(command -v cloudflared 2>/dev/null)"; then
     printf '%s\n' "$resolved"
     return 0
@@ -59,8 +36,6 @@ resolve_cloudflared() {
   return 1
 }
 
-# Prints the connector path, or an actionable install hint on stderr. Callers
-# use the non-zero status to fall back to local-only development.
 print_binary() {
   local resolved
   if resolved="$(resolve_cloudflared)"; then
@@ -93,8 +68,6 @@ run_quick_tunnel() {
     print_binary >/dev/null
     return 1
   fi
-  # --no-autoupdate keeps a quick tunnel from rewriting itself mid-session and
-  # from silently changing version between two local runs.
   exec "$cloudflared" tunnel --no-autoupdate --url "http://127.0.0.1:$port"
 }
 
@@ -111,9 +84,6 @@ run_named_tunnel() {
   fi
   exec "$cloudflared" --config "$config" --no-autoupdate tunnel run "$name"
 }
-# The tunnel name for this branch. A shared tunnel keeps one name; by default
-# each branch gets its own tunnel, named after the branch, so branches are
-# isolated from each other in the Cloudflare dashboard.
 tunnel_name() {
   if [[ "${MELTIPLY_TUNNEL_SHARED:-0}" == "1" ]]; then
     printf '%s\n' "${MELTIPLY_TUNNEL_NAME:-meltiply-dev}"
@@ -130,16 +100,10 @@ tunnel_name() {
 named_tunnel_possible() {
   local cloudflared
   cloudflared="$(resolve_cloudflared)" || return 1
-  # cert.pem is what `tunnel login` writes and what authorizes creating the
-  # tunnel and its DNS records.
   [[ -s "${TUNNEL_ORIGIN_CERT:-$HOME/.cloudflared/cert.pem}" ]] || return 1
 }
 
-# Reads the API token and zone id out of the cert.pem that `tunnel login`
-# wrote, so replacing a stale DNS record needs no separate API token.
-# Exports MELTIPLY_TUNNEL_API_TOKEN and MELTIPLY_TUNNEL_ZONE_ID; a missing or
-# unreadable file simply leaves them empty, which disables only the
-# stale-record replacement, not the rest of provisioning.
+# `cloudflared tunnel login` writes cert.pem holding an API token and zone id.
 load_tunnel_api_credentials() {
   local cert="${TUNNEL_ORIGIN_CERT:-$HOME/.cloudflared/cert.pem}"
   [[ -s "$cert" ]] || return 0
@@ -213,8 +177,6 @@ route_hostname() {
     return 1
   fi
 
-  # The record exists. If it already targets this tunnel there is nothing to do;
-  # otherwise it is a leftover and must be replaced.
   local current
   current="$(record_target "$hostname")"
   if [[ "$current" == "$tunnel_id.cfargotunnel.com" ]]; then
@@ -304,9 +266,6 @@ api_call() {
 cloudflared_tunnel_exists() {
   local cloudflared=$1 name
   name="$(tunnel_name)"
-  # Parse the JSON rather than grepping it: `tunnel list --output json` is
-  # pretty-printed, so a `"name":"x"` pattern never matches, and the tunnel is
-  # then re-created on every run.
   "$cloudflared" tunnel list --output json 2>/dev/null |
     node -e '
       let raw = "";
@@ -327,12 +286,6 @@ cloudflared_tunnel_exists() {
     ' "$name"
 }
 
-# Creates an explicitly configured domain's branch tunnel and DNS records,
-# idempotently. Requires MELTIPLY_TUNNEL_DOMAIN; `make dev` calls this only in named mode.
-#
-# Per-branch tunnels are reached by explicit records: a wildcard CNAME has a
-# single target, so it can only ever point at one tunnel and would capture every
-# other branch. A wildcard is therefore only correct in shared-tunnel mode.
 setup_named_tunnel() {
   local cloudflared name tunnel_exists tunnel_id creds_file
   if ! cloudflared="$(resolve_cloudflared)"; then
@@ -370,9 +323,6 @@ LOGIN
     printf 'Tunnel %s already exists.\n' "$name"
   else
     printf 'Creating tunnel %s for this branch...\n' "$name"
-    # A concurrent `make dev` for the same branch can win this race, and the
-    # tunnel existing afterwards is the desired end state, so that outcome is
-    # accepted too. Any other error is real and must surface.
     local create_output
     if create_output="$("$cloudflared" tunnel create "$name" 2>&1)"; then
       printf '%s\n' "$create_output"
@@ -382,7 +332,6 @@ LOGIN
     fi
   fi
 
-  # Deduplicate: shared-tunnel mode resolves both hosts to one record.
   local hostname seen='' routing_ok=0 tunnel_id
   tunnel_id="$(tunnel_uuid "$cloudflared" "$name")"
   for hostname in $("$repo_root/scripts/cloudflare-local/tunnel-config.sh" coverage app) \
@@ -404,11 +353,8 @@ LOGIN
     return 1
   fi
 
-  # `tunnel route dns` exits 0 without telling you whether the record reached
-  # the zone, so confirm the hostname resolves before declaring success. A
-  # freshly created CNAME can take a minute or two to propagate, which is not a
-  # failure, so the wait is generous and the message names propagation as the
-  # likeliest cause.
+  # `cloudflared tunnel route dns` exits 0 even when the record lands in another
+  # account's zone, and a new CNAME can take minutes to propagate.
   if ! wait_for_dns "$app_hostname"; then
     printf '\nTunnel %s was created, but %s still does not resolve.\n' \
       "$name" "$app_hostname" >&2

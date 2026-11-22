@@ -11,58 +11,18 @@ const xmlTextPatterns = {
   UploadId: /<UploadId>([\s\S]*?)<\/UploadId>/,
 };
 
-/**
- * Generic S3-compatible object storage.
- *
- * Lets an operator point Meltiply at any origin that speaks the S3 REST API
- * (MinIO, Ceph RGW, Wasabi, Backblaze B2's S3 endpoint, or an on-premises
- * gateway) instead of Cloudflare R2, while keeping one behavior contract:
- * the same conditional promotion, the same create-only write capabilities, and
- * the same error taxonomy as the R2 adapter.
- *
- * Every worker-issued call is signed with the `Authorization` header scheme
- * against a real payload digest, and every presigned capability uses the same
- * shared SigV4 core the R2 signer uses, so switching provider changes where
- * bytes live, never what Meltiply is allowed to do with them.
- */
-
 const defaultRegion = "us-east-1";
 
-/** HTTP status codes that mean "the conditional write did not apply". */
 const preconditionStatuses = new Set([404, 409, 412]);
 
-/**
- * Normalizes an S3 ETag header into the unquoted form Meltiply compares.
- *
- * @param value - Raw `ETag` header value, quoted by the S3 protocol.
- * @returns The ETag without its surrounding double quotes.
- */
 function unquoteEtag(value: string | null): string {
   return (value ?? "").replace(weakEtagPrefixPattern, "").replace(etagQuotesPattern, "");
 }
 
-/**
- * Escapes the three XML metacharacters so operator-independent byte values
- * (ETags, which may contain `&`) round-trip through a request body.
- *
- * @param value - Raw text value.
- * @returns Text safe to embed in XML element content.
- */
 function xmlEscape(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
-/**
- * Extracts the text of the first `<tag>` element from an S3 XML response.
- *
- * S3 returns tiny fixed-shape documents (upload ids, copy results), so a
- * targeted extraction keeps the adapter dependency-free while still decoding
- * the five predefined entities.
- *
- * @param xml - Response body text.
- * @param tag - Supported S3 result element name.
- * @returns Decoded element text, or null when the element is absent.
- */
 function xmlText(xml: string, tag: keyof typeof xmlTextPatterns): string | null {
   const match = xmlTextPatterns[tag].exec(xml);
   const text = match?.[1];
@@ -76,12 +36,6 @@ function xmlText(xml: string, tag: keyof typeof xmlTextPatterns): string | null 
         .replaceAll("&amp;", "&");
 }
 
-/**
- * Converts a multipart part payload into the bytes an S3 part upload carries.
- *
- * @param value - ArrayBuffer, typed-array view, or Blob supplied by the caller.
- * @returns A bounded non-shared byte view; only shared backing storage is copied.
- */
 async function toBytes(
   value: ArrayBuffer | ArrayBufferView | Blob,
 ): Promise<Uint8Array<ArrayBuffer>> {
@@ -92,18 +46,11 @@ async function toBytes(
     if (value.buffer instanceof ArrayBuffer) {
       return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
     }
-    // WebCrypto and fetch require non-shared storage; normalize it once here.
     return new Uint8Array(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
   }
   return new Uint8Array(value);
 }
 
-/**
- * Converts a base64 SHA-256 checksum header into the hex form Meltiply stores.
- *
- * @param value - Raw `x-amz-checksum-sha256` header, base64 encoded.
- * @returns Hex digest, or null when the header is absent or malformed.
- */
 function checksumHex(value: string | null): string | null {
   if (!value) return null;
   try {
@@ -113,36 +60,15 @@ function checksumHex(value: string | null): string | null {
   }
 }
 
-/**
- * Renders an ETag as the quoted entity-tag an HTTP `If-Match`-style header
- * requires.
- *
- * `ObjectMetadata.etag` stores the unquoted form both providers agree on, while
- * the S3 wire protocol always quotes entity tags, so a pinned promotion must
- * re-quote it. Idempotent: an already-quoted value passes through unchanged.
- *
- * @param etag - Unquoted (or quoted) ETag.
- * @returns The quoted entity-tag.
- */
 function quoteEtag(etag: string): string {
   return `"${unquoteEtag(etag)}"`;
 }
 
-/**
- * Parses a `Content-Length` header into a byte count.
- *
- * @param headers - Response headers from the origin.
- * @returns The declared length, or 0 when the origin omitted or malformed it.
- */
 function contentLength(headers: Headers): number {
   const size = Number(headers.get("content-length") ?? "0");
   return Number.isSafeInteger(size) && size >= 0 ? size : 0;
 }
 
-/**
- * Derives {@link ObjectMetadata} from the response headers of a `HEAD`, or of
- * the `HEAD` that follows a successful write.
- */
 function metadataFromHeaders(key: string, headers: Headers): ObjectMetadata {
   const lastModified = headers.get("last-modified");
   const parsedDate = lastModified ? new Date(lastModified) : null;
@@ -191,10 +117,6 @@ export interface S3SigV4SignerOptions {
  * provider actually verifies.
  */
 export class S3SigV4Signer extends SigV4UrlSigner {
-  /**
-   * @param options - Endpoint, region, addressing style, bucket, and credentials.
-   * @throws {TypeError} When the endpoint, bucket, region, or credentials are invalid.
-   */
   constructor(options: S3SigV4SignerOptions) {
     const protocol = new URL(options.endpoint).protocol;
     if (protocol !== "https:" && !(options.allowInsecureEndpoint && protocol === "http:")) {
@@ -219,8 +141,6 @@ export class S3SigV4Signer extends SigV4UrlSigner {
    * Presigned capabilities are for external consumers (browsers, the native
    * processor); the object store needs the header-authenticated form to read
    * metadata, copy objects, and drive multipart uploads without a public URL.
-   *
-   * @returns Header-signing signer bound to the same endpoint and credentials.
    */
   requestSigner(): SigV4Signer {
     return this.signer;
@@ -246,10 +166,6 @@ export class S3ObjectStore extends EffectObjectStore {
   readonly #fetch: typeof fetch;
   readonly #signer: S3SigV4Signer;
 
-  /**
-   * @param options - Endpoint, region, addressing style, bucket, credentials, and optional fetch override.
-   * @throws {TypeError} When the configuration cannot produce a trusted signer.
-   */
   constructor(options: S3ObjectStoreOptions) {
     super();
     this.#signer = new S3SigV4Signer(options);
@@ -286,16 +202,10 @@ export class S3ObjectStore extends EffectObjectStore {
         ...(input.body ? { body: input.body } : {}),
       });
     } catch (cause) {
-      // Fetch uses TypeError for transport failures; the shared classifier
-      // reserves that type for invalid caller input, not origin outages.
       throw new Error("object storage transport failed", { cause });
     }
   }
 
-  /**
-   * Rejects any unsuccessful response that is not an expected precondition
-   * outcome, so a caller never mistakes an origin error for "object absent".
-   */
   #expectOk(response: Response, action: string): void {
     if (!response.ok) {
       throw new Error(`${action} failed with status ${response.status}`);
@@ -307,12 +217,6 @@ export class S3ObjectStore extends EffectObjectStore {
     await response.body?.cancel().catch(() => undefined);
   }
 
-  /**
-   * Retrieves metadata for an object without reading its body.
-   *
-   * @param key - Storage object key.
-   * @returns ObjectMetadata if found, or null if the origin reports 404.
-   */
   async head(key: string): Promise<ObjectMetadata | null> {
     const response = await this.#send({ key, method: "HEAD" });
     if (response.status === 404) {
@@ -323,12 +227,6 @@ export class S3ObjectStore extends EffectObjectStore {
     return metadataFromHeaders(key, response.headers);
   }
 
-  /**
-   * Streams a whole object for relay to an authenticated caller.
-   *
-   * @param key - Storage object key.
-   * @returns Streaming body plus content type and size, or null when absent.
-   */
   async read(key: string): Promise<ObjectBody | null> {
     const response = await this.#send({ key, method: "GET" });
     if (response.status === 404) {
@@ -346,15 +244,6 @@ export class S3ObjectStore extends EffectObjectStore {
     };
   }
 
-  /**
-   * Reads a bounded slice of an object by byte offset and maximum length.
-   *
-   * @param key - Storage object key.
-   * @param offset - Non-negative start byte offset.
-   * @param maximumBytes - Length of slice to read (between 1 and 1,048,576 bytes).
-   * @returns Byte buffer if found, or null.
-   * @throws {RangeError} If offset or maximumBytes are outside safe bounds.
-   */
   async readRange(key: string, offset: number, maximumBytes: number): Promise<Uint8Array | null> {
     assertValidByteRange(offset, maximumBytes);
     const response = await this.#send({
@@ -362,8 +251,6 @@ export class S3ObjectStore extends EffectObjectStore {
       key,
       method: "GET",
     });
-    // A range past the end of the object is answered with 416; there is nothing
-    // to return, and the caller treats a missing slice exactly like R2 does.
     if (response.status === 404 || response.status === 416) {
       await this.#discard(response);
       return null;
@@ -377,8 +264,6 @@ export class S3ObjectStore extends EffectObjectStore {
    *
    * A 404 is a success: deleting an already-removed key is a bucket no-op on
    * R2, and retention sweeps rely on that to retry an interrupted reclaim.
-   *
-   * @param key - Storage object key to delete.
    */
   async delete(key: string): Promise<void> {
     const response = await this.#send({ key, method: "DELETE" });
@@ -398,12 +283,6 @@ export class S3ObjectStore extends EffectObjectStore {
    * create-only destination is enforced both by probing for an existing object
    * (so a replay adopts it instead of failing) and by sending `If-None-Match: *`
    * on the copy itself.
-   *
-   * @param sourceKey - Existing source object key.
-   * @param destinationKey - Destination object key; left untouched when it already exists.
-   * @param options - `ifSourceEtagMatches`, `contentType`, and `ifDestinationAbsent` guards.
-   * @returns Metadata of the copied object, or `null` when a precondition rejected the copy.
-   * @throws {Error} When the origin reports any other failure.
    */
   async copyObject(
     sourceKey: string,
@@ -442,13 +321,6 @@ export class S3ObjectStore extends EffectObjectStore {
     return this.head(destinationKey);
   }
 
-  /**
-   * Initiates an S3 multipart upload session for large assets.
-   *
-   * @param key - Destination object key.
-   * @param contentType - MIME content type recorded with the upload.
-   * @returns MultipartUpload controller handle for uploading parts, completing, or aborting.
-   */
   async createMultipartUpload(key: string, contentType: string): Promise<MultipartUpload> {
     const response = await this.#send({
       headers: { "content-type": contentType },
@@ -469,16 +341,11 @@ export class S3ObjectStore extends EffectObjectStore {
    *
    * No request is issued: the handle is a pure function of the key and id, so a
    * redelivered job can re-drive an upload the worker started earlier.
-   *
-   * @param key - Destination object key.
-   * @param uploadId - Active multipart upload ID.
-   * @returns MultipartUpload controller handle.
    */
   resumeMultipartUpload(key: string, uploadId: string): MultipartUpload {
     return this.#session(key, uploadId);
   }
 
-  /** Builds the request-scoped multipart handle for one key and upload id. */
   #session(key: string, uploadId: string): MultipartUpload {
     return {
       abort: async () => {

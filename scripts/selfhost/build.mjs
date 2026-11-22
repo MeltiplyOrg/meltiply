@@ -80,11 +80,6 @@ for (const [name, entry] of Object.entries({
   }
 }
 await writeFile(resolve(output, "metadata.json"), JSON.stringify(metadata));
-// Maintainer improvement-reporting destination for released images. The values
-// are publishable deployment configuration rather than secrets, so a
-// self-hoster needs no PostHog account; `server.mjs` falls back to them only
-// when the operator has not supplied their own. Empty means the image ships no
-// destination and both reporting categories stay off.
 await writeFile(
   resolve(output, "reporting.json"),
   JSON.stringify({

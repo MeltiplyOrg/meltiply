@@ -81,8 +81,6 @@ services:
       args:
         PROCESSOR_PLATFORM: ${SELFHOST_PLATFORM:?Generate .env.selfhost or set SELFHOST_PLATFORM}
     platform: ${SELFHOST_PLATFORM:?Generate .env.selfhost or set SELFHOST_PLATFORM}
-    # Sharing the runtime network lets signed localhost capabilities work on a
-    # local machine too. No Docker socket or processor port is published.
     network_mode: service:runtime
     depends_on:
       runtime:
@@ -120,8 +118,6 @@ services:
         condition: service_healthy
     environment:
       APP_URL: ${APP_URL:-http://localhost:8080}
-    # Derive Caddy's hostname from the same origin used by the application.
-    # Keep commands overridable so `gateway caddy validate ...` uses this path too.
     entrypoint:
       - /bin/sh
       - -ec
@@ -147,8 +143,6 @@ services:
       - certificates:/data
       - caddy-config:/config
 
-  # CI-only real SMTP protocol endpoint; production must configure a delivering
-  # SMTP server. This profile must never be used as production email delivery.
   smtp-test:
     image: axllent/mailpit:v1.27.4
     profiles: [verification]

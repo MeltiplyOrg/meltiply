@@ -1,6 +1,10 @@
 import { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
-import { isoDateTime, type DatabaseError, type DomainError } from "@meltiply/domain";
+import {
+  isoDateTime,
+  type DatabaseError,
+  type ActiveOrganizationRequiredError,
+} from "@meltiply/domain";
 import type { components } from "@meltiply/contracts/schema";
 import type { EffectTransactionClient } from "@meltiply/database";
 
@@ -58,7 +62,10 @@ export interface UpdateBrandProfileInput {
   name?: string;
 }
 
-export type BrandProfileServiceError = CoreApiError | DomainError | DatabaseError;
+export type BrandProfileServiceError =
+  | CoreApiError
+  | ActiveOrganizationRequiredError
+  | DatabaseError;
 
 /**
  * Effect-first application service managing the Brand Profile lifecycle.

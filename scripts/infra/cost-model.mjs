@@ -8,34 +8,14 @@ const defaultInput = resolve(import.meta.dirname, "cost-model-inputs.json");
 const datePattern = /^\d{4}-\d{2}-\d{2}$/u;
 const roundingModes = new Set(["ceil_billable", "ceil_usage", "continuous"]);
 
-/**
- * Checks whether a value is a non-null, non-array object record.
- *
- * @param {unknown} value - Value to test
- * @returns {boolean} True if value is a plain object record
- */
 function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/**
- * Checks whether a value is a finite, non-negative number.
- *
- * @param {unknown} value - Value to test
- * @returns {boolean} True if value is a finite number >= 0
- */
 function nonnegative(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-/**
- * Recursively collects dot-separated object paths for properties with explicit null values.
- * Used to discover unknown or unmeasured inputs across cost profile sections.
- *
- * @param {Record<string, unknown>} value - Object to traverse
- * @param {string} prefix - Current path prefix (e.g., "usage_1x")
- * @returns {Array<string>} Sorted list of dot-separated paths containing null values
- */
 function collectNullPaths(value, prefix) {
   const paths = [];
   for (const [key, nested] of Object.entries(value)) {
@@ -46,13 +26,6 @@ function collectNullPaths(value, prefix) {
   return paths;
 }
 
-/**
- * Discovers all explicit null inputs across a cost profile's usage, business unit,
- * observed metric, and external cost sections to detect unmeasured cost drivers.
- *
- * @param {object} profile - Parsed cost profile object
- * @returns {Array<string>} Sorted array of dot-delimited null property paths
- */
 function actualUnknownInputs(profile) {
   return [
     ...collectNullPaths(profile.usage_1x, "usage_1x"),
@@ -62,15 +35,6 @@ function actualUnknownInputs(profile) {
   ].sort();
 }
 
-/**
- * Recursively validates that an object record contains only finite non-negative numbers or nulls,
- * accumulating human-readable error descriptions into the failures array.
- *
- * @param {Array<string>} failures - Accumulator array for validation error messages
- * @param {unknown} value - Object record to validate
- * @param {string} name - Dotted field name prefix for error messages
- * @returns {void}
- */
 function validateNumericRecord(failures, value, name) {
   if (!record(value)) {
     failures.push(`${name} must be an object`);
@@ -94,17 +58,6 @@ const requiredBusinessInputs = [
   "uploaded_gb",
 ];
 
-/**
- * Validates a cost profile object against schema version 1 and internal invariants.
- * Enforces valid schema/profile versions, ISO dates, USD currency, unique positive scaling
- * scenarios, verified public-pricing source citations, tariff structures with recognized
- * rounding modes, required business drivers, and exact equality between declared
- * expected_unknown_inputs and actual null fields to prevent silent unknown-drift.
- *
- * @param {unknown} profile - Raw cost profile object to validate
- * @returns {object} Validated cost profile object
- * @throws {TypeError} If any schema or operational invariant validation check fails
- */
 export function validateCostProfile(profile) {
   const failures = [];
   if (!record(profile)) throw new TypeError("cost profile must be an object");
@@ -261,17 +214,6 @@ export function validateCostProfile(profile) {
   return profile;
 }
 
-/**
- * Computes the monetary cost for a specific tariff given baseline usage and a scenario multiplier.
- * Accounts for effective start dates, included free allowances, billing units, and pricing
- * rounding modes ('ceil_usage', 'ceil_billable', or 'continuous').
- *
- * @param {object} tariff - Tariff pricing definition and rules
- * @param {number} usage - Baseline 1x usage volume
- * @param {number} multiplier - Scenario growth multiplier (e.g., 1, 3, 10)
- * @param {string} projectionOn - ISO date of the projection run
- * @returns {number} Unrounded computed USD cost for the tariff
- */
 function tariffCost(tariff, usage, multiplier, projectionOn) {
   if (tariff.effective_on && projectionOn < tariff.effective_on) return 0;
   const scaled = usage * multiplier;
@@ -285,13 +227,6 @@ function tariffCost(tariff, usage, multiplier, projectionOn) {
   return (billable / tariff.billing_unit) * tariff.usd_per_unit;
 }
 
-/**
- * Rounds a floating-point USD value to 6 decimal places (micro-dollars) for deterministic
- * arithmetic precision without floating point drift across platforms.
- *
- * @param {number} value - Floating point monetary amount
- * @returns {number} Value rounded to 6 decimal places
- */
 function rounded(value) {
   return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
 }
@@ -306,16 +241,6 @@ const normalizedUnits = {
   uploaded_gb: ["uploaded_gb", 1],
 };
 
-/**
- * Generates cost projections for a single scaling scenario multiplier.
- * Computes fixed base costs, variable tariff costs, and external costs, deriving total
- * known monthly cost and normalized unit costs per business driver (e.g., cost per publish).
- * If any inputs are null, outputs are labeled as lower bounds.
- *
- * @param {object} profile - Validated cost profile
- * @param {number} multiplier - Scale multiplier for the scenario
- * @returns {object} Detailed scenario projection with component breakdowns and unit costs
- */
 function scenarioProjection(profile, multiplier) {
   const components = {};
   let knownTotal = 0;
@@ -360,14 +285,6 @@ function scenarioProjection(profile, multiplier) {
   };
 }
 
-/**
- * Constructs a full multi-scenario cost projection from an input cost profile.
- * Produces structured monthly totals, normalized unit costs, explicit unknown input
- * tracking, and non-billable service audits across all configured scale scenarios (1x, 3x, 10x).
- *
- * @param {object} input - Raw or parsed cost profile data
- * @returns {object} Formatted projection report ready for JSON emission or gate evaluation
- */
 export function buildCostProjection(input) {
   const profile = validateCostProfile(input);
   return {
@@ -382,14 +299,6 @@ export function buildCostProjection(input) {
   };
 }
 
-/**
- * Asserts that a cost projection is completely measured with zero unknown or unmeasured inputs.
- * Used as a fail-closed CI gate before production promotions to prevent untracked cost exposure.
- *
- * @param {object} projection - Built cost projection report
- * @returns {void}
- * @throws {Error} If any unknown inputs remain unmeasured
- */
 export function assertCompleteProjection(projection) {
   if (!projection.complete) {
     throw new Error(
@@ -398,25 +307,12 @@ export function assertCompleteProjection(projection) {
   }
 }
 
-/**
- * Asynchronously loads and validates a cost profile JSON file from disk.
- *
- * @param {string} [path=defaultInput] - Filesystem path to the cost profile JSON
- * @returns {Promise<object>} Validated cost profile object
- * @throws {Error} If reading or parsing fails
- * @throws {TypeError} If schema validation fails
- */
 export async function loadCostProfile(path = defaultInput) {
   return validateCostProfile(JSON.parse(await readFile(resolve(path), "utf8")));
 }
 
 const defaultNeonConfig = resolve(import.meta.dirname, "../../infra/neon/endpoint.json");
 
-/**
- * Shape of the checked-in Neon compute configuration: each field is either a
- * measured value of the given kind, or named in `unmeasured` so the gap is
- * explicit rather than defaulted to zero.
- */
 const neonFields = {
   "endpoint.autosuspend_delay_seconds": (value) => Number.isSafeInteger(value) && value >= 0,
   "endpoint.max_cu": (value) => nonnegative(value) && value > 0,
@@ -437,15 +333,6 @@ const neonRetrievalFields = [
   "project_id_env",
 ];
 
-/**
- * Validates the schema and operational invariants of the Neon PostgreSQL compute endpoint configuration.
- * Verifies autosuspend delay, CU minimum/maximum bounds, billed compute CU hours, wall clock hours,
- * and ensures that every unmeasured field is explicitly declared in `unmeasured` and set to null.
- *
- * @param {unknown} config - Raw Neon endpoint configuration object
- * @returns {object} Validated Neon endpoint configuration
- * @throws {TypeError} If structure, types, or invariant checks fail
- */
 export function validateNeonEndpointConfig(config) {
   if (!record(config)) {
     throw new TypeError("Neon endpoint config must be an object");
@@ -510,41 +397,16 @@ export function validateNeonEndpointConfig(config) {
   return config;
 }
 
-/**
- * Asynchronously loads and validates the Neon PostgreSQL endpoint configuration JSON file.
- *
- * @param {string} [path=defaultNeonConfig] - Filesystem path to the Neon endpoint configuration JSON
- * @returns {Promise<object>} Validated Neon endpoint configuration object
- * @throws {Error} If reading or parsing fails
- * @throws {TypeError} If configuration validation fails
- */
 export async function loadNeonEndpointConfig(path = defaultNeonConfig) {
   return validateNeonEndpointConfig(JSON.parse(await readFile(resolve(path), "utf8")));
 }
 
-/**
- * Rejects a Neon configuration that still carries an unmeasured field. Used by
- * `--require-complete`, alongside the projection's own completeness check, so
- * the compute figure that dominates the bill cannot stay inferred once the
- * profile claims to be complete.
- *
- * @param {object} config - Validated Neon configuration object
- * @returns {void}
- * @throws {Error} If any Neon configuration fields are unmeasured
- */
 export function assertMeasuredNeonConfig(config) {
   if (config.unmeasured.length > 0) {
     throw new Error(`Neon compute configuration is unmeasured (${config.unmeasured.join(", ")})`);
   }
 }
 
-/**
- * Parses command-line arguments for the cost-model tool.
- *
- * @param {Array<string>} argv - CLI argument vector
- * @returns {{ check: boolean, input: string, neonConfig: string, requireComplete: boolean }} Parsed execution options
- * @throws {TypeError} If an unknown argument is encountered
- */
 function argumentsFor(argv) {
   const options = {
     check: false,
@@ -565,13 +427,6 @@ function argumentsFor(argv) {
   return options;
 }
 
-/**
- * Main execution entrypoint for the cost model CLI.
- * Loads the cost profile and Neon configuration, builds the multi-scenario projection,
- * optionally enforces completeness, and prints formatted results to stdout.
- *
- * @returns {Promise<void>}
- */
 async function run() {
   const options = argumentsFor(process.argv.slice(2));
   const projection = buildCostProjection(await loadCostProfile(options.input));

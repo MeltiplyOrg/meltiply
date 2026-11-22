@@ -5,46 +5,19 @@ import { Button } from "./button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip";
 import { cn } from "@meltiply/ui/utils";
 
-/** Record content and real actions for the shared Gr8r-style inspection drawer. */
 export interface SideDialogProps {
   open: boolean;
-  /**
-   * Receives dismissal requests from Escape or Close; the drawer ignores outside
-   * clicks so the workspace stays live while a record is inspected.
-   */
   onOpenChange: (open: boolean) => void;
-  /** Required accessible dialog heading, visually hidden when breadcrumb is supplied. */
   title: React.ReactNode;
   description?: React.ReactNode;
-  /** Record context displayed at the left of the compact header. */
   breadcrumb?: React.ReactNode;
-  /** Caller-owned supported actions; Close remains canonical. */
   actions?: React.ReactNode;
   children: React.ReactNode;
-  /**
-   * Extra classes for the scrolling body, e.g. removing its bottom padding so a
-   * pinned action bar can sit flush against the drawer's bottom edge.
-   */
   bodyClassName?: string;
   className?: string;
   closeLabel?: string;
 }
 
-/**
- * Ports Gr8r's 620px edge drawer and 46px record toolbar. The drawer is a
- * non-modal companion, as in the reference: the workspace keeps painting and
- * taking input, so clicking another record re-inspects it in place instead of
- * being swallowed by a scrim. Radix still owns Escape dismissal, the portal, and
- * opener restoration without scrolling the workspace; the inspection container
- * receives initial focus so a toolbar tooltip cannot consume the first Escape.
- * Keyboard focus is deliberately not trapped: this companion panel lets Tab
- * reach the workspace. Native body scrolling stays untouched. Motion is the
- * reference drawer's: the panel steps 48px in on `--ease-drawer` and slides back
- * out on dismissal (`side-dialog-enter`/`side-dialog-exit`), its body blocks rise
- * behind the panel with a 0/55/105/150ms stagger (`side-dialog-rise-in`).
- * Feature-owned keyed sections replay the entrance when their record changes,
- * while retained sections keep their state and effects.
- */
 export function SideDialog({
   open,
   onOpenChange,
@@ -70,8 +43,6 @@ export function SideDialog({
           data-side-dialog=""
           {...(!hasDescription ? { "aria-describedby": undefined } : {})}
           onInteractOutside={(event) => {
-            // A companion panel ignores outside use: the workspace stays live so
-            // another record can be inspected in place.
             event.preventDefault();
           }}
           onOpenAutoFocus={(event) => {

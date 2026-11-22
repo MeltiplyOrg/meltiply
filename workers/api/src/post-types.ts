@@ -1,7 +1,7 @@
 import type { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
-import type { DatabaseError, DomainError } from "@meltiply/domain";
+import type { DatabaseError, ActiveOrganizationRequiredError } from "@meltiply/domain";
 import type {
   FacebookPublishOptions,
   InstagramPostType,
@@ -119,7 +119,7 @@ interface DeletePostInput {
   brandProfileId: string;
 }
 
-export type PostServiceError = CoreApiError | DomainError | DatabaseError;
+export type PostServiceError = CoreApiError | ActiveOrganizationRequiredError | DatabaseError;
 
 /**
  * Effect-first application service owning the durable Post composition surface:

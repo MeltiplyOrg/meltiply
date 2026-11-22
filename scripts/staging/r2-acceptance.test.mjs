@@ -13,11 +13,7 @@ import {
   uploadSignedPart,
   verifySignedPutCors,
 } from "./r2-acceptance.mjs";
-import {
-  releaseInternals,
-  validateIacOutputs,
-  validateReleaseSpec,
-} from "../release/release-lib.mjs";
+import { queueBindings, validateIacOutputs, validateReleaseSpec } from "../release/release-lib.mjs";
 
 const gitSha = "a".repeat(40);
 const accountId = "b".repeat(32);
@@ -81,10 +77,7 @@ function releaseInput(overrides = {}) {
 
 function queueNames() {
   return Object.fromEntries(
-    Object.keys(releaseInternals.queueBindings).map((workload) => [
-      workload,
-      `meltiply-${workload}-staging`,
-    ]),
+    Object.keys(queueBindings).map((workload) => [workload, `meltiply-${workload}-staging`]),
   );
 }
 
@@ -464,8 +457,6 @@ function acceptanceFetch({
       const objectPath = url.pathname.replace(`/${bucketName}`, "");
       if (method === "OPTIONS") {
         assert.equal(headers.get("origin"), browserOrigin);
-        // R2 only answers the preflight the browser sends; a probe that omits
-        // these headers exercises nothing on the live service.
         assert.equal(headers.get("access-control-request-method"), "PUT");
         return new Response(null, {
           headers: {
@@ -636,8 +627,6 @@ describe("signed R2 requests", () => {
     assert.equal(observed.init.method, "OPTIONS");
     const preflight = new Headers(observed.init.headers);
     assert.equal(preflight.get("origin"), browserOrigin);
-    // A preflight that omits the requested method or headers asks R2 nothing;
-    // the browser then blocks the PUT that the probe is meant to prove.
     assert.equal(preflight.get("access-control-request-method"), "PUT");
     assert.equal(preflight.get("access-control-request-headers"), "content-type");
     assert.equal(preflight.get("authorization"), null);
@@ -763,9 +752,6 @@ it("runs the credential-gated lifecycle and emits redacted mode-0600 evidence", 
   );
   assert.ok([...harness.assets.values()].every((asset) => asset.deleted));
   assert.equal(harness.objects.size, 0);
-  // Each asset poll and each deletion poll sleeps exactly once in this harness:
-  // single upload (ready + deleted), multipart complete (ready + deleted), and
-  // multipart abort (deleted).
   assert.deepEqual(sleeps, [1_000, 1_000, 1_000, 1_000, 1_000]);
   assert.ok(result.api_request_ids.every((value) => /^api-\d+$/.test(value)));
   assert.ok(result.r2_request_ids.every((value) => /^r2-\d+$/.test(value)));
@@ -878,8 +864,6 @@ it("polls cleanup and writes failed evidence when verification fails", async () 
   );
   assert.ok([...harness.assets.values()].every((asset) => asset.deleted));
   assert.equal(harness.objects.size, 0);
-  // One poll before the corrupted download is detected, one before cleanup
-  // confirms deletion.
   assert.deepEqual(sleeps, [1_000, 1_000]);
 
   const evidenceText = await readFile(options.outputPath, "utf8");

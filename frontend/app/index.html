@@ -5,30 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="Distribution workspace for Meltiply" />
     <link rel="license" href="/third-party-notices.txt" />
-    <script>
-      var root = document.documentElement;
-      var consentValue = null;
-      try {
-        var consentEntry = document.cookie
-          .split(";")
-          .find((item) => item.trim().startsWith("meltiply-consent="));
-        consentValue = consentEntry
-          ? JSON.parse(decodeURIComponent(consentEntry.trim().slice("meltiply-consent=".length)))
-          : null;
-      } catch (error) {
-        // A blocked or malformed consent cookie denies optional purposes.
-      }
-      var decided =
-        consentValue &&
-        consentValue.v === 1 &&
-        typeof consentValue.expires === "number" &&
-        Number.isFinite(consentValue.expires) &&
-        consentValue.expires > Date.now() &&
-        typeof consentValue.functional === "boolean";
-      var functional = decided && consentValue.functional === true;
-      root.toggleAttribute("data-cookie-decided", Boolean(decided));
-      root.toggleAttribute("data-cookie-functional", Boolean(functional));
-    </script>
     <!-- The shared before-paint runtime is injected by `meltiply-theme-bootstrap`
          in vite.config.ts from `frontend/shared/theme-bootstrap.js`. -->
     <!-- meltiply-theme-bootstrap -->

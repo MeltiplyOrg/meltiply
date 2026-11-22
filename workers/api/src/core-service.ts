@@ -3,7 +3,7 @@ import type { components } from "@meltiply/contracts/schema";
 import type { SessionClaims } from "@meltiply/auth";
 import type { EffectTransactionClient } from "@meltiply/database";
 import {
-  AccessDenied,
+  ActiveOrganizationRequiredError,
   type DatabaseError,
   isoDateTime,
   PLATFORM_IDS,
@@ -334,12 +334,12 @@ interface AnalyticsAccess {
  * @param brandProfileId - Optional explicit Brand Profile selector.
  * @returns Current organization, database membership role, and canonical
  *   visibility identity.
- * @throws {AccessDenied} When the caller has no active membership in the claimed Workspace.
+ * @throws {ActiveOrganizationRequiredError} When the caller has no active membership in the claimed Workspace.
  */
 function analyticsAccessEffect(
   client: EffectTransactionClient,
   brandProfileId: string | undefined,
-): Effect.Effect<AnalyticsAccess, DatabaseError | AccessDenied> {
+): Effect.Effect<AnalyticsAccess, DatabaseError | ActiveOrganizationRequiredError> {
   return Effect.gen(function* () {
     const result = yield* client.query<{
       organization_id: string | null;
@@ -373,7 +373,9 @@ function analyticsAccessEffect(
     const row = result.rows[0];
     if (!row || !row.organization_id) {
       return yield* Effect.fail(
-        new AccessDenied("The authenticated identity is not an active organization member."),
+        new ActiveOrganizationRequiredError({
+          message: "The authenticated identity is not an active organization member.",
+        }),
       );
     }
     return {
@@ -837,7 +839,7 @@ export function createCoreApiService(
      * @param env - Worker environment bindings.
      * @param session - Authenticated user session claims.
      * @returns Effect resolving to unique organization ID string.
-     * @throws {AccessDenied} If the user lacks active organization membership.
+     * @throws {ActiveOrganizationRequiredError} If the user lacks active organization membership.
      */
     activeOrganization(env, session) {
       return withTenantTransactionEffect(env, session, (client) =>

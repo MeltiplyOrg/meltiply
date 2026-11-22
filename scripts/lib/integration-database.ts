@@ -1,7 +1,3 @@
-/**
- * Default local containerized test PostgreSQL connection strings provisioned by
- * `bun run db:start` (`compose.dev.yml` + `scripts/cloudflare-local/postgres`).
- */
 export const LOCAL_TEST_URL =
   "postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable";
 export const LOCAL_SYSTEM_URL =
@@ -11,16 +7,6 @@ export const LOCAL_ADMIN_URL =
 
 const LOCAL_LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 
-/**
- * Validates that a connection string is a PostgreSQL URL targeting the dedicated
- * local `meltiply` test database on a loopback host. Rejects non-PostgreSQL
- * schemes, non-loopback hosts, and any other database name before I/O.
- *
- * @param urlString - Candidate PostgreSQL connection string.
- * @param label - Optional variable or configuration label included in errors.
- * @returns Parsed `URL` instance pointing at the local `meltiply` test database.
- * @throws {TypeError} When the value is missing, malformed, or not the local test DB.
- */
 export function assertLocalTestDatabaseUrl(
   urlString: string | undefined,
   label = "MELTIPLY_DATABASE_TEST_URL",
@@ -44,12 +30,6 @@ export function assertLocalTestDatabaseUrl(
   return url;
 }
 
-/**
- * Derives a privileged integration connection from the authenticated test target.
- * Preserves its loopback host, port, database and session options; only the local
- * fixture role/password change. An explicit privileged URL may override credentials
- * but must select the same database. Missing or mismatched targets fail before I/O.
- */
 export function integrationDatabaseUrl(
   authenticatedUrl: string | undefined,
   role: "admin" | "system",

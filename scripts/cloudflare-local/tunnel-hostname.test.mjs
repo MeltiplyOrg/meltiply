@@ -13,13 +13,6 @@ import {
 
 const scriptPath = fileURLToPath(new URL("./tunnel-hostname.mjs", import.meta.url));
 
-/**
- * Runs the script as a subprocess.
- *
- * @param {string[]} args Arguments passed to the script.
- * @param {object} [env] Extra environment entries.
- * @returns {{status: number, stdout: string, stderr: string}} Process result.
- */
 function runScript(args, env = {}) {
   try {
     const stdout = execFileSync(process.execPath, [scriptPath, ...args], {
@@ -58,9 +51,6 @@ describe("branchLabelFrom", () => {
   });
 
   it("leaves room for the longest suffix inside a DNS label", () => {
-    // `-public-dev` is the longest suffix any layout appends, so the truncated
-    // slug plus that suffix must still fit RFC 1035's 63-character label. A
-    // longer slug limit would make this hostname fail validation outright.
     const hostname = hostnameFor({
       branch: "b".repeat(80),
       domain: "meltiply.com",
@@ -109,7 +99,6 @@ describe("hostnameFor", () => {
   });
 
   it("folds the service suffix into the branch label in flat style", () => {
-    // A branch name without "dev" in it keeps the expected shapes unambiguous.
     for (const [kind, expected] of [
       ["app", "feature-app.meltiply.com"],
       ["public", "feature-public.meltiply.com"],
@@ -119,7 +108,6 @@ describe("hostnameFor", () => {
         expected,
       );
     }
-    // A dev label is folded into the same label rather than gaining a level.
     assert.equal(
       hostnameFor({
         branch: "feature",
@@ -133,9 +121,6 @@ describe("hostnameFor", () => {
   });
 
   it("keeps every branch hostname under one wildcard label in wildcard style", () => {
-    // One `*.<domain>` record covers both services only when they share the
-    // parent domain and differ in the first label; a layout that pushed one
-    // service under an extra label would need a second record.
     const domain = "meltiply.com";
     const hostnames = ["app", "public"].map((kind) =>
       hostnameFor({ branch: "feature", domain, kind }),
@@ -152,9 +137,6 @@ describe("hostnameFor", () => {
   });
 
   it("cannot wildcard the flat layout, because both services claim label one", () => {
-    // In flat style the service suffix sits inside the branch label, so app and
-    // public already differ in the first label and no single wildcard covers
-    // both. That is what makes `wildcard` the default layout.
     const domain = "meltiply.com";
     const app = hostnameFor({ branch: "feature", domain, kind: "app", style: "flat" });
     const pub = hostnameFor({ branch: "feature", domain, kind: "public", style: "flat" });
@@ -176,9 +158,6 @@ describe("hostnameFor", () => {
   });
 
   it("keeps the hostname one label deep by default so Universal SSL covers it", () => {
-    // Cloudflare's default certificate is `meltiply.com` + `*.meltiply.com`.
-    // A hostname two labels deep matches neither and the edge fails the TLS
-    // handshake with alert 40, so the default must add no extra label.
     const domain = "meltiply.com";
     const app = hostnameFor({ branch: "dev-tunnel", domain, kind: "app" });
     const extraLabels = app.split(".").length - domain.split(".").length;
@@ -205,9 +184,6 @@ describe("hostnameFor", () => {
 
 describe("coverageHostnames", () => {
   it("returns explicit hostnames for a per-branch tunnel", () => {
-    // A wildcard CNAME has one target, so it can only ever point at a single
-    // tunnel. A per-branch tunnel must therefore be reached by explicit records,
-    // otherwise the first record created would capture every other branch.
     assert.deepEqual(coverageHostnames({ branch: "dev-tunnel", domain: "meltiply.com" }), [
       "dev-tunnel.meltiply.com",
       "dev-tunnel-public.meltiply.com",
@@ -354,8 +330,6 @@ describe("tunnel-hostname CLI", () => {
   });
 
   it("fails when the branch cannot be determined and none is supplied", () => {
-    // Outside a git checkout, with no override, the script must say how to fix
-    // it rather than emit a hostname built from an empty branch.
     let failure;
     try {
       execFileSync("bash", ["-c", `cd /tmp && exec "${process.execPath}" "${scriptPath}"`], {

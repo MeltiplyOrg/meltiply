@@ -1,19 +1,14 @@
-import { addSeconds, malformed } from "../adapter-helpers";
-import { classifyProviderFailure, ProviderAdapterError } from "../failures";
-import type { ProviderHttpClient } from "../http";
-import { OAUTH_STATE_MAX_CHARS, OAUTH_TOKEN_MAX_CHARS } from "../limits";
+import { classifyProviderFailure, malformed, ProviderAdapterError, rejected } from "../failures";
+import { OAUTH_TOKEN_MAX_CHARS } from "../limits";
+import { META_GRAPH_API_VERSION } from "../meta";
 import {
+  addSeconds,
   assertConfiguredRedirectUri,
-  bearer,
-  boundedCursor,
-  boundedString,
-  boundedText,
-  providerIdentifier,
-  record,
-  required,
-  secureUrl,
-} from "../meta-common";
-import { exchangeAuthorizationCodeForm } from "../oauth-helpers";
+  authorizationCodeUrl,
+  exchangeAuthorizationCodeForm,
+  postForm,
+} from "../oauth";
+import type { AdapterRuntime } from "../runtime";
 import type {
   OAuthAuthorizationInput,
   OAuthConnection,
@@ -23,359 +18,300 @@ import type {
   ProviderTokenSet,
 } from "../types";
 import {
-  FACEBOOK_API_VERSION,
-  FACEBOOK_AUTHORIZATION_ORIGIN,
+  bearer,
+  boundedCursor,
+  boundedString,
+  boundedText,
+  providerIdentifier,
+  record,
+  required,
+  secureUrl,
+} from "../values";
+import {
   FACEBOOK_BUSINESS_DISCOVERY_SCOPE,
   FACEBOOK_CONFIGURED_SCOPES,
   FACEBOOK_GRAPH_ORIGIN,
   FACEBOOK_LIMITS,
   FACEBOOK_PUBLISHING_SCOPES,
+  graphUrl,
+  nodeUrl,
   type FacebookRefreshSecret,
 } from "./types";
 
 const numericIdPattern = /^\d+$/;
 const vanityHandlePattern = /^[A-Za-z0-9.]{1,255}$/;
 const pageTaskPattern = /^[A-Z][A-Z0-9_]{0,127}$/;
+const reservedPaths = new Set([
+  "events",
+  "gaming",
+  "groups",
+  "help",
+  "marketplace",
+  "pages",
+  "people",
+  "privacy",
+  "profile.php",
+  "settings",
+  "watch",
+]);
+const contentTasks = ["CREATE_CONTENT", "PROFILE_PLUS_CREATE_CONTENT"];
+const discoveryPageSize = 100;
+const maxDiscoveryRequests = 1_000;
+const maxDiscoveredPages = 1_000;
+const maxBusinessUsers = 1_000;
+const maxPageTasks = 32;
+const businessEdgeConcurrency = 4;
+const businessUsersPath = "me/business_users";
 
-const RESERVED_FACEBOOK_PATHS: Readonly<Record<string, true>> = {
-  events: true,
-  gaming: true,
-  groups: true,
-  help: true,
-  marketplace: true,
-  pages: true,
-  people: true,
-  privacy: true,
-  "profile.php": true,
-  settings: true,
-  watch: true,
-};
+type OAuthField =
+  | "authorization_token"
+  | "business_user_identity"
+  | "business_user_list"
+  | "long_lived_token"
+  | "token_type"
+  | "token_expiry"
+  | "permissions"
+  | "page_list"
+  | "page_identity"
+  | "page_access_token"
+  | "page_tasks"
+  | "page_pagination";
 
-export interface FacebookOAuthConfig {
-  clientId: string;
-  clientSecret: string;
-  configuredRedirectUri: string;
-  http: ProviderHttpClient;
-  now: () => Date;
-}
-
-/**
- * Identifies a malformed Facebook OAuth response field in existing warning logs.
- * Static field names preserve the shared transient classification. Optional
- * internal diagnostics contain only expiry facts, never credentials or bodies.
- */
-function oauthMalformed(
-  field:
-    | "authorization_token"
-    | "business_user_identity"
-    | "business_user_list"
-    | "long_lived_token"
-    | "token_type"
-    | "token_expiry"
-    | "permissions"
-    | "page_list"
-    | "page_identity"
-    | "page_access_token"
-    | "page_tasks"
-    | "page_pagination",
-  cause?: Error,
-): ProviderAdapterError {
+function oauthMalformed(field: OAuthField, cause?: Error): ProviderAdapterError {
   return new ProviderAdapterError(
-    classifyProviderFailure({
-      code: `facebook_oauth_${field}_invalid`,
-      malformedResponse: true,
-    }),
+    classifyProviderFailure({ code: `facebook_oauth_${field}_invalid`, malformedResponse: true }),
     cause ? { cause } : undefined,
   );
 }
 
-/**
- * Builds internal expiry evidence for OAuth warnings without retaining tokens,
- * app identities, or raw responses. Only finite numbers are rendered; all other
- * provider values appear as their type, so hostile strings cannot enter logs.
- */
+/** Log evidence for a rejected expiry: provider values render as finite numbers, booleans, or their type. */
 function expiryDiagnostic(
   source: "exchange" | "debug_token",
-  value: unknown,
-  lifetime: unknown,
-  valid?: boolean,
-  appMatches?: boolean,
+  facts: Readonly<Record<string, unknown>>,
 ): Error {
-  const numeric = (input: unknown): string =>
-    typeof input === "number" && Number.isFinite(input)
-      ? String(input)
-      : input === null
-        ? "null"
-        : typeof input;
+  const rendered = Object.entries(facts)
+    .filter(([, value]) => value !== undefined)
+    .map(([name, value]) => {
+      const shown =
+        (typeof value === "number" && Number.isFinite(value)) ||
+        typeof value === "boolean" ||
+        value === null
+          ? String(value)
+          : typeof value;
+      return `${name}=${shown}`;
+    });
   return new Error(
-    `Facebook OAuth expiry rejected: source=${source}, expiry=${numeric(value)}, lifetime_seconds=${numeric(lifetime)}, maximum_seconds=${FACEBOOK_LIMITS.tokenLifetimeMaxSeconds}` +
-      (valid === undefined ? "" : `, token_valid=${valid}`) +
-      (appMatches === undefined ? "" : `, app_matches=${appMatches}`),
+    `Facebook OAuth expiry rejected: ${[`source=${source}`, ...rendered, `maximum_seconds=${FACEBOOK_LIMITS.tokenLifetimeMaxSeconds}`].join(", ")}`,
   );
 }
 
-/**
- * Decodes and validates the composite Facebook refresh secret payload stored in database credentials.
- * Facebook Page access tokens require renewing a user token and refetching the Page token;
- * the refresh secret packages both `{ pageId, userAccessToken }` into JSON.
- */
+/** Page tokens are renewed from the user token, so the refresh secret stores both identities. */
 function decodeRefreshSecret(value: string): FacebookRefreshSecret {
   const raw = required("refreshToken", value, OAUTH_TOKEN_MAX_CHARS);
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new ProviderAdapterError(
-      classifyProviderFailure({
-        code: "facebook_refresh_secret_invalid",
-        status: 400,
-      }),
-    );
+    throw rejected("facebook_refresh_secret_invalid");
   }
   const body = record(parsed);
   const pageId = providerIdentifier(body?.pageId);
   const userAccessToken = boundedString(body?.userAccessToken, FACEBOOK_LIMITS.tokenMaxChars);
   if (!body || Object.keys(body).length !== 2 || !pageId || !userAccessToken) {
-    throw new ProviderAdapterError(
-      classifyProviderFailure({
-        code: "facebook_refresh_secret_invalid",
-        status: 400,
-      }),
-    );
+    throw rejected("facebook_refresh_secret_invalid");
   }
   return { pageId, userAccessToken };
 }
 
-/** Encodes a FacebookRefreshSecret object into JSON for encrypted credential storage. */
 function encodeRefreshSecret(value: FacebookRefreshSecret): string {
   return JSON.stringify(value);
 }
 
-/**
- * Reads only explicitly granted permissions from Meta's permissions envelope.
- * Requested scopes are never evidence of consent, including during refresh.
- */
+/** Only `granted` entries count; requested scopes are never evidence of consent. */
 function grantedPermissions(value: unknown): string[] {
   const data = record(value)?.data;
   if (!Array.isArray(data)) throw oauthMalformed("permissions");
-  const granted: string[] = [];
+  const granted = new Set<string>();
   for (const item of data) {
     const entry = record(item);
     const permission = boundedString(entry?.permission, 128);
     const status = boundedString(entry?.status, 32)?.toLowerCase();
     if (!permission || !status) throw oauthMalformed("permissions");
-    if (status === "granted" && !granted.includes(permission)) granted.push(permission);
+    if (status === "granted") granted.add(permission);
   }
-  return granted;
+  return [...granted];
 }
 
-/**
- * Extracts a legitimate vanity handle from a Facebook Page link URL.
- * Accepts only canonical facebook.com paths with a single non-reserved,
- * non-numeric segment so fake handles are never emitted.
- */
+/** A single non-reserved, non-numeric facebook.com path segment; anything else is no handle. */
 function facebookVanityHandle(link: unknown): string | undefined {
-  if (typeof link !== "string" || !link) return undefined;
-  try {
-    const url = new URL(link);
-    const host = url.hostname.toLowerCase();
-    if (host !== "facebook.com" && !host.endsWith(".facebook.com")) {
-      return undefined;
-    }
-    if (url.searchParams.has("id")) {
-      return undefined;
-    }
-    const segments = url.pathname.split("/").filter(Boolean);
-    if (segments.length !== 1) {
-      return undefined;
-    }
-    const candidate = segments[0];
-    if (!candidate || numericIdPattern.test(candidate) || !vanityHandlePattern.test(candidate)) {
-      return undefined;
-    }
-    if (RESERVED_FACEBOOK_PATHS[candidate.toLowerCase()]) {
-      return undefined;
-    }
-    return candidate;
-  } catch {
+  if (typeof link !== "string" || !URL.canParse(link)) return undefined;
+  const url = new URL(link);
+  const host = url.hostname.toLowerCase();
+  const segments = url.pathname.split("/").filter(Boolean);
+  const [candidate] = segments;
+  if (
+    (host !== "facebook.com" && !host.endsWith(".facebook.com")) ||
+    url.searchParams.has("id") ||
+    segments.length !== 1 ||
+    !candidate ||
+    numericIdPattern.test(candidate) ||
+    !vanityHandlePattern.test(candidate) ||
+    reservedPaths.has(candidate.toLowerCase())
+  ) {
     return undefined;
   }
+  return candidate;
 }
 
 /**
- * Extracts and validates the next pagination cursor from a Facebook Graph API
- * `paging` object, verifying both `cursors.after` and `next` origin/cursor
- * consistency and rejecting cycles against `seenCursors`.
+ * The next cursor from `paging`: `cursors.after` and the `next` URL's `after`
+ * must agree, `next` must stay on the Graph origin, and a repeated cursor is a cycle.
  */
-function nextFacebookPageCursor(
-  pagingValue: unknown,
-  seenCursors: Set<string>,
-): string | undefined {
+function nextPageCursor(pagingValue: unknown, seenCursors: Set<string>): string | undefined {
   if (pagingValue === undefined) return undefined;
   const paging = record(pagingValue);
-  if (!paging) throw oauthMalformed("page_pagination");
-
-  let cursorFromPaging: string | undefined;
-  if (paging.cursors !== undefined) {
-    const cursors = record(paging.cursors);
-    if (!cursors) throw oauthMalformed("page_pagination");
-    if (cursors.after !== undefined) {
-      const validated = boundedCursor(cursors.after);
-      if (!validated) throw oauthMalformed("page_pagination");
-      cursorFromPaging = validated;
-    }
-  }
-
+  const cursors = paging?.cursors === undefined ? {} : record(paging.cursors);
+  if (!paging || !cursors) throw oauthMalformed("page_pagination");
+  const cursorFromPaging =
+    cursors.after === undefined ? undefined : (boundedCursor(cursors.after) ?? null);
+  if (cursorFromPaging === null) throw oauthMalformed("page_pagination");
   if (paging.next === undefined) return undefined;
-  if (typeof paging.next !== "string") throw oauthMalformed("page_pagination");
-
-  let nextUrl: URL;
-  try {
-    nextUrl = new URL(paging.next);
-  } catch {
+  if (typeof paging.next !== "string" || !URL.canParse(paging.next)) {
     throw oauthMalformed("page_pagination");
   }
-  if (nextUrl.origin !== FACEBOOK_GRAPH_ORIGIN) throw oauthMalformed("page_pagination");
-
-  const rawAfterParam = nextUrl.searchParams.get("after");
-  let cursorFromNextUrl: string | undefined;
-  if (rawAfterParam !== null) {
-    cursorFromNextUrl = boundedCursor(rawAfterParam);
-    if (!cursorFromNextUrl) throw oauthMalformed("page_pagination");
-  }
+  const nextUrl = new URL(paging.next);
+  const rawAfter = nextUrl.searchParams.get("after");
+  const cursorFromNext = rawAfter === null ? undefined : boundedCursor(rawAfter);
+  const cursor = cursorFromPaging ?? cursorFromNext;
   if (
-    cursorFromPaging !== undefined &&
-    cursorFromNextUrl !== undefined &&
-    cursorFromPaging !== cursorFromNextUrl
+    nextUrl.origin !== FACEBOOK_GRAPH_ORIGIN ||
+    (rawAfter !== null && !cursorFromNext) ||
+    (cursorFromPaging !== undefined &&
+      cursorFromNext !== undefined &&
+      cursorFromPaging !== cursorFromNext) ||
+    !cursor ||
+    seenCursors.has(cursor)
   ) {
     throw oauthMalformed("page_pagination");
   }
-  const resolvedCursor = cursorFromPaging ?? cursorFromNextUrl;
-  if (!resolvedCursor || seenCursors.has(resolvedCursor)) {
-    throw oauthMalformed("page_pagination");
-  }
-  seenCursors.add(resolvedCursor);
-  return resolvedCursor;
+  seenCursors.add(cursor);
+  return cursor;
 }
 
-/**
- * Builds the Facebook OAuth handler methods (`authorizationUrl`,
- * `exchangeAuthorizationCode`, `refreshAccessToken`) sharing one long-lived
- * token exchange helper and Page discovery pipeline.
- */
-export function createFacebookOAuth(config: FacebookOAuthConfig) {
-  const { clientId, clientSecret, configuredRedirectUri, http, now } = config;
+function parsePageTasks(value: unknown): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length > maxPageTasks ||
+    value.some((task) => typeof task !== "string" || !pageTaskPattern.test(task))
+  ) {
+    throw oauthMalformed("page_tasks");
+  }
+  return value;
+}
+
+export function createFacebookOAuth(runtime: AdapterRuntime) {
+  const { clientId, clientSecret, http, now, redirectUri } = runtime;
+  const tokenUrl = graphUrl("oauth/access_token").toString();
+  const authorizationEndpoint = `https://www.facebook.com/${META_GRAPH_API_VERSION}/dialog/oauth`;
+
+  const getGraph = async (context: ProviderRequestContext, accessToken: string, url: URL) =>
+    (
+      await http.request(context, {
+        headers: bearer(accessToken),
+        method: "GET",
+        url: url.toString(),
+      })
+    ).body;
 
   /**
-   * Exchanges a user token for a validated long-lived bearer token.
-   * Missing expiry triggers same-app token inspection: a zero timestamp means
-   * no time-based expiry, while a positive timestamp must be future and bounded.
+   * Exchanges a user token for a long-lived one. Without `expires_in`, same-app
+   * token inspection decides: `expires_at: 0` means no time-based expiry.
    */
   const exchangeLongLived = async (
     context: ProviderRequestContext,
     currentToken: string,
   ): Promise<{ accessToken: string; expiresAt?: string }> => {
-    const form = new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      fb_exchange_token: required("userAccessToken", currentToken, FACEBOOK_LIMITS.tokenMaxChars),
-      grant_type: "fb_exchange_token",
-    });
-    const response = await http.request<unknown>(context, {
-      body: form,
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      method: "POST",
-      url: `${FACEBOOK_GRAPH_ORIGIN}/${FACEBOOK_API_VERSION}/oauth/access_token`,
-    });
-    const body = record(response.body);
+    const body = record(
+      await postForm(http, context, tokenUrl, {
+        client_id: clientId,
+        client_secret: clientSecret,
+        fb_exchange_token: required("userAccessToken", currentToken, FACEBOOK_LIMITS.tokenMaxChars),
+        grant_type: "fb_exchange_token",
+      }),
+    );
     const accessToken = boundedString(body?.access_token, FACEBOOK_LIMITS.tokenMaxChars);
-    const tokenType = boundedString(body?.token_type, 32)?.toLowerCase();
     if (!accessToken) throw oauthMalformed("long_lived_token");
-    if (tokenType !== "bearer") throw oauthMalformed("token_type");
+    if (boundedString(body?.token_type, 32)?.toLowerCase() !== "bearer") {
+      throw oauthMalformed("token_type");
+    }
     let lifetime = body?.expires_in;
-    let expirySource: "exchange" | "debug_token" = "exchange";
-    let expiryValue: unknown = lifetime;
     let exchangedAt = now();
+    let source: "exchange" | "debug_token" = "exchange";
+    let evidence: Record<string, unknown> = { expiry: lifetime };
     if (lifetime === undefined) {
-      const debugUrl = new URL(`/${FACEBOOK_API_VERSION}/debug_token`, FACEBOOK_GRAPH_ORIGIN);
+      const debugUrl = graphUrl("debug_token");
       debugUrl.searchParams.set("input_token", accessToken);
-      const inspected = await http.request<unknown>(context, {
-        headers: bearer(`${clientId}|${clientSecret}`),
-        method: "GET",
-        url: debugUrl.toString(),
-      });
-      const data = record(record(inspected.body)?.data);
-      expirySource = "debug_token";
-      expiryValue = data?.expires_at;
+      const data = record(
+        record(await getGraph(context, `${clientId}|${clientSecret}`, debugUrl))?.data,
+      );
+      source = "debug_token";
+      evidence = {
+        expiry: data?.expires_at,
+        token_valid: data?.is_valid === true,
+        app_matches: data?.app_id === clientId,
+      };
       if (
         data?.is_valid !== true ||
         data.app_id !== clientId ||
         typeof data.expires_at !== "number" ||
         !Number.isSafeInteger(data.expires_at)
       ) {
-        throw oauthMalformed(
-          "token_expiry",
-          expiryDiagnostic(
-            expirySource,
-            expiryValue,
-            undefined,
-            data?.is_valid === true,
-            data?.app_id === clientId,
-          ),
-        );
+        throw oauthMalformed("token_expiry", expiryDiagnostic(source, evidence));
       }
       if (data.expires_at === 0) return { accessToken };
-      lifetime = data.expires_at - Math.floor(exchangedAt.getTime() / 1_000);
-      exchangedAt = new Date(Math.floor(exchangedAt.getTime() / 1_000) * 1_000);
+      const exchangedSeconds = Math.floor(exchangedAt.getTime() / 1_000);
+      lifetime = data.expires_at - exchangedSeconds;
+      exchangedAt = new Date(exchangedSeconds * 1_000);
     }
-    let expiresAt: string;
     try {
-      expiresAt = addSeconds(exchangedAt, lifetime, FACEBOOK_LIMITS.tokenLifetimeMaxSeconds);
-    } catch (cause) {
-      if (cause instanceof ProviderAdapterError) {
-        throw oauthMalformed("token_expiry", expiryDiagnostic(expirySource, expiryValue, lifetime));
-      }
-      throw cause;
+      return {
+        accessToken,
+        expiresAt: addSeconds(exchangedAt, lifetime, FACEBOOK_LIMITS.tokenLifetimeMaxSeconds),
+      };
+    } catch {
+      throw oauthMalformed(
+        "token_expiry",
+        expiryDiagnostic(source, { ...evidence, lifetime_seconds: lifetime }),
+      );
     }
-    return { accessToken, expiresAt };
   };
 
+  const readPermissions = async (context: ProviderRequestContext, accessToken: string) =>
+    grantedPermissions(await getGraph(context, accessToken, graphUrl("me/permissions")));
+
   return {
-    /**
-     * Builds the state-bound Facebook dialog URL for Page publishing and discovery.
-     * `business_management` enables business-user Page assignments in addition to
-     * directly managed Pages. Rejects callbacks that differ from configuration.
-     */
-    authorizationUrl(input: OAuthAuthorizationInput): string {
-      assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
-      const url = new URL(`/${FACEBOOK_API_VERSION}/dialog/oauth`, FACEBOOK_AUTHORIZATION_ORIGIN);
-      url.searchParams.set("client_id", clientId);
-      url.searchParams.set("redirect_uri", configuredRedirectUri);
-      url.searchParams.set("response_type", "code");
-      url.searchParams.set(
-        "scope",
-        [...FACEBOOK_CONFIGURED_SCOPES, FACEBOOK_BUSINESS_DISCOVERY_SCOPE].join(","),
-      );
-      url.searchParams.set("state", required("state", input.state, OAUTH_STATE_MAX_CHARS));
-      return url.toString();
-    },
+    authorizationUrl: (input: OAuthAuthorizationInput): string =>
+      authorizationCodeUrl(authorizationEndpoint, input, redirectUri, {
+        client_id: clientId,
+        scope: [...FACEBOOK_CONFIGURED_SCOPES, FACEBOOK_BUSINESS_DISCOVERY_SCOPE].join(","),
+      }),
 
     /**
-     * Exchanges the code and discovers publishable direct and business-assigned Pages.
-     * Bounds Page records and requests to 1,000; runs up to four business-user edges
-     * concurrently while preserving discovery order and deduplicating Page IDs.
+     * Discovers Pages the user can create content on, directly managed first and
+     * then business-assigned (with `business_management`). Requests and Pages are
+     * bounded; business edges are read concurrently but merged in discovery order.
      */
     async exchangeAuthorizationCode(
       context: ProviderRequestContext,
       input: OAuthExchangeInput,
     ): Promise<OAuthExchangeResult> {
-      assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
+      assertConfiguredRedirectUri(input.redirectUri, redirectUri);
       const shortBody = await exchangeAuthorizationCodeForm(http, context, {
         clientId,
         clientSecret,
         code: input.code,
-        redirectUri: configuredRedirectUri,
-        tokenUrl: `${FACEBOOK_GRAPH_ORIGIN}/${FACEBOOK_API_VERSION}/oauth/access_token`,
+        redirectUri,
+        tokenUrl,
       });
       const shortToken = boundedString(
         record(shortBody)?.access_token,
@@ -384,186 +320,140 @@ export function createFacebookOAuth(config: FacebookOAuthConfig) {
       if (!shortToken) throw oauthMalformed("authorization_token");
 
       const longToken = await exchangeLongLived(context, shortToken);
-      const permissionsUrl = new URL(
-        `/${FACEBOOK_API_VERSION}/me/permissions`,
-        FACEBOOK_GRAPH_ORIGIN,
-      );
-      const permissionsResponse = await http.request<unknown>(context, {
-        headers: bearer(longToken.accessToken),
-        method: "GET",
-        url: permissionsUrl.toString(),
-      });
-      const grantedScopes = grantedPermissions(permissionsResponse.body);
+      const grantedScopes = await readPermissions(context, longToken.accessToken);
       if (!FACEBOOK_PUBLISHING_SCOPES.every((scope) => grantedScopes.includes(scope))) {
         return { accounts: [] };
       }
 
-      const businessUsers = new Set<string>();
       const businessPaths: string[] = [];
+      const businessUsers = new Set<string>();
       let discoveredCount = 0;
       let requestCount = 0;
       let failed = false;
 
-      const discover = async (discoveryPath: string): Promise<OAuthConnection[]> => {
+      const pageConnection = (value: unknown): OAuthConnection | undefined => {
+        const page = record(value);
+        const id = providerIdentifier(page?.id);
+        const displayName = boundedText(page?.name, 500);
+        const accessToken = boundedString(page?.access_token, FACEBOOK_LIMITS.tokenMaxChars);
+        if (!id || !displayName) throw oauthMalformed("page_identity");
+        if (!accessToken) throw oauthMalformed("page_access_token");
+        const tasks = parsePageTasks(page?.tasks);
+        if (!tasks.some((task) => contentTasks.includes(task))) return undefined;
+        const avatarUrl = secureUrl(
+          record(record(page?.picture)?.data)?.url ??
+            (typeof page?.picture === "string" ? page.picture : undefined),
+        )?.href;
+        const username = facebookVanityHandle(page?.link);
+        return {
+          accessToken,
+          account: {
+            ...(avatarUrl ? { avatarUrl } : {}),
+            displayName,
+            id,
+            ...(username ? { username } : {}),
+          },
+          ...(longToken.expiresAt === undefined ? {} : { expiresAt: longToken.expiresAt }),
+          refreshToken: encodeRefreshSecret({ pageId: id, userAccessToken: longToken.accessToken }),
+          scopes: [...grantedScopes],
+        };
+      };
+
+      const discover = async (path: string): Promise<OAuthConnection[]> => {
+        const isBusinessUserList = path === businessUsersPath;
         const candidates: OAuthConnection[] = [];
-        const pageIds = new Set<string>();
-        const isBusinessUserList = discoveryPath === "me/business_users";
+        const candidateIds = new Set<string>();
         const seenCursors = new Set<string>();
-        let nextCursor: string | undefined;
-        while (!failed) {
-          if (requestCount >= 1_000) throw oauthMalformed("page_pagination");
+        let cursor: string | undefined;
+        do {
+          if (failed) break;
+          if (requestCount >= maxDiscoveryRequests) throw oauthMalformed("page_pagination");
           requestCount += 1;
-          const pagesUrl = new URL(
-            `/${FACEBOOK_API_VERSION}/${discoveryPath}`,
-            FACEBOOK_GRAPH_ORIGIN,
-          );
-          pagesUrl.searchParams.set(
+          const url = graphUrl(path);
+          url.searchParams.set(
             "fields",
             isBusinessUserList ? "id" : "id,name,access_token,tasks,picture,link",
           );
-          pagesUrl.searchParams.set("limit", "100");
-          if (nextCursor !== undefined) pagesUrl.searchParams.set("after", nextCursor);
-
-          const pagesResponse = await http.request<unknown>(context, {
-            headers: bearer(longToken.accessToken),
-            method: "GET",
-            url: pagesUrl.toString(),
-          });
-          const pagesBody = record(pagesResponse.body);
-          if (!Array.isArray(pagesBody?.data) || pagesBody.data.length > 100) {
+          url.searchParams.set("limit", String(discoveryPageSize));
+          if (cursor !== undefined) url.searchParams.set("after", cursor);
+          const body = record(await getGraph(context, longToken.accessToken, url));
+          if (!Array.isArray(body?.data) || body.data.length > discoveryPageSize) {
             throw oauthMalformed("page_list");
           }
-
-          if (!isBusinessUserList) {
-            discoveredCount += pagesBody.data.length;
-            if (discoveredCount > 1_000) throw oauthMalformed("page_list");
-          }
-
-          for (const value of pagesBody.data) {
-            if (isBusinessUserList) {
+          if (isBusinessUserList) {
+            for (const value of body.data) {
               const id = providerIdentifier(record(value)?.id);
               if (!id) throw oauthMalformed("business_user_identity");
-              if (!businessUsers.has(id)) {
-                businessUsers.add(id);
-                if (businessUsers.size > 1_000) throw oauthMalformed("business_user_list");
-                businessPaths.push(`${id}/assigned_pages`);
+              if (businessUsers.has(id)) continue;
+              businessUsers.add(id);
+              if (businessUsers.size > maxBusinessUsers) throw oauthMalformed("business_user_list");
+              businessPaths.push(`${id}/assigned_pages`);
+            }
+          } else {
+            discoveredCount += body.data.length;
+            if (discoveredCount > maxDiscoveredPages) throw oauthMalformed("page_list");
+            for (const value of body.data) {
+              const connection = pageConnection(value);
+              if (connection && !candidateIds.has(connection.account.id)) {
+                candidateIds.add(connection.account.id);
+                candidates.push(connection);
               }
-              continue;
-            }
-            const page = record(value);
-            const id = providerIdentifier(page?.id);
-            const displayName = boundedText(page?.name, 500);
-            const accessToken = boundedString(page?.access_token, FACEBOOK_LIMITS.tokenMaxChars);
-            const tasks = page?.tasks;
-            if (!id || !displayName) throw oauthMalformed("page_identity");
-            if (!accessToken) throw oauthMalformed("page_access_token");
-            if (
-              !Array.isArray(tasks) ||
-              tasks.length > 32 ||
-              tasks.some((task) => typeof task !== "string" || !pageTaskPattern.test(task))
-            ) {
-              throw oauthMalformed("page_tasks");
-            }
-            if (pageIds.has(id)) continue;
-
-            const picture = record(page?.picture);
-            const pictureData = record(picture?.data);
-            const rawAvatar =
-              pictureData?.url ?? (typeof page?.picture === "string" ? page.picture : undefined);
-            const avatarUrl = secureUrl(rawAvatar)?.href;
-            const username = facebookVanityHandle(page?.link);
-
-            if (tasks.includes("CREATE_CONTENT") || tasks.includes("PROFILE_PLUS_CREATE_CONTENT")) {
-              pageIds.add(id);
-              candidates.push({
-                accessToken,
-                account: {
-                  ...(avatarUrl ? { avatarUrl } : {}),
-                  displayName,
-                  id,
-                  ...(username ? { username } : {}),
-                },
-                ...(longToken.expiresAt === undefined ? {} : { expiresAt: longToken.expiresAt }),
-                refreshToken: encodeRefreshSecret({
-                  pageId: id,
-                  userAccessToken: longToken.accessToken,
-                }),
-                scopes: [...grantedScopes],
-              });
             }
           }
-
-          nextCursor = nextFacebookPageCursor(pagesBody.paging, seenCursors);
-          if (nextCursor === undefined) break;
-        }
+          cursor = nextPageCursor(body.paging, seenCursors);
+        } while (cursor !== undefined);
         return candidates;
       };
 
       const eligible = await discover("me/accounts");
       if (grantedScopes.includes(FACEBOOK_BUSINESS_DISCOVERY_SCOPE)) {
-        await discover("me/business_users");
+        await discover(businessUsersPath);
       }
-      const businessResults: OAuthConnection[][] = new Array(businessPaths.length);
-      let nextEdge = 0;
+      const businessResults: OAuthConnection[][] = [];
+      const edges = businessPaths.entries();
       const outcomes = await Promise.allSettled(
-        Array.from({ length: Math.min(4, businessPaths.length) }, async () => {
-          while (!failed && nextEdge < businessPaths.length) {
-            const index = nextEdge++;
-            const path = businessPaths[index];
-            if (!path) continue;
-            try {
-              businessResults[index] = await discover(path);
-            } catch (cause) {
-              failed = true;
-              throw cause;
+        Array.from(
+          { length: Math.min(businessEdgeConcurrency, businessPaths.length) },
+          async () => {
+            for (const [index, path] of edges) {
+              if (failed) return;
+              try {
+                businessResults[index] = await discover(path);
+              } catch (cause) {
+                failed = true;
+                throw cause;
+              }
             }
-          }
-        }),
+          },
+        ),
       );
-      for (const outcome of outcomes) {
-        if (outcome.status === "rejected") throw outcome.reason;
-      }
+      const rejection = outcomes.find((outcome) => outcome.status === "rejected");
+      if (rejection) throw rejection.reason;
       const identifiers = new Set(eligible.map((connection) => connection.account.id));
-      for (const candidates of businessResults) {
-        for (const candidate of candidates) {
-          if (identifiers.has(candidate.account.id)) continue;
-          identifiers.add(candidate.account.id);
-          eligible.push(candidate);
-        }
+      for (const candidate of businessResults.flat()) {
+        if (identifiers.has(candidate.account.id)) continue;
+        identifiers.add(candidate.account.id);
+        eligible.push(candidate);
       }
       return { accounts: eligible };
     },
 
-    /**
-     * Rotates the user token and derives a token for the same Page.
-     * Preserves absent expiry for inspected zero-expiry tokens; Page identity
-     * and grants are re-read from Meta rather than assumed.
-     */
+    /** Rotates the user token, then re-reads the same Page's token and the current grants. */
     async refreshAccessToken(
       context: ProviderRequestContext,
       value: string,
     ): Promise<ProviderTokenSet> {
       const current = decodeRefreshSecret(value);
       const longToken = await exchangeLongLived(context, current.userAccessToken);
-      const pageUrl = new URL(
-        `/${FACEBOOK_API_VERSION}/${encodeURIComponent(current.pageId)}`,
-        FACEBOOK_GRAPH_ORIGIN,
+      const page = record(
+        await getGraph(
+          context,
+          longToken.accessToken,
+          nodeUrl(current.pageId, "id,name,access_token"),
+        ),
       );
-      pageUrl.searchParams.set("fields", "id,name,access_token");
-      const pageResponse = await http.request<unknown>(context, {
-        headers: bearer(longToken.accessToken),
-        method: "GET",
-        url: pageUrl.toString(),
-      });
-      const page = record(pageResponse.body);
-      const id = providerIdentifier(page?.id);
       const accessToken = boundedString(page?.access_token, FACEBOOK_LIMITS.tokenMaxChars);
-      if (id !== current.pageId || !accessToken) throw malformed();
-      const permissions = await http.request<unknown>(context, {
-        headers: bearer(longToken.accessToken),
-        method: "GET",
-        url: new URL(`/${FACEBOOK_API_VERSION}/me/permissions`, FACEBOOK_GRAPH_ORIGIN).toString(),
-      });
+      if (providerIdentifier(page?.id) !== current.pageId || !accessToken) throw malformed();
       return {
         accessToken,
         ...(longToken.expiresAt === undefined ? {} : { expiresAt: longToken.expiresAt }),
@@ -571,7 +461,7 @@ export function createFacebookOAuth(config: FacebookOAuthConfig) {
           pageId: current.pageId,
           userAccessToken: longToken.accessToken,
         }),
-        scopes: grantedPermissions(permissions.body),
+        scopes: await readPermissions(context, longToken.accessToken),
       };
     },
   };

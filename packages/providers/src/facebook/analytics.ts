@@ -1,13 +1,7 @@
-import { malformed, requiredIdentifier } from "../adapter-helpers";
-import { classifyProviderFailure, ProviderAdapterError } from "../failures";
+import { malformed, rejected } from "../failures";
 import type { ProviderHttpClient } from "../http";
-import {
-  bearer,
-  metricValue,
-  parseMetaInsightsMap,
-  record,
-  validatePageInput,
-} from "../meta-common";
+import { parseMetaInsightsMap } from "../meta";
+import { engagementSnapshot } from "../results";
 import type {
   ProviderAccountAnalytics,
   ProviderAnalyticsRecord,
@@ -17,15 +11,16 @@ import type {
   ProviderPublicationLookup,
   ProviderRequestContext,
 } from "../types";
+import { bearer, metricValue, record, requiredIdentifier, validateSnapshotPage } from "../values";
 import {
-  FACEBOOK_API_VERSION,
-  FACEBOOK_GRAPH_ORIGIN,
   facebookAccountId,
+  graphUrl,
+  nodeUrl,
   parseFacebookOperationId,
   type FacebookOperationPhase,
 } from "./types";
 
-const nonReelAnalyticsPhases: ReadonlySet<FacebookOperationPhase> = new Set([
+const nonReelPhases: ReadonlySet<FacebookOperationPhase> = new Set([
   "post",
   "post_draft",
   "video",
@@ -36,39 +31,41 @@ const nonReelAnalyticsPhases: ReadonlySet<FacebookOperationPhase> = new Set([
   "ab_test",
 ]);
 
-/**
- * Builds the Facebook Page analytics methods (`getAccountAnalytics`, `listAnalytics`).
- */
+function summaryCount(edge: unknown): number | undefined {
+  return metricValue(record(record(edge)?.summary)?.total_count);
+}
+
 export function createFacebookAnalytics(http: ProviderHttpClient, now: () => Date) {
+  const get = async (context: ProviderRequestContext, accessToken: string, url: URL) =>
+    record(
+      (
+        await http.request(context, {
+          headers: bearer(accessToken),
+          method: "GET",
+          url: url.toString(),
+        })
+      ).body,
+    );
+
   return {
-    /** Reads Page followers only; Page likes (`fan_count`) are not accounts the Page follows. */
+    /** Page followers only; `fan_count` counts Page likes, not follows. */
     async getAccountAnalytics(
       context: ProviderRequestContext,
       credentials: ProviderCredentials,
     ): Promise<ProviderAccountAnalytics> {
-      const url = new URL(
-        `/${FACEBOOK_API_VERSION}/${encodeURIComponent(facebookAccountId(credentials))}`,
-        FACEBOOK_GRAPH_ORIGIN,
+      const body = await get(
+        context,
+        credentials.accessToken,
+        nodeUrl(facebookAccountId(credentials), "followers_count"),
       );
-      url.searchParams.set("fields", "followers_count");
-      const response = await http.request<unknown>(context, {
-        headers: bearer(credentials.accessToken),
-        method: "GET",
-        url: url.toString(),
-      });
-      const followers = metricValue(record(response.body)?.followers_count);
+      const followers = metricValue(body?.followers_count);
       if (followers === undefined) throw malformed();
-      return {
-        followers,
-        recordedAt: now().toISOString(),
-      };
+      return { followers, recordedAt: now().toISOString() };
     },
 
     /**
-     * Reads lifetime engagement for one published Page Reel.
-     * Video Insights supplies Reel plays and comments-plus-shares social actions;
-     * the Video object supplies like and comment summaries. Any missing metric or
-     * negative derived shares fails closed so no measurement is invented as zero.
+     * Reel plays and comments-plus-shares come from Video Insights, likes and
+     * comments from the Video edges. Any missing metric fails closed.
      */
     async listAnalytics(
       context: ProviderRequestContext,
@@ -77,56 +74,28 @@ export function createFacebookAnalytics(http: ProviderHttpClient, now: () => Dat
       page: ProviderPageInput,
     ): Promise<ProviderPage<ProviderAnalyticsRecord>> {
       const phase = parseFacebookOperationId(lookup.providerOperationId)?.phase;
-      if (phase && nonReelAnalyticsPhases.has(phase)) {
-        throw new ProviderAdapterError(
-          classifyProviderFailure({
-            code: "facebook_format_analytics_unavailable",
-            status: 422,
-          }),
-        );
+      if (phase && nonReelPhases.has(phase)) {
+        throw rejected("facebook_format_analytics_unavailable", 422);
       }
-      validatePageInput("facebook", page);
-      if (page.cursor) {
-        throw new ProviderAdapterError(
-          classifyProviderFailure({
-            code: "facebook_analytics_not_paginated",
-            status: 400,
-          }),
-        );
-      }
+      validateSnapshotPage("facebook", page);
       const providerPostId = requiredIdentifier(
         lookup.providerPostId,
         "facebook_video_id_required",
       );
-      const insightsUrl = new URL(
-        `/${FACEBOOK_API_VERSION}/${encodeURIComponent(providerPostId)}/video_insights`,
-        FACEBOOK_GRAPH_ORIGIN,
-      );
+      const insightsUrl = graphUrl(`${encodeURIComponent(providerPostId)}/video_insights`);
       insightsUrl.searchParams.set("metric", "blue_reels_play_count,post_video_social_actions");
       insightsUrl.searchParams.set("period", "lifetime");
-      const insightsResponse = await http.request<unknown>(context, {
-        headers: bearer(credentials.accessToken),
-        method: "GET",
-        url: insightsUrl.toString(),
-      });
-      const metrics = parseMetaInsightsMap(insightsResponse.body, { strictSingleValue: true });
-
-      const videoUrl = new URL(
-        `/${FACEBOOK_API_VERSION}/${encodeURIComponent(providerPostId)}`,
-        FACEBOOK_GRAPH_ORIGIN,
+      const metrics = parseMetaInsightsMap(
+        await get(context, credentials.accessToken, insightsUrl),
+        { singleValue: true },
       );
-      videoUrl.searchParams.set(
-        "fields",
-        "likes.summary(true).limit(0),comments.summary(true).limit(0)",
+      const video = await get(
+        context,
+        credentials.accessToken,
+        nodeUrl(providerPostId, "likes.summary(true).limit(0),comments.summary(true).limit(0)"),
       );
-      const videoResponse = await http.request<unknown>(context, {
-        headers: bearer(credentials.accessToken),
-        method: "GET",
-        url: videoUrl.toString(),
-      });
-      const video = record(videoResponse.body);
-      const likes = metricValue(record(record(video?.likes)?.summary)?.total_count);
-      const comments = metricValue(record(record(video?.comments)?.summary)?.total_count);
+      const likes = summaryCount(video?.likes);
+      const comments = summaryCount(video?.comments);
       const views = metrics.get("blue_reels_play_count");
       const socialActions = metrics.get("post_video_social_actions");
       if (
@@ -138,21 +107,10 @@ export function createFacebookAnalytics(http: ProviderHttpClient, now: () => Dat
       ) {
         throw malformed();
       }
-      return {
-        items: [
-          {
-            comments,
-            impressions: 0,
-            likes,
-            providerPostId,
-            recordedAt: now().toISOString(),
-            reach: 0,
-            shares: socialActions - comments,
-            views,
-            watchTimeSeconds: 0,
-          },
-        ],
-      };
+      return engagementSnapshot(
+        { comments, likes, providerPostId, shares: socialActions - comments, views },
+        now(),
+      );
     },
   };
 }

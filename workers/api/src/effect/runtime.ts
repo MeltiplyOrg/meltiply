@@ -1,12 +1,6 @@
 import type { Context } from "hono";
 import { Cause, Effect, Exit, Layer, Option, Result } from "effect";
-import {
-  DomainError,
-  RequestContext,
-  makeRequestContext,
-  type DomainErrorCode,
-  type RequestContextData,
-} from "@meltiply/domain";
+import { RequestContext, type RequestContextData } from "@meltiply/domain";
 import {
   errorDiagnostic,
   effectLoggerLayer,
@@ -29,36 +23,13 @@ export interface RunWorkerEffectOptions {
   readonly status?: number;
 }
 
-interface IssueLike {
-  readonly actual?: unknown;
-  readonly code?: string;
-  readonly constraint?: string;
-  readonly field?: string | null;
-  readonly limit?: number | string;
-  readonly message: string;
-}
-
 interface TaggedErrorShape {
   readonly _tag?: string;
   readonly cause?: unknown;
   readonly code?: string;
-  readonly details?: readonly IssueLike[];
-  readonly issues?: readonly IssueLike[];
   readonly message?: string;
-  readonly retryAfterSeconds?: number;
   readonly status?: number;
 }
-
-/**
- * HTTP status mapping for transport-agnostic domain failures.
- *
- * Maps Effect-typed DomainError failures to their canonical status envelope
- * (`active_organization_required` → 403, `service_unavailable` → 503).
- */
-const DOMAIN_ERROR_STATUS: Readonly<Record<DomainErrorCode, number>> = {
-  active_organization_required: 403,
-  service_unavailable: 503,
-};
 
 interface ResolvedFailure {
   readonly code: string;
@@ -73,13 +44,12 @@ interface ResolvedFailure {
  *
  * Implements the API Worker error sanitization contract:
  * 1. `CoreApiError` failures always preserve explicit client-facing messages and status codes.
- * 2. `DomainError` instances map status via `DOMAIN_ERROR_STATUS` and preserve their message.
- * 3. `ProviderAdapterError` rate limits surface 429 with retry-after and provider messages, while 5xx
+ * 2. `ProviderAdapterError` rate limits surface 429 with retry-after and provider messages, while 5xx
  *    upstream provider failures are sanitized to "An unexpected error occurred." under 502 status.
- * 4. Tagged domain Effect errors (`Data.TaggedError` shapes) sanitize all 5xx messages (status >= 500,
+ * 3. Tagged domain Effect errors (`Data.TaggedError` shapes) sanitize all 5xx messages (status >= 500,
  *    such as `DatabaseError` 500 or `StorageUnavailableError` 503) to prevent sensitive internal detail leakage,
  *    while preserving client-actionable 4xx messages (< 500).
- * 5. Unknown or unshaped values fall back to 500 internal_error with the generic sanitization message.
+ * 4. Unknown or unshaped values fall back to 500 internal_error with the generic sanitization message.
  *
  * @param error - Typed failure value extracted from the Effect exit cause.
  * @returns Resolved canonical failure envelope with status, error code, client message, details, and optional Retry-After.
@@ -92,15 +62,6 @@ function resolveFailure(error: unknown): ResolvedFailure {
       message: error.message,
       retryAfterSeconds: error.retryAfterSeconds,
       status: error.status,
-    };
-  }
-  if (error instanceof DomainError) {
-    return {
-      code: error.code,
-      details: [],
-      message: error.message,
-      retryAfterSeconds: undefined,
-      status: DOMAIN_ERROR_STATUS[error.code] ?? 500,
     };
   }
   if (error instanceof ProviderAdapterError) {
@@ -131,9 +92,9 @@ function resolveFailure(error: unknown): ResolvedFailure {
         : (shaped.message ?? "An unexpected error occurred.");
     return {
       code: shaped.code ?? "internal_error",
-      details: normalizeErrorDetails(shaped),
+      details: [],
       message,
-      retryAfterSeconds: shaped.retryAfterSeconds,
+      retryAfterSeconds: undefined,
       status,
     };
   }
@@ -144,49 +105,6 @@ function resolveFailure(error: unknown): ResolvedFailure {
     retryAfterSeconds: undefined,
     status: 500,
   };
-}
-
-/**
- * Converts one loose validation descriptor into a canonical OpenAPI ErrorDetail record.
- *
- * Domain ValidationError entries (ValidationIssue) carry no mandatory `code` and allow
- * string `limit` / arbitrary `actual` values, while the OpenAPI ErrorDetail schema
- * requires `code` and numeric bounds. Missing codes fall back to the constraint name,
- * then to "invalid"; non-numeric bounds are dropped rather than forwarded verbatim.
- *
- * @param issue - Single validation descriptor from `details` or `issues`.
- * @returns Canonical ErrorDetail record, e.g. `{code: "invalid", ...}` for `{message: "Required"}`.
- */
-function toCanonicalDetail(issue: IssueLike): Schemas["ErrorDetail"] {
-  return {
-    actual: typeof issue.actual === "number" ? issue.actual : undefined,
-    code: issue.code ?? issue.constraint ?? "invalid",
-    constraint: issue.constraint,
-    field: issue.field ?? null,
-    limit: typeof issue.limit === "number" ? issue.limit : undefined,
-    message: issue.message,
-  };
-}
-
-/**
- * Normalizes validation issues or detailed error descriptors into canonical OpenAPI ErrorDetail records.
- *
- * Translates domain ValidationError entries from either `details` or `issues` (both
- * ValidationIssue-shaped) into the standard details schema expected by errorResponse.
- * Both sources are mapped through the same conversion so contract-required fields
- * (`code`, numeric bounds) are always present regardless of which field is populated.
- *
- * @param error - The tagged error shape extracted from the Effect exit cause.
- * @returns An array of normalized error detail items.
- */
-function normalizeErrorDetails(error: TaggedErrorShape): readonly Schemas["ErrorDetail"][] {
-  if (error.details && error.details.length > 0) {
-    return error.details.map(toCanonicalDetail);
-  }
-  if (error.issues && error.issues.length > 0) {
-    return error.issues.map(toCanonicalDetail);
-  }
-  return [];
 }
 
 /**
@@ -243,12 +161,12 @@ function requestScope(c: Context<ApiWorkerEnvironment>): RequestScope {
   const actor = c.get?.("actor") as ResolvedActor | undefined;
   const tenantId = actor?.workspace.id;
 
-  const requestContextData: RequestContextData = makeRequestContext({
+  const requestContextData: RequestContextData = {
     requestId,
-    session: actor?.claims,
+    session: actor?.claims ?? null,
     tenantId,
     traceId,
-  });
+  };
 
   const workerEnv = c.env as { ENVIRONMENT?: string; VERSION?: string } | undefined;
   const logContext: LogContext = {
@@ -320,7 +238,7 @@ async function runRequestExit<A, E>(
  *
  * Inspects for defects first so unhandled crashes/finalizers always take the 500
  * internal_error path; typed recoverable failures resolve through resolveFailure()
- * (CoreApiError/DomainError/ProviderAdapterError/validation shapes) preserving
+ * (CoreApiError/ProviderAdapterError/tagged domain errors) preserving
  * status codes, error codes, details, and Retry-After headers. Pure request
  * interruption is recorded distinctly and returns 499/503 only after typed errors
  * and defects have been ruled out. 5xx outcomes are logged with diagnostics; 4xx

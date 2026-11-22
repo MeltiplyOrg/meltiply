@@ -14,9 +14,9 @@ import {
 import { oauthStateRoutingKey } from "../src/core-routes";
 import { tokenCipherFor } from "../src/token-credentials";
 import {
-  AccessDenied,
+  ActiveOrganizationRequiredError,
   DatabaseError,
-  StorageUnavailable,
+  StorageUnavailableError,
   type PlatformCapability,
 } from "@meltiply/domain";
 import type { JwtIdentity, SessionClaims } from "@meltiply/auth";
@@ -358,18 +358,10 @@ function oauthRegistry() {
 }
 
 describe("core API routes", () => {
-  it.each([
-    {
-      error: new AccessDenied("workspace membership is required"),
-      status: 403,
-      code: "active_organization_required",
-    },
-    {
-      error: new StorageUnavailable("storage is unavailable"),
-      status: 503,
-      code: "service_unavailable",
-    },
-  ])("maps $code domain errors to their HTTP contract", async ({ error, status, code }) => {
+  it("maps a thrown active_organization_required error to its HTTP contract", async () => {
+    const error = new ActiveOrganizationRequiredError({
+      message: "workspace membership is required",
+    });
     const app = authenticatedApp(
       service({
         platformCapabilities: () => {
@@ -383,9 +375,9 @@ describe("core API routes", () => {
       env,
     );
 
-    expect(response.status).toBe(status);
+    expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
-      error: { code, message: error.message },
+      error: { code: "active_organization_required", message: error.message },
     });
   });
   it.each([
@@ -2873,7 +2865,7 @@ describe("core API routes", () => {
       assetService: {
         ...assetService(),
         abortUploadSession: () =>
-          Effect.fail(new StorageUnavailable("media bucket is not configured")),
+          Effect.fail(new StorageUnavailableError({ message: "media bucket is not configured" })),
       },
     });
     const sessionId = "00000000-0000-4000-8000-000000000601";
@@ -2893,7 +2885,7 @@ describe("core API routes", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "service_unavailable",
-        message: "media bucket is not configured",
+        message: "An unexpected error occurred.",
       },
     });
   });

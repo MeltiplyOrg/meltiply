@@ -9,9 +9,7 @@ import { processNativeJob } from "../lib/processor-client";
 
 export { ReplyWorkflow } from "../../workers/automation/src/index";
 
-/** Addresses the Compose processor over its private network; bucket credentials never enter the processor. */
 export class MediaProcessorContainer extends DurableObject<{ PROCESSOR_JOB_TOKEN: string }> {
-  /** Validates jobs and engine responses, retaining the Cloudflare adapter's failure classification and deadline. */
   async process(job: NativeProcessorJob): Promise<MediaProcessorRpcOutcome> {
     return processNativeJob(job, this.env.PROCESSOR_JOB_TOKEN);
   }
@@ -25,9 +23,8 @@ type Delivery = {
   attempts: number;
 };
 
-/** Keeps the canonical automation handler and exposes private RPC for durable host delivery and schedules. */
 export default class SelfhostAutomation extends AutomationEntrypoint {
-  /** Accepts host-only dispatch over fetch so Miniflare's synchronous RPC discovery cannot block its Node event loop. */
+  /** Miniflare's synchronous RPC discovery would block its Node event loop, so the host dispatches over fetch. */
   async fetch(request: Request) {
     if (request.method !== "POST") return new Response(null, { status: 404 });
     const payload: unknown = await request.json();
@@ -69,7 +66,6 @@ export default class SelfhostAutomation extends AutomationEntrypoint {
     );
   }
 
-  /** Runs the real queue handler, collecting per-message decisions for the durable broker's transaction. */
   async deliver(queue: string, rows: Delivery[], metrics: MessageBatchMetrics) {
     const explicitAcks: string[] = [];
     const retryMessages: { msgId: string; delaySeconds?: number }[] = [];
@@ -120,7 +116,6 @@ export default class SelfhostAutomation extends AutomationEntrypoint {
     return { outcome, explicitAcks, retryMessages, retryBatch };
   }
 
-  /** Executes canonical scheduled tiers; the host records and retries schedule jobs durably. */
   async runScheduled(cron: string, scheduledTime: number) {
     let retry = true;
     try {

@@ -21,15 +21,6 @@ const DISABLE_REASONING = { chat_template_kwargs: { enable_thinking: false } };
 const DEFAULT_SEED = 20261019;
 const PROVIDER_MODES = new Set(["auto", "workers-ai", "ollama"]);
 
-/**
- * Parses a positive integer environment override, falling back when unset.
- *
- * @param {string | undefined} value Raw environment value.
- * @param {number} fallback Default when the value is unset or empty.
- * @param {string} name Variable name for the error message.
- * @returns {number} Parsed positive integer.
- * @throws {Error} When the value is not a positive integer.
- */
 function parsePositiveInteger(value, fallback, name) {
   if (value === undefined || value === "") return fallback;
   const parsed = Number(value);
@@ -39,16 +30,6 @@ function parsePositiveInteger(value, fallback, name) {
   return parsed;
 }
 
-/**
- * Reads the operand for a value-taking flag and rejects a missing value or one
- * that looks like another option.
- *
- * @param {string[]} argv Process arguments after the script name.
- * @param {number} index Index of the flag itself.
- * @param {string} option Flag name used in the error message.
- * @returns {{value: string, index: number}} Operand and the index it occupies.
- * @throws {Error} When the operand is missing or starts with `-`.
- */
 function optionValue(argv, index, option) {
   const value = argv[index + 1];
   if (value === undefined || value.startsWith("-")) {
@@ -57,14 +38,6 @@ function optionValue(argv, index, option) {
   return { value, index: index + 1 };
 }
 
-/**
- * Parses generation flags. `--dry-run`, `--force`, `--target`, `--model`, and
- * `--provider` are the supported developer options; `--locales` exists for
- * tests and alternate checkouts.
- *
- * @param {string[]} argv Process arguments after the script name.
- * @returns {{localeRoot: string, target: string, dryRun: boolean, force: boolean, model?: string, provider?: string}}
- */
 function parseArguments(argv) {
   const options = {
     localeRoot: defaultLocaleRoot,
@@ -104,25 +77,10 @@ function parseArguments(argv) {
   return options;
 }
 
-/**
- * Reads a JSON catalog, surfacing parse errors instead of overwriting a corrupt
- * target file.
- *
- * @param {string} path Catalog path.
- * @returns {Record<string, unknown>} Parsed catalog.
- */
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-/**
- * Resolves the provider mode from the CLI override, `I18N_PROVIDER`, or the
- * `auto` default.
- *
- * @param {string | undefined} provider CLI override.
- * @returns {"auto" | "workers-ai" | "ollama"} Selected mode.
- * @throws {Error} When the mode is unknown.
- */
 function resolveProviderMode(provider) {
   const mode = provider ?? process.env.I18N_PROVIDER ?? "auto";
   if (!PROVIDER_MODES.has(mode)) {
@@ -133,21 +91,6 @@ function resolveProviderMode(provider) {
   return mode;
 }
 
-/**
- * Creates the provider chain from environment configuration. The Workers AI
- * token is read only from the environment and is never printed. Each cloud
- * model gets its own bounded retries and the fallback model runs only after the
- * primary exhausts them.
- *
- * `auto` uses Workers AI when both credentials are present and local Ollama
- * otherwise, so a machine with no account or key can still draft translations
- * offline. `workers-ai` and `ollama` force one backend; `--model` overrides the
- * active backend's model.
- *
- * @param {{model?: string, provider?: string, systemPrompt: string, fetchImpl?: typeof fetch, retryOptions?: {retries?: number, baseDelayMs?: number, sleep?: (milliseconds: number) => Promise<void>}}} options
- * @returns {{complete: (prompt: string, options?: {maxTokens?: number}) => Promise<string>}}
- * @throws {Error} When credentials are partial, missing for an explicit cloud mode, or configuration is invalid.
- */
 export function createProvider({ model, provider, systemPrompt, fetchImpl, retryOptions = {} }) {
   const mode = resolveProviderMode(provider);
   const accountId = process.env.WORKERS_AI_ACCOUNT_ID;
@@ -219,21 +162,6 @@ export function createProvider({ model, provider, systemPrompt, fetchImpl, retry
   );
 }
 
-/**
- * Reads every source namespace, generates target values, and only after all
- * namespaces succeed writes the target files atomically. A placeholder failure
- * in any namespace leaves every committed file byte-identical.
- *
- * @param {object} options
- * @param {string} [options.localeRoot] Locale tree root containing `<lang>/<namespace>.json`.
- * @param {string} options.target Target language code.
- * @param {{name?: string, complete: (...args: any[]) => Promise<string>}} [options.provider] Required unless `dryRun`.
- * @param {boolean} [options.force] Retranslate every existing string.
- * @param {boolean} [options.dryRun] Report pending keys without provider calls or writes.
- * @param {boolean} [options.retry] Wrap the provider with retry here; production providers already retry per model.
- * @returns {Promise<Array<{namespace: string, targetPath: string, result: Record<string, unknown> | null, pending: Array<{key: string, text: string}>, dryRun: boolean, stats: {translated: number, reused: number, skipped: number, failed: number}}>>}
- * @throws {PlaceholderDriftError} When a generated value changes placeholders.
- */
 export async function generateAll({
   localeRoot = defaultLocaleRoot,
   target,
@@ -280,15 +208,6 @@ export async function generateAll({
   return run;
 }
 
-/**
- * Runs the configured production provider and reports per-namespace counts.
- * Exit code 0 means every namespace was generated and written (or previewed),
- * 1 means a provider/placeholder failure with no partial write, and 2 means
- * invalid configuration or arguments.
- *
- * @param {{localeRoot: string, target: string, dryRun: boolean, force: boolean, model?: string, provider?: string}} options
- * @returns {Promise<number>} Process exit code.
- */
 export async function main(options) {
   let glossary;
   try {

@@ -1,8 +1,6 @@
-// Wrangler's outer dev proxy rejects non-loopback /cdn-cgi Host headers even
-// when --local-upstream configures the inner runtime. Expose only the native S3
-// route through the Docker-facing listener. Native hosts and Docker-in-Docker
-// both own that interface. Wrangler restores the signed authority through
-// --local-upstream before its S3 handler verifies SigV4.
+// Wrangler's outer dev proxy rejects non-loopback /cdn-cgi Host headers even with
+// --local-upstream; --local-upstream restores the signed authority before its S3
+// handler verifies SigV4.
 import { spawn } from "node:child_process";
 import { readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -20,11 +18,8 @@ const downloadResponseHeaders = [
 ];
 
 /**
- * Streams native S3 requests without changing signed bytes; --local-upstream
- * restores the authority after the outer proxy's loopback Host guard.
- * Miniflare omits download response overrides, so successful GETs apply the
- * two signed download headers only after upstream SigV4 validation. Rejected
- * requests retain their response; malformed header values fail without streaming.
+ * Miniflare omits download response overrides, so successful GETs apply the two
+ * signed download headers after upstream SigV4 validation.
  */
 const server = createServer((incoming, outgoing) => {
   if (!incoming.url?.startsWith(`${pathPrefix}/`)) {
@@ -83,8 +78,7 @@ if (!address || typeof address === "string") {
 const authority = `${gatewayHost}:${address.port}`;
 console.log(`Local signed R2 gateway: http://${authority}${pathPrefix}`);
 
-// Secondary Workers ignore CLI env-file/var overrides. Give every config its
-// own env lookup in an isolated session layout, never in the user's checkout.
+// Secondary Workers ignore CLI env-file/var overrides.
 const configIndexes = args.flatMap((arg, index) =>
   arg === "--config" && args[index + 1] ? [index + 1] : [],
 );
@@ -107,7 +101,6 @@ try {
   throw error;
 }
 
-/** Removes this session's private config/env tree, including interrupted startup. */
 async function removeSessionEnv() {
   if (session) await rm(session.root, { recursive: true, force: true });
 }
@@ -125,10 +118,6 @@ worker = spawn(
   { stdio: "inherit", detached: true },
 );
 
-/**
- * Stops the owned Wrangler process group and local gateway.
- * No sibling stack or daemon-global resources are touched.
- */
 function stop(signal) {
   stopping = true;
   if (worker?.pid && worker.exitCode === null && worker.signalCode === null) {

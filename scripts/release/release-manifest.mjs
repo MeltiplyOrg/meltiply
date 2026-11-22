@@ -11,12 +11,13 @@ import {
 } from "./release-guard.mjs";
 import {
   containsCredentialMaterial,
-  releaseInternals,
+  requiredRemoteSecrets,
   validateIacOutputs,
 } from "./release-lib.mjs";
 import { validateWorkerVersionId } from "./release-worker.mjs";
 import { assertFrontendReleaseEvidence } from "./release-frontend.mjs";
 import { matchedString, plainObject } from "./validation.mjs";
+import { stableJson, stableValue } from "../lib/stable-json.mjs";
 
 const httpsUrlPattern = /^https:\/\/[^\s]+$/;
 const rolloutEvidencePattern = /^api-rollout-(?:5|25|50|100)\.json$/;
@@ -35,8 +36,6 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const sha256Pattern = /^[0-9a-f]{64}$/;
 const gitShaPattern = /^[0-9a-f]{40}$/;
 
-// Environment variables whose values must never appear in published evidence.
-// Mirrors redactError's secret set plus the raw release secret bundle variable.
 const secretEnvironmentNames = [
   "CLOUDFLARE_API_TOKEN",
   "MELTIPLY_AUTHENTICATED_DATABASE_URL",
@@ -46,9 +45,6 @@ const secretEnvironmentNames = [
   "TF_HTTP_PASSWORD",
 ];
 
-// Files that may exist in the release directory but are never publishable:
-// the reviewed input itself, the current post-apply outputs, plaintext phase
-// markers written by CI shell steps, and a prior manifest being regenerated.
 const privateAllowlist = new Set([
   "consumers-transition",
   "deployment-mode",
@@ -61,7 +57,6 @@ const privateAllowlist = new Set([
   "approval-session.json",
 ]);
 
-// IaC phase proven by each transition's post-apply outputs.
 const transitionStates = Object.freeze({
   domain: "domains-paused",
   foundation: "foundation",
@@ -70,9 +65,6 @@ const transitionStates = Object.freeze({
   unpause: "active",
 });
 
-// Publishable evidence per deployment mode, mirroring the CI staging-manifest
-// copy allowlist. Common entries are required for every release; the mode
-// lists add their own artifacts and forbid the other mode's files.
 const evidenceByMode = Object.freeze({
   common: Object.freeze([
     "approval-foundation.json",
@@ -124,22 +116,8 @@ const evidenceByMode = Object.freeze({
   ]),
 });
 
-// Each review binds one transition digest in the selected installation.
 const approvalScopes = Object.freeze(["foundation", "traffic", "queue-resume"]);
 
-/**
- * Asserts an evidence record's approvals equal one loaded approval hold.
- *
- * Release mutations embed the exact validated approval records used at
- * execution time, so manifest validation re-normalizes the embedded record
- * and requires deep equality rather than accepting any well-formed approval.
- *
- * @param {object} evidence - Parsed evidence record
- * @param {object} approval - Loaded approval record for the expected hold
- * @param {string} name - Contextual label for error reporting
- * @param {object} spec - Validated release specification
- * @throws {TypeError} If the embedded approvals differ from the loaded hold
- */
 function assertApprovalEmbedded(evidence, approval, name, spec) {
   if (!Array.isArray(evidence.approvals) || evidence.approvals.length !== 1) {
     throw new TypeError(`${name} embeds unexpected approval records`);
@@ -150,28 +128,12 @@ function assertApprovalEmbedded(evidence, approval, name, spec) {
   }
 }
 
-/**
- * Asserts an evidence record binds the reviewed OpenTofu plan for its phase.
- *
- * @param {object} evidence - Parsed evidence record
- * @param {string} digest - Expected SHA-256 digest of the reviewed saved plan
- * @param {string} name - Contextual label for error reporting
- * @throws {TypeError} If the embedded plan digest differs from the reviewed digest
- */
 function assertPlanDigest(evidence, digest, name) {
   if (evidence.plan_digest !== digest) {
     throw new TypeError(`${name} binds an unexpected plan digest`);
   }
 }
 
-/**
- * Asserts a Worker traffic array is well-formed and totals 100 percent.
- *
- * @param {unknown} traffic - Candidate traffic array
- * @param {string} name - Contextual label for error reporting
- * @returns {Array<{ percentage: number, version_id: string }>} Validated traffic entries
- * @throws {TypeError} If entries are malformed or the split does not total 100
- */
 function validTraffic(traffic, name) {
   if (!Array.isArray(traffic) || traffic.length === 0 || traffic.length > 4) {
     throw new TypeError(`${name} traffic is invalid`);
@@ -197,14 +159,6 @@ function validTraffic(traffic, name) {
   return entries;
 }
 
-/**
- * Reads and validates a `<phase>-plan.sha256` digest file.
- *
- * @param {string} outDir - Release output directory
- * @param {string} phase - Transition phase name
- * @returns {Promise<string>} 64-hex plan digest
- * @throws {TypeError} If the file is missing or malformed
- */
 async function readPlanDigest(outDir, phase) {
   let content;
   try {
@@ -219,19 +173,6 @@ async function readPlanDigest(outDir, phase) {
   return digest;
 }
 
-/**
- * Validates a redacted `<phase>-plan-summary.json` against the phase contract.
- *
- * Requires the exact schema emitted by scripts/infra/release-plan.mjs and
- * cross-checks the recorded transition variables against the same phase
- * triples enforced on live IaC outputs, so a summary cannot drift from the
- * transition it claims to review.
- *
- * @param {object} summary - Parsed plan summary
- * @param {string} phase - Expected release transition phase
- * @param {object} spec - Release input whose environment the summary must match
- * @throws {TypeError} If fields, phase, or transition invariants mismatch
- */
 function validatePlanSummary(summary, phase, spec) {
   plainObject(summary, `${phase} plan summary`);
   if (summary.schemaVersion !== 1 || summary.phase !== phase) {
@@ -254,8 +195,6 @@ function validatePlanSummary(summary, phase, spec) {
   ) {
     throw new TypeError(`${phase} plan summary does not prove the expected transition`);
   }
-  // A bounded change list is sufficient: a no-op transition (empty plan) is a
-  // legitimate outcome already proven by the phase variable triple above.
   if (!Array.isArray(summary.resourceChanges) || summary.resourceChanges.length > 512) {
     throw new TypeError(`${phase} plan summary resourceChanges is invalid`);
   }
@@ -274,18 +213,6 @@ function validatePlanSummary(summary, phase, spec) {
   }
 }
 
-/**
- * Validates a post-apply `iac-outputs-<phase>.json` file.
- *
- * Re-runs the full IaC output validation against the release spec and asserts
- * the activation triple proves the exact phase state, so published outputs
- * cannot claim a different transition than the one reviewed and applied.
- *
- * @param {object} outputs - Raw parsed IaC outputs
- * @param {string} phase - Transition phase the outputs must prove
- * @param {object} spec - Validated release specification
- * @throws {TypeError} If outputs fail spec validation or phase invariants
- */
 function validatePhaseOutputs(outputs, phase, spec) {
   const iac = validateIacOutputs(outputs, spec);
   const resources = plainObject(iac.release_resources, `${phase} IaC outputs`);
@@ -300,19 +227,6 @@ function validatePhaseOutputs(outputs, phase, spec) {
   }
 }
 
-/**
- * Validates deployment and contract identities in the health sub-record embedded in smoke evidence.
- *
- * A null contract version denotes legacy health only for a matching proven previous
- * Worker in a partial live rollout; missing metadata and all pinned probes remain invalid.
- * @param {object} evidence - Parsed smoke evidence record
- * @param {string} url - Expected probe URL (version URL or live hostname + path)
- * @param {string} name - Contextual label for error reporting
- * @param {boolean} versionPinned - Whether the served version must equal the release SHA
- * @param {object} spec - Validated release specification
- * @param {string} [previousVersionId] - Previous Worker ID from the candidate/rollout evidence
- * @throws {TypeError} If the health record fails URL, status, or version checks
- */
 function validateSmokeHealth(evidence, url, name, versionPinned, spec, previousVersionId) {
   const health = plainObject(evidence.health, `${name} health`);
   matchedString(health.url, httpsUrlPattern, `${name} health.url`);
@@ -344,10 +258,6 @@ function validateSmokeHealth(evidence, url, name, versionPinned, spec, previousV
   }
 }
 
-/**
- * Builds a per-filename validator context holding digests, approvals, and
- * cross-evidence identities reused across validation branches.
- */
 function evidenceContext({
   approvals,
   candidate,
@@ -372,20 +282,6 @@ function evidenceContext({
   };
 }
 
-/**
- * Validates one allowlisted release-evidence JSON document.
- *
- * Enforces release binding, kind-specific field contracts, the approval hold
- * and plan digest the underlying mutation ran under, and cross-file identity
- * (rollouts and smoke records must reference the deployed secrets version).
- *
- * @param {object} params - Validation parameters
- * @param {object} params.content - Parsed JSON document
- * @param {object} params.context - Shared evidence context
- * @param {string} params.name - Evidence filename
- * @param {object} params.spec - Validated release specification
- * @throws {TypeError} If the document fails any evidence contract
- */
 function validateEvidenceDocument({ content, context, name, spec }) {
   const foundation = context.approvalByName.get(`${spec.environment}-foundation-approval`);
   const evidence = assertReleaseBound(content, name, spec);
@@ -451,10 +347,7 @@ function validateEvidenceDocument({ content, context, name, spec }) {
     } else {
       validateWorkerVersionId(evidence.previous_version_id);
     }
-    // Version URLs are the immutable `${id8}-${hostname}` form; the update
-    // alias is `--preview-alias <release_id>` rendered against the same
-    // hostname. Recovery paths (`findUniqueTaggedVersion`) legitimately record
-    // both URLs null — non-null values must match the exact identity.
+    // Cloudflare version URLs take the `${id8}-${hostname}` form.
     const hostname = new URL(spec.api_workers_dev_url).hostname;
     const expectedAlias =
       worker === "api" && spec.deployment_mode === "update"
@@ -478,7 +371,7 @@ function validateEvidenceDocument({ content, context, name, spec }) {
 
   if (name.startsWith("worker-") && name.endsWith("-secrets.json")) {
     const worker = name.slice("worker-".length, -"-secrets.json".length);
-    const required = releaseInternals.requiredRemoteSecrets(spec)[worker];
+    const required = requiredRemoteSecrets(spec)[worker];
     if (
       evidence.worker !== worker ||
       JSON.stringify(evidence.secret_names) !== JSON.stringify(required) ||
@@ -498,9 +391,6 @@ function validateEvidenceDocument({ content, context, name, spec }) {
     if (evidence.worker !== worker || traffic.length !== 1 || traffic[0].percentage !== 100) {
       throw new TypeError(`${name} does not prove full activation`);
     }
-    // The activated version must be the version this release produced: the
-    // state Worker deploys its code candidate directly, while api/automation
-    // activate their secret-injected versions.
     const deployedIds = {
       api: context.secretsVersionId,
       automation: context.candidate.automation_secrets,
@@ -580,9 +470,6 @@ function validateEvidenceDocument({ content, context, name, spec }) {
     if (JSON.stringify(traffic) !== JSON.stringify(context.expectedTraffic[percentage])) {
       throw new TypeError(`${name} traffic does not match the rollout proof`);
     }
-    // The live hostname legitimately serves the previous version during a
-    // partial rollout; only a full (or bootstrap) deployment must serve the
-    // release SHA deterministically.
     validateSmokeHealth(
       evidence,
       `${spec.app_url}/api/v1/health`,
@@ -620,20 +507,6 @@ function validateEvidenceDocument({ content, context, name, spec }) {
   throw new TypeError(`${name} has no release evidence contract`);
 }
 
-/**
- * Scans evidence bytes for credential material before publication.
- *
- * Two fail-closed layers: the shared release credential pattern (database
- * URLs, private keys, provider secret keys), then every populated protected
- * environment secret as a literal substring. A hit rejects the release
- * directory rather than redacting it, because published artifacts must never
- * have contained credentials in the first place.
- *
- * @param {string} content - Raw file text
- * @param {Record<string, string | undefined>} environment - Process environment
- * @param {string} name - Contextual label for error reporting
- * @throws {TypeError} If credential material is present
- */
 function assertSecretFree(content, environment, name) {
   if (containsCredentialMaterial(content)) {
     throw new TypeError(`${name} embeds credential material`);
@@ -646,14 +519,6 @@ function assertSecretFree(content, environment, name) {
   }
 }
 
-/**
- * Extracts the declared contract version and digest of the canonical OpenAPI
- * document checked into the reviewed release commit.
- *
- * @param {string} repoRoot - Repository root directory path
- * @returns {Promise<{ path: string, sha256: string, version: string }>} Contract provenance record
- * @throws {TypeError} If the document is missing, oversized, or lacks info.version
- */
 async function openapiContract(repoRoot) {
   const relativePath = "packages/contracts/openapi.yaml";
   const filePath = path.join(repoRoot, relativePath);
@@ -671,26 +536,6 @@ async function openapiContract(repoRoot) {
   return { path: relativePath, sha256: sha256(content), version: value };
 }
 
-/**
- * Validates the allowlisted release evidence set and publishes the manifest.
- *
- * Classifies every file in the release directory as publishable evidence,
- * private scratch, or an illegal artifact; validates each allowlisted JSON
- * record against its contract (release binding, approval hold, plan digest,
- * cross-file version identity); binds all three operator reviews to
- * their per-phase plan digests; scans for credential material; and atomically
- * writes a deterministic redacted `release-manifest.json`.
- *
- * @param {object} params - Manifest parameters
- * @param {Array<string>} params.approvalPaths - Approval metadata file paths
- * @param {Record<string, string | undefined>} params.environment - Process environment
- * @param {object} params.iac - Validated current (final) IaC outputs
- * @param {string} params.outDir - Release output/evidence directory
- * @param {string} params.repoRoot - Repository root directory path
- * @param {object} params.spec - Validated release specification
- * @returns {Promise<object>} The written release manifest record
- * @throws {TypeError|Error} If evidence is missing, mismatched, secret-bearing, or approvals fail
- */
 export async function buildReleaseManifest({
   approvalPaths,
   environment,
@@ -709,8 +554,6 @@ export async function buildReleaseManifest({
     readPlanDigest(outDir, "unpause"),
   ]);
 
-  // Every hold must bind its own reviewed plan; a later hold can never reuse
-  // an earlier digest or label.
   const approvals = await loadApprovalMetadata({
     expectedNames: new Set(approvalScopes.map((scope) => `${spec.environment}-${scope}-approval`)),
     paths: approvalPaths,
@@ -722,9 +565,6 @@ export async function buildReleaseManifest({
     spec,
   });
 
-  // Classify the release directory. Unknown artifacts fail closed so the
-  // allowlist can never silently admit an unreviewed file; a file valid for
-  // the other deployment mode is rejected as stale or corrupted evidence.
   const entries = await readdir(outDir, { withFileTypes: true });
   const wranglerEntries = [];
   const wranglerLogFiles = [];
@@ -748,8 +588,6 @@ export async function buildReleaseManifest({
     if (publishable.has(entry.name)) {
       publishFiles.push(entry.name);
     } else if (wranglerLogPattern.test(entry.name)) {
-      // Wrangler NDJSON output logs are private scratch: scanned for
-      // credential material below but never publishable.
       wranglerLogFiles.push(entry.name);
     } else if (!privateAllowlist.has(entry.name)) {
       throw new TypeError(`unclassified release artifact: ${entry.name}`);
@@ -762,9 +600,6 @@ export async function buildReleaseManifest({
     throw new TypeError(`release evidence is incomplete: ${missing.join(", ")}`);
   }
 
-  // Approval files on the publishable list are independently re-validated
-  // against the release and their bound phase digest so copied artifacts
-  // cannot diverge from the metadata supplied to this command.
   const approvalByName = new Map(
     approvals.map((approval) => [approval.approval_job.name, approval]),
   );
@@ -819,9 +654,6 @@ export async function buildReleaseManifest({
     }
   }
 
-  // Cross-evidence identities the per-document validators bind against:
-  // the immutable code candidate, the deployable secrets version, the
-  // previous serving version, and each rollout's expected traffic split.
   if (!candidateEvidence || !secretsEvidence) {
     throw new TypeError("API candidate evidence is incomplete");
   }
@@ -870,9 +702,6 @@ export async function buildReleaseManifest({
   }
   await assertFrontendReleaseEvidence({ iac, outDir, spec });
 
-  // The final post-apply outputs must equal the unpause outputs byte-for-byte,
-  // must equal the outputs supplied for validation, and must prove the fully
-  // active end state.
   const finalContent = await readFile(path.join(outDir, "iac-outputs.json"), "utf8");
   assertSecretFree(finalContent, environment, "iac-outputs.json");
   const unpauseOutputsHash = files.find((entry) => entry.file === "iac-outputs-unpause.json");
@@ -885,15 +714,8 @@ export async function buildReleaseManifest({
   } catch {
     throw new TypeError("current IaC outputs must contain valid JSON");
   }
-  // The on-disk document is the raw OpenTofu output; the loaded `iac` input is
-  // its normalized form. Revalidating the file and comparing normalized forms
-  // proves the supplied outputs and the persisted outputs describe the same
-  // installation state without a brittle byte-level identity requirement.
   const finalIac = validateIacOutputs(parsedFinal, spec);
-  if (
-    JSON.stringify(releaseInternals.stableValue(finalIac)) !==
-    JSON.stringify(releaseInternals.stableValue(iac))
-  ) {
+  if (JSON.stringify(stableValue(finalIac)) !== JSON.stringify(stableValue(iac))) {
     throw new TypeError("current IaC outputs diverge from the loaded outputs");
   }
   const resources = iac.release_resources;
@@ -908,8 +730,6 @@ export async function buildReleaseManifest({
     throw new TypeError("final IaC outputs do not prove the active release");
   }
 
-  // Rendered configs and Wrangler output logs are scanned for credential
-  // material as defense in depth; they are never publishable evidence.
   for (const name of wranglerEntries) {
     const content = await readFile(path.join(outDir, "wrangler", name), "utf8");
     assertSecretFree(content, environment, `wrangler/${name}`);
@@ -938,7 +758,7 @@ export async function buildReleaseManifest({
     })),
     status: "complete",
   };
-  assertSecretFree(releaseInternals.json(manifest), environment, manifestName);
+  assertSecretFree(stableJson(manifest), environment, manifestName);
   await writeEvidence(outDir, manifestName, manifest);
   return manifest;
 }

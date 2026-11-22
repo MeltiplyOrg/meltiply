@@ -18,13 +18,6 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const markdownLink = /\]\(\s*(<[^>\n]+>|[^)\s\n]+)(?:\s+["'][^"'\n]*["'])?\s*\)/g;
 const externalTarget = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
 
-/**
- * Converts heading text to a GitHub-compatible URL anchor slug.
- * Strips Markdown links, images, HTML tags, formatting punctuation, and converts spaces to hyphens.
- *
- * @param {string} value - Raw heading text
- * @returns {string} Normalized lowercase anchor slug
- */
 function headingSlug(value) {
   return value
     .replace(imageLinkPattern, "$1")
@@ -37,13 +30,6 @@ function headingSlug(value) {
     .replace(headingWhitespacePattern, "-");
 }
 
-/**
- * Extracts all valid anchor targets from Markdown content, including headings and explicit HTML anchor tags.
- * Resolves duplicate heading slugs by appending numerical suffixes (-1, -2, etc.).
- *
- * @param {string} content - Markdown file content
- * @returns {Set<string>} Set of lowercase anchor strings
- */
 function headingAnchors(content) {
   const anchors = new Set();
   const duplicates = new Map();
@@ -64,12 +50,6 @@ function headingAnchors(content) {
   return anchors;
 }
 
-/**
- * Normalizes a raw link destination by stripping wrapping angle brackets and decoding URI percent-encoding.
- *
- * @param {string} raw - Raw link URL or path from Markdown syntax
- * @returns {string} Cleaned destination string
- */
 function normalizedDestination(raw) {
   const destination = raw.startsWith("<") ? raw.slice(1, -1) : raw;
   try {
@@ -79,27 +59,11 @@ function normalizedDestination(raw) {
   }
 }
 
-/**
- * Verifies whether a resolved filesystem target lies strictly within the repository root boundary.
- * Prevents directory traversal outside the worktree.
- *
- * @param {string} root - Absolute repository root path
- * @param {string} target - Absolute resolved target file path
- * @returns {boolean} True if target is within root, false if it escapes
- */
 function insideRoot(root, target) {
   const pathFromRoot = relative(root, target);
   return pathFromRoot === "" || (!pathFromRoot.startsWith("..") && !isAbsolute(pathFromRoot));
 }
 
-/**
- * Scans Markdown files for broken local links, missing heading anchors, and path traversals escaping the repo.
- * Ignores external links and code blocks while resolving relative and absolute paths against the repository root.
- *
- * @param {string} root - Repository root directory path
- * @param {Array<string>} markdownFiles - List of relative Markdown file paths to scan
- * @returns {{ failures: Array<string>, localLinks: number }} Sorted failure descriptions and count of verified local links
- */
 export function collectLinkFailures(root, markdownFiles) {
   const absoluteRoot = resolve(root);
   const failures = [];
@@ -153,24 +117,10 @@ export function collectLinkFailures(root, markdownFiles) {
   return { failures: failures.sort(), localLinks };
 }
 
-/**
- * Filters a list of file paths to those that exist on disk relative to root.
- *
- * @param {string} root - Base directory path
- * @param {Array<string>} files - File paths to check
- * @returns {Array<string>} Files that exist on disk
- */
 export function existingMarkdownFiles(root, files) {
   return files.filter((file) => existsSync(resolve(root, file)));
 }
 
-/**
- * High-level gate entrypoint that runs link validation across all tracked Markdown files.
- * Enforces zero broken links or missing anchors before PR merge or release.
- *
- * @returns {{ files: number, localLinks: number }} Number of scanned files and verified local links
- * @throws {Error} If any link failure or missing anchor is detected
- */
 export function runDocumentationLinkGate() {
   const files = trackedMarkdownFiles(repositoryRoot);
   const result = collectLinkFailures(repositoryRoot, files);

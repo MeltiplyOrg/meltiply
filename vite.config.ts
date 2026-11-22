@@ -1,9 +1,5 @@
 import { defineConfig } from "vite-plus";
 
-// Root lint policy for every workspace; nested configs cannot override it.
-// TypeScript/Worker hardening and frontend ownership rules share this entry.
-// The upstream React Hooks plugin supplies rules Oxlint does not implement.
-
 // Keeps UI imports on shared data boundaries, icon primitives, and the single
 // Sileo notification store. Both no-restricted-imports overrides reference
 // this list so the broad and component scopes cannot drift apart.

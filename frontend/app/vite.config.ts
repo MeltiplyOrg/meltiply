@@ -170,7 +170,7 @@ function themeBootstrapPlugin(): Plugin {
       const runtime = readFileSync(themeBootstrapRuntimeFile, "utf8");
       return html.replace(
         themeBootstrapMarker,
-        `<script>${renderThemeBootstrap(runtime, { mode: "class" })}</script>`,
+        `<script>${renderThemeBootstrap(runtime)}</script>`,
       );
     },
   };

@@ -10,12 +10,6 @@ import { withRetry } from "./retry.mjs";
 
 const temporaryRoots = [];
 
-/**
- * Creates a temporary locale tree and removes it after the test.
- *
- * @param {Record<string, string>} files Path relative to the fixture root → file content.
- * @returns {string} Fixture root.
- */
 function fixture(files) {
   const root = mkdtempSync(join(tmpdir(), "meltiply-i18n-"));
   temporaryRoots.push(root);
@@ -27,13 +21,6 @@ function fixture(files) {
   return root;
 }
 
-/**
- * Returns a provider that serves one response per call, recording each prompt.
- * Errors are thrown instead of serialized so retry paths can be exercised.
- *
- * @param {Array<string[] | Error>} responses Responses in call order.
- * @returns {{name: string, prompts: string[], complete: (prompt: string) => Promise<string>}}
- */
 function scriptedProvider(responses) {
   const prompts = [];
   return {
@@ -49,11 +36,6 @@ function scriptedProvider(responses) {
   };
 }
 
-/**
- * Fails the test if generation ever calls the provider.
- *
- * @returns {{name: string, complete: () => Promise<never>}}
- */
 function noProvider() {
   return {
     name: "forbidden",
@@ -152,8 +134,6 @@ test("retries transient provider failures with backoff", async () => {
 
   assert.deepEqual(result, { Hello: "Hola" });
   assert.equal(provider.prompts.length, 3);
-  // Two failures, so the second wait must double the first: a constant-delay
-  // implementation would emit [5, 5].
   assert.deepEqual(delays, [5, 10]);
 });
 
@@ -177,7 +157,6 @@ test("surfaces the provider failure once retries are exhausted", async () => {
       return true;
     },
   );
-  // retries: 2 means the first attempt plus two retries, and two waits.
   assert.equal(provider.prompts.length, 3);
   assert.deepEqual(delays, [5, 10]);
 });

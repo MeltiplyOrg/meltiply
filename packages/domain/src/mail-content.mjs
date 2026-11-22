@@ -13,12 +13,10 @@ const htmlEscapes = {
 };
 
 /**
- * Checks a normalized bare sender address against the shared dot-atom/DNS policy.
- * Empty local-part atoms, header syntax, and values over 254 characters fail.
- * Local single-label domains are allowed unless release validation requires a dot.
- * @param {string} value - Address without surrounding whitespace or display name.
- * @param {boolean} [requireDottedDomain=false] - Require multiple DNS labels.
- * @returns {boolean} Whether the address satisfies the sender policy.
+ * Bare dot-atom sender address of at most 254 characters; single-label domains pass unless `requireDottedDomain`.
+ * @param {string} value
+ * @param {boolean} [requireDottedDomain]
+ * @returns {boolean}
  */
 export function isMailSenderAddress(value, requireDottedDomain = false) {
   return (
@@ -29,11 +27,9 @@ export function isMailSenderAddress(value, requireDottedDomain = false) {
 }
 
 /**
- * Checks a normalized sender name without allocating a character array.
- * Names over 200 characters, ASCII controls, DEL, and header punctuation fail;
- * callers decide whether blank names are omitted or rejected.
- * @param {string} value - Display name after the caller's normalization policy.
- * @returns {boolean} Whether the name is safe as an unquoted display name.
+ * Display name of at most 200 characters, safe unquoted in a mail header.
+ * @param {string} value
+ * @returns {boolean}
  */
 export function isMailSenderName(value) {
   if (value.length > 200) return false;
@@ -51,14 +47,9 @@ export function isMailSenderName(value) {
 }
 
 /**
- * Resolves the configured sender identity for both Worker mail paths.
- *
- * `MAIL_FROM_ADDRESS` must be a bare dot-atom address; malformed values yield
- * undefined so delivery fails closed as unavailable rather than dispatching an
- * invalid sender. `MAIL_FROM_NAME` is optional; a nonblank unsafe name also
- * fails closed instead of silently dropping it, and a blank name is omitted.
- * @param {{ MAIL_FROM_ADDRESS?: string, MAIL_FROM_NAME?: string }} env - Worker variables.
- * @returns {{ email: string, name?: string } | undefined} The validated sender, or undefined.
+ * Configured sender, or undefined (mail unavailable) when the address or a nonblank name is unsafe.
+ * @param {{ MAIL_FROM_ADDRESS?: string, MAIL_FROM_NAME?: string }} env
+ * @returns {{ email: string, name?: string } | undefined}
  */
 export function mailSenderConfiguration(env) {
   const email = env.MAIL_FROM_ADDRESS?.trim();
@@ -76,11 +67,9 @@ export function mailSenderConfiguration(env) {
 }
 
 /**
- * Escapes raw mail-template text once for HTML content and quoted attributes.
- * Replaces &, <, >, and both quotes in one pass; existing entities are raw input
- * too, so `&amp;` becomes `&amp;amp;`. Plain-text bodies must stay unescaped.
- * @param {string} value - Raw text, not already HTML-escaped content.
- * @returns {string} Text safe to interpolate into HTML mail templates.
+ * Escapes raw text for HTML mail content and quoted attributes; existing entities are escaped again.
+ * @param {string} value
+ * @returns {string}
  */
 export function escapeMailHtml(value) {
   return value.replace(

@@ -374,32 +374,6 @@ export function withReadRetry<A>(
 }
 
 /**
- * Projects a provider failure into a log-safe diagnostic record.
- * Projects only canonical failure fields and credential-free request metadata.
- * Raw causes remain on the Error for the shared error serializer, never in this
- * context record. Returns classification, code, retryability, request facts, and
- * any missing public OAuth scope names so a grant problem is named in logs.
- */
-export function failureDiagnostic(error: ProviderAdapterError): {
-  classification: ProviderAdapterError["failure"]["classification"];
-  code: string;
-  retryable: boolean;
-  retryAfterSeconds?: number;
-  request?: ProviderAdapterError["request"];
-  missing_scopes?: readonly string[];
-} {
-  const { classification, code, retryable, retryAfterSeconds } = error.failure;
-  return {
-    classification,
-    code,
-    retryable,
-    ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
-    ...(error.request ? { request: error.request } : {}),
-    ...(error.missingScopes ? { missing_scopes: error.missingScopes } : {}),
-  };
-}
-
-/**
  * Effect service shape exposing worker-facing provider operations.
  * Keeps provider-specific branching inside `packages/providers`: generic
  * workers select a platform and compose Effects without learning per-provider

@@ -1,12 +1,5 @@
 /**
- * Shared byte-encoding helpers for object storage adapters and SigV4 signing.
- */
-
-/**
  * Converts an ArrayBuffer or Uint8Array to a lowercase hexadecimal string without intermediate array copies.
- *
- * @param value - Binary buffer or view to represent as hex.
- * @returns Lowercase hexadecimal string.
  */
 export function bytesToHex(value: ArrayBuffer | Uint8Array): string {
   const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
@@ -17,10 +10,6 @@ export function bytesToHex(value: ArrayBuffer | Uint8Array): string {
 
 /**
  * Validates byte range bounds shared by all `ObjectStore.readRange` implementations.
- *
- * @param offset - Non-negative start byte offset.
- * @param maximumBytes - Slice length between 1 and 1 MiB.
- * @throws {RangeError} When `offset` or `maximumBytes` is outside safe bounds.
  */
 export function assertValidByteRange(offset: number, maximumBytes: number): void {
   if (!Number.isSafeInteger(offset) || offset < 0) {

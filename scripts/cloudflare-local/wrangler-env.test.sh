@@ -31,17 +31,11 @@ append_local_wrangler_env_file args "$fixture/.env"
 
 append_local_wrangler_overrides args
 
-# Env-file values — secret or not — never become command-line arguments, which
-# prevents Wrangler's startup banner from logging them. Checked after the
-# origin overrides are appended, because that helper is what actually adds
-# `--var` arguments and could leak an env value into them.
 if printf '%s\n' "${args[@]}" | grep -q "local-encryption-key\|local-auth-secret\|no-reply@meltiply.local"; then
   echo "env-file value was forwarded as a Wrangler command-line argument" >&2
   exit 1
 fi
 
-# The signing key must also stay out: it is the value most likely to be added by
-# mistake when a new override is introduced.
 WRANGLER_DEV_BETTER_AUTH_JWKS_URL="http://127.0.0.1:8787/api/auth/jwks"
 args=()
 append_local_wrangler_overrides args
@@ -82,9 +76,6 @@ configure_local_wrangler_network "$repo_root" 3000 8787
 [[ "$WRANGLER_DEV_ALLOWED_ORIGINS" == "$ALLOWED_ORIGINS" ]]
 [[ "$WRANGLER_DEV_APP_URL" == "$APP_URL" ]]
 
-# The container-runtime flag is explicit so local media processing is a chosen
-# mode rather than an accident of the pinned Wrangler default, and an invalid
-# value must stop the launcher instead of silently booting without the engine.
 container_args=()
 WRANGLER_DEV_ENABLE_CONTAINERS=true append_local_wrangler_container_flags container_args
 printf '%s\n' "${container_args[@]}" | grep -Fxq -- '--enable-containers=true'
@@ -103,7 +94,5 @@ fi
 unset WRANGLER_DEV_ENABLE_CONTAINERS
 
 node --test "$repo_root/scripts/cloudflare-local/worker-config-session.test.mjs"
-# The type generator reuses the session mirror to keep checkout env files out
-# of the checked-in declarations; its regression lives beside it.
 node --test "$repo_root/scripts/cloudflare-local/worker-types.test.mjs"
 printf 'wrangler local environment tests passed\n'

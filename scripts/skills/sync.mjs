@@ -14,11 +14,6 @@ const packRef = "6d8d860bbe8fd67c8354a8564418dbd8c353d606";
 const skillsCli = "skills@1.7.4";
 const agent = "opencode";
 
-/**
- * Skills synchronized from the Essential Kit pack. `pr` is deliberately absent:
- * it is repository-owned because it follows this repo's completion gate and PR
- * template instead of the pack's standalone PR-body guide.
- */
 const managedSkills = [
   "code-review",
   "codebase-design",
@@ -37,23 +32,12 @@ const managedSkills = [
   "writing-for-agents",
 ];
 
-/**
- * The pack addresses a generic domain document while this repository keeps its
- * `CONTEXT.md` naming. Each replacement is an exact filename, so the order does
- * not overlap with the others.
- */
 const contextNames = [
   ["GLOSSARY-FORMAT.md", "CONTEXT-FORMAT.md"],
   ["GLOSSARY-MAP.md", "CONTEXT-MAP.md"],
   ["GLOSSARY.md", "CONTEXT.md"],
 ];
 
-/**
- * Yields every regular file below a directory, recursively.
- *
- * @param {string} directory - Absolute directory to walk
- * @returns {AsyncGenerator<string>} Absolute file paths
- */
 async function* walkFiles(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
@@ -65,15 +49,6 @@ async function* walkFiles(directory) {
   }
 }
 
-/**
- * Replaces the pack's domain-document names with this repository's names in
- * every text file below the staged skills directory, then renames the format
- * file itself. The pack contains only Markdown, YAML, and shell files, so every
- * file is safe to read as UTF-8.
- *
- * @param {string} directory - Staged `.agents/skills` directory
- * @returns {Promise<void>} Resolves after all matches are rewritten
- */
 async function applyContextNames(directory) {
   for (const skill of managedSkills) {
     const skillDirectory = join(directory, skill);
@@ -94,14 +69,6 @@ async function applyContextNames(directory) {
   }
 }
 
-/**
- * Keeps explicit cache review in the checklist and reviewer prompt reproducible
- * when the pinned pack is installed. Covers existing-cache correctness as well
- * as measured opportunities, using Meltiply's authorization/runtime constraints.
- *
- * @param {string} directory - Staged `.agents/skills` directory
- * @returns {Promise<void>} Resolves after both Optimization review sources are adapted
- */
 async function applyCacheReviewGuidance(directory) {
   const file = join(directory, "code-review", "SCALING.md");
   const source = await readFile(file, "utf8");
@@ -152,15 +119,6 @@ async function applyCacheReviewGuidance(directory) {
   await writeFile(skillFile, skillSource.replace(promptAnchor, cachePrompt + promptAnchor));
 }
 
-/**
- * Installs the pinned pack into a staging directory with the `skills` CLI.
- * The CLI is invoked outside the repository so a failed install cannot leave
- * partial skill directories behind.
- *
- * @param {string} directory - Empty staging directory
- * @returns {void}
- * @throws {Error} When the CLI fails or omits one of the managed skills
- */
 function installPack(directory) {
   const args = ["--yes", skillsCli, "add", `${pack}#${packRef}`, "-a", agent, "-y"];
   for (const skill of managedSkills) {
@@ -183,12 +141,6 @@ function installPack(directory) {
   }
 }
 
-/**
- * Installs the pack into a temporary directory and applies this repository's
- * context naming and cache-safety review guidance.
- *
- * @returns {Promise<{staging: string, skills: string}>} Staged install
- */
 async function stagePack() {
   const staging = await mkdtemp(join(tmpdir(), "meltiply-skills-"));
   try {
@@ -203,13 +155,6 @@ async function stagePack() {
   }
 }
 
-/**
- * Replaces the managed skill directories with the staged copies. Deleting
- * first removes files the upstream pack no longer ships.
- *
- * @param {string} stagedSkills - Staged `.agents/skills` directory
- * @returns {Promise<void>} Resolves after every managed directory is replaced
- */
 async function installStaged(stagedSkills) {
   for (const skill of managedSkills) {
     const target = join(skillsRoot, skill);
@@ -218,12 +163,6 @@ async function installStaged(stagedSkills) {
   }
 }
 
-/**
- * Lists file paths relative to a directory, sorted for stable comparisons.
- *
- * @param {string} directory - Directory to list
- * @returns {Promise<Array<string>>} Sorted relative paths
- */
 async function listRelativeFiles(directory) {
   const files = [];
   for await (const file of walkFiles(directory)) {
@@ -232,13 +171,6 @@ async function listRelativeFiles(directory) {
   return files.sort();
 }
 
-/**
- * Compares two skill directories file by file.
- *
- * @param {string} expected - Freshly staged skill directory
- * @param {string} actual - Committed skill directory
- * @returns {Promise<Array<string>>} Human-readable differences
- */
 async function compareDirectories(expected, actual) {
   if (!existsSync(actual)) {
     return [`missing directory: ${relative(repositoryRoot, actual)}`];
@@ -267,13 +199,6 @@ async function compareDirectories(expected, actual) {
   return failures;
 }
 
-/**
- * Verifies the committed skills match a fresh install of the pinned pack.
- * Never writes to the repository.
- *
- * @returns {Promise<void>} Resolves when everything matches
- * @throws {Error} When skill files drift from the pinned pack
- */
 async function check() {
   const staged = await stagePack();
   try {
@@ -296,12 +221,6 @@ async function check() {
   }
 }
 
-/**
- * Installs the pinned pack, reapplies this repository's context naming, and
- * writes the managed skill directories.
- *
- * @returns {Promise<void>} Resolves after the repository is updated
- */
 async function sync() {
   const staged = await stagePack();
   try {

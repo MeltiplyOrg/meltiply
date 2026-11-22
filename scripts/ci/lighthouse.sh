@@ -81,8 +81,6 @@ node "$lighthouse_cli" "$url" \
 
 test -s "$output"
 
-# Apply the app's existing budgets to the retained report: emitting JSON alone
-# must not make an inaccessible or slow production build pass the manual CI lane.
 "$repo_root/frontend/app/node_modules/.bin/lhci" assert \
   --config "$repo_root/frontend/app/.lighthouserc.json" \
   --lhr "$output"

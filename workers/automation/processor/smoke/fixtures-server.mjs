@@ -1,13 +1,3 @@
-// Smoke object service for the processor harness (issue #284).
-//
-// Stands in for object storage during the native processor smoke: it serves one
-// exact object per GET and records one exact object per PUT, so the harness can
-// inspect the bytes the engine actually wrote. It exists only so the native
-// compute proof does not depend on local R2 emulation; the engine still sees
-// nothing but a GET capability and a PUT capability, and no credential of any
-// kind crosses this boundary.
-//
-// Env: FIXTURE_DIR (root holding `objects/`), FIXTURE_PORT.
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, readdir, rm, stat } from "node:fs/promises";
@@ -19,23 +9,14 @@ const fixtureDir = process.env.FIXTURE_DIR ?? "/fixtures";
 const port = Number(process.env.FIXTURE_PORT ?? 8099);
 const objectsDir = path.join(fixtureDir, "objects");
 
-/** Uploads the engine performed, newest last; read back by the harness assertions. */
 const recorded = [];
 
-/**
- * Resolves a request path to a file inside the objects directory, refusing any
- * traversal so a crafted job URL cannot read outside the fixture set.
- */
 function objectPath(name) {
   const resolved = path.resolve(objectsDir, name);
   if (!resolved.startsWith(`${objectsDir}${path.sep}`)) return null;
   return resolved;
 }
 
-/**
- * Serves one exact object with an accurate content length, which is what lets
- * the engine verify the declared size before decoding anything.
- */
 async function serveObject(response, name) {
   const file = objectPath(name);
   if (!file) {
@@ -54,12 +35,6 @@ async function serveObject(response, name) {
   }
 }
 
-/**
- * Removes one exact object, standing in for the Worker's staging-clear step:
- * before re-invoking a job whose verdict was never recorded, the Worker deletes
- * the unrecorded output so a replay must prove it can recreate the bytes.
- * Idempotent like a real object delete: a missing object still answers 204.
- */
 async function deleteObject(response, name) {
   const file = objectPath(name);
   if (!file) {
@@ -70,10 +45,6 @@ async function deleteObject(response, name) {
   response.writeHead(204, { "content-length": "0" }).end();
 }
 
-/**
- * Stores one exact object, honouring create-only semantics when the request
- * carries `If-None-Match: *` so a replayed capability cannot overwrite bytes.
- */
 async function storeObject(request, response, name) {
   const file = objectPath(name);
   if (!file) {
@@ -81,25 +52,20 @@ async function storeObject(request, response, name) {
     return;
   }
   const createOnly = (request.headers["if-none-match"] ?? "") === "*";
-  if (createOnly) {
-    try {
-      await stat(file);
-      response.writeHead(412, { "content-length": "0" }).end();
-      return;
-    } catch {
-      // No object yet, so the create is allowed to proceed.
-    }
+  if (
+    createOnly &&
+    (await stat(file).then(
+      () => true,
+      () => false,
+    ))
+  ) {
+    response.writeHead(412, { "content-length": "0" }).end();
+    return;
   }
-  // The upload lands beside the fixtures so a later job can legitimately read a
-  // rendition back as its own input, exactly as a crash retry would.
   const stored = await storeBody(request, file, name);
   response.writeHead(200, { "content-length": "0", etag: stored.etag }).end();
 }
 
-/**
- * Streams a request body to disk and records its digest and size, so the
- * harness can compare the stored bytes against what the engine reported.
- */
 async function storeBody(request, target, name) {
   const digest = createHash("sha256");
   let bytes = 0;
@@ -114,9 +80,6 @@ async function storeBody(request, target, name) {
     sink.on("finish", resolve);
     request.pipe(sink);
   });
-  // A deliberately opaque ETag: it is not the byte count, so an engine that
-  // reports something other than the origin's tag cannot pass by coincidence,
-  // and its quoting exercises the engine's HTTP to R2 normalization.
   const etag = `"${bytes.toString(16)}-${name.length.toString(16)}"`;
   const sha256 = digest.digest("hex");
   recorded.push({ bytes, etag, key: name, sha256 });

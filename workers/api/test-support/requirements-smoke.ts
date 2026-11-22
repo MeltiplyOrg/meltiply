@@ -58,7 +58,7 @@ export default {
         },
         transferModes: [],
         getPublicationRequirements: async (context) => {
-          const response = await http.request<unknown>(context, {
+          const response = await http.request(context, {
             url: "https://controlled-requirements.test/requirements",
             method: "GET",
             headers: { "X-Request-ID": context.requestId },

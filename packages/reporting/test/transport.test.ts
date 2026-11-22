@@ -5,15 +5,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { reportingConfiguration } from "../src/configuration";
 import { CAPTURE_TIMEOUT_MILLISECONDS, createPostHogTransport } from "../src/transport";
 
-/**
- * Controlled PostHog-compatible capture receiver.
- *
- * These cases exercise the real transport against a real socket on loopback: no
- * `fetch` stub and no echoing adapter stands in for the reporting module. The
- * receiver records the bytes the transport actually sent, which is the only
- * evidence that proves the outbound payload and the deployment controls.
- */
-
 interface ReceivedRequest {
   body: Record<string, unknown>;
   headers: Record<string, string | string[] | undefined>;
@@ -21,7 +12,6 @@ interface ReceivedRequest {
   url: string;
 }
 
-/** Receiver behaviour for the next requests. */
 type ReceiverMode = { kind: "ok" } | { kind: "status"; status: number } | { kind: "hang" };
 
 const receiver = {
@@ -64,13 +54,11 @@ afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-/** Resets recorded requests and the receiver's behaviour. */
 function resetReceiver(mode: ReceiverMode = { kind: "ok" }) {
   receiver.mode = mode;
   receiver.requests = [];
 }
 
-/** Resolves the destination the transport under test will use. */
 function destinationFor(host = origin) {
   const configuration = reportingConfiguration({
     DEPLOYMENT_CATEGORY: "selfhosted",

@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { DomainError, type RequestContext } from "@meltiply/domain";
+import { ActiveOrganizationRequiredError, type RequestContext } from "@meltiply/domain";
 import { ProviderAdapterError } from "@meltiply/providers";
 
 import { CoreApiError } from "../core-types";
@@ -7,7 +7,7 @@ import { CoreApiError } from "../core-types";
 /**
  * Lifts one sync or async route step into an Effect program.
  *
- * Preserves typed failures (CoreApiError, DomainError, ProviderAdapterError) on the
+ * Preserves typed failures (CoreApiError, ActiveOrganizationRequiredError, ProviderAdapterError) on the
  * failure channel so the boundary maps them to the existing HTTP error envelope;
  * unexpected throws escape as defects so they take the 500 internal_error path with
  * diagnostics instead of being misclassified as typed client errors. Covers sync
@@ -20,12 +20,16 @@ import { CoreApiError } from "../core-types";
  */
 export function fromPromise<A>(
   operation: () => Promise<A> | A,
-): Effect.Effect<A, CoreApiError | DomainError | ProviderAdapterError, RequestContext> {
+): Effect.Effect<
+  A,
+  CoreApiError | ActiveOrganizationRequiredError | ProviderAdapterError,
+  RequestContext
+> {
   return Effect.tryPromise({
     catch: (cause) => {
       if (
         cause instanceof CoreApiError ||
-        cause instanceof DomainError ||
+        cause instanceof ActiveOrganizationRequiredError ||
         cause instanceof ProviderAdapterError
       ) {
         return cause;

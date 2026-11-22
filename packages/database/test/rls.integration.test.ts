@@ -3,12 +3,8 @@ import { Cause, Effect, Exit, Option } from "effect";
 import { afterAll, afterEach, describe, expect, it } from "vite-plus/test";
 
 import {
-  acquireClient,
-  createDatabaseServiceLive,
-  createDatabaseServiceTest,
   createHyperdrivePool,
-  DatabaseService,
-  destroyClientsOnRelease,
+  createHyperdrivePoolCache,
   serializeAuthenticatedClaims,
   withAuthenticatedTransactionEffect,
   withTransactionEffect,
@@ -25,10 +21,6 @@ const pool = createHyperdrivePool({ connectionString }, { max: 2 });
 afterAll(async () => {
   await pool.end();
 });
-
-// Seeded identities (scripts/cloudflare-local/postgres/seed.sql): Better Auth
-// subjects auth_user_local_alpha/beta map to internal users 10000000-…-1/2,
-// team workspaces 20000000-…-1/2, and one personal workspace per user.
 const alphaSubject = "auth_user_local_alpha";
 const betaSubject = "auth_user_local_beta";
 const alphaUserId = "10000000-0000-4000-8000-000000000001";
@@ -37,7 +29,6 @@ const betaOrgId = "20000000-0000-4000-8000-000000000002";
 const alphaAssetId = "40000000-0000-4000-8000-000000000001";
 const betaAssetId = "40000000-0000-4000-8000-000000000002";
 
-/** Requires the intended PostgreSQL rejection, not an unrelated fixture or connection failure. */
 function expectDatabaseFailure(exit: Exit.Exit<unknown, unknown>, code: string): void {
   expect(Exit.isFailure(exit)).toBe(true);
   if (Exit.isFailure(exit)) {
@@ -69,10 +60,6 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
   });
 
   it("rejects a cross-tenant write", async () => {
-    // The row is fully valid for Beta's workspace — its Brand Profile really
-    // belongs to Beta — so only the INSERT policy's org-claim predicate can
-    // reject it. A row that also broke a NOT NULL or foreign key would fail
-    // even with the policy dropped and would prove nothing.
     const betaProfileId = "a0000000-0000-4000-8000-000000000002";
     const exit = await Effect.runPromiseExit(
       withAuthenticatedTransactionEffect(
@@ -95,7 +82,6 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
       expect(Option.isSome(failure)).toBe(true);
       if (Option.isSome(failure)) {
         expect(failure.value).toMatchObject({ _tag: "DatabaseError" });
-        // RLS surfaces as PostgreSQL insufficient_privilege (42501).
         expect((failure.value as { cause?: { code?: string } }).cause).toMatchObject({
           code: "42501",
         });
@@ -142,7 +128,6 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
   });
 
   it("does not leak transaction-local claims through the pool", async () => {
-    // Positive control: the same query returns a row while the claims are set.
     await Effect.runPromise(
       withAuthenticatedTransactionEffect(
         pool,
@@ -156,10 +141,6 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
           }),
       ),
     );
-
-    // pg-pool hands back the most recently released client, so this checkout
-    // reuses the connection that carried the claims; a surviving
-    // `set_config(..., false)` would make the count visible here.
     const client = await pool.connect();
     try {
       const result = await client.query<{ count: string }>(
@@ -267,8 +248,6 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
     const gammaUserId = "10000000-0000-4000-8000-000000000003";
     const deltaSubject = "auth_user_local_delta";
     const deltaUserId = "10000000-0000-4000-8000-000000000004";
-
-    // Editor may write content.
     const inserted = await Effect.runPromise(
       withAuthenticatedTransactionEffect(
         pool,
@@ -290,8 +269,6 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
         (client) => client.query("DELETE FROM assets WHERE id = $1", [assetId]),
       ),
     );
-
-    // Editor may not manage Brand Profiles.
     const editorBrandWrite = await Effect.runPromiseExit(
       withAuthenticatedTransactionEffect(
         pool,
@@ -305,8 +282,6 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
       ),
     );
     expectDatabaseFailure(editorBrandWrite, "42501");
-
-    // Viewer cannot write content.
     const viewerWrite = await Effect.runPromiseExit(
       withAuthenticatedTransactionEffect(
         pool,
@@ -320,10 +295,6 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
       ),
     );
     expectDatabaseFailure(viewerWrite, "42501");
-
-    // Viewer reads remain available. Asserting a specific seeded row (rather
-    // than `count >= 0`, which no implementation can fail) proves the Viewer
-    // policy admits rows instead of silently returning none.
     const viewerRead = await Effect.runPromise(
       withAuthenticatedTransactionEffect(
         pool,
@@ -377,7 +348,6 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
     );
 
     try {
-      // Ordinary Editor edits to a protected Post remain allowed.
       const editorEdit = await Effect.runPromise(
         asEditor((client) =>
           client.query<{ id: string }>(
@@ -387,18 +357,12 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
         ),
       );
       expect(editorEdit.rows).toEqual([{ id: publishedPostId }]);
-
-      // A soft delete is an UPDATE, so the column-specific trigger must reject
-      // it even though the Post row is otherwise editable.
       const editorSoftDelete = await Effect.runPromiseExit(
         asEditor((client) =>
           client.query("UPDATE posts SET deleted_at = now() WHERE id = $1", [publishedPostId]),
         ),
       );
       expectDatabaseFailure(editorSoftDelete, "42501");
-
-      // RLS hides the published Post from DELETE, so the statement affects no
-      // rows instead of raising; the row and its distribution must survive.
       const editorDelete = await Effect.runPromise(
         asEditor((client) =>
           client.query<{ id: string }>("DELETE FROM posts WHERE id = $1 RETURNING id", [
@@ -414,8 +378,6 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
         ),
       );
       expect(survivor.rows).toEqual([{ id: publishedPostId }]);
-
-      // Drafts without published history remain deletable by Editors.
       const draftDelete = await Effect.runPromise(
         asEditor((client) =>
           client.query<{ id: string }>("DELETE FROM posts WHERE id = $1 RETURNING id", [
@@ -435,11 +397,10 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
     }
   });
 
-  it("destroys connections after use when destroy-after-use is enabled", async () => {
-    // Pool.query uses connect(callback) internally; it must finish and release
-    // capacity before Promise-based transaction checkouts use the same pool.
-    const destroyPool = destroyClientsOnRelease(
-      createHyperdrivePool({ connectionString }, { max: 2 }),
+  it("closes request-owned pool connections on release", async () => {
+    const destroyPool = createHyperdrivePoolCache("test")(
+      { connectionString },
+      { ENVIRONMENT: "local" },
     );
     try {
       const result = await destroyPool.query<{ one: number }>("SELECT 1 AS one");
@@ -450,8 +411,6 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
       await first.query("SELECT 1 AS one");
       first.release();
       expect(destroyPool.totalCount).toBe(0);
-
-      // A later checkout still works on a freshly created connection.
       const second = await destroyPool.connect();
       await second.query("SELECT 1 AS one");
       second.release();
@@ -571,42 +530,7 @@ describe("Effect transaction paths against PostgreSQL", () => {
       }
     }
   });
-
-  it("serves scoped clients and the live DatabaseService", async () => {
-    const scoped = await Effect.runPromise(
-      Effect.scoped(
-        acquireClient(pool).pipe(
-          Effect.flatMap((client) => client.query<{ two: number }>("SELECT 2 AS two")),
-        ),
-      ),
-    );
-    expect(scoped.rows).toEqual([{ two: 2 }]);
-
-    const layer = createDatabaseServiceLive(pool);
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const database = yield* DatabaseService;
-        const one = yield* database.withTransaction((client) =>
-          client.query<{ one: number }>("SELECT 1 AS one"),
-        );
-        const alpha = yield* database.withAuthenticatedTransaction(
-          { org_id: alphaOrgId, sub: alphaSubject },
-          (client) => client.query<{ id: string }>("SELECT id FROM assets ORDER BY id"),
-        );
-        return { alpha, one };
-      }).pipe(Effect.provide(layer)),
-    );
-    expect(result.one.rows).toEqual([{ one: 1 }]);
-    expect(result.alpha.rows).toEqual([{ id: alphaAssetId }]);
-  });
 });
-
-// Brand Profile ownership boundary (issue #255): brand_profiles is the
-// mandatory parent of assets, platform_accounts, and distributions. These
-// tests exercise the real constraints through authenticated transactions so
-// both DDL enforcement and RLS visibility are covered. Seeded users are
-// workspace admins; a member-role fixture cannot be created because
-// org_members grants no INSERT to the authenticated role.
 describe("Brand Profile ownership and lifecycle constraints", () => {
   const seededAlphaProfile = "a0000000-0000-4000-8000-000000000001";
   const seededBetaProfile = "a0000000-0000-4000-8000-000000000002";
@@ -622,11 +546,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
   const postB = "48000000-0000-4000-8000-0000000000b1";
   const alphaClaims = { org_id: alphaOrgId, sub: alphaSubject };
   const betaClaims = { org_id: betaOrgId, sub: betaSubject };
-
-  // Platform accounts are written through the system role in production
-  // (meltiply_rls holds no INSERT grant on the table), so fixtures for them
-  // use a privileged pool; brand profile, asset, and distribution writes stay
-  // on the authenticated pool to exercise RLS.
   const systemPool = createHyperdrivePool(
     {
       connectionString: integrationDatabaseUrl(
@@ -641,14 +560,9 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
     Effect.runPromise(withTransactionEffect(systemPool, operation));
   const asAlpha = <A, E>(operation: (client: EffectTransactionClient) => Effect.Effect<A, E>) =>
     Effect.runPromise(withAuthenticatedTransactionEffect(pool, alphaClaims, operation));
-
-  // The privileged pool holds open sockets, so it must not outlive the suite.
   afterAll(async () => {
     await systemPool.end();
   });
-
-  // Inserts the two alpha profiles used across the suite; callers that need
-  // additional rows create them inside their own transaction.
   const seedProfiles = () =>
     asAlpha((client) =>
       client.query(
@@ -661,8 +575,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
     );
 
   afterEach(async () => {
-    // Deleting the profiles cascades through every owned row, so cleanup
-    // needs no per-table deletes; referential actions bypass RLS.
     await asAlpha((client) =>
       client.query("DELETE FROM brand_profiles WHERE id = ANY($1::uuid[])", [[profileA, profileB]]),
     );
@@ -675,8 +587,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
 
   it("enforces normalized unique names per workspace and reserves soft-deleted names", async () => {
     await seedProfiles();
-
-    // Case and whitespace variants collide with the stored normalized name.
     const duplicate = await Effect.runPromiseExit(
       withAuthenticatedTransactionEffect(pool, alphaClaims, (client) =>
         client.query(
@@ -687,8 +597,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
       ),
     );
     expectDatabaseFailure(duplicate, "23505");
-
-    // The same normalized name is free in another workspace.
     await Effect.runPromise(
       withAuthenticatedTransactionEffect(pool, betaClaims, (client) =>
         client.query(
@@ -698,8 +606,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
         ),
       ),
     );
-
-    // Soft deletion keeps the name reserved until purge.
     await asAlpha((client) =>
       client.query(
         `UPDATE brand_profiles
@@ -770,16 +676,12 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
         [accountA, alphaOrgId, profileA, accountB, profileB],
       ),
     );
-
-    // Missing brand_profile_id violates NOT NULL.
     const unowned = await Effect.runPromiseExit(
       withAuthenticatedTransactionEffect(pool, alphaClaims, (client) =>
         client.query(`INSERT INTO assets (org_id, title) VALUES ($1, 'orphan')`, [alphaOrgId]),
       ),
     );
     expectDatabaseFailure(unowned, "23502");
-
-    // A Post cannot be attached to an Asset owned by another Brand Profile.
     const crossAttachment = await Effect.runPromiseExit(
       withAuthenticatedTransactionEffect(pool, alphaClaims, (client) =>
         client.query(
@@ -790,8 +692,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
       ),
     );
     expectDatabaseFailure(crossAttachment, "23503");
-
-    // Same-brand distribution succeeds.
     await asAlpha((client) =>
       client.query(
         `INSERT INTO distributions
@@ -800,8 +700,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
         [alphaOrgId, profileA, postA, accountA],
       ),
     );
-
-    // Post from another brand profile is rejected by the composite FK.
     const crossPost = await Effect.runPromiseExit(
       withAuthenticatedTransactionEffect(pool, alphaClaims, (client) =>
         client.query(
@@ -813,8 +711,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
       ),
     );
     expectDatabaseFailure(crossPost, "23503");
-
-    // Platform account from another brand profile is rejected likewise.
     const crossAccount = await Effect.runPromiseExit(
       withAuthenticatedTransactionEffect(pool, alphaClaims, (client) =>
         client.query(
@@ -826,8 +722,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
       ),
     );
     expectDatabaseFailure(crossAccount, "23503");
-
-    // One Post and Channel pair has at most one Distribution row.
     const duplicateDistribution = await Effect.runPromiseExit(
       withAuthenticatedTransactionEffect(pool, alphaClaims, (client) =>
         client.query(
@@ -860,10 +754,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
         [accountA, alphaOrgId, profileA],
       ),
     );
-
-    // The same external identity cannot attach to another workspace; the
-    // duplicate attempt also runs as the system role because the
-    // authenticated role holds no INSERT grant on platform_accounts.
     const duplicate = await Effect.runPromiseExit(
       withTransactionEffect(systemPool, (client) =>
         client.query(
@@ -875,9 +765,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
       ),
     );
     expectDatabaseFailure(duplicate, "23505");
-
-    // A Brand Profile owns at most one Channel per Provider: a different
-    // external identity of the same Platform cannot join profileA either.
     const secondChannel = await Effect.runPromiseExit(
       withTransactionEffect(systemPool, (client) =>
         client.query(
@@ -901,15 +788,12 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
         [profileB],
       ),
     );
-
-    // Admins see active and soft-deleted profiles in their workspace.
     const adminRows = await asAlpha((client) =>
       client.query<{ id: string }>("SELECT id FROM brand_profiles ORDER BY name"),
     );
     expect(adminRows.rows.map((row) => row.id).sort()).toEqual(
       [seededAlphaProfile, profileA, profileB].sort(),
     );
-    // Beta sees only its seed profile, never Alpha's active or deleted rows.
     const betaRows = await Effect.runPromise(
       withAuthenticatedTransactionEffect(pool, betaClaims, (client) =>
         client.query<{ id: string }>("SELECT id FROM brand_profiles"),
@@ -985,13 +869,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
       posts: "0",
     });
   });
-
-  // asset_objects is the only source of truth for R2 keys, so the member role
-  // must be able to write the staging inventory the upload lifecycle settles
-  // while every protected original, thumbnail, and rendition row stays
-  // read-only. The assertions run against the live PostgreSQL rules rather
-  // than inspecting the policy text, so they catch a dropped column grant or
-  // an over-broad check even if the policy is later rewritten.
   it("lets members write their own staging objects but not protected inventory", async () => {
     await seedProfiles();
     await asAlpha((client) =>
@@ -1002,8 +879,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
       ),
     );
     const stagingKey = `staging/${alphaOrgId}/${assetA}/90000000-0000-4000-8000-000000000099/staged.png`;
-
-    // A member can create its own staging inventory row.
     const inserted = await asAlpha((client) =>
       client.query<{ id: string }>(
         `INSERT INTO asset_objects
@@ -1015,9 +890,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
     );
     const stagingObjectId = inserted.rows[0]!.id;
     expect(stagingObjectId).toMatch(/^[0-9a-f-]{36}$/);
-
-    // A member can settle verified bytes, record the writer deadline, and hand
-    // the quota reservation onto the staging row.
     const settled = await asAlpha((client) =>
       client.query<{ status: string }>(
         `UPDATE asset_objects
@@ -1038,8 +910,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
         [stagingObjectId, 2048],
       ),
     );
-
-    // A member can move its own staging row into deletion for the sweep.
     const deleting = await asAlpha((client) =>
       client.query<{ status: string }>(
         `UPDATE asset_objects
@@ -1050,13 +920,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
       ),
     );
     expect(deleting.rows[0]!.status).toBe("deleting");
-
-    // A foreign member cannot create staging inventory inside another
-    // workspace. The row is otherwise well formed — the Asset and Brand
-    // Profile exist and really belong to Alpha's workspace — so the only rule
-    // that can reject it is the INSERT policy's org-claim predicate. Asserting
-    // the SQLSTATE keeps that attribution honest: a referential failure would
-    // prove nothing about RLS.
     const foreign = await Effect.runPromiseExit(
       withAuthenticatedTransactionEffect(pool, betaClaims, (client) =>
         client.query(
@@ -1085,10 +948,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
       ),
     );
     expectDatabaseFailure(crossKindInsert, "42501");
-
-    // A protected row for this same Asset is installed by the system role, so
-    // the member's attempt to move its bytes targets a row that really exists:
-    // an UPDATE matching nothing would prove nothing.
     const protectedObject = await asSystem((client) =>
       client.query<{ id: string }>(
         `INSERT INTO asset_objects
@@ -1107,8 +966,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
       ),
     );
     expectDatabaseFailure(protectedUpdate, "42501");
-
-    // Identity, ownership, and media columns are not writable by members.
     const keySwap = await Effect.runPromiseExit(
       withAuthenticatedTransactionEffect(pool, alphaClaims, (client) =>
         client.query(`UPDATE asset_objects SET r2_key = 'staging/evil.png' WHERE id = $1`, [
@@ -1117,8 +974,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
       ),
     );
     expectDatabaseFailure(keySwap, "42501");
-
-    // Terminal and superseded states stay system-owned.
     const terminal = await Effect.runPromiseExit(
       withAuthenticatedTransactionEffect(pool, alphaClaims, (client) =>
         client.query(`UPDATE asset_objects SET status = 'deleted' WHERE id = $1`, [
@@ -1128,24 +983,12 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
     );
     expectDatabaseFailure(terminal, "42501");
   });
-
-  // A saved draft must never lose its media. These assertions pin the two
-  // corrections in migration 006: a finalized upload that is still being
-  // processed may carry the orphan clock that the API arms at completion (the
-  // first upload a creator saves used to be rejected outright), and detaching
-  // the last attachment from a draft whose processing failed re-arms the
-  // seven-day window instead of leaving a reclaimed candidate with no
-  // deadline. They run through the real triggers rather than asserting on the
-  // constraint or function text.
   it("arms and preserves orphan clocks across processing and failed detaches", async () => {
     await seedProfiles();
     const processingAsset = "40000000-0000-4000-8000-0000000000d1";
     const failedAsset = "40000000-0000-4000-8000-0000000000d2";
     const unfinishedAsset = "40000000-0000-4000-8000-0000000000d3";
     const draftPost = "48000000-0000-4000-8000-0000000000d1";
-
-    // Upload sessions reference pre-existing Assets, just as the real upload
-    // creation transaction does; completion then changes their lifecycle state.
     await asAlpha((client) =>
       client.query(
         `INSERT INTO assets
@@ -1154,8 +997,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
         [[processingAsset, failedAsset], alphaOrgId, profileA],
       ),
     );
-
-    // An upload session is the evidence that an Asset is finalized.
     await asSystem((client) =>
       client.query(
         `INSERT INTO asset_upload_sessions
@@ -1182,9 +1023,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
         ],
       ),
     );
-
-    // The API completion path: verified upload, status 'processing', orphan
-    // clock armed for an asset that is not attached to anything yet.
     const completed = await asAlpha((client) =>
       client.query<{
         orphaned_at: Date | null;
@@ -1228,8 +1066,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
         [draftPost, alphaOrgId, profileA],
       ),
     );
-
-    // Saving the draft keeps both attachments, including the failed one.
     await asAlpha((client) =>
       client.query(
         `INSERT INTO post_attachments (post_id, asset_id, org_id, brand_profile_id, position)
@@ -1237,8 +1073,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
         [draftPost, processingAsset, alphaOrgId, profileA, failedAsset],
       ),
     );
-
-    // A retained reference cancels the orphan deadline on attach.
     const afterAttach = await asAlpha((client) =>
       client.query<{
         orphaned_at: string | null;
@@ -1247,10 +1081,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
     ).then((result) => result.rows[0]);
     expect(afterAttach?.orphaned_at).toBeNull();
     expect(afterAttach?.orphan_delete_after).toBeNull();
-
-    // Detaching the last attachment from the FAILED asset arms a fresh
-    // seven-day window: the creator removed an attachment, and the bytes are
-    // still reclaimable only after the grace period.
     await asAlpha((client) =>
       client.query(`DELETE FROM post_attachments WHERE post_id = $1 AND asset_id = $2`, [
         draftPost,
@@ -1269,8 +1099,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
       new Date(failedAfterDetach!.orphan_delete_after!).getTime() -
         new Date(failedAfterDetach!.orphaned_at!).getTime(),
     ).toBe(7 * 24 * 60 * 60 * 1000);
-
-    // An upload that never finalized still cannot carry a clock.
     const unfinishedClock = await Effect.runPromiseExit(
       withAuthenticatedTransactionEffect(pool, alphaClaims, (client) =>
         client.query(
@@ -1280,10 +1108,6 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
       ),
     );
     expectDatabaseFailure(unfinishedClock, "23514");
-
-    // A claimed Asset has already cleared its orphan clock and cannot acquire
-    // a new retained reference. Use the vacated position so an unrelated unique
-    // position constraint cannot make this guard test pass.
     await asAlpha((client) =>
       client.query(
         `INSERT INTO assets (id, org_id, brand_profile_id, title, status, finalized_at)
@@ -1310,15 +1134,5 @@ describe("database boundary validation", () => {
     expect(() => serializeAuthenticatedClaims({ org_id: alphaOrgId, sub: "  " })).toThrow(
       TypeError,
     );
-  });
-
-  it("keeps the test-layer double aligned with the live service shape", async () => {
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const database = yield* DatabaseService;
-        return yield* database.withTransaction(() => Effect.succeed("ok"));
-      }).pipe(Effect.provide(createDatabaseServiceTest())),
-    );
-    expect(result).toBe("ok");
   });
 });

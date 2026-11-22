@@ -1,21 +1,12 @@
 import type { ProviderFailure, ProviderFailureClass } from "./types";
 
 const failureCodePattern = /^[a-z0-9][a-z0-9._-]{0,99}$/;
+const maxRetryAfterSeconds = 86_400;
 
 export interface ProviderFailureInput {
   code?: string;
   malformedResponse?: boolean;
-  /**
-   * Set when a safely parsed provider error body proves the rejection is a
-   * quota exhaustion (e.g. Google `quotaExceeded`), which must classify as
-   * 'quota' rather than the status-derived 'auth' class.
-   */
   quotaExceeded?: boolean;
-  /**
-   * Set when a safely parsed provider error body proves the rejection is a
-   * rate limit (e.g. Google `rateLimitExceeded`), which must classify as
-   * 'rate_limit' rather than the status-derived 'auth' class.
-   */
   rateLimited?: boolean;
   retryAfterSeconds?: number;
   sideEffectPossible?: boolean;
@@ -33,35 +24,18 @@ const messages: Readonly<Record<ProviderFailureClass, string>> = {
   transient: "The provider is temporarily unavailable.",
 };
 
-/**
- * Sanitizes an arbitrary provider error code into a lowercase ASCII identifier.
- * Enforces length <= 100 and pattern `[a-z0-9][a-z0-9._-]*` to prevent injection or malformed metrics.
- * Returns the normalized code, or the provided fallback string if invalid or absent.
- */
-function safeCode(value: string | undefined, fallback: string): string {
-  const normalized = value?.trim().toLowerCase();
-  return normalized && failureCodePattern.test(normalized) ? normalized : fallback;
-}
+const retryableClasses: ReadonlySet<ProviderFailureClass> = new Set([
+  "rate_limit",
+  "timeout",
+  "transient",
+]);
 
-/**
- * Validates and bounds a provider-suggested retry delay in seconds.
- * Clamps input between 0 and 86,400 seconds (24 hours) and rejects non-integer numbers.
- * Returns the integer retry delay in seconds, or undefined if absent, negative, or excessive.
- */
-function retryAfter(value: number | undefined): number | undefined {
-  return value !== undefined && Number.isInteger(value) && value >= 0 && value <= 86_400
-    ? value
-    : undefined;
-}
+const uncertainClasses: ReadonlySet<ProviderFailureClass> = new Set([
+  "ambiguous",
+  "timeout",
+  "transient",
+]);
 
-/**
- * Maps raw provider HTTP status, timeout, and response flags to a semantic failure class.
- * Enforces safety: write requests with possible remote side effects that timeout or return malformed
- * responses are classified as 'ambiguous' to trigger reconciliation rather than blind retry.
- * Parsed-body diagnoses (quotaExceeded, rateLimited) refine status-derived classes so a Google 403
- * quota or rate-limit reason is never mistaken for an authorization failure.
- * Returns one of the seven ProviderFailureClass discriminator strings.
- */
 function classification(input: ProviderFailureInput): ProviderFailureClass {
   if (
     input.sideEffectPossible &&
@@ -81,67 +55,57 @@ function classification(input: ProviderFailureInput): ProviderFailureClass {
   return "deterministic";
 }
 
-/**
- * Evaluates whether a classified provider failure is safe and appropriate to retry.
- * Only 'rate_limit', 'timeout', and 'transient' classes are marked retryable;
- * 'auth', 'quota', 'deterministic', and 'ambiguous' require user or manual intervention.
- * Returns true if retryable, false otherwise.
- */
-function isRetryable(failureClass: ProviderFailureClass): boolean {
-  return (
-    failureClass === "rate_limit" || failureClass === "timeout" || failureClass === "transient"
-  );
-}
-
-/**
- * Reports whether a provider failure leaves a remote mutation's outcome uncertain.
- * Ambiguous, timeout, and transient failures after a write cannot prove the remote
- * operation did not commit; when `includeRateLimit` is true, rate-limit rejections
- * are treated as interrupted/uncertain as well (e.g. mid-stream upload probes).
- */
-export function isUncertainFailure(failure: ProviderFailure, includeRateLimit = false): boolean {
-  return (
-    failure.classification === "ambiguous" ||
-    failure.classification === "timeout" ||
-    failure.classification === "transient" ||
-    (includeRateLimit && failure.classification === "rate_limit")
-  );
-}
-
-/**
- * Normalizes a ProviderFailure object into a standard canonical shape.
- * Ensures consistent error messages, sanitizes code strings, and bounds retry delays according
- * to whether the classification permits retrying.
- * Returns normalized ProviderFailure descriptor.
- */
-export function normalizeProviderFailure(failure: ProviderFailure): ProviderFailure {
-  const retryable = isRetryable(failure.classification);
-  const delay = retryable ? retryAfter(failure.retryAfterSeconds) : undefined;
+function canonicalFailure<C extends ProviderFailureClass>(
+  failureClass: C,
+  code: string | undefined,
+  retryAfterSeconds?: number,
+): ProviderFailure & { classification: C } {
+  const normalizedCode = code?.trim().toLowerCase();
+  const retryable = retryableClasses.has(failureClass);
+  const delay =
+    retryable &&
+    retryAfterSeconds !== undefined &&
+    Number.isInteger(retryAfterSeconds) &&
+    retryAfterSeconds >= 0 &&
+    retryAfterSeconds <= maxRetryAfterSeconds
+      ? retryAfterSeconds
+      : undefined;
   return {
-    classification: failure.classification,
-    code: safeCode(failure.code, `provider_${failure.classification}`),
-    message: messages[failure.classification],
+    classification: failureClass,
+    code:
+      normalizedCode && failureCodePattern.test(normalizedCode)
+        ? normalizedCode
+        : `provider_${failureClass}`,
+    message: messages[failureClass],
     retryable,
     ...(delay === undefined ? {} : { retryAfterSeconds: delay }),
   };
 }
 
+/** Failures after which a remote write may or may not have committed. */
+export function isUncertainFailure(failure: ProviderFailure): boolean {
+  return uncertainClasses.has(failure.classification);
+}
+
+/** Re-derives message, retryability, code, and retry delay from the failure class. */
+export function normalizeProviderFailure(failure: ProviderFailure): ProviderFailure {
+  return canonicalFailure(failure.classification, failure.code, failure.retryAfterSeconds);
+}
+
 /**
- * Classifies raw provider HTTP status and response conditions into a normalized ProviderFailure.
- * Synthesizes classification, canonical human-readable message, sanitized code, and retry metadata.
- * Returns fully normalized ProviderFailure record.
+ * Maps transport facts to the failure taxonomy. A write whose outcome cannot be
+ * observed (timeout, malformed response, no status) is `ambiguous`, never retried.
  */
 export function classifyProviderFailure(input: ProviderFailureInput): ProviderFailure {
-  const failureClass = classification(input);
-  return normalizeProviderFailure({
-    classification: failureClass,
-    code: safeCode(input.code, `provider_${failureClass}`),
-    message: messages[failureClass],
-    retryable: isRetryable(failureClass),
-    ...(input.retryAfterSeconds === undefined
-      ? {}
-      : { retryAfterSeconds: input.retryAfterSeconds }),
-  });
+  return canonicalFailure(classification(input), input.code, input.retryAfterSeconds);
+}
+
+export function ambiguousFailure(code: string): ProviderFailure & { classification: "ambiguous" } {
+  return canonicalFailure("ambiguous", code);
+}
+
+export function rejection(code: string, status = 400): ProviderFailure {
+  return classifyProviderFailure({ code, status });
 }
 
 /** Credential-free facts identifying a failed outbound provider request. */
@@ -151,13 +115,9 @@ export interface ProviderRequestDiagnostic {
   status_code?: number;
 }
 
-/** Internal causes are serialized only through the shared sanitized logger. */
 export interface ProviderAdapterErrorOptions extends ErrorOptions {
   request?: ProviderRequestDiagnostic;
-  /**
-   * Granted-scope names the provider omitted from an otherwise valid response.
-   * Scope identifiers are public OAuth vocabulary, never token material.
-   */
+  /** Public OAuth scope names the provider did not grant. */
   missingScopes?: readonly string[];
 }
 
@@ -166,13 +126,6 @@ export class ProviderAdapterError extends Error {
   readonly request?: ProviderRequestDiagnostic;
   readonly missingScopes?: readonly string[];
 
-  /**
-   * Initializes a new ProviderAdapterError wrapping a canonical provider failure descriptor.
-   * Normalizes the input failure and assigns the standard classification message to the Error.
-   * Retains an optional non-enumerable cause for the shared logger to sanitize,
-   * plus credential-free request metadata and any missing public scope names;
-   * public failure messages stay canonical.
-   */
   constructor(failure: ProviderFailure, options?: ProviderAdapterErrorOptions) {
     const normalized = normalizeProviderFailure(failure);
     super(normalized.message, options);
@@ -181,4 +134,39 @@ export class ProviderAdapterError extends Error {
     this.request = options?.request;
     this.missingScopes = options?.missingScopes;
   }
+}
+
+export function rejected(code: string, status = 400): ProviderAdapterError {
+  return new ProviderAdapterError(rejection(code, status));
+}
+
+/** A response that does not match the provider's documented shape. */
+export function malformed(sideEffectPossible = false, code?: string): ProviderAdapterError {
+  return new ProviderAdapterError(
+    classifyProviderFailure({ code, malformedResponse: true, sideEffectPossible }),
+  );
+}
+
+export function isHttp404(cause: unknown): boolean {
+  return cause instanceof ProviderAdapterError && cause.failure.code === "provider_http_404";
+}
+
+/** Log-safe projection: canonical failure fields and credential-free request facts only. */
+export function failureDiagnostic(error: ProviderAdapterError): {
+  classification: ProviderFailureClass;
+  code: string;
+  retryable: boolean;
+  retryAfterSeconds?: number;
+  request?: ProviderRequestDiagnostic;
+  missing_scopes?: readonly string[];
+} {
+  const { classification, code, retryable, retryAfterSeconds } = error.failure;
+  return {
+    classification,
+    code,
+    retryable,
+    ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+    ...(error.request ? { request: error.request } : {}),
+    ...(error.missingScopes ? { missing_scopes: error.missingScopes } : {}),
+  };
 }

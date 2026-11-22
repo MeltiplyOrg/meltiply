@@ -4,6 +4,7 @@ import "@testing-library/jest-dom/vitest";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import themeBootstrapRuntime from "@meltiply/ui/theme-bootstrap-runtime?raw";
+import { consentCookieName, writeCookieConsent } from "@meltiply/ui/cookie-consent";
 import {
   renderThemeBootstrap,
   type ThemeBootstrapSettings,
@@ -15,10 +16,8 @@ import {
   themeStorageKey,
 } from "@meltiply/ui/theme-preference";
 
-const defaultSettings: ThemeBootstrapSettings = { mode: "class" };
-
 /** Executes the exact checked-in runtime as a blocking classic script would. */
-function runBootstrap(settings: ThemeBootstrapSettings = defaultSettings): void {
+function runBootstrap(settings: ThemeBootstrapSettings = {}): void {
   new Function(renderThemeBootstrap(themeBootstrapRuntime, settings))();
 }
 
@@ -40,19 +39,19 @@ function clearBrowserState(): void {
   document.documentElement.removeAttribute(themePreferenceAttribute);
   document.documentElement.removeAttribute("data-cookie-functional");
   document.documentElement.removeAttribute("data-cookie-decided");
-  document.documentElement.removeAttribute("data-theme");
   document.documentElement.style.removeProperty("color-scheme");
   document.body.innerHTML = "";
   document.cookie = `${themeCookieName}=; Path=/; Max-Age=0`;
+  document.cookie = `${consentCookieName}=; Path=/; Max-Age=0`;
   window.localStorage.clear();
   window.history.replaceState(null, "", "/");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 }
 
-/** Records a valid explicit choice without invoking the runtime under test. */
 function grantFunctionalConsent(): void {
-  document.documentElement.setAttribute("data-cookie-functional", "");
+  writeCookieConsent({ functional: true });
+  document.documentElement.removeAttribute("data-cookie-functional");
 }
 
 beforeEach(clearBrowserState);
@@ -149,6 +148,18 @@ describe("before-paint theme runtime", () => {
     releaseListeners();
   });
 
+  it("clears optional records before paint unless functional consent is saved", () => {
+    window.localStorage.setItem(themeStorageKey, "dark");
+    window.localStorage.setItem("essential-operation", "keep");
+    runBootstrap();
+
+    expect(Object.keys(window.localStorage)).toEqual(["essential-operation"]);
+    expect(document.documentElement).not.toHaveAttribute("data-cookie-decided");
+    expect(document.documentElement).not.toHaveClass("dark");
+
+    releaseListeners();
+  });
+
   it("persists a resolved choice through both stores only with consent", () => {
     grantFunctionalConsent();
     window.history.replaceState(null, "", `/?${themeQueryParam}=dark`);
@@ -168,7 +179,7 @@ describe("before-paint theme runtime", () => {
       <a id="configured" href="https://app.example.test/posts?tab=all#top">App</a>
       <a id="external" href="https://other.example.test/docs?tab=two">Other</a>
     `;
-    runBootstrap({ mode: "class", siteUrls: ["https://app.example.test"] });
+    runBootstrap({ siteUrls: ["https://app.example.test"] });
 
     for (const id of ["marked", "configured"]) {
       const anchor = document.getElementById(id);
@@ -210,18 +221,6 @@ describe("before-paint theme runtime", () => {
     releaseListeners();
   });
 
-  it("supports the data-theme adapter without leaving a stale class", () => {
-    grantFunctionalConsent();
-    window.localStorage.setItem(themeStorageKey, "dark");
-    document.documentElement.classList.add("dark");
-    runBootstrap({ mode: "data-theme" });
-
-    expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(document.documentElement).not.toHaveClass("dark");
-
-    releaseListeners();
-  });
-
   it("keeps applying the palette when reduced motion is requested", () => {
     grantFunctionalConsent();
     window.localStorage.setItem(themeStorageKey, "dark");
@@ -238,26 +237,16 @@ describe("before-paint theme runtime", () => {
 });
 
 describe("theme bootstrap source", () => {
-  it("serializes options without terminating the surrounding script", () => {
-    const hostileOrigin = "https://example.test/</script><script>alert(1)</script>";
+  it("reduces configured sites to origins and cannot terminate the surrounding script", () => {
     const source = renderThemeBootstrap(
       "window.captured = window.__meltiplyThemeBootstrapOptions;",
-      {
-        mode: "class",
-        siteUrls: [hostileOrigin],
-      },
+      { siteUrls: ["https://example.test/</script><script>alert(1)</script>"] },
     );
-
-    // Parse the actual HTML embedding boundary: an unescaped closing tag
-    // creates a second executable script before JavaScript parsing even begins.
     const html = new DOMParser().parseFromString(`<script>${source}</script>`, "text/html");
     const scripts = html.querySelectorAll("script");
     expect(scripts).toHaveLength(1);
     const browser: Record<string, unknown> = {};
     new Function("window", scripts[0]!.textContent ?? "")(browser);
-    expect(browser.captured).toMatchObject({
-      mode: "class",
-      siteUrls: [hostileOrigin],
-    });
+    expect(browser.captured).toMatchObject({ siteOrigins: ["https://example.test"] });
   });
 });

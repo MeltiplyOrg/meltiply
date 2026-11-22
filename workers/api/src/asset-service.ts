@@ -2,12 +2,11 @@ import { Effect, Layer, Option } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
 import {
-  AccessDenied,
+  ActiveOrganizationRequiredError,
   ASSET_UPLOAD_POLICY,
   AssetPolicyError,
   assetOrphanGraceSeconds,
   type DatabaseError,
-  type DomainError,
   isoDateTime,
   COMMUNITY_LIMITS,
   uploadLayout,
@@ -467,13 +466,13 @@ function recordStagingWriteDeadlineEffect(
  * @param client - Active PostgreSQL EffectTransactionClient scoped to the tenant.
  * @param periodKey - ISO usage month (e.g. `2026-03`), used for the period-scoped upload counter.
  * @param currentInstant - Reference timestamp for expiry comparison (defaults to now).
- * @returns Effect resolving to aggregated organization usage, or failing with AccessDenied/DatabaseError.
+ * @returns Effect resolving to aggregated organization usage, or failing with ActiveOrganizationRequiredError/DatabaseError.
  */
 function organizationUsageEffect(
   client: EffectTransactionClient,
   periodKey: string,
   currentInstant: Date = new Date(),
-): Effect.Effect<OrganizationUsageRow, AccessDenied | DatabaseError> {
+): Effect.Effect<OrganizationUsageRow, ActiveOrganizationRequiredError | DatabaseError> {
   return Effect.gen(function* () {
     yield* lockActiveOrganizationEffect(client);
     yield* client.query(
@@ -615,12 +614,16 @@ function organizationUsageEffect(
     const row = result.rows[0];
     if (!row) {
       return yield* Effect.fail(
-        new AccessDenied("The authenticated identity is not an active organization member."),
+        new ActiveOrganizationRequiredError({
+          message: "The authenticated identity is not an active organization member.",
+        }),
       );
     }
     if (!row.user_id) {
       return yield* Effect.fail(
-        new AccessDenied("The authenticated user has not been synchronized."),
+        new ActiveOrganizationRequiredError({
+          message: "The authenticated user has not been synchronized.",
+        }),
       );
     }
     return row;
@@ -705,7 +708,7 @@ function getReadyMediaAssetRowEffect(
   download: boolean,
 ): Effect.Effect<
   { title: string; original_filename: string | null; protected_key: string },
-  CoreApiError | DatabaseError | DomainError
+  CoreApiError | DatabaseError | ActiveOrganizationRequiredError
 > {
   return withTenantTransactionEffect(env, session, (client) =>
     Effect.gen(function* () {

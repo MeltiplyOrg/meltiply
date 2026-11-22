@@ -3,7 +3,6 @@ const requiredRoles = [
   { name: "meltiply_rls", variable: "MELTIPLY_AUTHENTICATED_DATABASE_URL", bypass: false },
 ];
 
-/** Creates a dedicated TLS-configured pg client from the caller's protected URL; does not connect. */
 export async function createDatabaseClient(connectionString) {
   const { Client } = await import("pg");
   return new Client({
@@ -13,13 +12,6 @@ export async function createDatabaseClient(connectionString) {
   });
 }
 
-/**
- * Reads both required role definitions through each protected login and verifies the actual
- * session/current identity, BYPASSRLS split, and non-superuser authenticated role. Performs
- * SELECTs only, before callers acquire locks or mutate the database. An optional connected
- * systemClient stays caller-owned; all other clients are closed, including on failure.
- * Connection/catalog failures discard driver errors so credentials never enter diagnostics.
- */
 export async function assertDatabaseRoles({
   environment,
   clientFactory = createDatabaseClient,

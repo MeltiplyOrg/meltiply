@@ -1,33 +1,14 @@
 import type { Platform } from "@meltiply/domain";
 
-/** Shared Meltiply upload ceiling across video-capable platforms (500 MiB). */
-const PLATFORM_VIDEO_MAX_BYTES = 500 * 1024 * 1024;
+const assetVideoMaxBytes = 500 * 1024 * 1024;
+const metaTokenLifetimeMaxSeconds = 90 * 24 * 60 * 60;
+const tiktokTokenLifetimeMaxSeconds = 2 * 24 * 60 * 60;
+const googleTokenLifetimeMaxSeconds = 24 * 60 * 60;
+const strictTokenMaxChars = 16_000;
 
-/** Maximum character length accepted for opaque OAuth access/refresh tokens. */
 export const OAUTH_TOKEN_MAX_CHARS = 16_384;
 
-/** Maximum character length for Meta long-lived/page token strings and Google/TikTok tokens. */
-const OAUTH_STRICT_TOKEN_MAX_CHARS = 16_000;
-
-/** Maximum character length for Meta/TikTok/YouTube idempotency keys. */
-export const IDEMPOTENCY_KEY_MAX_CHARS = 255;
-
-/** Maximum character length for OAuth state parameters. */
-export const OAUTH_STATE_MAX_CHARS = 1_024;
-
-/** Maximum lifetime in seconds for Meta long-lived OAuth tokens (90 days). */
-const META_TOKEN_LIFETIME_MAX_SECONDS = 90 * 24 * 60 * 60;
-
-/** Maximum lifetime in seconds for TikTok OAuth access tokens (48 hours). */
-const TIKTOK_TOKEN_LIFETIME_MAX_SECONDS = 2 * 24 * 60 * 60;
-
-/** Maximum lifetime in seconds for Google OAuth access tokens (24 hours). */
-const GOOGLE_TOKEN_LIFETIME_MAX_SECONDS = 24 * 60 * 60;
-
-/** Shared Meta Graph API version for Facebook and Instagram endpoints. */
-export const META_GRAPH_API_VERSION = "v25.0";
-
-/** Platform-specific content, media, and token ceilings owned in one place. */
+/** Platform content, media, and token ceilings; capabilities and validators read only these. */
 export const PROVIDER_LIMITS = {
   facebook: {
     maxCaptionCodePoints: null,
@@ -36,10 +17,10 @@ export const PROVIDER_LIMITS = {
     maxMediaCount: null,
     maxReelDurationSeconds: 90,
     maxStoryDurationSeconds: 60,
-    maxVideoBytes: PLATFORM_VIDEO_MAX_BYTES,
+    maxVideoBytes: assetVideoMaxBytes,
     minReelStoryDurationSeconds: 3,
-    tokenLifetimeMaxSeconds: META_TOKEN_LIFETIME_MAX_SECONDS,
-    tokenMaxChars: OAUTH_STRICT_TOKEN_MAX_CHARS,
+    tokenLifetimeMaxSeconds: metaTokenLifetimeMaxSeconds,
+    tokenMaxChars: strictTokenMaxChars,
   },
   instagram: {
     maxCaptionCodePoints: 2_200,
@@ -50,9 +31,9 @@ export const PROVIDER_LIMITS = {
     maxReelDurationSeconds: 900,
     maxStoryBytes: 100_000_000,
     maxStoryDurationSeconds: 60,
-    maxVideoBytes: PLATFORM_VIDEO_MAX_BYTES,
+    maxVideoBytes: assetVideoMaxBytes,
     minReelStoryDurationSeconds: 3,
-    tokenLifetimeMaxSeconds: META_TOKEN_LIFETIME_MAX_SECONDS,
+    tokenLifetimeMaxSeconds: metaTokenLifetimeMaxSeconds,
     tokenMaxChars: OAUTH_TOKEN_MAX_CHARS,
   },
   threads: {
@@ -60,9 +41,9 @@ export const PROVIDER_LIMITS = {
     maxCarouselItems: 20,
     maxHashtags: null,
     maxImageBytes: 8 * 1024 * 1024,
-    maxVideoBytes: PLATFORM_VIDEO_MAX_BYTES,
+    maxVideoBytes: assetVideoMaxBytes,
     maxVideoDurationSeconds: 300,
-    tokenLifetimeMaxSeconds: META_TOKEN_LIFETIME_MAX_SECONDS,
+    tokenLifetimeMaxSeconds: metaTokenLifetimeMaxSeconds,
     tokenMaxChars: OAUTH_TOKEN_MAX_CHARS,
   },
   tiktok: {
@@ -72,13 +53,13 @@ export const PROVIDER_LIMITS = {
     maxPhotoImages: 35,
     maxPhotoShortSidePx: 1_080,
     maxPhotoTitleChars: 90,
-    maxVideoBytes: PLATFORM_VIDEO_MAX_BYTES,
+    maxVideoBytes: assetVideoMaxBytes,
     maxVideoCaptionCodePoints: 2_200,
     maxVideoDimensionPx: 4_096,
     maxVideoDurationSeconds: 600,
     minVideoDimensionPx: 360,
-    tokenLifetimeMaxSeconds: TIKTOK_TOKEN_LIFETIME_MAX_SECONDS,
-    tokenMaxChars: OAUTH_STRICT_TOKEN_MAX_CHARS,
+    tokenLifetimeMaxSeconds: tiktokTokenLifetimeMaxSeconds,
+    tokenMaxChars: strictTokenMaxChars,
   },
   youtube: {
     maxCaptionCodePoints: 5_000,
@@ -86,9 +67,9 @@ export const PROVIDER_LIMITS = {
     maxHashtagsJoinedChars: 500,
     maxMediaCount: 1,
     maxTitleCodePoints: 100,
-    maxVideoBytes: PLATFORM_VIDEO_MAX_BYTES,
+    maxVideoBytes: assetVideoMaxBytes,
     maxVideoDurationSeconds: 12 * 60 * 60,
-    tokenLifetimeMaxSeconds: GOOGLE_TOKEN_LIFETIME_MAX_SECONDS,
-    tokenMaxChars: OAUTH_STRICT_TOKEN_MAX_CHARS,
+    tokenLifetimeMaxSeconds: googleTokenLifetimeMaxSeconds,
+    tokenMaxChars: strictTokenMaxChars,
   },
 } as const satisfies Record<Platform, Record<string, number | null>>;

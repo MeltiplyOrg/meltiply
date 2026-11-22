@@ -713,7 +713,7 @@ const oauthState = {
   finalizeSelection: async () => undefined,
   getSelection: async () => {
     if (contractFailureStatus === 404) return null;
-    return body("getOAuthSelection") as components["schemas"]["OAuthSelection"];
+    return body<components["schemas"]["OAuthSelection"]>("getOAuthSelection");
   },
   claimSelection: async () => {
     if (contractFailureStatus === 404) return { status: "not_found" as const };

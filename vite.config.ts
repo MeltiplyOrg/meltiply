@@ -35,15 +35,12 @@ export default defineConfig({
   lint: {
     plugins: ["oxc", "typescript", "unicorn"],
     categories: {
-      // Legacy recommended rules are enumerated below. Enabling Oxlint's
-      // on Node test registration that the old ESLint config never enforced.
       correctness: "off",
     },
     options: {
       typeAware: true,
       typeCheck: true,
       denyWarnings: true,
-      // Match ESLint 9's default: stale disable directives warn (and therefore
       reportUnusedDisableDirectives: "warn",
     },
     env: {
@@ -56,15 +53,12 @@ export default defineConfig({
       "**/worker-configuration.d.ts",
       "packages/contracts/src/generated/**",
       "frontend/public/.astro/**",
-      // ESLint had no Astro parser or matching .astro config. Preserve that
       "**/*.astro",
-      // Artifact/generated ignores carried over from frontend/eslint.config.mjs
       "frontend/app/coverage/**",
       "frontend/app/playwright-report/**",
       "frontend/app/test-results/**",
       "frontend/app/cloudflare-env.d.ts",
       ".agents/**",
-      // The Claude skills symlink aliases .agents; Oxlint follows that alias.
       ".claude/**",
       ".opencode/**",
       ".kiro/**",
@@ -130,8 +124,6 @@ export default defineConfig({
       "require-yield": "error",
       "use-isnan": "error",
       "valid-typeof": "error",
-      // Off globally: tseslint's recommended config only ever ran
-      // variants are in its eslint-recommended OFF list). Enabled for TS in
       "no-unused-expressions": "off",
       "typescript/ban-ts-comment": "error",
       "typescript/no-duplicate-enum-values": "error",
@@ -154,7 +146,6 @@ export default defineConfig({
     },
     overrides: [
       {
-        // TS files: mirror tseslint's eslint-recommended adjustments — core
         files: ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"],
         rules: {
           "constructor-super": "off",
@@ -196,7 +187,6 @@ export default defineConfig({
         },
       },
       {
-        // REPLACES the base plugin list in Oxlint overrides, so the import
         files: ["packages/**/*.ts", "workers/**/*.ts"],
         plugins: ["oxc", "typescript", "unicorn", "import"],
         env: {
@@ -213,8 +203,6 @@ export default defineConfig({
           ],
           "typescript/no-unnecessary-type-assertion": "error",
           "typescript/ban-ts-comment": "error",
-          // Oxlint ships a single TS-aware core implementation, so the
-          // @typescript-eslint extension rule maps to the same eslint name
           "no-unused-expressions": "error",
           "typescript/consistent-type-imports": "error",
           "import/no-duplicates": "error",
@@ -252,7 +240,6 @@ export default defineConfig({
         },
       },
       {
-        // eslint-plugin-react-hooks flat/recommended (v7), loaded verbatim as
         files: ["frontend/app/**", "frontend/shared/**", "frontend/public/**"],
         rules: {
           "react-hooks-js/rules-of-hooks": "error",
@@ -286,7 +273,6 @@ export default defineConfig({
         },
       },
       {
-        // copy-text helper. As in ESLint flat config, this later-matching
         files: ["frontend/app/src/components/**/*.{ts,tsx}"],
         excludeFiles: ["frontend/app/src/**/*.test.{ts,tsx}"],
         rules: {
@@ -357,7 +343,6 @@ export default defineConfig({
         },
       },
       {
-        // because Oxlint overrides cannot carry settings.
         files: ["frontend/app/src/**/*.{ts,tsx}", "frontend/shared/**/*.{ts,tsx}"],
         excludeFiles: ["frontend/app/src/**/*.test.{ts,tsx}"],
         rules: {

@@ -1,5 +1,4 @@
 import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
-// Response.json() is `unknown` under the pool's types but `any` in eslint's
 /* oxlint-disable @typescript-eslint/no-unnecessary-type-assertion */
 import type { JwtIdentity } from "@meltiply/auth";
 import { Effect } from "effect";

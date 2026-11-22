@@ -1,10 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
 import { Cause, Data, Effect, Exit } from "effect";
-
-interface StateWorkerEnv {
-  OAUTH_STATE: DurableObjectNamespace<OAuthStateCoordinator>;
-}
-
 import type {
   CancelSelectionResult,
   ClaimSelectionResult,
@@ -17,35 +12,19 @@ import type {
   OAuthStateRecord,
 } from "@meltiply/contracts";
 
-/**
- * Tagged error for invalid OAuth state input: empty state or non-future expiry.
- */
+interface StateWorkerEnv {
+  OAUTH_STATE: DurableObjectNamespace<OAuthStateCoordinator>;
+}
+
 export class InvalidOAuthStateError extends Data.TaggedError("InvalidOAuthStateError")<{
   readonly message: string;
 }> {}
 
-/**
- * Tagged error for Durable Object storage adapter failures: put, get, delete,
- * list, and alarm reads/writes. `cause` preserves the underlying error name
- * for diagnostics; surfaces to RPC callers as a plain rejection, never a 400.
- */
 export class OAuthStateStorageError extends Data.TaggedError("OAuthStateStorageError")<{
   readonly cause?: string;
   readonly message: string;
 }> {}
 
-/**
- * Validates OAuth state creation input as an Effect program.
- *
- * Pure validation core shared by the Durable Object method and its tests:
- * rejects empty state strings and non-future expiries before any storage
- * write, so invalid handoffs fail before arming alarms. Brand Profile
- * assignment happens later, when the pending account is confirmed.
- *
- * @param state - Unique opaque state string from authorization initiation.
- * @param record - Context containing org/user/provider/redirect/expiry.
- * @returns Effect resolving to void on valid input, else InvalidOAuthStateError.
- */
 export function validateOAuthStateCreateEffect(
   state: string,
   record: OAuthStateRecord,
@@ -60,16 +39,6 @@ export function validateOAuthStateCreateEffect(
   return Effect.void;
 }
 
-/**
- * Validates pending OAuth assignment initialization input as an Effect program.
- *
- * Ensures selection ID meets length constraints (16-256), expiry is in the future,
- * and tenant context is present. The Brand Profile is chosen at confirmation.
- *
- * @param selectionId - Opaque selection ID string.
- * @param init - Pending assignment context without candidates.
- * @returns Effect resolving to void on valid input, else InvalidOAuthStateError.
- */
 export function validateOAuthSelectionCreateEffect(
   selectionId: string,
   init: OAuthSelectionInit,
@@ -110,17 +79,6 @@ export function validateOAuthSelectionCreateEffect(
   return Effect.void;
 }
 
-/**
- * Adapts one Durable Object storage call into a typed Effect.
- *
- * Applies the immediate `Effect.tryPromise` adapter convention: every storage
- * op fails with `OAuthStateStorageError` carrying an operation-specific
- * message plus the underlying error name as `cause` for diagnostics.
- *
- * @param message - Operation-specific failure description (e.g. "put OAuth state").
- * @param thunk - Deferred storage call (e.g. `() => storage.put(key, record)`).
- * @returns Effect resolving to the storage result, else OAuthStateStorageError.
- */
 function storageEffect<A>(
   message: string,
   thunk: () => Promise<A>,
@@ -135,19 +93,14 @@ function storageEffect<A>(
   });
 }
 
-/**
- * Extra retention (10 min) for secret-free fence/replay evidence after a
- * selection ticket expires. Bounds how long a stripped master record may
- * acknowledge late completions or replays; never extends credential lifetime.
- */
 const SELECTION_EVIDENCE_RETENTION_MS = 10 * 60 * 1_000;
 
-/**
- * Asynchronous `storage.delete` accepts at most 128 keys per call.
- */
+function selectionEvidenceExpiry(record: OAuthSelectionRecord): number {
+  return record.evidence_expires_at ?? record.expires_at + SELECTION_EVIDENCE_RETENTION_MS;
+}
+
 const STORAGE_DELETE_BATCH = 128;
 
-/** Deletes storage keys in batches of 128 to stay within the async delete limit. */
 function deleteStorageKeysEffect(
   storage: DurableObjectStorage,
   keys: ReadonlyArray<string>,
@@ -161,7 +114,6 @@ function deleteStorageKeysEffect(
   });
 }
 
-/** Writes storage entries in batches of 128 to stay within the async put limit. */
 function putStorageEntriesEffect(
   storage: DurableObjectStorage,
   entries: Record<string, unknown>,
@@ -176,18 +128,6 @@ function putStorageEntriesEffect(
   });
 }
 
-/**
- * Arms the Durable Object alarm at the earliest pending deadline when the
- * current alarm is unset or later than `expiresAt`.
- *
- * Every mutating path that persists an expiring record calls this inside its
- * transaction so the sweep cannot be left unarmed by an interrupted write.
- *
- * @param storage - Durable Object storage for this coordinator instance.
- * @param expiresAt - Expiry timestamp in epoch milliseconds.
- * @returns Effect resolving once the alarm is armed, or unchanged when an
- *   earlier alarm already covers the deadline.
- */
 function armExpiryAlarmEffect(
   storage: DurableObjectStorage,
   expiresAt: number,
@@ -204,14 +144,6 @@ function armExpiryAlarmEffect(
   });
 }
 
-/**
- * Deletes every `selection-account:`/`selection-credential:` entry for a
- * selection in batches of 128. Listing the metadata prefix keeps large
- * ciphertext values out of memory while still covering entries orphaned by a
- * partially failed append. `storage.list()` is paginated with `startAfter` and
- * `limit: STORAGE_DELETE_BATCH` until a page returns fewer than `limit` keys,
- * so selections holding up to 1000 accounts (2000 keys) are completely swept.
- */
 function deleteSelectionCandidatesEffect(
   storage: DurableObjectStorage,
   selectionId: string,
@@ -241,19 +173,6 @@ function deleteSelectionCandidatesEffect(
     }
   });
 }
-/**
- * Executes one composed OAuth state program at the Durable Object boundary.
- *
- * The single approved `Effect.run*` site in the state worker
- * (docs/architecture/effect-v4.md §1.4): `create`, `consume`, and `alarm`
- * compose programs from pure cores plus storage adapters and delegate here.
- * `InvalidOAuthStateError` maps to `TypeError` because the RPC contract — the
- * API Worker caller and tests — relies on TypeError rejections for invalid
- * handoffs; every other failure or defect rethrows the squashed cause.
- *
- * @param program - OAuth state program with typed validation/storage errors.
- * @returns The program's success value; rejects on typed failure or defect.
- */
 async function runStateProgram<A>(
   program: Effect.Effect<A, InvalidOAuthStateError | OAuthStateStorageError>,
 ): Promise<A> {
@@ -272,17 +191,6 @@ export class OAuthStateCoordinator
   extends DurableObject<StateWorkerEnv>
   implements OAuthStateCoordinatorStub
 {
-  /**
-   * Persists single-use OAuth state and arms a storage alarm for automatic expiry.
-   * Required to guard authorization code grant handoffs with organization, user, and PKCE verifier context.
-   * Composes the create program — validateOAuthStateCreateEffect, then storage
-   * put/getAlarm/setAlarm adapters — executed via runStateProgram; schedules or
-   * advances the DO alarm to match earliest expiry.
-   *
-   * @param state - Unique opaque state string generated during authorization initiation.
-   * @param record - Context containing org_id, user_id, provider, redirect path, expiry ms, and optional PKCE verifier.
-   * @throws {TypeError} When state is empty or record.expires_at is not in the future.
-   */
   async create(state: string, record: OAuthStateRecord): Promise<void> {
     const storage = this.ctx.storage;
     const program = Effect.gen(function* () {
@@ -295,18 +203,6 @@ export class OAuthStateCoordinator
     return storage.transaction(() => runStateProgram(program));
   }
 
-  /**
-   * Atomically consumes and deletes an OAuth state record, enforcing consume-once replay protection.
-   * Needed during OAuth callback verification so authorization codes cannot be replayed or shared across tenants.
-   * Runs the get/delete/expiry-check sequence inside `storage.transaction`,
-   * which holds the Durable Object's input gate across the awaited get so a
-   * concurrent callback replay cannot interleave between the read and the
-   * delete; deletes the stored key unconditionally and returns the record
-   * only if found and not yet expired.
-   *
-   * @param state - Opaque state string received in the provider authorization callback.
-   * @returns The stored OAuthStateRecord if present and unexpired; null otherwise.
-   */
   async consume(state: string): Promise<OAuthStateRecord | null> {
     const storage = this.ctx.storage;
     const key = `oauth:${state}`;
@@ -321,13 +217,6 @@ export class OAuthStateCoordinator
     return storage.transaction(() => runStateProgram(program));
   }
 
-  /**
-   * Initiates a candidate OAuth account selection session before candidates are appended.
-   * Stores master tenant/lifecycle context with ready=false so partial selections cannot be listed.
-   *
-   * @param selectionId - Unique opaque selection identifier.
-   * @param init - Candidate session metadata.
-   */
   async createSelection(selectionId: string, init: OAuthSelectionInit): Promise<void> {
     const storage = this.ctx.storage;
     const program = Effect.gen(function* () {
@@ -345,18 +234,11 @@ export class OAuthStateCoordinator
       yield* storageEffect("Failed to persist OAuth selection.", () =>
         storage.put(`selection:${selectionId}`, record),
       );
-      // Arm expiry before any candidate credentials exist so an interrupted
-      // append/finalize sequence cannot leave secrets unswept.
       yield* armExpiryAlarmEffect(storage, record.expires_at);
     });
     return storage.transaction(() => runStateProgram(program));
   }
 
-  /**
-   * Appends public metadata and sealed credentials under separate bounded key families.
-   * Batch writes and the master index commit atomically, so a failure cannot orphan a partial append.
-   * Listings read metadata only; later confirmation reads just the chosen credential.
-   */
   async appendSelectionCandidates(
     selectionId: string,
     candidates: ReadonlyArray<OAuthSelectionCandidate>,
@@ -386,9 +268,6 @@ export class OAuthStateCoordinator
             }),
           );
         }
-        // Duplicates are rejected before any entry is written: a repeated
-        // account id would overwrite the same credential key and inflate
-        // account_ids, so the second copy is never a distinct candidate.
         if (seenAccountIds.has(candidate.account.id)) {
           return yield* Effect.fail(
             new InvalidOAuthStateError({
@@ -404,8 +283,6 @@ export class OAuthStateCoordinator
           encrypted_connection: candidate.encryptedConnection,
         };
       }
-      // The 1000-account cap is checked before any candidate entry is written
-      // so a rejected append leaves no orphaned credential keys behind.
       if (record.account_ids.length + newAccountIds.length > 1000) {
         return yield* Effect.fail(
           new InvalidOAuthStateError({
@@ -429,12 +306,6 @@ export class OAuthStateCoordinator
     return storage.transaction(() => runStateProgram(program));
   }
 
-  /**
-   * Marks the selection ready for listing and confirmation once candidate
-   * discovery completes; re-arms the expiry alarm if it advanced past it.
-   *
-   * @param selectionId - Unique opaque selection identifier.
-   */
   async finalizeSelection(selectionId: string): Promise<void> {
     const storage = this.ctx.storage;
     const program = Effect.gen(function* () {
@@ -459,15 +330,6 @@ export class OAuthStateCoordinator
     return storage.transaction(() => runStateProgram(program));
   }
 
-  /**
-   * Retrieves public candidate metadata for an unexpired, finalized selection.
-   * Lists only `selection-account:` metadata entries in account_ids order;
-   * never loads credential values. Foreign callers receive null.
-   *
-   * @param selectionId - Opaque selection identifier.
-   * @param actor - Organization and user context of the authenticated requester.
-   * @returns Sanitized public selection DTO if present, unexpired, and owned; null otherwise.
-   */
   async getSelection(
     selectionId: string,
     actor: { organizationId: string; userId: string },
@@ -510,12 +372,6 @@ export class OAuthStateCoordinator
     return runStateProgram(program);
   }
 
-  /**
-   * Claims an owner-bound candidate before the original deadline; the default 30s lease excludes concurrent saves.
-   * The chosen account stays pinned across retries; an unreleased claim also fences its Brand Profile.
-   * Completed replay requires the same account, Brand Profile, and key before the evidence deadline.
-   * Returns a credential claim, replay, conflict, or not-found; custom lease durations are milliseconds.
-   */
   async claimSelection(
     selectionId: string,
     accountId: string,
@@ -536,8 +392,7 @@ export class OAuthStateCoordinator
       if (record.organization_id !== actor.organizationId || record.user_id !== actor.userId) {
         return { status: "not_found" } as const;
       }
-      const evidenceExpiry =
-        record.evidence_expires_at ?? record.expires_at + SELECTION_EVIDENCE_RETENTION_MS;
+      const evidenceExpiry = selectionEvidenceExpiry(record);
       if (now >= evidenceExpiry) {
         return { status: "not_found" } as const;
       }
@@ -558,12 +413,9 @@ export class OAuthStateCoordinator
           status: "conflict",
         } as const;
       }
-      // Original ticket expiry is absolute; claims never extend it.
       if (record.expires_at <= now) {
         return { status: "not_found" } as const;
       }
-      // Once any confirmation claim is acquired, the selected account stays
-      // pinned for the ticket lifetime, even if the claim is released.
       if (record.pinned_account_id && record.pinned_account_id !== accountId) {
         return {
           code: "pinned_account_mismatch",
@@ -633,11 +485,6 @@ export class OAuthStateCoordinator
     return storage.transaction(() => runStateProgram(program));
   }
 
-  /**
-   * Completes a matching save claim before the bounded evidence deadline.
-   * Candidate cleanup and terminal replay state commit atomically, preserving retry credentials on failure.
-   * Returns false for a missing/mismatched/expired claim; successful completion exposes no candidate metadata.
-   */
   async completeSelection(
     selectionId: string,
     accountId: string,
@@ -659,8 +506,7 @@ export class OAuthStateCoordinator
         return false;
       }
       const now = Date.now();
-      const evidenceExpiry =
-        record.evidence_expires_at ?? record.expires_at + SELECTION_EVIDENCE_RETENTION_MS;
+      const evidenceExpiry = selectionEvidenceExpiry(record);
       if (now >= evidenceExpiry) return false;
       yield* deleteSelectionCandidatesEffect(storage, selectionId);
       const updated: OAuthSelectionRecord = {
@@ -680,14 +526,6 @@ export class OAuthStateCoordinator
     return storage.transaction(() => runStateProgram(program));
   }
 
-  /**
-   * Releases an active claim after a deterministic failed-save (e.g. quota limit exceeded).
-   * Permitting retry without losing authorization while preserving the pinned account invariant.
-   *
-   * @param selectionId - Opaque selection identifier.
-   * @param claimToken - Unique claim identity token issued during claimSelection.
-   * @returns True if claim was released; false if claim token mismatched or ticket missing.
-   */
   async releaseSelectionClaim(selectionId: string, claimToken: string): Promise<boolean> {
     const storage = this.ctx.storage;
     const key = `selection:${selectionId}`;
@@ -709,11 +547,6 @@ export class OAuthStateCoordinator
     return storage.transaction(() => runStateProgram(program));
   }
 
-  /**
-   * Cancels an owner-bound pending ticket with atomic credential cleanup and terminal state.
-   * Any retained save claim conflicts, regardless of lease age, so cancellation cannot promise a false 204.
-   * Returns cancelled, not-found, or conflict; a failed cleanup leaves the ticket safely retryable.
-   */
   async cancelSelection(
     selectionId: string,
     actor: { organizationId: string; userId: string },
@@ -732,7 +565,6 @@ export class OAuthStateCoordinator
       if (record.organization_id !== actor.organizationId || record.user_id !== actor.userId) {
         return { status: "not_found" } as const;
       }
-      // A retained claim can still mean an in-flight save; never cancel it.
       if (record.claim) {
         return {
           message: "Cannot cancel selection while confirmation is or was in progress.",
@@ -765,11 +597,6 @@ export class OAuthStateCoordinator
     return storage.transaction(() => runStateProgram(program));
   }
 
-  /**
-   * Atomically expires OAuth states and candidate credentials at their original deadlines.
-   * Retained claims and terminal statuses keep only secret-free evidence for the bounded grace window.
-   * Cleanup, stripped evidence, and rescheduling commit together so interrupted batches remain retryable.
-   */
   async alarm(): Promise<void> {
     const storage = this.ctx.storage;
     const program = Effect.gen(function* () {
@@ -777,8 +604,6 @@ export class OAuthStateCoordinator
       const oauthEntries = yield* storageEffect("Failed to list OAuth state entries.", () =>
         storage.list<OAuthStateRecord>({ prefix: "oauth:" }),
       );
-      // selection-account:/selection-credential: live outside this prefix, so
-      // listing masters never loads candidate values.
       const selectionEntries = yield* storageEffect("Failed to list OAuth selection entries.", () =>
         storage.list<OAuthSelectionRecord>({ prefix: "selection:" }),
       );
@@ -803,12 +628,7 @@ export class OAuthStateCoordinator
           scheduleAt(record.expires_at);
           continue;
         }
-        // Sweep candidate entries unconditionally so credentials appended by a
-        // partially failed append (never recorded in account_ids) still expire.
         yield* deleteSelectionCandidatesEffect(storage, key.slice("selection:".length));
-        // Pending masters keep fence value only while a claim is retained;
-        // terminal statuses keep replay/cancel evidence. Both are stripped of
-        // candidate entries and bounded by the evidence deadline.
         const retainEvidence = record.status !== "pending" || record.claim !== undefined;
         const evidenceExpiry =
           record.evidence_expires_at ?? record.expires_at + SELECTION_EVIDENCE_RETENTION_MS;
@@ -846,13 +666,6 @@ export class OAuthStateCoordinator
 }
 
 export default {
-  /**
-   * Default HTTP fetch handler for the State Worker.
-   * Rejects direct HTTP ingress with a 404 response because the State Worker
-   * exposes only internal Durable Object bindings to the API Worker.
-   *
-   * @returns 404 JSON response with standard error envelope.
-   */
   fetch() {
     return Response.json(
       {

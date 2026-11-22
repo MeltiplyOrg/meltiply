@@ -1,8 +1,4 @@
 import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
-// Response.json() is `unknown` under the pool's types but `any` in eslint's
-// project, so the necessary body assertions look unnecessary to the rule
-// (AUD-055); the assertions are required for tsc.
-/* oxlint-disable @typescript-eslint/no-unnecessary-type-assertion */
 import { Cause, Effect, Layer, Option } from "effect";
 import type { MultipartUpload, ObjectMetadata, ObjectStore } from "@meltiply/storage";
 import {
@@ -20,8 +16,6 @@ import {
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import type * as Domain from "@meltiply/domain";
 
-// Keep storage-boundary coverage under an explicit finite test policy while the
-// real community policy is unrestricted. Scenarios may load that policy too.
 vi.mock("@meltiply/domain", async (importOriginal) => ({
   ...(await importOriginal<typeof Domain>()),
   COMMUNITY_LIMITS: {
@@ -67,6 +61,8 @@ import type {
   NativeProcessorSuccess,
 } from "../src/native-processor";
 import { runSystemTransaction } from "./system-transaction";
+import { fakeMediaProcessor } from "./integration-doubles";
+import { fakeQueue } from "./test-doubles";
 
 const connectionString = process.env.MELTIPLY_DATABASE_TEST_URL;
 if (!connectionString) {
@@ -75,14 +71,7 @@ if (!connectionString) {
 const describeIntegration = describe;
 const organizationId = "20000000-0000-4000-8000-000000000001";
 const userId = "10000000-0000-4000-8000-000000000001";
-// The seeded Alpha workspace profile owns every asset, platform account, and
-// distribution fixture below: brand_profile_id is mandatory and the composite
-// foreign keys require same-profile references.
 const seededAlphaProfileId = "a0000000-0000-4000-8000-000000000001";
-// Canonical publish fixtures from seed.sql: the ready image Asset and the
-// connected YouTube Channel every distribution spec below composed over when
-// distributions still keyed `asset_id` directly. Post-owned fixtures keep the
-// same composition by attaching this Asset and targeting this Channel.
 const seededAlphaAssetId = "40000000-0000-4000-8000-000000000001";
 const seededYouTubeAccountId = "50000000-0000-4000-8000-000000000001";
 const currentUsagePeriod = new Date().toISOString().slice(0, 7);
@@ -108,44 +97,23 @@ const send = vi.fn(async () => ({
 const youtubePublishSend = vi.fn(async (..._arguments: unknown[]) => ({
   metadata: { metrics: { backlogBytes: 0, backlogCount: 0 } },
 }));
-// Publication failures now enqueue notification deliveries on the same outbox.
-// The relay claims every pending row in this shared database, so routing needs
-// the real binding shape even though these scenarios never assert its payload.
 const notificationsSend = vi.fn(async (..._arguments: unknown[]) => ({
   metadata: { metrics: { backlogBytes: 0, backlogCount: 0 } },
 }));
 const env = {
-  ASSET_PROCESSING_QUEUE: { sendBatch: send } as unknown as Queue<unknown>,
+  ASSET_PROCESSING_QUEUE: fakeQueue({ sendBatch: send }),
   DB_SYSTEM: {
     connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   ENVIRONMENT: "test",
-  NOTIFICATIONS_QUEUE: {
-    sendBatch: notificationsSend,
-  } as unknown as Queue<unknown>,
-  // These scenarios exercise the explicitly enabled recurring engagement product.
+  NOTIFICATIONS_QUEUE: fakeQueue({ sendBatch: notificationsSend }),
   RECURRING_COMMENTS_ENABLED: "true",
   VERSION: "1.0.0-target.0",
-  YOUTUBE_PUBLISH_QUEUE: {
-    sendBatch: youtubePublishSend,
-  } as unknown as Queue<unknown>,
+  YOUTUBE_PUBLISH_QUEUE: fakeQueue({ sendBatch: youtubePublishSend }),
 } satisfies AutomationEnv;
 
-/**
- * Live QueuePublisher layer for provider-sync programs under test: dispatch
- * goes through the env's mocked Queue bindings so sendBatch recordings still
- * observe the exact message bodies each test asserts.
- */
 const queuePublisherLayer = createQueuePublisherLive();
 
-/**
- * Runs the outbox relay Effect at the test boundary with production wiring:
- * the live QueuePublisher drives the recorded fake bindings, and the live
- * PublishQueueResolver maps platforms through publishingQueueFor against the
- * supplied env, so distribution rows still exercise real binding lookup.
- * Baseline events are skip-locked on a separate transaction so unrelated seed
- * or earlier-suite work cannot consume the fixture's batch or alter its counts.
- */
 function runRelay(relayEnv: AutomationEnv, batchSize?: number): Promise<OutboxRelayResult> {
   return runSystemTransaction(relayEnv, async (client) => {
     await client.query(
@@ -164,13 +132,6 @@ function runRelay(relayEnv: AutomationEnv, batchSize?: number): Promise<OutboxRe
   });
 }
 
-/**
- * Runs the real global scheduler against this suite's newly inserted fixtures.
- * Pre-existing in-flight demo rows are skip-locked on a separate connection
- * only for this claim, without changing their statuses or clocks. The optional
- * limit retains the production default. Errors propagate after rollback/release,
- * so later provider-sync fixtures can freely update the baseline rows.
- */
 async function enqueueFixtureDistributions(limit?: number): Promise<number> {
   const client = await systemPoolFor(env).connect();
   try {
@@ -199,29 +160,14 @@ const apiEnv = {
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
 
-// Verified JWT identity for the seeded Alpha user; the `verifyJwtToken` test
-// double returns it so HTTP-level requests authenticate as the same subject
-// the seeded users row binds.
 const alphaIdentity = {
   email: "alpha@meltiply.local",
   name: "Alpha Creator",
   subject: "auth_user_local_alpha",
 };
 
-// Fixed bearer JWT credential for API-level requests; protected routes accept
-// it instead of a session cookie.
 const bearerAuthorization = "Bearer test-only.jwt";
 
-/**
- * Deterministic PNG fixture: real PNG signature plus a well-formed IHDR chunk
- * carrying the requested dimensions. The media-processor test double parses
- * these fields from the stored bytes exactly like ffprobe would, so media
- * facts asserted later are engine-measured rather than fixture-echoed.
- *
- * @param width - Image width in pixels.
- * @param height - Image height in pixels.
- * @returns A 24-byte PNG header (signature + IHDR length/type + dimensions).
- */
 function png(width: number, height: number): Uint8Array {
   const bytes = new Uint8Array(24);
   bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -233,31 +179,8 @@ function png(width: number, height: number): Uint8Array {
   return bytes;
 }
 
-/**
- * Real-byte ObjectStore double for the media pipeline. Every stored object is
- * an actual `Uint8Array` body, so `head` derives size, content type, ETag and
- * SHA-256 from what was written — never from hand-entered metadata.
- *
- * `copyObject` is R2-faithful for the conditional promotion the module relies
- * on: it returns `null` when the source ETag does not match or the destination
- * already exists, and otherwise installs the source bytes under the
- * destination key. `delete` is idempotent like R2. `failKeys` injects a
- * transport failure into `head`/`delete`/`copyObject`/`readPrefix`/`readRange`
- * for a key; `oneShot` entries clear themselves after firing once so a fault
- * can simulate a single crash without poisoning the replay. `deletes`,
- * `copies`, and `multipartAborts` record every side effect for assertions.
- *
- * @returns The storage double plus its byte map and fault/assertion handles.
- */
 interface ObjectStoreHarness {
   bodies: Map<string, Uint8Array>;
-  /**
-   * Optional hook awaited inside `copyObject` immediately before the copy runs,
-   * so a spec can observe durable database state at the exact moment the
-   * external write happens. That is what makes "the destination was reserved
-   * before the copy" testable rather than merely reviewable: the observation is
-   * taken while the copy is in flight, not after it.
-   */
   copyProbe: {
     current: null | ((copy: { destination: string; source: string }) => Promise<void>);
   };
@@ -281,10 +204,6 @@ function objectStoreHarness(): ObjectStoreHarness {
   const multipartAborts: string[] = [];
   let generation = 0;
 
-  /**
-   * Raises the injected transport fault for a key when configured. One-shot
-   * faults fire exactly once so a replayed attempt observes a healthy store.
-   */
   const check = (key: string) => {
     if (oneShot.has(key)) {
       oneShot.delete(key);
@@ -332,9 +251,6 @@ function objectStoreHarness(): ObjectStoreHarness {
       if (options.ifDestinationAbsent && bodies.has(destinationKey)) {
         return null;
       }
-      // Awaited while the copy is still pending, so a probe observes the exact
-      // durable state the promotion was required to establish first. It runs
-      // after the guard checks, so a declined copy probes nothing.
       await copyProbe.current?.({
         destination: destinationKey,
         source: sourceKey,
@@ -373,18 +289,10 @@ function objectStoreHarness(): ObjectStoreHarness {
     resumeMultipartUpload: vi.fn((_key, uploadId) => multipart(uploadId)),
   };
 
-  /**
-   * Installs raw bytes under a key, exactly like an R2 PUT through a signed
-   * capability: no inventory row is touched, so specs can place foreign or
-   * engine-produced bytes and observe whether the pipeline adopts or deletes
-   * them.
-   */
   const put = (key: string, body: Uint8Array, contentType = "image/png") => {
     bodies.set(key, body);
     types.set(key, contentType);
   };
-  // A mutable holder rather than a plain field: the probe is installed by a
-  // spec after the harness is built, and `copyObject` closes over this box.
   const copyProbe = {
     current: null as null | ((copy: { destination: string; source: string }) => Promise<void>),
   };
@@ -419,25 +327,16 @@ interface MediaProcessorHarness {
   };
 }
 
-/** SHA-256 hex digest of real bytes, mirroring R2's reported checksum. */
 async function sha256Hex(body: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", body.slice().buffer);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-/**
- * Per-file output ceiling `reserveOutputs` charges an image reservation at:
- * `mediaUploadMaximum('image/png')`. The reservation is deliberately the
- * media ceiling rather than the uploaded byte count, because normalization
- * can legitimately produce a larger object than an opaque source — so specs
- * assert this exact number rather than the fixture's 24-byte body length.
- */
 const imageReservationCeiling = mediaUploadMaximum("image/png");
 if (imageReservationCeiling === null) {
   throw new Error("Processing fixtures require the supported PNG upload policy.");
 }
 
-/** One scripted engine outcome consumed by the media-processor double. */
 type ScriptedOutcome =
   | { kind: "misreport_checksum" }
   | { kind: "misreport_size" }
@@ -448,13 +347,6 @@ type ScriptedOutcome =
       kind: "failure";
     };
 
-/**
- * Deterministic rendition bytes the engine double produces for a source: a
- * JPEG-flavoured signature, the measured display dimensions, and the source
- * digest. The content is byte-distinct from its input and every field the
- * verdict reports is parsed back out of the bytes actually written, so the
- * Worker-side verification exercises real identity, not a metadata echo.
- */
 function engineRenditionBytes(width: number, height: number, sourceSha256: string): Uint8Array {
   const output = new Uint8Array(44);
   output.set([0xff, 0xd8, 0xff, 0xe0], 0);
@@ -466,13 +358,6 @@ function engineRenditionBytes(width: number, height: number, sourceSha256: strin
   return output;
 }
 
-/**
- * Reads the absolute instant a signed capability commits to, from the
- * `X-Amz-Date` and `X-Amz-Expires` parameters SigV4 puts on every presigned
- * URL. The pipeline bounds the output grant by the reservation row's persisted
- * write hold, so specs compare this deadline against that row — a relative
- * TTL minted after a delayed sign would land measurably later.
- */
 function grantDeadlineMsFromUrl(url: string): number | null {
   const params = new URL(url).searchParams;
   const stamped = params.get("X-Amz-Date");
@@ -486,31 +371,6 @@ function grantDeadlineMsFromUrl(url: string): number | null {
   return Number.isFinite(parsed) ? Date.parse(iso) + parsed * 1_000 : null;
 }
 
-/**
- * Media-processor Durable Object namespace double: `get(idFromName(name))`
- * returns a stub whose `process(job)` is a real deterministic byte transformer
- * over the harness contents, matching the `MediaProcessorRpcOutcome` union the
- * production adapter consumes.
- *
- * The stub parses the object keys out of the job's signed `input_url` and
- * `output_url` (`https://<account>.r2.cloudflarestorage.com/<bucket>/<key>`),
- * reads the input bytes from the harness, parses the PNG IHDR for real media
- * facts, and writes genuinely different bytes at the output key. It honours
- * the create-only capability: when the output key already exists it refuses
- * with a conflict outcome instead of overwriting. Scriptable
- * outcomes let specs drive `optimized`, `original_compatible`, permanent and
- * retryable failures, and verdicts whose reported size or checksum does not
- * match the bytes written. Jobs are deduplicated by `job_id` like the real
- * engine's replay guard, including its distrust rule: a recorded verdict
- * answers a redelivery directly, except an `optimized` verdict whose stored
- * object may have been deleted by the Worker's recovery — that job
- * re-executes, the create-only PUT either recreates the bytes or refuses with
- * a 412-shaped `output_exists`, and the recorded verdict replays only when the
- * recomputed output proves byte-identical to the recorded one — the engine
- * never inspects the stored object (a create-only grant carries no read), so
- * whether the stored bytes are that output is the Worker's stored-digest
- * check (sha256, else the PUT-recorded ETag) to prove before promotion.
- */
 function mediaProcessorNamespace(harness: ObjectStoreHarness): MediaProcessorHarness {
   const calls: MediaProcessorHarness["calls"] = [];
   const conflicts: string[] = [];
@@ -524,18 +384,8 @@ function mediaProcessorNamespace(harness: ObjectStoreHarness): MediaProcessorHar
   };
 
   const stub = {
-    /**
-     * Executes one job against the harness bytes. The outcome is derived from
-     * what was actually read and written; failures arrive as data, never as
-     * thrown RPC errors.
-     */
     async process(job: NativeProcessorJob): Promise<MediaProcessorRpcOutcome> {
       const recorded = verdictsByJob.get(job.job_id);
-      // An 'optimized' verdict is only replayable while the object it uploaded
-      // still exists or provably holds the job's own bytes: the Worker deletes
-      // an unrecorded staging object before re-invoking, so the entry is
-      // distrusted and the job re-executes — exactly like the real engine. A
-      // verdict with no output (original_compatible) replays directly.
       const distrusted = recorded?.result === "optimized" && recorded.output ? recorded : undefined;
       if (recorded && !distrusted) {
         return { ok: true, result: { ...recorded, replayed: true } };
@@ -581,22 +431,9 @@ function mediaProcessorNamespace(harness: ObjectStoreHarness): MediaProcessorHar
         };
       }
       const view = new DataView(input.buffer, input.byteOffset, input.byteLength);
-      // Dimensions come from the body because the IHDR is the only real signal
-      // these fixture bytes carry; the FORMAT decision is driven by
-      // `job.declared_content_type` instead, because that is the value the
-      // pipeline supplies and the value the engine classifies on. A PNG-
-      // signature body declared as JPEG is therefore intentional, not a bug:
-      // swapping in a real JPEG encoder would add bytes without adding
-      // assertion power, and a second encoder here is surface to rot.
       const width = view.getUint32(16);
       const height = view.getUint32(20);
       const inputSha256 = await sha256Hex(input);
-      // A duration is derived from the body the same way dimensions are: these
-      // fixture bytes carry no container, so there is no real timeline to probe.
-      // A video source reports a positive duration and an image reports none,
-      // which is what makes "the accepted original object carries a measured
-      // duration" a distinguishable claim rather than a NULL echo. It is still
-      // derived from real bytes, never from the value an assertion wants.
       const durationSeconds = job.profile.kind === "video" ? input.byteLength / 10 : null;
       const directive = scripted.shift() ?? { kind: "optimized" as const };
       const media = {
@@ -632,16 +469,6 @@ function mediaProcessorNamespace(harness: ObjectStoreHarness): MediaProcessorHar
         return { ok: true, result };
       }
 
-      // Create-only honouring: a signed PUT carrying If-None-Match: * is
-      // rejected by the store when the key exists, so the engine surfaces the
-      // same terminal conflict rather than clobbering committed bytes. When a
-      // distrusted verdict exists, byte-identical recomputation
-      // (produced sha == recorded output sha) is all the engine can prove —
-      // it never inspects the stored object, so the verdict replays and
-      // whether the STORED bytes match is the Worker's stored-digest check
-      // (sha256, else recorded ETag) to decide. A conflict without a
-      // distrusted entry is the same terminal `output_exists` the real
-      // engine answers.
       const produced = engineRenditionBytes(width, height, inputSha256);
       const producedSha256 = await sha256Hex(produced);
       if (harness.bodies.has(outputKey)) {
@@ -683,19 +510,15 @@ function mediaProcessorNamespace(harness: ObjectStoreHarness): MediaProcessorHar
     },
   };
 
-  const namespace = {
-    get: vi.fn((_id: unknown) => stub),
-    idFromName: vi.fn((name: string) => name),
-  } as unknown as AutomationEnv["MEDIA_PROCESSOR"];
+  const baseNamespace = fakeMediaProcessor(stub.process);
+  const namespace: NonNullable<AutomationEnv["MEDIA_PROCESSOR"]> = {
+    get: vi.fn((id: DurableObjectId) => baseNamespace.get(id)),
+    idFromName: vi.fn((name: string) => baseNamespace.idFromName(name)),
+  };
 
   return { calls, conflicts, namespace, scripted, stub };
 }
 
-/**
- * AutomationEnv for processing specs: the shared env plus the R2 signing
- * credentials `processorJobUrlsEffect` requires and the injected
- * `MEDIA_PROCESSOR` namespace double.
- */
 function processorEnv(processor: MediaProcessorHarness): AutomationEnv {
   return {
     ...env,
@@ -707,19 +530,6 @@ function processorEnv(processor: MediaProcessorHarness): AutomationEnv {
   };
 }
 
-/**
- * Fixture for the state `completeUploadSession` commits when an upload
- * finalizes: an Asset in `processing` carrying the pinned source identity, and
- * its `asset_objects` staging row in `ready` holding the verified bytes, ETag,
- * version, checksum, and content type. Both rows commit atomically, matching
- * the finalized upload state the processing pipeline promotes.
- *
- * The staging key mirrors the upload-writable namespace
- * (`staging/<org>/<asset>/<session>/<name>`) and the object is installed in
- * the harness so every derived identity (ETag/SHA-256/size) is real.
- *
- * @returns The staging key, real body, and derived object metadata.
- */
 async function stagedUploadFixture(options: {
   assetId: string;
   assetType?: "image" | "video";
@@ -798,9 +608,7 @@ interface InventoryRow extends Record<string, unknown> {
   asset_id: string;
   bytes: string | null;
   content_type: string | null;
-  /** Native-decoded duration in seconds; NULL when no duration was measured. */
   duration_sec: string | null;
-  /** R2-reported ETag recorded when the object's bytes were settled. */
   etag: string | null;
   height: number | null;
   width: number | null;
@@ -811,11 +619,9 @@ interface InventoryRow extends Record<string, unknown> {
   reserved_bytes: string | null;
   sha256: string | null;
   status: string;
-  /** Persisted deadline a late writer grant could still recreate bytes by. */
   write_hold_until: Date | null;
 }
 
-/** Reads the full `asset_objects` inventory for one Asset, ordered by key. */
 async function assetInventory(assetId: string): Promise<InventoryRow[]> {
   return runSystemTransaction(env, async (client) => {
     const result = await client.query<InventoryRow>(
@@ -838,7 +644,6 @@ interface RenditionRow extends Record<string, unknown> {
   status: string;
 }
 
-/** Reads the `asset_renditions` rows for one Asset, ordered by profile. */
 async function assetRenditions(assetId: string): Promise<RenditionRow[]> {
   return runSystemTransaction(env, async (client) => {
     const result = await client.query<RenditionRow>(
@@ -852,17 +657,6 @@ async function assetRenditions(assetId: string): Promise<RenditionRow[]> {
   });
 }
 
-/**
- * Sums an organization's charged bytes exactly as `chargedCapacitySql`, the
- * API's usage query, and `settleDeletedObjects` all do: every inventoried
- * object that is not `'deleted'` contributes
- * `GREATEST(COALESCE(bytes, 0), COALESCE(reserved_bytes, 0))` — the larger of
- * its verified size and the reservation it still holds, never the sum, because
- * one physical key cannot hold both at once — plus every live
- * `asset_quota_reservations` promise, which is capacity an unfinished upload
- * has already claimed. Used to prove charge-once accounting without reading the
- * driftable `usage_records` counter.
- */
 async function chargedObjectBytes(orgId: string): Promise<bigint> {
   return runSystemTransaction(env, async (client) => {
     const result = await client.query<{ charged: string }>(
@@ -883,21 +677,6 @@ async function chargedObjectBytes(orgId: string): Promise<bigint> {
   });
 }
 
-/**
- * Creates a genuine in-flight upload session for an Asset that is otherwise
- * unrelated to the spec under test: a `created` session, its `staging` object
- * row (the real upload path starts that row with neither `bytes` nor
- * `reserved_bytes`, because `asset_quota_reservations` holds these bytes), and
- * the `asset_quota_reservations` row that actually claims them.
- *
- * This is the boundary a processing reservation must respect: the session's
- * bytes are charged before any object row exists for them. Its single-request
- * session leaves multipart fields absent, matching the persisted upload shape;
- * ignoring the quota row would promise the same capacity twice.
- *
- * @param options - Identifiers for the fixture and the size it claims.
- * @returns The promised byte count, for asserting against a charged total.
- */
 async function pendingUploadFixture(options: {
   assetId: string;
   bytes: number;
@@ -949,11 +728,6 @@ async function pendingUploadFixture(options: {
   return bytes;
 }
 
-/**
- * Reads one Asset's lifecycle columns, its ownership-aware orphan clock, and
- * its processing lease outcome, so specs can assert both the durable failure
- * evidence and the reclamation deadline a failure arms.
- */
 async function processingState(
   assetId: string,
   eventId: string,
@@ -1004,41 +778,10 @@ function outboxMessage(eventId: string, aggregateId: string, topic = "asset.proc
   };
 }
 
-/**
- * Mints the fixture Post id paired with one fixture Distribution id.
- *
- * `distributions` enforces `(post_id, platform_account_id)` unique, so specs
- * that stage several rows on the same Channel need one Post each. Deriving
- * the Post id from the Distribution id keeps the pairing readable at the
- * fixture site and lets the suite cleanup enumerate every seeded Post from
- * the Distribution ids alone.
- *
- * @param distributionId - UUID of the Distribution the Post will own.
- * @returns UUID in the fixture-owned `4da00000-…` family, separate from seeded Posts.
- */
 function postIdForDistribution(distributionId: string): string {
   return `4da00000-0000-4000-8000-${distributionId.slice(24)}`;
 }
 
-/**
- * Seeds the Post-owned identity a Distribution fixture requires in place of
- * the removed `distributions.asset_id` column.
- *
- * One call writes the complete composition a publish claim resolves: the Post
- * row, its ordered `post_attachments` (what the claim query joins for media),
- * and the saved `post_targets` row whose per-Channel settings the schedule
- * path copies onto the Distribution row. Defaults bind the seeded Alpha Brand
- * Profile, the canonical ready image Asset, and the seeded YouTube Channel so
- * single-Channel specs keep their pre-cutover shape; specs pass `orgId`,
- * `brandProfileId`, `assetIds`, or `target` overrides when they need a
- * different tenant or selection. All three statements are idempotent so a
- * re-run after an interrupted suite re-establishes the fixture instead of
- * failing on keys the suite cleanup never reached.
- *
- * @param client - Active system-transaction query client.
- * @param options - Fixture identity plus the composition it must carry.
- * @returns Resolves once the Post, its attachments, and its target exist.
- */
 async function seedDistributionPost(
   client: Queryable,
   options: {
@@ -1109,8 +852,6 @@ async function seedDistributionPost(
   }
 }
 
-// Fixture Distribution ids staged by the specs below; the suite-level cleanup
-// enumerates them once so each spec's rows cannot leak into later runs.
 const automationDistributionFixtureIds = [
   "93000000-0000-4000-8000-000000000001",
   "93000000-0000-4000-8000-000000000002",
@@ -1142,9 +883,6 @@ const automationDistributionFixtureIds = [
   "93000000-0000-4000-8000-000000000065",
 ];
 
-// The posts the fixtures seed for those Distributions, plus the three rows
-// whose specs delete only the Distribution in-test: post_attachments and
-// post_targets cascade, but posts themselves must be removed explicitly.
 const automationFixturePostIds = [
   ...automationDistributionFixtureIds,
   "93000000-0000-4000-8000-000000000091",
@@ -1152,9 +890,6 @@ const automationFixturePostIds = [
   "93000000-0000-4000-8000-000000000149",
 ].map(postIdForDistribution);
 
-// Outbox aggregates the suite cleanup purges: every fixture Distribution id
-// plus the `…071`–`…081` Asset ids whose deletion sweeps arm
-// `asset.deletion.requested` events keyed on the Asset itself.
 const automationOutboxAggregateIds = [
   ...automationDistributionFixtureIds,
   "93000000-0000-4000-8000-000000000071",
@@ -1177,18 +912,6 @@ const automationOutboxAggregateIds = [
   "93000000-0000-4000-8000-000000000088",
 ];
 
-// Aggregate-id families this suite owns outright. `outbox_events.aggregate_id`
-// and `async_job_events.aggregate_id` are plain UUIDs with no foreign key, so
-// deleting the Asset or Distribution row never removes the events and job
-// leases keyed on it. The deletion sweeps arm `asset.deletion.requested` and
-// lifecycle-recovery events on the Asset id itself, so purging only the
-// enumerated Distribution ids left every media-processing fixture's events and
-// leases behind: a re-run then met its own stale pending events and live
-// leases. Each family below is minted only by this file and appears nowhere in
-// seed.sql, so purging them cannot touch seeded or other suites' rows.
-// `b7000000`–`b8000000` belong to the throwaway usage-window workspace (its
-// Distributions and its Asset); the org itself is `b6000000` and cascades with
-// its own rows.
 const automationFixtureAggregateFamilies = [
   "92000000",
   "93000000",
@@ -1212,11 +935,6 @@ async function currentStorageBytes(): Promise<bigint> {
   });
 }
 
-/**
- * Reads a deleting Asset's durable state for deletion specs: lifecycle status,
- * lease outcome, the period storage counter, and its full object inventory so
- * specs can assert which rows were settled and which remain claimed.
- */
 async function deletionState(assetId: string, eventId: string) {
   return runSystemTransaction(env, async (client) => {
     const asset = await client.query<{
@@ -1250,13 +968,6 @@ async function deletionState(assetId: string, eventId: string) {
   });
 }
 
-/**
- * Registers a single test-double YouTube adapter so distribution specs can swap
- * only the operations under test. `publish` is required; omitting
- * `cancelPublication` exercises the no-cancel-adapter path, `lookupPublication`
- * defaults to `not_found`, and `retryPolicy` defaults to the 15 s/5-attempt
- * schedule. The returned registry advertises image remote_ingest publishing.
- */
 function youtubeRegistry(
   publish: NonNullable<ProviderAdapter["publish"]>,
   cancelPublication?: ProviderAdapter["cancelPublication"],
@@ -1298,7 +1009,6 @@ function youtubeRegistry(
   return registry;
 }
 
-/** Supplies reply-only capability so comment retries cannot accidentally publish media. */
 function youtubeReplyRegistry(
   reply: NonNullable<ProviderAdapter["reply"]>,
   lookupPublication: NonNullable<ProviderAdapter["lookupPublication"]> = async () => ({
@@ -1337,7 +1047,6 @@ function youtubeReplyRegistry(
   return registry;
 }
 
-/** Supplies sync-only capability for analytics/comment lifecycle work without publication. */
 function youtubeSyncRegistry(
   listAnalytics: NonNullable<ProviderAdapter["listAnalytics"]>,
   listComments: NonNullable<ProviderAdapter["listComments"]>,
@@ -1449,8 +1158,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       await client.query("DELETE FROM distributions WHERE id = ANY($1::uuid[])", [
         automationDistributionFixtureIds,
       ]);
-      // Post-owned fixtures leave their Posts behind otherwise: deleting the
-      // Post cascades its post_attachments and post_targets in one statement.
       await client.query("DELETE FROM posts WHERE id = ANY($1::uuid[])", [
         automationFixturePostIds,
       ]);
@@ -1704,9 +1411,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const processingKey = `staging/${organizationId}/${assetId}/processing-${profile}`;
     const produced = engineRenditionBytes(320, 240, await sha256Hex(body));
 
-    // The engine ran exactly once against the promoted original and its
-    // create-only grant was the inventoried staging key. The job pinned the
-    // real source size and the media-ceiling reservation as its output cap.
     expect(processor.calls).toHaveLength(1);
     const [call] = processor.calls;
     expect(call).toMatchObject({
@@ -1716,8 +1420,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       maximumOutputBytes: imageReservationCeiling,
       outputKey: processingKey,
     });
-    // The bucket really holds the promoted bytes at the protected keys; the
-    // superseded processing copy is still charged while its write hold runs.
     expect(harness.bodies.get(originalKey)).toEqual(body);
     expect(harness.bodies.get(readyKey)).toEqual(produced);
     expect(harness.bodies.get(processingKey)).toEqual(produced);
@@ -1749,12 +1451,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     });
     expect(inventory).toHaveLength(4);
 
-    // The signed output capability commits to the reservation row's persisted
-    // write hold as an absolute deadline: the grant's own signature instant
-    // plus its expires seconds can never outlive the window in which a late
-    // PUT could still land. The few-seconds slack absorbs only the transaction
-    // and signing work between writing the hold and minting the URL; the
-    // signature timestamp itself comes from the URL, not from Date.now().
     expect(call?.outputGrantDeadlineMs).toBeTypeOf("number");
     expect(supersededOutput?.write_hold_until).toBeInstanceOf(Date);
     const outputHoldMs = Number(supersededOutput?.write_hold_until);
@@ -1762,12 +1458,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     expect(outputDeadlineMs).toBeLessThanOrEqual(outputHoldMs);
     expect(outputHoldMs - outputDeadlineMs).toBeLessThan(10_000);
 
-    // Exactly one rendition reference, and it points at the verified optimized
-    // output. Promotion deliberately does NOT create an `original`-profile
-    // reference: the original is protected at that point but has not been
-    // decoded, and a ready reference is precisely what the API's ready-media
-    // query joins to, so approving it there would make a corrupt or truncated
-    // upload publishable before anything inspected the media.
     const renditions = await assetRenditions(assetId);
     expect(renditions).toHaveLength(1);
     expect(renditions[0]).toMatchObject({
@@ -1788,10 +1478,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const harness = objectStoreHarness();
     const processor = mediaProcessorNamespace(harness);
 
-    // The caller passes the reservation row's persisted deadline as an absolute
-    // instant: the minted create-only grant can never outlive it, however much
-    // of the capability TTL nominally remains. This spec drives the URL
-    // boundary directly so no media bytes are involved.
     const bound = new Date(Date.now() + 120_000);
     const urls = await Effect.runPromise(
       processorJobUrlsEffect(processorEnv(processor), {
@@ -1810,8 +1496,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     );
     expect(new URL(urls.input_url).searchParams.get("X-Amz-Expires")).toBe("900");
 
-    // A deadline that has already elapsed is refused at minting rather than
-    // revived into a one-second grant that would outlive the released charge.
     const exit = await Effect.runPromiseExit(
       processorJobUrlsEffect(processorEnv(processor), {
         inputKey: `${organizationId}/92000000-0000-4000-8000-000000000001/original`,
@@ -1848,8 +1532,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const originalKey = `${organizationId}/${assetId}/original`;
     const readyKey = `${organizationId}/${assetId}/rendition-${profile}`;
     const produced = engineRenditionBytes(320, 240, await sha256Hex(body));
-    // The durable post-commit state a crashed first delivery left behind: the
-    // promotion and rendition commit landed but the Asset row never flipped.
     harness.put(originalKey, body, "image/png");
     harness.put(readyKey, produced, "image/jpeg");
     const originalObjectId = await runSystemTransaction(env, async (client) => {
@@ -1916,9 +1598,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       Effect.runPromise(processorJob.process(outboxMessage(eventB, assetId))),
     ).resolves.toBe("skipped");
 
-    // Only the first delivery adopted the committed rendition: the engine was
-    // never invoked, no new object or copy appeared, and every later event is
-    // skipped because the Asset row converged to 'ready' with the verdict.
     expect(processor.calls).toHaveLength(0);
     expect(harness.copies.filter((copy) => copy.destination === readyKey)).toHaveLength(0);
     expect(harness.bodies.get(readyKey)).toEqual(produced);
@@ -1955,12 +1634,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const produced = engineRenditionBytes(320, 240, await sha256Hex(body));
     harness.put(originalKey, body, "image/png");
     harness.put(readyKey, produced, "image/jpeg");
-    // Migration 007's re-queue state: the Asset was flipped back to
-    // 'processing' for re-verification while the committed optimized rendition
-    // stayed ready, and its 'original' approval was demoted to a 'processing'
-    // reference with no object. Before the adoption commit landed the verdict
-    // on the Asset, this Asset stayed 'processing' forever: the maintenance
-    // rearmer kept re-arming it and the orphan sweep refused it.
     await runSystemTransaction(env, async (client) => {
       await client.query(
         `INSERT INTO asset_objects
@@ -2009,8 +1682,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       Effect.runPromise(processorJob.process(outboxMessage(eventId, assetId))),
     ).resolves.toBe("processed");
 
-    // The verdict was adopted, not recomputed: the media processor was never
-    // invoked and no new object or copy appeared.
     expect(processor.calls).toHaveLength(0);
     expect(harness.copies.filter((copy) => copy.destination === readyKey)).toHaveLength(0);
     expect(harness.bodies.get(readyKey)).toEqual(produced);
@@ -2070,11 +1741,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
 
     await expect(Effect.runPromise(processorJob.process(message))).resolves.toBe("skipped");
 
-    // Exactly one engine run produced exactly one rendition object. The
-    // fixture's staging row was already inside `chargedBefore`, so the delta is
-    // the three new physical rows the run added: the promoted original copy
-    // plus both the superseded processing staging output and its ready
-    // rendition — every real byte charged once.
     expect(processor.calls).toHaveLength(1);
     const produced = engineRenditionBytes(320, 240, await sha256Hex(body));
     const chargedAfter = await chargedObjectBytes(organizationId);
@@ -2142,8 +1808,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       title: "Automation integration promotion adoption",
     });
     const originalKey = `${organizationId}/${assetId}/original`;
-    // Crash window: the promotion copy landed but the inventory transaction
-    // never committed, so the original exists only as bucket bytes.
     harness.put(originalKey, body, "image/png");
 
     await expect(
@@ -2154,8 +1818,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       ),
     ).resolves.toBe("processed");
 
-    // The conditional copy declined and the Worker adopted the object it found
-    // instead of writing a second one.
     expect(harness.copies.filter((copy) => copy.destination === originalKey)).toHaveLength(0);
     expect(harness.bodies.get(originalKey)).toEqual(body);
     const inventory = await assetInventory(assetId);
@@ -2185,10 +1847,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       title: "Automation integration unrecorded output",
     });
     const processingKey = `staging/${organizationId}/${assetId}/processing-${profile}`;
-    // The engine wrote bytes but the attempt died before the digest was
-    // durable: foreign bytes nobody can verify, under a bare reservation.
-    // The reservation is seeded at the image media ceiling `reserveOutputs`
-    // would charge, not at the 24-byte fixture size.
     harness.put(processingKey, png(64, 48), "image/jpeg");
     await runSystemTransaction(env, async (client) => {
       await client.query(
@@ -2215,7 +1873,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       ),
     ).resolves.toBe("processed");
 
-    // Untracked bytes were deleted rather than trusted, then recomputed.
     expect(harness.deletes).toContain(processingKey);
     expect(processor.calls).toHaveLength(1);
     const inventory = await assetInventory(assetId);
@@ -2243,9 +1900,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     });
     const processingKey = `staging/${organizationId}/${assetId}/processing-${profile}`;
     const produced = engineRenditionBytes(320, 240, await sha256Hex(body));
-    // A row that was only partially recorded: real bytes and a digest landed,
-    // but the media type never did. It is adoptable on nothing, so it must be
-    // reset to a clean reservation rather than trusted or charged as output.
     harness.put(processingKey, produced, "image/jpeg");
     await runSystemTransaction(env, async (client) => {
       await client.query(
@@ -2272,9 +1926,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         [organizationId, assetId, seededAlphaProfileId, profile],
       );
     });
-    // Fail once so the post-clear state is observable end of run: on a build
-    // that resets only rows with `bytes IS NULL`, this row keeps its stale
-    // bytes here and the reservation never returns to a clean state.
     processor.scripted.push({
       error: {
         code: "engine_overloaded",
@@ -2304,8 +1955,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     expect(harness.deletes).toContain(processingKey);
     expect(processor.calls).toHaveLength(1);
 
-    // The cleared reservation is genuinely reusable: the retry recomputes and
-    // commits rather than hanging on bytes it can no longer prove.
     await expect(Effect.runPromise(processorJob.process(message))).resolves.toBe("processed");
     expect(processor.calls).toHaveLength(2);
     await expect(processingState(assetId, eventId)).resolves.toMatchObject({
@@ -2323,11 +1972,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const profile = "image_auto_4096_long_edge";
     const harness = objectStoreHarness();
     const processor = mediaProcessorNamespace(harness);
-    // The promotion is granted exactly the headroom it needs — the staged
-    // source bytes — and the checkpoint's full reservation completes the
-    // workspace's charge, so nothing remains for a second reservation. A retry
-    // that demanded fresh headroom for a key it already holds would be refused
-    // here, which is exactly what this case pins.
     const storageCeiling = storageLimit;
     try {
       const { body } = await stagedUploadFixture({
@@ -2339,8 +1983,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       const produced = engineRenditionBytes(320, 240, await sha256Hex(png(320, 240)));
       harness.put(processingKey, produced, "image/jpeg");
       await runSystemTransaction(env, async (client) => {
-        // The crash checkpoint itself: measured output recorded, but the
-        // promotion never ran, so the row still holds its full reservation.
         await client.query(
           `INSERT INTO asset_objects
              (org_id, asset_id, brand_profile_id, kind, profile, r2_key, bytes,
@@ -2366,11 +2008,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
           [organizationId, assetId, seededAlphaProfileId, profile],
         );
       });
-      // Charged rows accumulate across this suite's fixtures and the seed, so
-      // the holder is sized against the measured charge rather than a
-      // constant: it leaves exactly the staged source bytes of headroom, which
-      // the protected-copy reservation consumes, filling the workspace to its
-      // ceiling alongside the checkpoint's full reservation.
       const chargedSoFar = await chargedObjectBytes(organizationId);
       const holderBytes = storageCeiling - body.byteLength - Number(chargedSoFar);
       await runSystemTransaction(env, async (client) => {
@@ -2397,10 +2034,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         );
       });
 
-      // The checkpoint row is charged its full reservation rather than its
-      // small measured output: charging its bytes instead would free the
-      // reservation and let another request take capacity this attempt still
-      // needs to write.
       expect(await chargedObjectBytes(organizationId)).toBe(chargedSoFar + BigInt(holderBytes));
 
       const processorJob = createAssetJobProcessor(processorEnv(processor), harness.storage);
@@ -2408,13 +2041,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
 
       await expect(Effect.runPromise(processorJob.process(message))).resolves.toBe("processed");
 
-      // The checkpoint was adopted and promoted rather than recomputed or
-      // refused for want of headroom it already held.
       expect(processor.calls).toHaveLength(0);
       const inventory = await assetInventory(assetId);
-      // Promotion settled the checkpoint row onto its measured size and
-      // released its reservation in one step, so the bytes are never charged as
-      // both the reservation and the output.
       expect(inventory.find((row) => row.r2_key === processingKey)).toMatchObject({
         bytes: String(produced.byteLength),
         reserved_bytes: null,
@@ -2426,10 +2054,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         bytes: String(produced.byteLength),
         reserved_bytes: null,
       });
-      // Nothing is left writing, so no reservation survives the promotion to be
-      // charged a second time: the workspace settled at the checkpoint's real
-      // output plus the two copies the run added, and the surplus reservation
-      // is gone.
       expect(inventory.find((row) => row.status === "writing")).toBeUndefined();
       expect(await chargedObjectBytes(organizationId)).toBe(
         BigInt(storageCeiling) + BigInt(2 * produced.byteLength) - BigInt(imageReservationCeiling),
@@ -2458,8 +2082,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     });
     const processingKey = `staging/${organizationId}/${assetId}/processing-${profile}`;
     const produced = engineRenditionBytes(320, 240, await sha256Hex(body));
-    // Crash window after the verified digest was recorded but before the
-    // promotion ran: the staging row carries the real facts.
     harness.put(processingKey, produced, "image/jpeg");
     await runSystemTransaction(env, async (client) => {
       await client.query(
@@ -2495,8 +2117,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       ),
     ).resolves.toBe("processed");
 
-    // The recorded output was adopted and promoted without paying for the
-    // compute again.
     expect(processor.calls).toHaveLength(0);
     expect(harness.bodies.get(processingKey)).toEqual(produced);
     expect(harness.bodies.get(`${organizationId}/${assetId}/rendition-${profile}`)).toEqual(
@@ -2537,8 +2157,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       "engine is overloaded",
     );
 
-    // The Asset is still processing, the lease recorded the failure, and the
-    // 'writing' reservation row still holds its charge.
     const duringFailure = await assetInventory(assetId);
     const reservation = duringFailure.find(
       (row) => row.kind === "rendition" && row.status === "writing",
@@ -2582,10 +2200,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       Effect.runPromise(processorJob.process(outboxMessage(eventId, assetId))),
     ).resolves.toBe("processed");
 
-    // The durable failed state carries the engine's actionable code, the
-    // reservation is released and nothing is marked ready, the promoted
-    // original stays inventoried and charged, and the unattached failed Asset
-    // is armed for the seven-day ownership-aware orphan sweep.
     await expect(processingState(assetId, eventId)).resolves.toMatchObject({
       failure_code: "corrupt_media",
       orphan_armed: true,
@@ -2605,8 +2219,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     expect(harness.bodies.has(readyKey)).toBe(false);
     expect(processor.calls).toHaveLength(1);
 
-    // A redelivery under a different event id cannot re-run a job whose input
-    // can never succeed — and no raw bytes are ever published.
     const redelivery = "automation-integration-processing-permanent-redeliver";
     await expect(
       Effect.runPromise(processorJob.process(outboxMessage(redelivery, assetId))),
@@ -2621,9 +2233,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const profile = "image_auto_4096_long_edge";
     const harness = objectStoreHarness();
     const processor = mediaProcessorNamespace(harness);
-    // The source is declared as the profile's preferred opaque still type,
-    // which is the only case in which a verified `original_compatible`
-    // verdict is legitimate: a PNG source must actually be converted.
     const { body } = await stagedUploadFixture({
       assetId,
       contentType: "image/jpeg",
@@ -2641,9 +2250,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       ),
     ).resolves.toBe("processed");
 
-    // The rendition references the original object id: no second copy of the
-    // bytes is ever created, so `rendition-<profile>` does not exist in the
-    // bucket and no ready rendition object is inventoried for it.
     const inventory = await assetInventory(assetId);
     const original = inventory.find((row) => row.kind === "original");
     expect(
@@ -2655,13 +2261,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       status: "ready",
     });
 
-    // Two new charges land in this run and each is exactly one physical key:
-    // the protected original (its real bytes) and the engine's staging output
-    // row, which holds its full reservation rather than zero because the
-    // create-only grant minted for the job is still live and could recreate
-    // the key it never wrote. The retired staging source's real bytes were
-    // already counted inside `chargedBefore`, so they are not part of the
-    // delta.
     const supersededOutput = inventory.find(
       (row) => row.kind === "rendition" && row.status === "superseded",
     );
@@ -2690,11 +2289,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       harness,
       title: "Automation integration demoted original",
     });
-    // Migration 007's re-queue state: the legacy 'original' approval is
-    // 'processing' with no object, and only the reserved profile row carries
-    // the verdict this run commits. Nothing else ever writes the 'original'
-    // row, so before the verdict-commit settle it stayed 'processing' forever
-    // and excluded the Asset from the orphan sweep's live-rendition guard.
     await runSystemTransaction(env, async (client) => {
       await client.query(
         `INSERT INTO asset_renditions
@@ -2709,9 +2303,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       Effect.runPromise(processorJob.process(outboxMessage(eventId, assetId))),
     ).resolves.toBe("processed");
 
-    // The committed verdict settled the demoted row to a terminal state that
-    // is neither publishable ('ready' needs a reference object) nor a
-    // reclamation claim ('deleting'/'deleted' belong to the deletion path).
     const renditions = await assetRenditions(assetId);
     expect(renditions.find((row) => row.profile === profile)).toMatchObject({
       status: "ready",
@@ -2727,11 +2318,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       status: "ready",
     });
 
-    // Orphan deadline elapsed and no Post retains the Asset, so the only thing
-    // that could refuse the sweep's claim is a live rendition — the state the
-    // stranded 'processing' row produced. Every other Asset's deadline is
-    // parked for the duration of this spec, the way the bounded-cleanup spec
-    // pins the shared database, so this Asset's claim is deterministic.
     const pinnedDeadlines = await runSystemTransaction(env, async (client) => {
       const rows = await client.query<{
         id: string;
@@ -2772,9 +2358,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         orphan_assets_claimed: 1,
       });
 
-      // The claim itself is the sweep predicate's verdict: the Asset moved to
-      // 'deleting' and its deletion event was armed in one statement, which a
-      // 'processing' rendition would have refused.
       await runSystemTransaction(env, async (client) => {
         const claimed = await client.query<{
           deletion_events: string;
@@ -2891,8 +2474,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const processingKey = `staging/${organizationId}/${assetId}/processing-${profile}`;
     const readyKey = `${organizationId}/${assetId}/rendition-${profile}`;
     const produced = engineRenditionBytes(320, 240, await sha256Hex(body));
-    // A previous attempt produced verified output and promoted it before
-    // dying; the ready key exists with no committed reference to it yet.
     harness.put(processingKey, produced, "image/jpeg");
     harness.put(readyKey, produced, "image/jpeg");
     await runSystemTransaction(env, async (client) => {
@@ -2929,8 +2510,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       ),
     ).resolves.toBe("processed");
 
-    // The create-only promotion declined rather than clobbering the existing
-    // object, and the settled inventory points at the bytes already there.
     expect(harness.copies.filter((copy) => copy.destination === readyKey)).toHaveLength(0);
     expect(harness.bodies.get(readyKey)).toEqual(produced);
     expect(processor.calls).toHaveLength(0);
@@ -2952,9 +2531,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const harness = objectStoreHarness();
     const processor = mediaProcessorNamespace(harness);
     try {
-      // Pre-charge the workspace to its community storage ceiling so the
-      // reservation math finds zero headroom; this holder asset is deleted in
-      // the finally block so later specs keep full capacity.
       await runSystemTransaction(env, async (client) => {
         await client.query(
           `INSERT INTO assets
@@ -2993,8 +2569,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         ),
       ).resolves.toBe("processed");
 
-      // The engine was never invoked, no reservation row was written, and the
-      // Asset is durably failed rather than declared ready.
       expect(processor.calls).toHaveLength(0);
       const inventory = await assetInventory(assetId);
       expect(
@@ -3023,10 +2597,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       harness,
       title: "Automation integration source race",
     });
-    // A still-valid upload grant rewrote the staged object after
-    // finalization: the live checksum no longer matches the SHA-256 the
-    // staging row pinned, so verification refuses before any promotion
-    // reservation is taken.
     harness.put(stagingKey, png(160, 120), "image/png");
 
     await expect(
@@ -3074,27 +2644,15 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       ),
     ).resolves.toBe("processed");
 
-    // Consumers resolve a publishable candidate by joining the ready rendition
-    // reference to its object row and reading geometry/duration off the OBJECT,
-    // not off the Asset. So the no-benefit path must populate the object it
-    // accepted: a video left with NULL duration would be handed to a
-    // duration-limited Platform as "unknown" and rejected, despite the engine
-    // having measured it. These are the engine's real decoded values, not
-    // fixture echoes — no row written before this point carries them at all.
     const original = (await assetInventory(assetId)).find((row) => row.kind === "original");
     expect(original).toMatchObject({
       bytes: String(body.byteLength),
       content_type: "video/mp4",
       status: "ready",
     });
-    // The double derives duration from the body length, so this is a measured
-    // value the pipeline had to carry across, not a constant both sides could
-    // have agreed on independently.
     expect(Number(original?.duration_sec)).toBe(body.byteLength / 10);
     expect(Number(original?.width)).toBe(640);
     expect(Number(original?.height)).toBe(360);
-    // The Asset carries the same facts, and the reference points at the object
-    // that now holds them.
     await expect(processingState(assetId, eventId)).resolves.toMatchObject({
       height: 360,
       status: "ready",
@@ -3119,15 +2677,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const body = png(320, 240);
     const sourceBytes = body.byteLength;
     const ceiling = storageLimit;
-    // Charged rows from the seed and earlier fixture assets accumulate until
-    // the suite's teardown, so the holder is sized against the measured charge
-    // rather than a constant.
     const chargedBase = await chargedObjectBytes(organizationId);
     try {
-      // Headroom once the control's staging row lands is exactly one source
-      // copy: enough to promote the original, far too little for the media
-      // ceiling the engine reservation needs. The control asset proves this
-      // fixture would otherwise reach that point.
       await runSystemTransaction(env, async (client) => {
         await client.query(
           `INSERT INTO assets
@@ -3164,8 +2715,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
           ),
         ),
       ).resolves.toBe("processed");
-      // The control reached the protected copy, so the only difference in the
-      // second run is the pending upload's promised bytes.
       expect(
         (await assetInventory(controlAssetId)).find((row) => row.kind === "original"),
       ).toMatchObject({ status: "ready" });
@@ -3173,10 +2722,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         processingState(controlAssetId, "automation-integration-processing-quota-control"),
       ).resolves.toMatchObject({ failure_code: "storage_limit_reached" });
 
-      // One byte of live upload reservation removes the last byte of headroom.
-      // Those bytes are charged before any object row exists for them, so a
-      // reservation that summed `asset_objects` alone would hand out capacity
-      // this workspace has already promised to an unfinished upload.
       await pendingUploadFixture({
         assetId: pendingAssetId,
         bytes: 1,
@@ -3203,8 +2748,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         orphan_armed: true,
         status: "failed",
       });
-      // Refused before any external write: no protected copy, and no leftover
-      // pending row holding a reservation nothing would ever release.
       const blocked = await assetInventory(blockedAssetId);
       expect(blocked.find((row) => row.kind === "original")).toBeUndefined();
       expect(blocked.find((row) => row.reserved_bytes !== null)).toBeUndefined();
@@ -3228,15 +2771,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const body = png(320, 240);
     const sourceBytes = body.byteLength;
     const ceiling = storageLimit;
-    // The seed and earlier fixture assets keep their charged rows until
-    // teardown, so the holder is sized against the measured charge rather
-    // than a constant.
     const chargedBase = await chargedObjectBytes(organizationId);
     try {
-      // Headroom is exactly one source copy once both staging rows are
-      // charged, so two concurrent promotions cannot both fit. This is the
-      // oversubscription boundary: copying first and reserving after would
-      // let both proceed.
       await runSystemTransaction(env, async (client) => {
         await client.query(
           `INSERT INTO assets
@@ -3286,8 +2822,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         ),
       ]);
 
-      // Exactly one protected copy exists. The winner's reservation was already
-      // charged when the loser measured headroom, so the loser never copied.
       const firstOriginal = (await assetInventory(firstAssetId)).find(
         (row) => row.kind === "original",
       );
@@ -3310,8 +2844,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         failure_code: "storage_limit_reached",
         status: "failed",
       });
-      // No orphan reservation: the refused attempt leaves nothing charged that
-      // no later sweep would release.
       expect(
         (await assetInventory(refused[0]!)).find((row) => row.reserved_bytes !== null),
       ).toBeUndefined();
@@ -3335,15 +2867,9 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         title: "Automation integration headroom two copies",
       });
       const producedSha = await sha256Hex(engineRenditionBytes(320, 240, await sha256Hex(body)));
-      // Engine output size is deterministic: the double always writes the
-      // 44-byte rendition body `engineRenditionBytes` builds.
       const outputBytes = 44;
       const chargedSoFar = await chargedObjectBytes(organizationId);
       const ceiling = BigInt(storageLimit);
-      // Headroom ends at exactly two copies of the real output plus the source
-      // copy and the staging reservation the source consumed: enough for the
-      // promotion path when reservations settle to real bytes, nowhere near
-      // enough for the 25 MiB media ceiling the old reservation demanded.
       const holderBytes = Number(ceiling - chargedSoFar) - body.byteLength - 2 * outputBytes;
       await runSystemTransaction(env, async (client) => {
         await client.query(
@@ -3377,9 +2903,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         ),
       ).resolves.toBe("processed");
 
-      // The rendition committed even though headroom never reached the media
-      // ceiling: the reservation settled to the real 44-byte output before the
-      // protected copy was charged, so headroom >= 2 * output sufficed.
       const inventory = await assetInventory(assetId);
       const rendition = inventory.find((row) => row.kind === "rendition" && row.status === "ready");
       expect(rendition).toMatchObject({
@@ -3390,7 +2913,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       await expect(processingState(assetId, eventId)).resolves.toMatchObject({
         status: "ready",
       });
-      // Exactness check: the workspace is now at its ceiling to the byte.
       expect(await chargedObjectBytes(organizationId)).toBe(ceiling);
     } finally {
       await runSystemTransaction(env, (client) =>
@@ -3415,9 +2937,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       const outputBytes = 44;
       const chargedSoFar = await chargedObjectBytes(organizationId);
       const ceiling = BigInt(storageLimit);
-      // One byte short of the guarantee: the staging reservation covers the
-      // source copy and the output reservation, but the destination needs
-      // 2 * output — one real byte more than is free.
       const holderBytes = Number(ceiling - chargedSoFar) - body.byteLength - 2 * outputBytes + 1;
       await runSystemTransaction(env, async (client) => {
         await client.query(
@@ -3451,10 +2970,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         ),
       ).resolves.toBe("processed");
 
-      // The refusal is terminal for the Asset, not retried forever: an
-      // undersized workspace is a durable answer the creator can act on, and
-      // the pending rows are superseded rather than left holding a reservation
-      // no later run would release.
       await expect(processingState(assetId, eventId)).resolves.toMatchObject({
         failure_code: "storage_limit_reached",
         orphan_armed: true,
@@ -3465,8 +2980,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         inventory.find((row) => row.kind === "rendition" && row.status === "ready"),
       ).toBeUndefined();
       expect(inventory.find((row) => row.status === "writing")).toBeUndefined();
-      // No orphan reservation: the refused destination row was rolled back, so
-      // nothing charges bytes that were never produced.
       expect(inventory.find((row) => row.r2_key.endsWith(`rendition-${profile}`))).toBeUndefined();
       expect(harness.bodies.has(`${organizationId}/${assetId}/rendition-${profile}`)).toBe(false);
     } finally {
@@ -3489,10 +3002,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       harness,
       title: "Automation integration settled replay",
     });
-    // A previous attempt verified the engine's output and exchanged its
-    // reservation for real bytes, then crashed before the protected copy was
-    // reserved: the row is still 'writing' with bytes recorded and
-    // reserved_bytes NULL — the exact mid-state the replay must adopt.
     const produced = engineRenditionBytes(320, 240, await sha256Hex(body));
     const producedSha = await sha256Hex(produced);
     harness.put(processingKey, produced, "image/jpeg");
@@ -3531,9 +3040,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       ),
     ).resolves.toBe("processed");
 
-    // The settled reservation was adopted, not re-settled: the destination was
-    // charged exactly once for the real output, and the replay added only the
-    // canonical source and the destination copy to the workspace's charge.
     const inventory = await assetInventory(assetId);
     expect(
       inventory.find((row) => row.kind === "rendition" && row.status === "ready"),
@@ -3594,10 +3100,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
           [organizationId, assetId, seededAlphaProfileId, profile],
         );
       });
-      // Fill the workspace so the re-arm to the media ceiling cannot fit: the
-      // settled row holds only its real bytes, and re-arming needs the full
-      // reservation because a stale create-only grant could still write to
-      // that ceiling.
       const chargedSoFar = await chargedObjectBytes(organizationId);
       const ceiling = BigInt(storageLimit);
       const holderBytes =
@@ -3629,9 +3131,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
           ],
         );
       });
-      // A stale grant rewrote the key after the facts were recorded, so the
-      // recorded digest no longer matches the live bytes: the pipeline must
-      // re-arm the reservation before it may delete and recompute.
       harness.put(processingKey, png(160, 120), "image/jpeg");
 
       await expect(
@@ -3642,9 +3141,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         ),
       ).rejects.toThrow("room to re-arm");
 
-      // The capacity failure left the measured facts and the object in place:
-      // clearing them before re-arming would let the stale grant write to the
-      // ceiling against a row that only accounts for the settled bytes.
       const duringFailure = await assetInventory(assetId);
       expect(duringFailure.find((row) => row.r2_key === processingKey)).toMatchObject({
         bytes: String(produced.byteLength),
@@ -3653,9 +3149,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       });
       expect(harness.bodies.has(processingKey)).toBe(true);
 
-      // Freeing the holder lets the retry re-arm to the full ceiling and
-      // recompute; the grant the engine receives is bounded by that re-armed
-      // reservation, not by the settled byte count.
       await runSystemTransaction(env, (client) =>
         client.query("DELETE FROM assets WHERE id = $1", [holderAssetId]),
       );
@@ -3700,9 +3193,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       title: "Automation integration ready copy reserved",
     });
     const chargedBeforePromotion = await chargedObjectBytes(organizationId);
-    // Captured while the promotion copy is still in flight, which is the only
-    // point at which "reserved before the copy" is a claim about ordering rather
-    // than about the final state.
     let pendingRowAtCopyTime: InventoryRow | undefined;
     harness.copyProbe.current = async ({ destination }) => {
       if (destination !== readyKey) return;
@@ -3717,14 +3207,11 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       ),
     ).resolves.toBe("processed");
 
-    // While the copy ran, the destination already had a charged inventory row
-    // reserved at exactly the measured output size. Both physical copies — the
-    // staging output and its protected copy — are accounted for at once.
     expect(pendingRowAtCopyTime).toMatchObject({
       bytes: null,
-      reserved_bytes: expect.stringMatching(/^\d+$/) as unknown as string,
       status: "writing",
     });
+    expect(pendingRowAtCopyTime?.reserved_bytes).toMatch(/^\d+$/);
     const produced = harness.bodies.get(processingKey);
     expect(pendingRowAtCopyTime?.reserved_bytes).toBe(String(produced?.byteLength));
     expect(chargedBeforePromotion).toBeGreaterThan(0n);
@@ -3760,9 +3247,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       ),
     ).resolves.toBe("processed");
 
-    // The protected original exists — it is real creator-visible bytes — but
-    // nothing references it as a rendition. Only the engine's
-    // `original_compatible` verdict may approve the original, and it refused.
     const original = (await assetInventory(assetId)).find((row) => row.kind === "original");
     expect(original).toMatchObject({ r2_key: originalKey, status: "ready" });
     const renditions = await assetRenditions(assetId);
@@ -3778,8 +3262,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     });
   });
 
-  // A landed protected copy settles its existing reservation without charging
-  // another source copy; only the engine's two physical output copies add bytes.
   it("adopts a protected copy that landed before its row was settled", async () => {
     const assetId = "93000000-0000-4000-8000-000000000080";
     const eventId = "automation-integration-processing-pending-copy";
@@ -3791,9 +3273,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       harness,
       title: "Automation integration pending original copy",
     });
-    // Crash checkpoint: the copy completed but the settle never ran, so the row
-    // is still `writing` with a reservation and no bytes while the object it
-    // owns already exists in the bucket.
     harness.put(originalKey, body, "image/png");
     await runSystemTransaction(env, async (client) => {
       await client.query(
@@ -3815,9 +3294,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       ),
     ).resolves.toBe("processed");
 
-    // The pending row was adopted and settled in place: one row for the key,
-    // charged once at the original's real size, with no second reservation for
-    // bytes already in the bucket.
     const inventory = await assetInventory(assetId);
     const originals = inventory.filter((row) => row.kind === "original");
     expect(originals).toHaveLength(1);
@@ -3829,9 +3305,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       status: "ready",
     });
     const chargedAfter = await chargedObjectBytes(organizationId);
-    // The original's reservation was already charged and is replaced by the
-    // same byte count. Only the uploaded staging output and its ready copy add
-    // physical storage; no fresh protected-source reservation may be charged.
     const rendition = inventory.find((row) => row.kind === "rendition");
     const output = rendition && harness.bodies.get(rendition.r2_key);
     if (!output) throw new Error("The processing fixture produced no ready object");
@@ -3869,8 +3342,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     });
     const harness = objectStoreHarness();
     harness.put(key, png(8, 8), "image/png");
-    // The delete lands in the bucket but the acknowledgement is lost, so the
-    // durable row never settles and the delivery must be retried.
     let lostAcknowledgement = true;
     const ambiguousStorage: ObjectStore = {
       ...harness.storage,
@@ -3909,8 +3380,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     expect(settledState.objects).toEqual([
       expect.objectContaining({ r2_key: key, status: "deleted" }),
     ]);
-    // R2's idempotent DELETE ran once per attempt; the charge was released
-    // exactly once through the guarded deleting→deleted transition.
     expect(harness.deletes).toEqual([key, key]);
   });
 
@@ -3949,8 +3418,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const harness = objectStoreHarness();
     harness.put(originalKey, png(64, 64), "image/png");
     harness.put(renditionKey, new Uint8Array(20), "image/jpeg");
-    // Interruption between the two external deletes: the original's removal
-    // throws before landing, leaving its row claimed but unsettled.
     let failOriginal = true;
     const interruptedStorage: ObjectStore = {
       ...harness.storage,
@@ -4036,9 +3503,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
            WHERE org_id = $1 AND period = $2`,
           [organizationId, currentUsagePeriod],
         );
-        // An active provider operation holds the Asset, so the lifecycle
-        // update fires the delete-claim guard and the whole commit (rendition
-        // settle + status flip + lease outcome) rolls back together.
         await client.query(
           `INSERT INTO provider_operations
              (id, org_id, distribution_id, operation, idempotency_key, status)
@@ -4073,8 +3537,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         status: "deleting",
         storage_bytes: usageBefore.toString(),
       });
-      // The bucket delete settled, but the lifecycle commit rolled back: the
-      // rendition row is not 'deleted' and the Asset still awaits its worker.
       expect(rolledBack.objects).toEqual([
         expect.objectContaining({ r2_key: originalKey, status: "deleted" }),
       ]);
@@ -4099,8 +3561,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         event_outcome: "succeeded",
         status: "deleted",
       });
-      // The settled object released its charge exactly once: the replay could
-      // not subtract the same bytes twice.
       expect(settledState.storage_bytes).toBe(usageBefore.toString());
       expect(harness.deletes).toEqual([originalKey]);
     } finally {
@@ -4149,9 +3609,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const processorJob = createAssetJobProcessor(processorEnv(processor), harness.storage);
 
     const invalidMessage = outboxMessage("automation-integration-invalid", invalidId);
-    // The engine decoded the staged bytes and refused them permanently: the
-    // Asset is quarantined as 'failed' and its protected original stays
-    // charged rather than being published anywhere.
     await expect(Effect.runPromise(processorJob.process(invalidMessage))).resolves.toBe(
       "processed",
     );
@@ -4205,8 +3662,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
          VALUES ($1, $2, 24)`,
         [sessionId, organizationId],
       );
-      // The finalize step never ran, so the staged object exists only as an
-      // uncharged 'writing' inventory row the session's reservation maps to.
       await client.query(
         `INSERT INTO asset_objects
            (org_id, asset_id, brand_profile_id, kind, r2_key, content_type,
@@ -4248,29 +3703,11 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
          WHERE session.id = $1`,
         [sessionId],
       );
-      // The abort is replayable: the session is terminal, the reservation's
-      // charge moved onto the staged row rather than being dropped, and that
-      // row was claimed for deletion with the reservation released exactly
-      // once. The bucket confirmed the abort, so the upload id and its part
-      // grants are dead: the write hold closed at once rather than parking at
-      // the session's expiry, which lets the same sweep's
-      // `releaseStaleProcessingStaging` pass pick the claimed row straight
-      // back up. R2 DELETE is idempotent and the key was already absent here,
-      // so the claim settles to `'deleted'` in this same `runMaintenance`
-      // rather than lingering in `'deleting'` for a later sweep.
-      // The confirmed abort closed the hold at the moment it was claimed: a
-      // hold still running into the future would mean the dead upload id could
-      // write again after its reservation moved.
       const hold = state.rows[0]!.object_hold;
       expect(hold).toBeInstanceOf(Date);
       expect(hold!.getTime()).toBeLessThanOrEqual(Date.now());
       const { object_hold: _hold, ...rest } = state.rows[0]!;
       expect(rest).toEqual({
-        // The abandoned upload leaves its Asset durably failed with a stable
-        // reason rather than pending forever on a session that will never
-        // finalize. Its object and reservation are reclaimed exactly as
-        // before; only the object's lifecycle slot advances past `'deleting'`
-        // because this sweep completes the delete it claimed.
         asset_status: "failed",
         object_reserved: "24",
         object_status: "deleted",
@@ -4307,7 +3744,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
          VALUES ($1, $2, 32)`,
         [sessionId, organizationId],
       );
-      // The single-PUT grant minted an active write hold 30 minutes in the future.
       await client.query(
         `INSERT INTO asset_objects
            (org_id, asset_id, brand_profile_id, kind, r2_key, content_type,
@@ -4321,9 +3757,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const harness = objectStoreHarness();
     const processor = createAssetJobProcessor(env, harness.storage);
 
-    // First maintenance sweep: expires session without any tenant API call,
-    // fails the Asset, transfers reservation to the staging row as 'deleting',
-    // but the active writer hold prevents premature object deletion.
     const sweep1 = await Effect.runPromise(processor.runMaintenance());
     expect(sweep1).toMatchObject({
       cleanup_errors: 0,
@@ -4364,7 +3797,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       });
     });
 
-    // Now lapse the writer hold so the object becomes eligible for physical reclamation.
     await runSystemTransaction(env, async (client) => {
       await client.query(
         `UPDATE asset_objects
@@ -4375,8 +3807,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       );
     });
 
-    // Second maintenance sweep: reclaims the 'deleting' object with expired write hold,
-    // deletes it from storage, and settles it to 'deleted'.
     const sweep2 = await Effect.runPromise(processor.runMaintenance());
     expect(sweep2).toMatchObject({
       cleanup_errors: 0,
@@ -4390,7 +3820,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       expect(row.rows[0]?.status).toBe("deleted");
     });
 
-    // Third sweep: repeated cleanup is idempotent and changes nothing.
     const sweep3 = await Effect.runPromise(processor.runMaintenance());
     expect(sweep3).toMatchObject({
       cleanup_errors: 0,
@@ -4417,19 +3846,11 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       Effect.runPromise(processorJob.process(outboxMessage(eventId, assetId))),
     ).resolves.toBe("processed");
 
-    // Rewind to the state a crashed recovery leaves: the engine's verdict is
-    // still recorded in its dedupe cache, but the Worker cleared the staging
-    // key for a recompute — row back to a bare reservation, object gone,
-    // committed references unwound.
     harness.bodies.delete(processingKey);
     harness.types.delete(processingKey);
     harness.bodies.delete(readyKey);
     harness.types.delete(readyKey);
     await runSystemTransaction(env, async (client) => {
-      // The rendition reference must leave 'ready' before its object row goes:
-      // `asset_renditions_ready_object_check` forbids a ready row with a NULL
-      // reference, which deleting the object would otherwise produce through
-      // ON DELETE SET NULL.
       await client.query(
         `UPDATE asset_renditions
          SET status = 'processing', object_id = NULL, failure_code = NULL,
@@ -4459,16 +3880,10 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       );
     });
 
-    // The replayed 'optimized' verdict must not be trusted once its staging
-    // bytes are gone: the engine re-executes, the create-only PUT recreates
-    // the object, and the rendition commits from real bytes — never from a
-    // verdict pointing at an absent object.
     await expect(
       Effect.runPromise(processorJob.process(outboxMessage(retryEventId, assetId))),
     ).resolves.toBe("processed");
 
-    // The staging key was deleted before redelivery, so a body there now can
-    // only be the re-executed engine's recreated output.
     expect(harness.bodies.has(processingKey)).toBe(true);
     expect(harness.bodies.has(readyKey)).toBe(true);
     await expect(processingState(assetId, retryEventId)).resolves.toMatchObject({
@@ -4499,16 +3914,9 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const produced = harness.bodies.get(processingKey);
     if (!produced) throw new Error("first run must have staged an output");
 
-    // Same rewind as the deleted-bytes spec, but the staging bytes stay in the
-    // store: a still-valid stale grant then re-creates byte-identical output
-    // the instant the Worker's recovery clears the key — the engine's
-    // create-only PUT answers 412 on bytes it itself produced, which proves
-    // this job's output is unchanged and the recorded verdict replays.
     harness.bodies.delete(readyKey);
     harness.types.delete(readyKey);
     await runSystemTransaction(env, async (client) => {
-      // Same FK-safe order as the deleted-bytes spec: the rendition reference
-      // leaves 'ready' before its object row is removed.
       await client.query(
         `UPDATE asset_renditions
          SET status = 'processing', object_id = NULL, failure_code = NULL,
@@ -4547,9 +3955,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       Effect.runPromise(processorJob.process(outboxMessage(retryEventId, assetId))),
     ).resolves.toBe("processed");
 
-    // The re-executed run hit the create-only refusal and replayed the honest
-    // verdict, so the pipeline still converged to a committed rendition holding
-    // exactly the bytes the first attempt produced.
     expect(harness.bodies.get(readyKey)).toEqual(produced);
     await expect(processingState(assetId, retryEventId)).resolves.toMatchObject({
       event_outcome: "succeeded",
@@ -4579,22 +3984,11 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const produced = harness.bodies.get(processingKey);
     if (!produced) throw new Error("first run must have staged an output");
 
-    // A live writer re-creates the key with SAME-SIZE foreign bytes the moment
-    // the Worker clears it: the engine's recomputation is byte-identical to
-    // the recorded verdict, so the verdict replays, but the Worker's
-    // stored-digest check (sha256/ETag of the live object vs the verdict)
-    // proves these bytes are NOT that rendition and fails terminally rather
-    // than promoting foreign content. Size equality is deliberate: it is the
-    // case where only a digest check can catch the swap. The staging bytes
-    // stay in the store until the Worker's own delete so the wrapper below
-    // actually fires (a missing key short-circuits deleteObject).
     const foreign = new Uint8Array(produced.byteLength).fill(0xab);
     harness.bodies.delete(readyKey);
     harness.types.delete(readyKey);
 
     await runSystemTransaction(env, async (client) => {
-      // The rendition reference leaves 'ready' before its object row is
-      // deleted, or ON DELETE SET NULL violates the ready-needs-object check.
       await client.query(
         `UPDATE asset_renditions
          SET status = 'processing', object_id = NULL, failure_code = NULL,
@@ -4634,12 +4028,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       Effect.runPromise(processorJob.process(outboxMessage(retryEventId, assetId))),
     ).resolves.toBe("processed");
 
-    // The foreign bytes were never promoted: no ready rendition object exists.
     expect(harness.bodies.has(readyKey)).toBe(false);
     await expect(processingState(assetId, retryEventId)).resolves.toMatchObject({
-      // The verdict replayed (the engine cannot see foreign bytes), then the
-      // Worker's stored-digest check rejected it: the Asset fails with the
-      // checksum-mismatch evidence rather than promoting the swapped object.
       event_outcome: "succeeded",
       failure_code: "output_checksum_mismatch",
       status: "failed",
@@ -4655,8 +4045,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const orphanKey = `staging/${organizationId}/${orphanAssetId}/gone.png`;
 
     await runSystemTransaction(env, async (client) => {
-      // A session stranded in 'completing': the checkpoint committed and the
-      // request died before the final write, well past the stale-write grace.
       await client.query(
         `INSERT INTO assets
            (id, org_id, brand_profile_id, uploaded_by, asset_type, title,
@@ -4687,9 +4075,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
                  now() + INTERVAL '30 minutes')`,
         [organizationId, completingAssetId, seededAlphaProfileId, completingKey],
       );
-      // A second abandoned session whose staging row is already gone: its
-      // reservation must still be released by the no-live-row branch, not held
-      // forever because no staged row claimed it.
       await client.query(
         `INSERT INTO assets
            (id, org_id, brand_profile_id, uploaded_by, asset_type, title,
@@ -4763,8 +4148,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
          WHERE asset_id = $1 AND kind = 'staging'`,
         [completingAssetId],
       );
-      // The session ended but its minted PUT grant still lives: the staged row
-      // is claimed for the sweep while its write hold remains in force.
       expect(staged.rows[0]).toMatchObject({
         held: true,
         status: "deleting",
@@ -4828,14 +4211,12 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       status: "ready",
     });
 
-    // While write hold is active, maintenance leaves the superseded original untouched.
     const sweepHoldActive = await Effect.runPromise(processor.runMaintenance());
     expect(sweepHoldActive.cleanup_errors).toBe(0);
     const inventoryDuringHold = await assetInventory(assetId);
     expect(inventoryDuringHold.find((row) => row.r2_key === legacyKey)?.status).toBe("superseded");
     expect(harness.bodies.has(legacyKey)).toBe(true);
 
-    // Now lapse writer holds on superseded objects of this asset
     await runSystemTransaction(env, async (client) => {
       await client.query(
         `UPDATE asset_objects
@@ -4848,8 +4229,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
 
     const usageBeforeSweep = await chargedObjectBytes(organizationId);
 
-    // Run maintenance: superseded original is claimed, deleted from store, settled to deleted.
-    // Promoted original and rendition bytes remain intact! Quota settles once.
     const sweepHoldElapsed = await Effect.runPromise(processor.runMaintenance());
     expect(sweepHoldElapsed.cleanup_errors).toBe(0);
 
@@ -4865,7 +4244,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const usageAfterSweep = await chargedObjectBytes(organizationId);
     expect(usageBeforeSweep).toBeGreaterThan(usageAfterSweep);
 
-    // Repeated sweep: quota does not settle again, nothing is re-deleted.
     const repeatedSweep = await Effect.runPromise(processor.runMaintenance());
     expect(repeatedSweep.cleanup_errors).toBe(0);
     expect(await chargedObjectBytes(organizationId)).toBe(usageAfterSweep);
@@ -4898,12 +4276,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const staleSessionKey = `staging/${organizationId}/${terminalSessionAssetId}/session.png`;
     const expiredSupersededKey = `staging/${organizationId}/${staleWriteAssetId}/superseded.png`;
 
-    // Pin every sweep's cross-spec inputs so counters are deterministic: the
-    // seeded orphan 'd8' from the shared fixture keeps its deadline parked for
-    // the duration of this spec, other suites' in-flight assets cannot be
-    // mistaken for stuck work, and usage reconciliation has no due orgs. Both
-    // raised values are captured here and put back in the `finally` block, so
-    // this spec leaves no state behind for the suites that share the database.
     const pinnedSweepInputs = await runSystemTransaction(env, async (client) => {
       const rows = await client.query<{
         id: string;
@@ -4931,8 +4303,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
              AND id <> $1`,
         [stuckAssetId],
       );
-      // One row per organization, so capture every schedule this spec is
-      // about to park and put each one back individually.
       const reconciliationBefore = await client.query<{
         next_reconciliation_at: Date;
         org_id: string;
@@ -4953,10 +4323,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     });
     try {
       await runSystemTransaction(env, async (client) => {
-        // One row per expired Asset. `unnest` is called with two arrays
-        // because the alias needs two columns: a single-argument `unnest`
-        // returns one column and `AS source(id, title)` over it is a 42P10
-        // alias-arity error, not a missing cast.
         await client.query(
           `INSERT INTO assets
              (id, org_id, brand_profile_id, uploaded_by, asset_type, title,
@@ -5006,10 +4372,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
              AS source(asset_id, object_key)`,
           [organizationId, seededAlphaProfileId, expiredAssetIds, expiredKeys],
         );
-        // Orphaned ready assets whose deadline elapsed claim one
-        // asset.deletion.requested event each through the due-work sweep.
-        // Same two-array shape as the expired rows above: one column per
-        // alias name.
         await client.query(
           `INSERT INTO assets
              (id, org_id, brand_profile_id, uploaded_by, asset_type, title,
@@ -5026,8 +4388,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
             orphanAssetIds.map((_, index) => `Automation integration cleanup orphan ${index}`),
           ],
         );
-        // Two abandoned in-flight writes on a failed Asset: one settles, one
-        // fails its external delete and stays claimed.
         await client.query(
           `INSERT INTO assets
              (id, org_id, brand_profile_id, uploaded_by, asset_type, title,
@@ -5040,10 +4400,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
           [staleWriteAssetId, organizationId, seededAlphaProfileId, userId],
         );
         await client.query(
-          // Every tuple must supply all nine target columns. The two abandoned
-          // writes record no writer deadline at all (NULL), which is the state
-          // the claim queries treat as "no live capability can recreate these
-          // bytes"; only the superseded row carries an explicitly closed hold.
           `INSERT INTO asset_objects
              (org_id, asset_id, brand_profile_id, kind, r2_key, bytes, status,
               updated_at, write_hold_until)
@@ -5063,7 +4419,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
             expiredSupersededKey,
           ],
         );
-        // A terminal session whose staged bytes nobody reclaimed.
         await client.query(
           `INSERT INTO assets
              (id, org_id, brand_profile_id, uploaded_by, asset_type, title,
@@ -5090,8 +4445,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
            VALUES ($1, $2, $3, 'staging', $4, 'writing')`,
           [organizationId, terminalSessionAssetId, seededAlphaProfileId, staleSessionKey],
         );
-        // One genuinely stuck Asset: still 'processing' long past the grace,
-        // so the sweep re-arms exactly one lifecycle event.
         await client.query(
           `INSERT INTO assets
              (id, org_id, brand_profile_id, uploaded_by, asset_type, title,
@@ -5117,11 +4470,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       });
       expect(harness.multipartAborts).toHaveLength(50);
 
-      // The second sweep reports no cleanup errors: the row whose delete
-      // failed left the first sweep claimed as 'deleting', so the stale-write
-      // pass never sees it again and only the release pass retries the bucket
-      // delete — idempotently and silently, since the error was already
-      // reported by the pass that claimed the row.
       await expect(Effect.runPromise(processor.runMaintenance())).resolves.toMatchObject({
         cleanup_errors: 0,
         expired_sessions: 5,
@@ -5132,9 +4480,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         usage_rows: 0,
       });
       expect(harness.multipartAborts).toHaveLength(55);
-      // The unfinished delete is genuinely retried, not parked: the store was
-      // asked to remove the key once in each claiming pass of sweep one and
-      // once more by the release pass in sweep two.
       expect(
         vi.mocked(harness.storage.delete).mock.calls.filter((call) => call[0] === staleForeignKey),
       ).toHaveLength(3);
@@ -5182,23 +4527,10 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
           aborted_sessions: "55",
           claimed_orphans: "55",
           created_sessions: "0",
-          // Every expired Asset's staged row was claimed for deletion by the
-          // abort pass and then finished: `releaseStaleProcessingStaging`
-          // claims `deleting` rows whose write hold already lapsed (the abort
-          // closes the hold to `now()` because the multipart id is dead), and
-          // its 50-row bound is never saturated across these two sweeps, so no
-          // staged row is left mid-settlement. Only the row whose delete
-          // genuinely fails stays claimed, below.
           deleting_objects: "0",
           recovery_events: "1",
-          // A failed delete keeps the row claimed so the next sweep retries it.
           stuck_failed_delete: "deleting",
-          // The superseded row passed through the deleting claim and was
-          // released by the shared settlement, never directly overwritten.
           superseded_staging_status: "deleted",
-          // Same reason as `deleting_objects`: the terminal session's staged
-          // row was claimed in the second sweep and settled once its hold
-          // lapsed, so it does not linger in `deleting` for a later pass.
           terminal_staging_status: "deleted",
         });
       });
@@ -5212,9 +4544,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
             [row.id, row.orphaned_at, row.orphan_delete_after],
           );
         }
-        // Put every schedule back exactly as it was found: another suite (or
-        // the seed) owns those deadlines, so this spec parks them only for its
-        // own duration.
         for (const row of pinnedSweepInputs.reconciliationDeadlines) {
           await client.query(
             `UPDATE usage_reconciliation_state
@@ -5366,11 +4695,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const now = new Date("2026-07-19T14:00:00.000Z");
     const period = "2026-07";
     const orgId = "b6000000-0000-4000-8000-000000000001";
-    // This test's distributions live in a throwaway workspace, so they need
-    // profile-owned posts and a channel there: the composite foreign keys bind
-    // each row's Post and platform account to the same Brand Profile, which
-    // forbids referencing the seeded Alpha rows across organizations. One Post
-    // per row because `(post_id, platform_account_id)` is unique.
     const profileId = "b8000000-0000-4000-8000-000000000001";
     const windowAssetId = "b8000000-0000-4000-8000-000000000002";
     const windowAccountId = "b8000000-0000-4000-8000-000000000003";
@@ -5405,10 +4729,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
            VALUES ($1, $2, $3, 'youtube', 'usage-window-yt', 'tok')`,
           [windowAccountId, orgId, profileId],
         );
-        // One distribution at each window boundary: only rows inside
-        // [period start, period end) may enter the authoritative count. Each
-        // row keeps its own Post carrying the same window Asset, mirroring
-        // the pre-cutover asset-scoped fixture.
         const createdAts = [
           "2026-06-30T23:59:59Z",
           "2026-07-01T00:00:00Z",
@@ -5476,9 +4796,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
   it("queues a missed due schedule exactly once across repeated scans", async () => {
     const distributionId = "93000000-0000-4000-8000-000000000001";
     await runSystemTransaction(env, async (client) => {
-      // The schedule claim path now keys on posts: seed the Post that
-      // composes the canonical image over the seeded YouTube Channel before
-      // the Distribution row can reference it.
       await seedDistributionPost(client, {
         postId: postIdForDistribution(distributionId),
         target: { platformAccountId: seededYouTubeAccountId },
@@ -5566,9 +4883,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const stalledId = "93000000-0000-4000-8000-000000000051";
     try {
       await runSystemTransaction(env, async (client) => {
-        // Each row must own its Post: the unique (post_id, platform_account_id)
-        // keeps five rows on the same Channel distinct only through their
-        // Posts, all composing the canonical image.
         for (const distributionId of [
           scheduledId,
           retryId,
@@ -5737,9 +5051,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const activeId = "93000000-0000-4000-8000-000000000053";
     try {
       await runSystemTransaction(env, async (client) => {
-        // Two stalled-or-active rows on one Channel need two Posts under the
-        // (post_id, platform_account_id) uniqueness, each composing the
-        // canonical image.
         for (const distributionId of [stalledId, activeId]) {
           await seedDistributionPost(client, {
             postId: postIdForDistribution(distributionId),
@@ -5816,9 +5127,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const retryEventId = "automation-integration-stalled-retry";
     try {
       await runSystemTransaction(env, async (client) => {
-        // The publish attempt freezes its composition at claim, so the Post
-        // must carry the canonical image attachment the pre-cutover
-        // asset-scoped fixture implied.
         await seedDistributionPost(client, {
           postId: postIdForDistribution(distributionId),
           target: { platformAccountId: seededYouTubeAccountId },
@@ -5849,8 +5157,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       ) => {
         transactionCalls += 1;
         if (transactionCalls === 2) {
-          // Prepare (call 1) committed 'processing' and attempt_count = 1 to real Postgres.
-          // Outcome recording (call 2) dies to simulate an unhandled queue worker crash during execution.
           return Effect.die(new Error("unhandled queue worker crash"));
         }
         return withSystemTransactionEffect(automationEnv, operation);
@@ -5861,7 +5167,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         payload: { distribution_id: distributionId },
       } as const;
 
-      // First attempt fails during outcome recording, leaving durable processing state
       await expect(
         Effect.runPromise(
           processDistributionMessage(env, initialMessage, {
@@ -5893,10 +5198,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         expect(row.rows[0]).toEqual({ attempt_count: 1, status: "processing" });
       });
 
-      // Within grace period, scheduled scan does NOT pick it up
       await expect(enqueueFixtureDistributions()).resolves.toBe(0);
 
-      // Simulate time advancing past the grace period
       await runSystemTransaction(env, (client) =>
         client.query(
           "UPDATE distributions SET updated_at = now() - INTERVAL '6 minutes' WHERE id = $1",
@@ -5904,8 +5207,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         ),
       );
 
-      // Stalled due scan picks it up and arms reconciliation — never a fresh
-      // publish command, since the provider side effect is unknown (#256).
       await expect(enqueueFixtureDistributions()).resolves.toBe(1);
 
       await runSystemTransaction(env, async (client) => {
@@ -5933,7 +5234,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         ]);
       });
 
-      // Relay the reconcile trigger outbox event
       send.mockClear();
       youtubePublishSend.mockClear();
       await expect(runRelay(env, 10)).resolves.toMatchObject({
@@ -5941,10 +5241,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         published: 1,
       });
 
-      // The reconciled message resolves through the provider lookup, never a
-      // second publish. The crash dropped the operation identity before it was
-      // persisted, so the lookup has no evidence and the row lands in a
-      // terminal, actionable failure instead of reposting.
       const lookupPublication = vi.fn(async () => ({
         state: "not_found" as const,
       }));
@@ -6010,8 +5306,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const rescheduleWinsId = "93000000-0000-4000-8000-000000000002";
     const claimWinsId = "93000000-0000-4000-8000-000000000003";
     await runSystemTransaction(env, async (client) => {
-      // Two scheduled rows on the same Channel need distinct Posts; each
-      // composes the canonical image exactly like the old asset fixture.
       for (const distributionId of [rescheduleWinsId, claimWinsId]) {
         await seedDistributionPost(client, {
           postId: postIdForDistribution(distributionId),
@@ -6096,15 +5390,11 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
   });
 
   it("arms within-horizon and overdue lost distributions, leaving beyond-horizon work for a later sweep", async () => {
-    // Twelve hours sits inside the 24-hour delayed-delivery horizon, so this
-    // row is the within-horizon case: the sweep arms its plain trigger now.
     const withinHorizonId = "93000000-0000-4000-8000-000000000061";
     const overdueLostId = "93000000-0000-4000-8000-000000000062";
     const activePendingId = "93000000-0000-4000-8000-000000000063";
     const activeLeasedId = "93000000-0000-4000-8000-000000000064";
     const futureProtectedId = "93000000-0000-4000-8000-000000000065";
-    // Beyond the horizon: Queues cannot hold this delay, so the sweep must arm
-    // nothing and let a later sweep convert the row once it comes into range.
     const beyondHorizonId = "93000000-0000-4000-8000-000000000066";
     const testIds = [
       withinHorizonId,
@@ -6117,9 +5407,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
 
     try {
       await runSystemTransaction(env, async (client) => {
-        // Six scheduled rows on the seeded Channel need six Posts under the
-        // (post_id, platform_account_id) uniqueness; each composes the
-        // canonical image like the old asset fixture.
         for (const distributionId of testIds) {
           await seedDistributionPost(client, {
             postId: postIdForDistribution(distributionId),
@@ -6173,11 +5460,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
           ],
         );
 
-        // Pre-create outbox events:
-        // overdueLostId: prior published event whose delivery was lost
-        // activePendingId: active pending event
-        // activeLeasedId: active leased event
-        // futureProtectedId: active published event for future instant
         await client.query(
           `INSERT INTO outbox_events
              (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload, state, published_at)
@@ -6223,8 +5505,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       await Effect.runPromise(sweepDueDistributions(env));
 
       await runSystemTransaction(env, async (client) => {
-        // withinHorizonId: exactly 1 new pending event emitted with the
-        // instant dedupe key (no recovery suffix — nothing was lost).
         const withinHorizonEvents = await client.query<{
           dedupe_key: string;
           payload: { distribution_id: string; version: number };
@@ -6249,15 +5529,12 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
           ),
         );
 
-        // beyondHorizonId: still outside the deliverable window, so the sweep
-        // must arm nothing at all.
         const beyondHorizonEvents = await client.query<{ count: string }>(
           `SELECT COUNT(*)::text AS count FROM outbox_events WHERE aggregate_id = $1`,
           [beyondHorizonId],
         );
         expect(beyondHorizonEvents.rows[0]?.count).toBe("0");
 
-        // overdueLostId: 2 events total (original published + new recovery event with :recovery suffix)
         const overdueLostEvents = await client.query<{
           dedupe_key: string;
           payload: { distribution_id: string; version: number };
@@ -6283,28 +5560,24 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
           ),
         );
 
-        // activePendingId: unchanged, exactly 1 event (no duplicate created)
         const activePendingEvents = await client.query<{ count: string }>(
           `SELECT COUNT(*)::text AS count FROM outbox_events WHERE aggregate_id = $1`,
           [activePendingId],
         );
         expect(activePendingEvents.rows[0]?.count).toBe("1");
 
-        // activeLeasedId: unchanged, exactly 1 event (no duplicate created)
         const activeLeasedEvents = await client.query<{ count: string }>(
           `SELECT COUNT(*)::text AS count FROM outbox_events WHERE aggregate_id = $1`,
           [activeLeasedId],
         );
         expect(activeLeasedEvents.rows[0]?.count).toBe("1");
 
-        // futureProtectedId: unchanged, exactly 1 event (no duplicate created)
         const futureProtectedEvents = await client.query<{ count: string }>(
           `SELECT COUNT(*)::text AS count FROM outbox_events WHERE aggregate_id = $1`,
           [futureProtectedId],
         );
         expect(futureProtectedEvents.rows[0]?.count).toBe("1");
 
-        // Durable distributions state: all 5 remain 'scheduled'
         const distributionsState = await client.query<{
           id: string;
           status: string;
@@ -6350,8 +5623,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const retryId = "93000000-0000-4000-8000-000000000036";
     const reconciliationId = "93000000-0000-4000-8000-000000000037";
     await runSystemTransaction(env, async (client) => {
-      // The retry and reconciliation rows share one Channel, so each needs
-      // its own Post composing the canonical image.
       for (const distributionId of [retryId, reconciliationId]) {
         await seedDistributionPost(client, {
           postId: postIdForDistribution(distributionId),
@@ -6438,8 +5709,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const distributionId = "93000000-0000-4000-8000-000000000004";
     const eventId = "automation-integration-distribution";
     await runSystemTransaction(env, async (client) => {
-      // The claim resolves media through the Post, so the queued row needs a
-      // Post composing the canonical image over the seeded YouTube Channel.
       await seedDistributionPost(client, {
         postId: postIdForDistribution(distributionId),
         target: { platformAccountId: seededYouTubeAccountId },
@@ -6509,8 +5778,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
   it("schedules only bounded safe provider retries with provider backoff", async () => {
     const distributionId = "93000000-0000-4000-8000-000000000008";
     await runSystemTransaction(env, async (client) => {
-      // The rate-limited publish still claims and freezes its composition, so
-      // the queued row's Post must carry the canonical image attachment.
       await seedDistributionPost(client, {
         postId: postIdForDistribution(distributionId),
         target: { platformAccountId: seededYouTubeAccountId },
@@ -6663,9 +5930,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const distributionId = "93000000-0000-4000-8000-000000000005";
     const eventId = "automation-integration-provider-success";
     await runSystemTransaction(env, async (client) => {
-      // The published caption comes from schedule-time overrides frozen on the
-      // Distribution; the saved target mirrors them so the fixture matches the
-      // state the schedule path would have left behind.
       await seedDistributionPost(client, {
         postId: postIdForDistribution(distributionId),
         target: {
@@ -6739,12 +6003,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       expect.objectContaining({
         caption: "Release title\n\nRelease description\n\n#launch",
         idempotencyKey: `queue:${eventId}`,
-        // `PublishInput.media` is the Post's ORDERED attachment list, so the
-        // frozen image rides at index 0 rather than as a single sibling object
-        // (packages/providers/src/types.ts: `media: ProviderMedia[]`, index =
-        // attachment position). One attached Asset therefore means exactly one
-        // remote_ingest descriptor here, and its verified geometry travels on
-        // the item's own `metadata`, not beside it.
         media: [expect.objectContaining({ mode: "remote_ingest" })],
       }),
     );
@@ -6794,8 +6052,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       providerPostId: "must-not-be-called",
     }));
     await runSystemTransaction(env, async (client) => {
-      // A mid-attempt row still carries its Post-owned composition so the
-      // reconcile path reads the same frozen media the publish attempt used.
       await seedDistributionPost(client, {
         postId: postIdForDistribution(distributionId),
         target: { platformAccountId: seededYouTubeAccountId },
@@ -6837,8 +6093,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       payload: { distribution_id: distributionId },
     } as const;
 
-    // A live lease defers the delivery: the classified retryable outcome is the
-    // boundary contract, not the wrapper's prose.
     const deferred = await Effect.runPromise(
       Effect.flip(
         processDistributionMessage(env, message, {
@@ -6856,9 +6110,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         [`outbox:${eventId}`],
       ),
     );
-    // The redelivered publish must not run again: the row is still processing,
-    // so the delivery no-ops and recovery is left to the stalled-processing
-    // Due scan (#256).
     await expect(
       Effect.runPromise(
         processDistributionMessage(env, message, {
@@ -6869,8 +6120,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     ).resolves.toBe("skipped");
     expect(publish).not.toHaveBeenCalled();
 
-    // Once the processing grace period lapses the scan moves the row to
-    // needs_reconciliation and arms the reconcile trigger.
     await runSystemTransaction(env, (client) =>
       client.query(
         `UPDATE distributions
@@ -6926,8 +6175,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const distributionId = "93000000-0000-4000-8000-000000000007";
     const eventId = "automation-integration-provider-cancel";
     await runSystemTransaction(env, async (client) => {
-      // A cancel claim joins the Post for its composition, so the
-      // cancel-requested row needs a real Post on the seeded Channel.
       await seedDistributionPost(client, {
         postId: postIdForDistribution(distributionId),
         target: { platformAccountId: seededYouTubeAccountId },
@@ -6989,8 +6236,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const distributionId = "93000000-0000-4000-8000-000000000009";
     const eventId = "automation-integration-provider-cancel-success";
     await runSystemTransaction(env, async (client) => {
-      // The cancel adapter path still claims through the Post composition, so
-      // the row keeps its Post and saved target on the seeded Channel.
       await seedDistributionPost(client, {
         postId: postIdForDistribution(distributionId),
         target: { platformAccountId: seededYouTubeAccountId },
@@ -7083,8 +6328,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const publishEventId = "automation-integration-provider-cancel-race-publish";
     const cancelEventId = "automation-integration-provider-cancel-race-cancel";
     await runSystemTransaction(env, async (client) => {
-      // The publish-under-cancel race freezes media at claim, so the queued
-      // row's Post carries the canonical image attachment.
       await seedDistributionPost(client, {
         postId: postIdForDistribution(distributionId),
         target: { platformAccountId: seededYouTubeAccountId },
@@ -7207,8 +6450,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
   it("polls provider publication status to a confirmed durable result", async () => {
     const distributionId = "93000000-0000-4000-8000-000000000010";
     await runSystemTransaction(env, async (client) => {
-      // The pending-outcome publish claim freezes the Post's media, so the
-      // queued row keeps the canonical image attachment on its Post.
       await seedDistributionPost(client, {
         postId: postIdForDistribution(distributionId),
         target: { platformAccountId: seededYouTubeAccountId },
@@ -7289,7 +6530,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
          FROM distributions WHERE id = $1`,
         [distributionId],
       );
-      // The fixed poll interval, not the adapter's 15s exponential base.
       expect(result.rows[0]).toMatchObject({
         poll_delay_seconds: providerPollIntervalSeconds,
         provider_operation_id: "publish-operation-10",
@@ -7353,8 +6593,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
          FROM distributions WHERE id = $1`,
         [distributionId],
       );
-      // A still-processing provider is re-polled on the same fixed interval,
-      // counted against its own budget rather than the reconciliation ladder.
       expect(result.rows[0]).toMatchObject({
         poll_delay_seconds: providerPollIntervalSeconds,
         provider_poll_attempts: 1,
@@ -7369,9 +6607,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       );
     });
 
-    // recordReconciliationOutcome already armed the live reconcile:2 event.
-    // The scanner must not create a duplicate claim merely because the due
-    // timestamp elapsed before that event's queue delivery completes.
     await expect(enqueueFixtureDistributions()).resolves.toBe(0);
     const secondMessage = {
       ...firstMessage,
@@ -7418,8 +6653,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
   it("fails an unfinished provider publication once its poll budget is spent", async () => {
     const distributionId = "93000000-0000-4000-8000-000000000011";
     await runSystemTransaction(env, async (client) => {
-      // The awaiting-provider row's Post supplies the frozen publish
-      // composition the reconcile continuation replays.
       await seedDistributionPost(client, {
         postId: postIdForDistribution(distributionId),
         target: { platformAccountId: seededYouTubeAccountId },
@@ -7492,8 +6725,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
          FROM distributions WHERE id = $1`,
         [distributionId],
       );
-      // The spent budget stops the poll loop permanently: the row lands in a
-      // terminal failed state with a safe, actionable code (#256).
       expect(result.rows[0]).toEqual({
         failure_code: "provider_poll_budget_exhausted",
         failure_retryable: false,
@@ -7503,16 +6734,12 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       });
     });
   });
-  // The ambiguous-outcome path uses seeded rows from one Brand Profile so the
-  // worker can exercise reconciliation without weakening ownership constraints.
   it("arms an immediate reconcile trigger for an ambiguous publish outcome without provider evidence", async () => {
     const distributionId = "93000000-0000-4000-8000-000000000055";
     const publishEventId = "automation-integration-ambiguous-publish";
     const reconcileEventId = "automation-integration-ambiguous-reconcile";
     try {
       await runSystemTransaction(env, async (client) => {
-        // The ambiguous publish still freezes the Post's media at claim, so
-        // the queued row keeps the canonical image attachment.
         await seedDistributionPost(client, {
           postId: postIdForDistribution(distributionId),
           target: { platformAccountId: seededYouTubeAccountId },
@@ -7536,9 +6763,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         );
       });
 
-      // The provider call may have had a side effect but returned no durable
-      // operation identity: the outcome must still arm a deterministic
-      // reconciliation trigger instead of stranding the row (#256).
       const publish = vi.fn(async () => ({
         failure: {
           classification: "ambiguous" as const,
@@ -7597,8 +6821,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         ]);
       });
 
-      // The armed reconcile resolves to a terminal, actionable failure because
-      // no provider evidence was ever persisted.
       const lookupPublication = vi.fn(async () => ({
         state: "not_found" as const,
       }));
@@ -7658,8 +6880,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     }
   });
 
-  // The terminal reconciliation case keeps the seeded Post, Asset, and Channel
-  // under their shared Brand Profile to satisfy the production composite keys.
   it("fails a distribution terminally once the reconciliation budget is exhausted", async () => {
     const distributionId = "93000000-0000-4000-8000-000000000056";
     const reconcileEventId = "automation-integration-reconcile-exhausted";
@@ -7691,8 +6911,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         );
       });
 
-      // The lookup stays ambiguous on the final allowed attempt: the row must
-      // land in a terminal failed state instead of re-arming forever (#256).
       const lookupPublication = vi.fn(async () => ({
         result: {
           failure: {
@@ -7760,9 +6978,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
            WHERE aggregate_id = $1 AND topic = 'distribution.reconcile.requested'`,
           [distributionId],
         );
-        // No further reconcile trigger is armed once the budget is spent. The
-        // terminal failure may still enqueue an unrelated notification event
-        // for the same aggregate, so only the reconcile topic is asserted.
         expect(events.rows[0]?.count).toBe("0");
       });
     } finally {
@@ -7885,11 +7100,11 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const commentsMessages: unknown[] = [];
     const tokenMessages: unknown[] = [];
     const queue = (messages: unknown[]) =>
-      ({
-        sendBatch: vi.fn(async (batch: { body: unknown }[]) => {
+      fakeQueue({
+        sendBatch: vi.fn(async (batch: Iterable<MessageSendRequest<unknown>>) => {
           for (const entry of batch) messages.push(entry.body);
         }),
-      }) as unknown as Queue<unknown>;
+      });
     const syncEnv = {
       ...env,
       ANALYTICS_QUEUE: queue(analyticsMessages),
@@ -7952,14 +7167,9 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       ),
     ).resolves.toBe("skipped");
 
-    // A comments page with a cursor arms its continuation by delayed delivery,
-    // so the next page needs no sweep to be discovered.
     const nextCommentsMessage = commentsMessages[1] as Parameters<
       typeof processProviderSyncMessage
     >[1];
-    // The continuation must address the same Distribution on the comments
-    // workload with a freshly minted event identity; anything else would
-    // re-fetch the page that was just checkpointed.
     expect(nextCommentsMessage).toMatchObject({
       target_id: distributionId,
       workload: "comments",
@@ -8103,11 +7313,11 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     );
     const failingEnv = {
       ...env,
-      ANALYTICS_QUEUE: {
+      ANALYTICS_QUEUE: fakeQueue({
         sendBatch: vi.fn(async () => {
           throw new Error("queue failed at https://signed.example/private");
         }),
-      } as unknown as Queue<unknown>,
+      }),
     } satisfies AutomationEnv;
 
     await expect(
@@ -8174,11 +7384,11 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const tokenMessages: unknown[] = [];
     const refreshEnv = {
       ...env,
-      TOKEN_REFRESH_QUEUE: {
-        sendBatch: vi.fn(async (batch: { body: unknown }[]) => {
+      TOKEN_REFRESH_QUEUE: fakeQueue({
+        sendBatch: vi.fn(async (batch: Iterable<MessageSendRequest<unknown>>) => {
           for (const entry of batch) tokenMessages.push(entry.body);
         }),
-      } as unknown as Queue<unknown>,
+      }),
     } satisfies AutomationEnv;
 
     await expect(
@@ -8244,8 +7454,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const distributionId = "93000000-0000-4000-8000-000000000091";
     const accountId = "50000000-0000-4000-8000-000000000001";
     await runSystemTransaction(env, async (client) => {
-      // The published row only needs a durable Post reference for the sync
-      // sweeps; the Post still composes the canonical image on the Channel.
       await seedDistributionPost(client, {
         postId: postIdForDistribution(distributionId),
         target: { platformAccountId: accountId },
@@ -8301,21 +7509,21 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const tokenBatches: unknown[] = [];
     const sweepEnv = {
       ...env,
-      ANALYTICS_QUEUE: {
-        sendBatch: vi.fn(async (batch: unknown[]) => {
+      ANALYTICS_QUEUE: fakeQueue({
+        sendBatch: vi.fn(async (batch: Iterable<MessageSendRequest<unknown>>) => {
           analyticsBatches.push(...batch);
         }),
-      } as unknown as Queue<unknown>,
-      COMMENTS_QUEUE: {
-        sendBatch: vi.fn(async (batch: unknown[]) => {
+      }),
+      COMMENTS_QUEUE: fakeQueue({
+        sendBatch: vi.fn(async (batch: Iterable<MessageSendRequest<unknown>>) => {
           commentsBatches.push(...batch);
         }),
-      } as unknown as Queue<unknown>,
-      TOKEN_REFRESH_QUEUE: {
-        sendBatch: vi.fn(async (batch: unknown[]) => {
+      }),
+      TOKEN_REFRESH_QUEUE: fakeQueue({
+        sendBatch: vi.fn(async (batch: Iterable<MessageSendRequest<unknown>>) => {
           tokenBatches.push(...batch);
         }),
-      } as unknown as Queue<unknown>,
+      }),
     } satisfies AutomationEnv;
 
     const registry = youtubeSyncRegistry(
@@ -8329,7 +7537,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       }),
     );
 
-    // Run hourly sweep
     const sweepResult = await Effect.runPromise(
       Effect.provide(
         sweepDueProviderJobs(sweepEnv, { providerRegistry: registry }),
@@ -8341,7 +7548,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     expect(sweepResult.comments).toBeGreaterThanOrEqual(1);
     expect(sweepResult.token_refresh).toBeGreaterThanOrEqual(1);
 
-    // Overdue analytics job was recovered with a fresh event ID
     expect(analyticsBatches.length).toBeGreaterThanOrEqual(1);
     const analyticsItem = analyticsBatches[0] as {
       body: { event_id: string; target_id: string; workload: string };
@@ -8351,7 +7557,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     expect(analyticsItem.body.target_id).toBe(distributionId);
     expect(analyticsItem.body.event_id).not.toBe("00000000-0000-4000-8000-000000000092");
 
-    // Beyond-horizon/unarmed comments job was scheduled with a bounded delay (~2 hours)
     expect(commentsBatches.length).toBeGreaterThanOrEqual(1);
     const commentsItem = commentsBatches[0] as {
       body: { event_id: string; target_id: string; workload: string };
@@ -8359,13 +7564,9 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     };
     expect(commentsItem.body.workload).toBe("comments");
     expect(commentsItem.body.target_id).toBe(distributionId);
-    // Two hours out: the delay is derived from the durable next-due instant,
-    // so anything above that (a clamp to the 24-hour horizon, or a delay of
-    // zero) means the sweep ignored the recorded schedule.
     expect(commentsItem.delaySeconds).toBeGreaterThan(7_100);
     expect(commentsItem.delaySeconds).toBeLessThanOrEqual(7_200);
 
-    // Cleanup
     await runSystemTransaction(env, async (client) => {
       await client.query("DELETE FROM distributions WHERE id = $1", [distributionId]);
     });
@@ -8381,9 +7582,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         `UPDATE distributions
          SET analytics_next_sync_at = NULL, comments_next_sync_at = NULL`,
       );
-      // Both rows are armed and due, exactly as a pre-migration row would be.
-      // Each publishes its own Post (one per Channel under the unique
-      // (post_id, platform_account_id)) composing the canonical image.
       for (const distributionId of [pastThresholdId, recentId]) {
         await seedDistributionPost(client, {
           postId: postIdForDistribution(distributionId),
@@ -8445,13 +7643,13 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const analyticsMessages: Parameters<typeof processProviderSyncMessage>[1][] = [];
     const syncEnv = {
       ...env,
-      ANALYTICS_QUEUE: {
-        sendBatch: vi.fn(async (batch: { body: unknown }[]) => {
+      ANALYTICS_QUEUE: fakeQueue({
+        sendBatch: vi.fn(async (batch: Iterable<MessageSendRequest<unknown>>) => {
           for (const entry of batch) {
             analyticsMessages.push(entry.body as Parameters<typeof processProviderSyncMessage>[1]);
           }
         }),
-      } as unknown as Queue<unknown>,
+      }),
     } satisfies AutomationEnv;
     const registry = youtubeSyncRegistry(
       async (_context, _credentials, lookup) => ({
@@ -8483,7 +7681,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       random: () => 1,
     };
 
-    // Before the terminal transition both rows are still claimed and polled.
     await expect(
       Effect.runPromise(
         Effect.provide(
@@ -8505,8 +7702,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       ).resolves.toBe("processed");
     }
 
-    // Only the recent Distribution arms a follow-up trigger; the
-    // past-threshold one sends nothing.
     expect(analyticsMessages.map((message) => message.target_id)).toEqual([recentId]);
 
     await runSystemTransaction(env, async (client) => {
@@ -8531,8 +7726,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         [[pastThresholdId, recentId]],
       );
       const [pastThreshold, recent] = rows.rows;
-      // Past the threshold: unscheduled and unarmed, with its collected
-      // snapshot still readable.
       expect(pastThreshold).toMatchObject({
         analytics_lease_expires_at: null,
         analytics_next_sync_at: null,
@@ -8541,14 +7734,11 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         snapshots: 1,
       });
       expect(pastThreshold?.analytics_last_synced_at).toBeInstanceOf(Date);
-      // Recent Distributions keep their cadence.
       expect(recent).toMatchObject({ id: recentId, snapshots: 1 });
       expect(recent?.analytics_next_sync_at).toBeInstanceOf(Date);
       expect(recent?.analytics_sync_event_id).toEqual(expect.any(String));
     });
 
-    // An absent next sync moment is excluded by the sweep's due comparison, so
-    // no later scan re-arms the past-threshold row.
     analyticsMessages.splice(0);
     await expect(
       Effect.runPromise(
@@ -8691,8 +7881,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       providerRegistry: youtubeReplyRegistry(reply, lookupPublication),
     };
 
-    // The retryable reply failure surfaces as a classified AutomationJobError:
-    // RetryableJobError keeps the original error name on its `cause` field.
     const failure = await Effect.runPromise(
       Effect.flip(processReplyMessage(env, message, dependencies)),
     );
@@ -8724,8 +7912,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     });
   });
 
-  // Scheduling a real authenticated Post must publish that Distribution and
-  // durable outcome, regardless of unrelated due events or global relay order.
   it("publishes from the authenticated API through PostgreSQL and the outbox Queue", async () => {
     const idempotencyKey = "automation-integration-black-box-publish";
     const queuedMessages: OutboxMessage[] = [];
@@ -8742,8 +7928,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const app = createApiApp({
       coreService: createCoreApiService(registry.capabilities()),
       providerRegistry: registry,
-      // The seeded Alpha actor: subject is the Better Auth user id, claims carry
-      // the internal workspace UUID + admin role that tenant RLS consumes.
       resolveActor: async () => ({
         authUserId: "auth_user_local_alpha",
         claims: {
@@ -8767,18 +7951,14 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     });
     const automationEnv = {
       ...env,
-      YOUTUBE_PUBLISH_QUEUE: {
-        sendBatch: queueSend,
-      } as unknown as Queue<unknown>,
+      YOUTUBE_PUBLISH_QUEUE: fakeQueue({
+        sendBatch: (batch) => queueSend([...batch]),
+      }),
     } satisfies AutomationEnv;
     let distributionId: string | undefined;
     let postId: string | undefined;
 
     try {
-      // The Post-owned API composes before it schedules: create attaches the
-      // canonical image to a new Post, then scheduling targets the seeded
-      // YouTube Channel with the same per-Channel overrides the retired
-      // asset-scoped create accepted.
       const created = await app.request(
         "/api/v1/posts",
         {
@@ -8798,7 +7978,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         apiEnv,
       );
       expect(created.status).toBe(201);
-      const createdPost = (await created.json()) as { id: string };
+      const createdBody: unknown = await created.json();
+      const createdPost = createdBody as { id: string };
       postId = createdPost.id;
 
       const accepted = await app.request(
@@ -8830,7 +8011,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       );
       expect(accepted.status).toBe(200);
       expect(accepted.headers.get("X-Request-ID")).toBe("black-box-request");
-      const scheduledPost = (await accepted.json()) as {
+      const scheduledBody: unknown = await accepted.json();
+      const scheduledPost = scheduledBody as {
         distributions: { id: string; status: string }[];
       };
       const scheduled = scheduledPost.distributions[0];
@@ -8912,10 +8094,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       ]);
     } finally {
       await runSystemTransaction(env, async (client) => {
-        // The create and schedule calls each reserved an idempotency key whose
-        // recorded response holds the ids cleanup needs on a partial failure:
-        // the Post id on the create response and the materialized Distribution
-        // id on the schedule response's distributions list.
         const resolvedPostId =
           postId ??
           (

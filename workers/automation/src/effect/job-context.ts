@@ -1,8 +1,3 @@
-/**
- * Immutable job-scoped execution metadata for one automation unit of work.
- * Carries correlation identifiers plus the Cloudflare entry source so queue,
- * scheduled, and workflow executions stay distinguishable in logs and traces.
- */
 export interface JobContextData {
   readonly jobId: string;
   readonly organizationId?: string;
@@ -13,16 +8,6 @@ export interface JobContextData {
   readonly workflowId?: string;
 }
 
-/**
- * Creates a validated JobContextData record for dependency injection.
- *
- * Requires job and trace identifiers; every other field is optional
- * correlation carried through logs, flow-ledger rows, and provider request
- * contexts.
- *
- * @param data - Job correlation including source discriminator and identifiers.
- * @returns Fully populated, immutable JobContextData instance.
- */
 export function makeJobContext(data: {
   readonly jobId: string;
   readonly organizationId?: string;

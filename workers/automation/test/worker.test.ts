@@ -29,11 +29,15 @@ import type { OutboxMessage } from "../src/messages";
 import { createAutomationHandler } from "../src/index";
 import { sweepDueProviderJobs } from "../src/provider-sync";
 import { logRecords } from "./log-records";
+import {
+  fakeProviderAdapter,
+  fakeProviderRegistry,
+  fakeReplyWorkflow,
+  fakeTransactionClient,
+} from "./test-doubles";
 
 const worker = createAutomationHandler();
 beforeEach(() => {
-  // Unoverridden hourly units still run their production queries in the
-  // scheduled tests; an empty result keeps that work from throwing.
   withSystemTransactionEffect.mockReturnValue(Effect.succeed({ rows: [] }));
 });
 afterEach(() => {
@@ -41,10 +45,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/**
- * Registry whose single adapter is eligible for every provider sync workload, so
- * the hourly sweep issues its analytics, comments and token refresh claims.
- */
 function engagementRegistry(): ProviderRegistry {
   const registry = new ProviderRegistry();
   const adapter: ProviderAdapter = {
@@ -200,10 +200,10 @@ describe("Automation Worker foundation", () => {
         timestamp: new Date("2026-01-01T00:00:00Z"),
       },
     ]);
-    const workflowEnv = {
+    const workflowEnv: AutomationEnv = {
       ...env,
-      REPLY_WORKFLOW: { createBatch },
-    } as unknown as typeof env;
+      REPLY_WORKFLOW: fakeReplyWorkflow(createBatch),
+    };
 
     const context = createExecutionContext();
     await handler.queue?.(batch, workflowEnv, context);
@@ -338,21 +338,19 @@ describe("Automation Worker foundation", () => {
 
   it("logs safe diagnostics when scheduled work fails", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    // Un-overridden units run their production claim queries; the canned
-    // transaction reports zero claimed rows so only the relay unit fails.
     withSystemTransactionEffect.mockImplementation(
       <T>(
         _env: AutomationEnv,
         operation: (client: EffectTransactionClient) => Effect.Effect<T, unknown>,
       ): Effect.Effect<T, unknown> =>
-        operation({
-          query: vi.fn(() =>
+        operation(
+          fakeTransactionClient(() =>
             Effect.succeed({
               rowCount: 0,
               rows: [{ claimed_count: 0, inserted_count: 0 }],
             }),
           ),
-        } as unknown as EffectTransactionClient),
+        ),
     );
     const handler = createAutomationHandler({
       assetProcessorFor: () => ({
@@ -402,21 +400,19 @@ describe("Automation Worker foundation", () => {
   it("reports a failing unit without silently skipping the remaining tiers", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const calls: string[] = [];
-    // The un-overridden distribution-sweep unit runs its production claim
-    // query; the canned transaction reports zero claimed rows so it succeeds.
     withSystemTransactionEffect.mockImplementation(
       <T>(
         _env: AutomationEnv,
         operation: (client: EffectTransactionClient) => Effect.Effect<T, unknown>,
       ): Effect.Effect<T, unknown> =>
-        operation({
-          query: vi.fn(() =>
+        operation(
+          fakeTransactionClient(() =>
             Effect.succeed({
               rowCount: 0,
               rows: [{ claimed_count: 0, inserted_count: 0 }],
             }),
           ),
-        } as unknown as EffectTransactionClient),
+        ),
     );
     const handler = createAutomationHandler({
       assetProcessorFor: () => ({
@@ -461,8 +457,6 @@ describe("Automation Worker foundation", () => {
           calls.push("retention");
           return { deleted: 0, errors: 0 };
         }),
-      // Improvement reporting is delivered best-effort and must not reach a
-      // transport from these unit cases; the dedicated suites cover it.
       deliverImprovementReports: () =>
         Effect.succeed({
           claimed: 0,
@@ -475,13 +469,9 @@ describe("Automation Worker foundation", () => {
       enqueueDailyUsageReport: () => Effect.succeed({ considered: 0, queued: 0 }),
     });
 
-    await expect(
-      handler.scheduled?.(
-        undefined as unknown as ScheduledController,
-        env,
-        createExecutionContext(),
-      ),
-    ).rejects.toThrow("private-cron-value");
+    await expect(handler.scheduled(undefined, env, createExecutionContext())).rejects.toThrow(
+      "private-cron-value",
+    );
 
     expect(calls).toEqual([
       "due-distribution-scan",
@@ -508,21 +498,19 @@ describe("Automation Worker foundation", () => {
   it("reports every failing unit and still runs the independent work", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const runRetention = vi.fn(() => Effect.succeed({ deleted: 2, errors: 0 }));
-    // The un-overridden distribution-sweep unit runs its production claim
-    // query; the canned transaction reports zero claimed rows so it succeeds.
     withSystemTransactionEffect.mockImplementation(
       <T>(
         _env: AutomationEnv,
         operation: (client: EffectTransactionClient) => Effect.Effect<T, unknown>,
       ): Effect.Effect<T, unknown> =>
-        operation({
-          query: vi.fn(() =>
+        operation(
+          fakeTransactionClient(() =>
             Effect.succeed({
               rowCount: 0,
               rows: [{ claimed_count: 0, inserted_count: 0 }],
             }),
           ),
-        } as unknown as EffectTransactionClient),
+        ),
     );
     const handler = createAutomationHandler({
       assetProcessorFor: () => ({
@@ -551,8 +539,6 @@ describe("Automation Worker foundation", () => {
         }),
       ),
       runRetention,
-      // Improvement reporting is delivered best-effort and must not reach a
-      // transport from these unit cases; the dedicated suites cover it.
       deliverImprovementReports: () =>
         Effect.succeed({
           claimed: 0,
@@ -564,13 +550,9 @@ describe("Automation Worker foundation", () => {
         }),
       enqueueDailyUsageReport: () => Effect.succeed({ considered: 0, queued: 0 }),
     });
-    await expect(
-      handler.scheduled?.(
-        undefined as unknown as ScheduledController,
-        env,
-        createExecutionContext(),
-      ),
-    ).rejects.toThrow("distribution scan failed");
+    await expect(handler.scheduled(undefined, env, createExecutionContext())).rejects.toThrow(
+      "distribution scan failed",
+    );
 
     expect(error).toHaveBeenCalledTimes(2);
     const reportedWork = logRecords(error).map(
@@ -597,12 +579,6 @@ describe("Distribution message processing", () => {
     };
   }
 
-  /**
-   * A durable `scheduled` row as the consumer re-reads it under lock. A
-   * Distribution no longer embeds one Asset's identity: it names its Post and
-   * carries the resolved ordered `media` candidates frozen at claim time, so
-   * later Post edits cannot mutate the attempt.
-   */
   function scheduledRow(scheduledAt: Date): Record<string, unknown> {
     return {
       access_token: "encrypted-access",
@@ -656,12 +632,6 @@ describe("Distribution message processing", () => {
     };
   }
 
-  /**
-   * Resolver stub for the frozen `video/mp4` object `scheduledRow` carries. The
-   * publish path refuses a descriptor whose MIME type, byte length, transfer
-   * mode, or delivery URL disagrees with the frozen object, so the stub has to
-   * answer with exactly those verified facts.
-   */
   function frozenMediaResolver() {
     return vi.fn(async () => ({
       contentType: "video/mp4",
@@ -674,18 +644,19 @@ describe("Distribution message processing", () => {
   type RecordingQuery = (
     sql: string,
     params?: unknown[],
-  ) => Effect.Effect<{ rowCount: number; rows: unknown[] }, unknown>;
+  ) => Effect.Effect<{ rowCount: number; rows: Record<string, unknown>[] }, never>;
 
   function recordingTransaction(
     query: RecordingQuery,
+    onCall?: () => void,
   ): NonNullable<DistributionProcessingDependencies["transaction"]> {
-    const transaction: NonNullable<DistributionProcessingDependencies["transaction"]> = <A, E, R>(
-      _env: AutomationEnv,
-      operation: (client: EffectTransactionClient) => Effect.Effect<A, E, R>,
-    ): Effect.Effect<A, E, R> => operation({ query } as unknown as EffectTransactionClient);
-    return vi.fn(transaction) as unknown as NonNullable<
-      DistributionProcessingDependencies["transaction"]
-    >;
+    const client = fakeTransactionClient((sql, params) =>
+      query(sql, params ? [...params] : undefined),
+    );
+    return (_env, operation) => {
+      onCall?.();
+      return operation(client);
+    };
   }
 
   it("records outcomes through an injectable transaction", async () => {
@@ -702,8 +673,6 @@ describe("Distribution message processing", () => {
               attempt_count: 0,
               attachment_ids: null,
               id: "00000000-0000-4000-8000-000000000001",
-              // The claim query coalesces composition.media to '[]', so a real
-              // claim row always carries a non-null media array.
               media: [],
               org_id: "00000000-0000-4000-8000-000000000002",
               platform: "threads",
@@ -723,12 +692,8 @@ describe("Distribution message processing", () => {
       }
       return Effect.succeed({ rowCount: 1, rows: [] });
     });
-    const transaction = vi.fn(
-      <A, E, R>(
-        _env: AutomationEnv,
-        operation: (client: EffectTransactionClient) => Effect.Effect<A, E, R>,
-      ): Effect.Effect<A, E, R> => operation({ query } as unknown as EffectTransactionClient),
-    );
+    const transactionCalls = vi.fn();
+    const transaction = recordingTransaction(query, transactionCalls);
 
     const result = await Effect.runPromise(
       processDistributionMessage(
@@ -743,19 +708,14 @@ describe("Distribution message processing", () => {
           version: 1 as const,
         },
         {
-          providerRegistry: {
-            get: () => undefined,
-          } as unknown as ProviderRegistry,
-          transaction: transaction as unknown as NonNullable<
-            DistributionProcessingDependencies["transaction"]
-          >,
+          providerRegistry: new ProviderRegistry(),
+          transaction,
         },
       ),
     );
 
     expect(result).toBe("processed");
-    // One transaction for lease claiming plus one for outcome recording.
-    expect(transaction).toHaveBeenCalledTimes(2);
+    expect(transactionCalls).toHaveBeenCalledTimes(2);
     expect(
       query.mock.calls.some(([sql]) => String(sql).includes("UPDATE provider_operations")),
     ).toBe(true);
@@ -776,8 +736,6 @@ describe("Distribution message processing", () => {
       failure_code: null,
       failure_retryable: null,
       platform_post_id: null,
-      // The crash drops the provider operation identity before it is persisted,
-      // so the stalled row carries no lookup evidence.
       provider_operation_id: null,
       reconciliation_attempt_count: 0,
       status: "queued",
@@ -854,8 +812,6 @@ describe("Distribution message processing", () => {
       }
       if (sql.includes("UPDATE distributions") && sql.includes("SET status = CASE")) {
         if (sql.includes("WHEN $2 = 'publish' THEN 'processing'")) {
-          // The prepare transition shares one statement for every operation;
-          // the bound operation parameter decides which counter moves.
           if (params?.[1] === "publish") {
             distributionState.status = "processing";
             distributionState.attempt_count += 1;
@@ -890,7 +846,6 @@ describe("Distribution message processing", () => {
         const graceSeconds = (params?.[1] as number) ?? distributionProcessingGraceSeconds;
         expect(graceSeconds).toBe(300);
         if (distributionState.status === "processing") {
-          // The stalled claim must arm reconciliation, never a fresh publish.
           distributionState.status = "needs_reconciliation";
           distributionState.failure_code = "provider_outcome_ambiguous";
           distributionState.failure_retryable = false;
@@ -923,12 +878,12 @@ describe("Distribution message processing", () => {
       operation: (client: EffectTransactionClient) => Effect.Effect<A, E, R>,
     ): Effect.Effect<A, E, R> => {
       transactionCalls += 1;
-      // First transaction is prepare (updates status to 'processing' and increments attempt_count)
-      // Second transaction during initial attempt fails (simulating crash during outcome recording)
       if (shouldFail && transactionCalls === 2) {
         return Effect.die(new Error("simulated queue handler crash"));
       }
-      return operation({ query } as unknown as EffectTransactionClient);
+      return operation(
+        fakeTransactionClient((sql, params) => query(sql, params ? [...params] : undefined)),
+      );
     };
 
     withSystemTransactionEffect.mockImplementation(transaction);
@@ -941,10 +896,6 @@ describe("Distribution message processing", () => {
     const lookupPublication = vi.fn(async () => ({
       state: "not_found" as const,
     }));
-    // The fixture mirrors the production ProviderAdapter contract: the
-    // capability descriptor and transfer modes are what validateTarget and the
-    // media resolver read before the adapter's publish is invoked, so the
-    // simulated crash lands on outcome recording after exactly one publish.
     const mockProviderRegistry = new ProviderRegistry();
     mockProviderRegistry.register("youtube", {
       capability: {
@@ -1038,8 +989,6 @@ describe("Distribution message processing", () => {
       createExecutionContext(),
     );
 
-    // The stalled scan must move the row to reconciliation and arm a reconcile
-    // trigger — never reset to queued or emit a second publish command.
     expect(distributionState.status).toBe("needs_reconciliation");
     expect(distributionState.failure_code).toBe("provider_outcome_ambiguous");
     expect(outboxEvents).toHaveLength(1);
@@ -1067,9 +1016,6 @@ describe("Distribution message processing", () => {
       }),
     );
 
-    // Reconciliation runs through the durable reconcile trigger; with no
-    // persisted provider evidence the outcome is a terminal, actionable
-    // failure — and the publish adapter is never invoked a second time.
     expect(outcome).toBe("processed");
     expect(lookupPublication).not.toHaveBeenCalled();
     expect(publish).toHaveBeenCalledTimes(1);
@@ -1093,7 +1039,10 @@ describe("Distribution message processing", () => {
       <A, E, R>(
         _env: AutomationEnv,
         operation: (client: EffectTransactionClient) => Effect.Effect<A, E, R>,
-      ): Effect.Effect<A, E, R> => operation({ query } as unknown as EffectTransactionClient),
+      ): Effect.Effect<A, E, R> =>
+        operation(
+          fakeTransactionClient((sql, params) => query(sql, params ? [...params] : undefined)),
+        ),
     );
 
     const claimed = await Effect.runPromise(enqueueDueDistributions(env));
@@ -1143,8 +1092,6 @@ describe("Distribution message processing", () => {
       return Effect.succeed({ rowCount: 1, rows: [] });
     });
 
-    // An adapter without lookupPublication yields the deterministic,
-    // non-retryable provider_lookup_unavailable failure.
     const outcome = await Effect.runPromise(
       processDistributionMessage(
         env,
@@ -1159,33 +1106,15 @@ describe("Distribution message processing", () => {
         },
         {
           decryptToken: async () => "token",
-          providerRegistry: {
-            get: () => ({
-              capability: {
-                accepted_mime_types: [],
-                analytics: false,
-                asset_types: [],
-                comments: false,
-                connect_available: false,
-                max_caption_length: 500,
-                max_file_size: null,
-                max_hashtags: 5,
-                max_media_count: null,
-                max_video_duration_sec: null,
-                min_media_count: null,
-                multi_asset_types: [],
-                notes: [],
-                platform: "threads",
-                publish: true,
-                reply: false,
-              },
+          providerRegistry: fakeProviderRegistry({
+            threads: fakeProviderAdapter("threads", {
               retryPolicy: {
                 baseDelaySeconds: 60,
                 maxAttempts: 5,
                 maxDelaySeconds: 3_600,
               },
             }),
-          } as unknown as ProviderRegistry,
+          }),
           transaction: recordingTransaction(query),
         },
       ),
@@ -1193,9 +1122,6 @@ describe("Distribution message processing", () => {
 
     expect(outcome).toBe("processed");
     expect(updates).toHaveLength(1);
-    // A non-retryable lookup failure can never be rearmed, so the row lands in
-    // a terminal failed disposition — never needs_reconciliation with a NULL
-    // next attempt (#256).
     expect(updates[0]?.params?.[1]).toBe("failed");
     expect(updates[0]?.params?.[5]).toBe("provider_lookup_unavailable");
     expect(updates[0]?.params?.[8]).toBeNull();
@@ -1237,8 +1163,6 @@ describe("Distribution message processing", () => {
             {
               analytics_event_id: null,
               comments_event_id: null,
-              // The durable count already reflects this delivery's claim, so
-              // the armed key names the next attempt exactly like the scanner.
               reconciliation_attempt_count: 4,
               status: "needs_reconciliation",
             },
@@ -1316,9 +1240,6 @@ describe("Distribution message processing", () => {
 
     expect(outcome).toBe("processed");
     expect(lookupPublication).toHaveBeenCalledTimes(1);
-    // The armed trigger must share the scanner's reconcile:<attempt> identity
-    // so a duplicate re-arm dedupes instead of claiming an independent
-    // reconciliation budget slot (#256).
     expect(outboxInserts).toHaveLength(1);
     expect(outboxInserts[0]?.params?.[4]).toBe(`distribution:${distributionId}:reconcile:5`);
   });
@@ -1378,18 +1299,11 @@ describe("Distribution message processing", () => {
     ).toHaveLength(1);
   });
 
-  /**
-   * A Threads adapter whose publish call is observable per test. The capability
-   * accepts the `video/mp4` object the frozen composition carries and declares
-   * the remote-ingest transfer mode it is delivered through, so claim-time
-   * selection freezes that object and the publish path can hand it over.
-   */
-  function threadsRegistry(
-    publish: (...args: unknown[]) => Promise<ProviderOperationResult>,
-  ): ProviderRegistry {
-    return {
-      get: () => ({
+  function threadsRegistry(publish: NonNullable<ProviderAdapter["publish"]>): ProviderRegistry {
+    return fakeProviderRegistry({
+      threads: fakeProviderAdapter("threads", {
         capability: {
+          ...fakeProviderAdapter("threads").capability,
           accepted_mime_types: ["video/mp4"],
           analytics: false,
           asset_types: ["image", "video"],
@@ -1407,6 +1321,7 @@ describe("Distribution message processing", () => {
           publish: true,
           reply: false,
         },
+        lookupPublication: async () => ({ state: "not_found" }),
         publish,
         retryPolicy: {
           baseDelaySeconds: 60,
@@ -1415,13 +1330,9 @@ describe("Distribution message processing", () => {
         },
         transferModes: ["remote_ingest"],
       }),
-    } as unknown as ProviderRegistry;
+    });
   }
 
-  /**
-   * Drives one publish delivery against a queued row, answering the cached
-   * budget read with `budget` (no row when null).
-   */
   async function publishAgainstBudget(
     now: Date,
     budget: Record<string, unknown> | null,
@@ -1477,7 +1388,6 @@ describe("Distribution message processing", () => {
     const { decryptToken, outcome, publish, query } = await publishAgainstBudget(now, {
       percent_used: 100,
       remaining: 0,
-      // Ninety minutes out: the park is capped at one window.
       resets_at: new Date(now.getTime() + 5_400_000),
     });
 
@@ -1561,7 +1471,6 @@ describe("Distribution message processing", () => {
               id: distributionId,
               org_id: organizationId,
               status: "scheduled",
-              // The durable schedule sits later than this stale trigger.
               scheduled_at: new Date(now.getTime() + 3_600_000),
             },
           ],
@@ -1569,20 +1478,19 @@ describe("Distribution message processing", () => {
       }
       return Effect.succeed({ rowCount: 1, rows: [] });
     });
-    const transaction = recordingTransaction(query);
+    const transactionCalls = vi.fn();
+    const transaction = recordingTransaction(query, transactionCalls);
 
     const result = await Effect.runPromise(
       processDistributionMessage(env, publishMessage(), {
         now: () => now,
-        providerRegistry: {
-          get: () => undefined,
-        } as unknown as ProviderRegistry,
+        providerRegistry: new ProviderRegistry(),
         transaction,
       }),
     );
 
     expect(result).toBe("skipped");
-    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(transactionCalls).toHaveBeenCalledTimes(1);
     expect(
       query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO provider_operations")),
     ).toBe(false);
@@ -1610,9 +1518,7 @@ describe("Distribution message processing", () => {
     const result = await Effect.runPromise(
       processDistributionMessage(env, publishMessage(), {
         now: () => now,
-        providerRegistry: {
-          get: () => undefined,
-        } as unknown as ProviderRegistry,
+        providerRegistry: new ProviderRegistry(),
         transaction: recordingTransaction(query),
       }),
     );
@@ -1629,8 +1535,6 @@ describe("Due work scheduled claim protocol", () => {
     const executedQueries: Array<{ params?: unknown[]; sql: string }> = [];
     const query = vi.fn((sql: string, params?: unknown[]) => {
       executedQueries.push({ params, sql });
-      // Lease claims return rows to deliver; none are claimed here so the sweep
-      // performs no Queue send.
       if (sql.includes("AS event_id")) {
         return Effect.succeed({ rowCount: 0, rows: [] });
       }
@@ -1643,7 +1547,10 @@ describe("Due work scheduled claim protocol", () => {
       <A, E, R>(
         _env: AutomationEnv,
         operation: (client: EffectTransactionClient) => Effect.Effect<A, E, R>,
-      ): Effect.Effect<A, E, R> => operation({ query } as unknown as EffectTransactionClient),
+      ): Effect.Effect<A, E, R> =>
+        operation(
+          fakeTransactionClient((sql, params) => query(sql, params ? [...params] : undefined)),
+        ),
     );
 
     const handler = createAutomationHandler({
@@ -1688,11 +1595,8 @@ describe("Due work scheduled claim protocol", () => {
       env,
       createExecutionContext(),
     );
-    // The retired per-minute expression matches no tier, so the invocation
-    // dispatches nothing: no database work at all, not merely no claim.
     expect(executedQueries).toHaveLength(0);
 
-    // Hourly tier: every Due claim plus the Outbox relay.
     await handler.scheduled?.(
       {
         cron: "0 * * * *",
@@ -1703,9 +1607,6 @@ describe("Due work scheduled claim protocol", () => {
       createExecutionContext(),
     );
 
-    // `FOR UPDATE SKIP LOCKED` selects claim statements out of the executed
-    // stream; it is the picker, not the assertion. What the tier owes is the
-    // set of claims it issues, in descriptor order, with their bound values.
     const hourlyClaims = executedQueries.filter(({ sql }) => sql.includes("SKIP LOCKED"));
     expect(hourlyClaims).toHaveLength(6);
 
@@ -1718,8 +1619,6 @@ describe("Due work scheduled claim protocol", () => {
       replyClaim,
     ] = hourlyClaims;
 
-    // The hourly tier's five Due claims plus the reply-reconciliation claim,
-    // in descriptor order, each carrying its own bound set.
     const hourlyProviderSyncBounds = [
       50,
       expect.any(Array),
@@ -1779,9 +1678,7 @@ describe("Scheduled entry delayed delivery", () => {
         Effect.succeed({
           rows: [
             claimedRow(301, new Date(base + 600_000)),
-            // Equal to the horizon: still inside the platform limit.
             claimedRow(302, new Date(base + 86_400_000)),
-            // Beyond the horizon: the stale command must never send.
             claimedRow(303, new Date(base + 90_000_000)),
           ],
         }),
@@ -1835,13 +1732,9 @@ describe("Scheduled entry delayed delivery", () => {
     expect(batches).toHaveLength(1);
     const sent = batches[0] ?? [];
     expect(sent.map(({ body }) => body.event_id)).toEqual([eventId(301), eventId(302)]);
-    // Each message carries its own delay derived from the durable schedule.
     expect(sent[0]?.delaySeconds).toBe(Math.max(0, Math.ceil((base + 600_000 - sentAtMs) / 1000)));
-    // The horizon row sits 24 hours out, so its delay must be the full horizon
-    // less the (sub-second) elapsed time — not merely "not above" the cap.
     expect(sent[1]?.delaySeconds).toBeGreaterThan(86_390);
     expect(sent[1]?.delaySeconds).toBeLessThanOrEqual(86_400);
-    // Bodies stay identifier-only triggers.
     for (const { body } of sent) {
       expect(body.payload).toEqual({
         distribution_id: distributionId,
@@ -1850,7 +1743,6 @@ describe("Scheduled entry delayed delivery", () => {
       expect(body.topic).toBe("distribution.publish.requested");
       expect(Object.keys(body)).not.toContain("scheduled_at");
     }
-    // The beyond-horizon command finalizes without a send.
     expect(new Set(query.mock.calls[1]?.[1]?.[0] as string[])).toEqual(
       new Set([eventId(301), eventId(302), eventId(303)]),
     );
@@ -1871,14 +1763,15 @@ describe("Hourly distribution recovery sweep", () => {
       <A, E, R>(
         _env: AutomationEnv,
         operation: (client: EffectTransactionClient) => Effect.Effect<A, E, R>,
-      ): Effect.Effect<A, E, R> => operation({ query } as unknown as EffectTransactionClient),
+      ): Effect.Effect<A, E, R> =>
+        operation(
+          fakeTransactionClient((sql, params) => query(sql, params ? [...params] : undefined)),
+        ),
     );
 
     const count = await Effect.runPromise(sweepDueDistributions(env));
     expect(count).toBe(2);
 
-    // One claim statement per call: the sweep is a single bounded transaction,
-    // not a row-at-a-time loop.
     expect(executedQueries).toHaveLength(1);
     expect(executedQueries[0]?.params).toEqual([
       100,
@@ -1900,7 +1793,10 @@ describe("Hourly distribution recovery sweep", () => {
       <A, E, R>(
         _env: AutomationEnv,
         operation: (client: EffectTransactionClient) => Effect.Effect<A, E, R>,
-      ): Effect.Effect<A, E, R> => operation({ query } as unknown as EffectTransactionClient),
+      ): Effect.Effect<A, E, R> =>
+        operation(
+          fakeTransactionClient((sql, params) => query(sql, params ? [...params] : undefined)),
+        ),
     );
 
     await Effect.runPromise(sweepDueDistributions(env, 42, 600, 43_200));

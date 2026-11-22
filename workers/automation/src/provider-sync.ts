@@ -26,6 +26,7 @@ import { type AutomationJobError, classifyJobError, QueuePublisher } from "./eff
 import type { AutomationEnv } from "./env";
 import {
   isProviderSyncMessage,
+  providerSyncMessage,
   type ProviderSyncMessage,
   type ProviderSyncWorkload,
 } from "./messages";
@@ -41,10 +42,6 @@ import {
 } from "./provider-sync-provider";
 import { nextDelaySeconds } from "./retry-policy";
 
-/**
- * Transaction runner for provider sync: the Effect-native system transaction
- * contract, so load/record statements compose inside the caller's program.
- */
 type SystemTransaction = typeof withSystemTransactionEffect;
 
 interface DistributionSyncRow extends Record<string, unknown> {
@@ -118,13 +115,6 @@ import {
   type DueWorkClaim,
 } from "./due-work";
 
-/**
- * Filters platforms to those implementing the required adapter capability for a given workload.
- *
- * @param registry - Provider adapter registry.
- * @param workload - Target workload ('analytics', 'comments', or 'token_refresh').
- * @returns Array of eligible platform names.
- */
 function eligiblePlatforms(registry: ProviderRegistry, workload: ProviderSyncWorkload): Platform[] {
   return PLATFORM_IDS.filter((platform) => {
     const adapter = registry.get(platform);
@@ -139,13 +129,6 @@ function eligiblePlatforms(registry: ProviderRegistry, workload: ProviderSyncWor
   });
 }
 
-/**
- * Validates and constrains the provider sync batch size between 1 and 100.
- *
- * @param value - Batch size candidate, defaulting to 50.
- * @returns Validated integer batch size.
- * @throws {RangeError} If value is not an integer between 1 and 100.
- */
 function boundedBatchSize(value = 50): number {
   if (!Number.isInteger(value) || value < 1 || value > 100) {
     throw new RangeError("provider sync batch size must be between 1 and 100");
@@ -153,14 +136,6 @@ function boundedBatchSize(value = 50): number {
   return value;
 }
 
-/**
- * Resolves the Cloudflare Queue binding for a provider sync workload.
- *
- * @param env - Automation worker environment bindings.
- * @param workload - Provider sync workload kind ('analytics', 'comments', 'token_refresh').
- * @returns Corresponding Cloudflare Queue binding.
- * @throws {Error} If the requested queue binding is missing.
- */
 function queueFor(env: AutomationEnv, workload: ProviderSyncWorkload): Queue<unknown> {
   const queue =
     workload === "analytics"
@@ -174,21 +149,6 @@ function queueFor(env: AutomationEnv, workload: ProviderSyncWorkload): Queue<unk
   return queue;
 }
 
-/**
- * Dispatches claimed provider sync items as messages to their target Cloudflare Queue.
- *
- * Effect program: resolves the workload's Queue binding (a missing binding is a
- * classified job failure) and publishes through the QueuePublisher service so
- * delivery stays injectable in tests. Automatically computes delivery delays
- * based on `next_due_at`. If dispatch fails, the claims are released back to the
- * database and the program yields 0 — the send error itself never propagates.
- *
- * @param env - Automation worker environment bindings.
- * @param workload - Target workload.
- * @param claims - Claimed work items.
- * @param transaction - Transaction runner for database operations.
- * @returns Effect producing the number of messages successfully published.
- */
 function sendClaims(
   env: AutomationEnv,
   workload: ProviderSyncWorkload,
@@ -208,14 +168,11 @@ function sendClaims(
         const diff = Math.ceil((new Date(claim.next_due_at).getTime() - Date.now()) / 1000);
         delaySeconds = Math.max(0, Math.min(maximumDelayedDeliverySeconds, diff));
       }
-      const message: ProviderSyncMessage = {
-        event_id: claim.event_id,
-        request_id: claim.event_id,
-        target_id: claim.target_id,
-        type: "provider.sync",
-        version: 1,
+      const message: ProviderSyncMessage = providerSyncMessage(
         workload,
-      };
+        claim.target_id,
+        claim.event_id,
+      );
       return {
         body: message,
         ...(delaySeconds !== null && delaySeconds > 0 ? { delaySeconds } : {}),
@@ -238,38 +195,12 @@ function sendClaims(
   });
 }
 
-/**
- * Identifier for the trigger armed alongside the next due moment.
- *
- * Work due beyond the delayed-delivery horizon is left unarmed (null) so the hourly
- * sweep converts it once it comes into range, matching the Due work contract in `due-work.ts`.
- *
- * @param delaySeconds - Delay in seconds until execution, or null if no schedule.
- * @returns Minted UUID string if within the horizon, otherwise null.
- */
 function armedEventId(delaySeconds: number | null): string | null {
   if (delaySeconds === null) return null;
   if (delaySeconds > maximumDelayedDeliverySeconds) return null;
   return crypto.randomUUID();
 }
 
-/**
- * Dispatches a delayed queue message for the next recurring provider sync execution.
- *
- * Best-effort Effect: the `sendTrigger` dependency override still intercepts the
- * dispatch for tests, and every send/queue-resolution failure is swallowed
- * (`Effect.catch` to void) because the armed event is already durable — the
- * hourly sweep recovers any trigger lost in transit.
- *
- * @param env - Automation worker environment bindings.
- * @param workload - Workload kind.
- * @param targetId - Target record UUID (distribution or platform account).
- * @param eventId - Minted trigger event ID.
- * @param delaySeconds - Delay in seconds before execution.
- * @param dependencies - Optional dependency overrides for testing.
- * @returns Effect that always succeeds; delivery happens via QueuePublisher
- *   unless a sendTrigger override is injected.
- */
 function sendNextProviderTrigger(
   env: AutomationEnv,
   workload: ProviderSyncWorkload,
@@ -294,14 +225,7 @@ function sendNextProviderTrigger(
       });
       const publisher = yield* QueuePublisher;
       const boundedDelay = Math.max(0, Math.ceil(delaySeconds));
-      const message: ProviderSyncMessage = {
-        event_id: eventId,
-        request_id: eventId,
-        target_id: targetId,
-        type: "provider.sync",
-        version: 1,
-        workload,
-      };
+      const message: ProviderSyncMessage = providerSyncMessage(workload, targetId, eventId);
       yield* publisher.sendBatch(queue, [
         {
           body: message,
@@ -313,17 +237,6 @@ function sendNextProviderTrigger(
   );
 }
 
-/**
- * Hourly recovery sweep for provider sync work: converts rows whose next due
- * moment has come inside the delayed-delivery horizon and re-arms triggers that
- * were lost, so no kind of provider work depends on a per-minute poll.
- *
- * @param env - Automation worker environment bindings.
- * @param dependencies - Optional overrides for batch size, registry, and transaction.
- * @returns Effect producing per-workload counts of claimed and dispatched jobs.
- *   Claim/dispatch failures surface on the typed error channel; an invalid
- *   batchSize remains a RangeError defect.
- */
 export function sweepDueProviderJobs(
   env: AutomationEnv,
   dependencies: ProviderDueDependencies = {},
@@ -332,54 +245,51 @@ export function sweepDueProviderJobs(
     const registry = dependencies.providerRegistry ?? cachedProviderRegistryFromEnvironment(env);
     const transaction = dependencies.transaction ?? withSystemTransactionEffect;
     const batchSize = boundedBatchSize(dependencies.batchSize);
-    const analytics = yield* sweepDueProviderSyncWork(
-      env,
-      "analytics",
-      batchSize,
-      eligiblePlatforms(registry, "analytics"),
-      transaction,
+    const [[analytics, comments], tokenRefresh] = yield* Effect.all(
+      [
+        Effect.gen(function* () {
+          const analyticsClaims = yield* sweepDueProviderSyncWork(
+            env,
+            "analytics",
+            batchSize,
+            eligiblePlatforms(registry, "analytics"),
+            transaction,
+          );
+          const commentsClaims = yield* sweepDueProviderSyncWork(
+            env,
+            "comments",
+            batchSize,
+            eligiblePlatforms(registry, "comments"),
+            transaction,
+          );
+          return [analyticsClaims, commentsClaims] as const;
+        }),
+        sweepDueProviderSyncWork(
+          env,
+          "token_refresh",
+          batchSize,
+          eligiblePlatforms(registry, "token_refresh"),
+          transaction,
+        ),
+      ],
+      { concurrency: 2 },
     );
-    const comments = yield* sweepDueProviderSyncWork(
-      env,
-      "comments",
-      batchSize,
-      eligiblePlatforms(registry, "comments"),
-      transaction,
-    );
-    const tokenRefresh = yield* sweepDueProviderSyncWork(
-      env,
-      "token_refresh",
-      batchSize,
-      eligiblePlatforms(registry, "token_refresh"),
-      transaction,
+    const [analyticsSent, commentsSent, tokenRefreshSent] = yield* Effect.all(
+      [
+        sendClaims(env, "analytics", analytics, transaction),
+        sendClaims(env, "comments", comments, transaction),
+        sendClaims(env, "token_refresh", tokenRefresh, transaction),
+      ],
+      { concurrency: 3 },
     );
     return {
-      analytics: yield* sendClaims(env, "analytics", analytics, transaction),
-      comments: yield* sendClaims(env, "comments", comments, transaction),
-      token_refresh: yield* sendClaims(env, "token_refresh", tokenRefresh, transaction),
+      analytics: analyticsSent,
+      comments: commentsSent,
+      token_refresh: tokenRefreshSent,
     };
   });
 }
 
-/**
- * Arm and deliver Comment fetches for Distributions the cadence ladder no
- * longer schedules, in response to a creator opening the Inbox.
- *
- * The Inbox request itself performs no Provider call: this claims a bounded page
- * of that organization's unscheduled Distributions and hands them to the same
- * comments Queue path the scheduled ladder uses, so the consumer, event guard,
- * lease, and checkpoint are unchanged. The claim is the only trust boundary that
- * matters here — it bounds how many Distributions one open may arm and refuses a
- * Distribution fetched within `onDemandCommentsIntervalSeconds` — so repeated
- * opens cannot force repeated Provider calls.
- *
- * @param env - Automation worker environment bindings.
- * @param input - Filter parameters including optional distributionId and organizationId.
- * @param dependencies - Optional dependency overrides for batch size and transaction.
- * @returns Effect producing the number of on-demand comments sync messages
- *   dispatched; claim failures surface on the typed error channel and an
- *   invalid batchSize remains a RangeError defect.
- */
 export function requestOnDemandCommentsSync(
   env: AutomationEnv,
   input: { distributionId: string | null; organizationId: string },
@@ -402,18 +312,6 @@ export function requestOnDemandCommentsSync(
   });
 }
 
-/**
- * Loads and locks a published distribution record matching the incoming sync event ID.
- *
- * Clears stale matching events and leases. With recurring collection disabled,
- * only a durable on-demand claim may reach the Provider; legacy queued work is
- * retired without deleting retained Comments or numerical Analytics.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Provider sync queue message.
- * @param transaction - Transaction runner for database operations.
- * @returns Locked distribution target row, or undefined if event is stale.
- */
 function loadDistributionTarget(
   env: AutomationEnv,
   message: ProviderSyncMessage,
@@ -465,16 +363,6 @@ function loadDistributionTarget(
   );
 }
 
-/**
- * Loads and locks a platform account record matching the token refresh event ID.
- *
- * If the event ID no longer matches, unsets the sync event and clears leases.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Provider sync queue message.
- * @param transaction - Transaction runner for database operations.
- * @returns Locked platform account target row, or undefined if event is stale.
- */
 function loadTokenTarget(
   env: AutomationEnv,
   message: ProviderSyncMessage,
@@ -508,28 +396,10 @@ function loadTokenTarget(
   );
 }
 
-/**
- * Calculates the elapsed age in seconds since a post's publication timestamp.
- *
- * @param publishedAt - Original post publication date or ISO string.
- * @param now - Current reference timestamp.
- * @returns Non-negative elapsed seconds.
- */
 function ageSeconds(publishedAt: Date | string, now: Date): number {
   return Math.max(0, (now.valueOf() - new Date(publishedAt).valueOf()) / 1_000);
 }
 
-/**
- * Next analytics cadence, or null once the Distribution passes
- * `analyticsTerminalAgeSeconds`: analytics on a Distribution that old is
- * archival, so it stops being scheduled instead of flooring at a daily poll
- * forever. Null is the same "no longer scheduled" value the failure path
- * already writes, so `armedEventId` leaves the row unarmed.
- *
- * @param age - Elapsed seconds since publication.
- * @param active - Boolean indicating whether metrics changed since the last snapshot.
- * @returns Cadence interval in seconds, or null if terminal.
- */
 function analyticsCadenceSeconds(age: number, active: boolean): number | null {
   if (age >= analyticsTerminalAgeSeconds) return null;
   if (!active && age >= 7 * 86_400) return 86_400;
@@ -539,23 +409,6 @@ function analyticsCadenceSeconds(age: number, active: boolean): number | null {
   return 86_400;
 }
 
-/**
- * Comment cadence for a published Distribution, or `null` once it is no longer
- * scheduled at all.
- *
- * Day zero is deliberately slower than a live-chat cadence: 600s active / 1200s
- * inactive halves the first day's Provider calls (288 to 144 active, 144 to 72
- * inactive) while keeping the worst-case delay before a new Comment is visible
- * at 10 minutes. Past `demandDrivenCommentsAgeSeconds` nothing is scheduled and
- * an Inbox open arms the fetch instead (see `requestOnDemandCommentsSync`), so
- * Meltiply stops paying a daily Provider call per Distribution forever. The
- * accepted tradeoff is that a Comment on such a Distribution produces no
- * notification until someone looks.
- *
- * @param age - Elapsed seconds since publication.
- * @param active - Boolean indicating whether new comments were returned in the last page.
- * @returns Cadence interval in seconds, or null if transitioned to demand-driven.
- */
 function commentsCadenceSeconds(age: number, active: boolean): number | null {
   if (age >= demandDrivenCommentsAgeSeconds) return null;
   if (!active && age >= 7 * 86_400) return 86_400;
@@ -564,17 +417,6 @@ function commentsCadenceSeconds(age: number, active: boolean): number | null {
   return active ? 10_800 : 21_600;
 }
 
-/**
- * Computes an exponential retry backoff delay with jitter for failed sync attempts.
- *
- * Honors provider retryAfter headers and adapter retry policy bounds.
- *
- * @param failure - Structured provider failure object.
- * @param attemptCount - Current attempt counter.
- * @param retryPolicy - Provider adapter retry policy.
- * @param random - PRNG function.
- * @returns Delay in seconds, or null if non-retryable or maximum attempts reached.
- */
 function retryDelaySeconds(
   failure: ProviderFailure,
   attemptCount: number,
@@ -595,16 +437,6 @@ function retryDelaySeconds(
   );
 }
 
-/**
- * Enforces that the distribution's active sync event ID has not changed under concurrency.
- *
- * Row-locks the distribution row to guard against double processing or superseded events.
- *
- * @param client - Transactional database client.
- * @param row - Target distribution record.
- * @param workload - Target sync workload ('analytics' or 'comments').
- * @returns True if the active sync event ID matches the processing event.
- */
 function requireCurrentDistributionEvent(
   client: EffectTransactionClient,
   row: DistributionSyncRow,
@@ -622,23 +454,6 @@ function requireCurrentDistributionEvent(
   );
 }
 
-/**
- * Records a failed analytics or comments sync attempt, computing backoff and updating leases.
- *
- * Sets reconnect_required on the platform account if the failure was auth-related,
- * unsets or rearms the sync event ID, and dispatches the next delayed trigger if retryable.
- *
- * @param env - Automation worker environment bindings.
- * @param row - Distribution sync row.
- * @param workload - Workload kind ('analytics' or 'comments').
- * @param execution - Failed provider read execution outcome.
- * @param transaction - Transaction runner for database operations.
- * @param random - PRNG function.
- * @param dependencies - Optional dependency overrides.
- * @returns Effect completing once the failure is persisted and any retry
- *   trigger is dispatched; the transaction's throws are classified onto the
- *   AutomationJobError channel while the trigger send stays best-effort.
- */
 function recordDistributionFailure(
   env: AutomationEnv,
   row: DistributionSyncRow,
@@ -697,12 +512,6 @@ function recordDistributionFailure(
   });
 }
 
-/**
- * Extracts the most recent analytics record from an array based on recordedAt timestamp.
- *
- * @param items - Array of provider analytics records.
- * @returns Latest record by recordedAt timestamp, or undefined if array is empty.
- */
 function latestAnalytics(items: ProviderAnalyticsRecord[]): ProviderAnalyticsRecord | undefined {
   let latest: ProviderAnalyticsRecord | undefined;
   let latestTime = Number.NEGATIVE_INFINITY;
@@ -716,23 +525,6 @@ function latestAnalytics(items: ProviderAnalyticsRecord[]): ProviderAnalyticsRec
   return latest;
 }
 
-/**
- * Records successful analytics metrics in analytics_snapshots and computes the next polling cadence.
- *
- * Detects engagement changes to differentiate active vs inactive cadence ladders, inserts hourly snapshots,
- * clears attempt counts, and schedules the next trigger.
- *
- * @param env - Automation worker environment bindings.
- * @param row - Distribution sync row.
- * @param execution - Successful analytics execution page.
- * @param now - Reference timestamp.
- * @param transaction - Transaction runner for database operations.
- * @param dependencies - Optional dependency overrides.
- * @returns Effect completing once the snapshot and next cadence are persisted
- *   and any follow-up trigger is dispatched; the transaction's throws are
- *   classified onto the AutomationJobError channel while the trigger send
- *   stays best-effort.
- */
 function recordAnalyticsSuccess(
   env: AutomationEnv,
   row: DistributionSyncRow,
@@ -836,24 +628,6 @@ function recordAnalyticsSuccess(
   });
 }
 
-/**
- * Inserts synced comments into the comments table and schedules the next comments polling trigger.
- *
- * Deduplicates comments on conflict with (distribution_id, platform_comment_id), updates content and author metadata,
- * resets failure counts, and arms cursor continuations. Completed demand fetches
- * stop; recurring cadence is armed only when the deployment explicitly opts in.
- *
- * @param env - Automation worker environment bindings.
- * @param row - Distribution sync row.
- * @param execution - Successful comment execution page.
- * @param now - Reference timestamp.
- * @param transaction - Transaction runner for database operations.
- * @param dependencies - Optional dependency overrides.
- * @returns Effect completing once the comments page and next cadence are
- *   persisted and any follow-up trigger is dispatched; the transaction's throws
- *   are classified onto the AutomationJobError channel while the trigger send
- *   stays best-effort.
- */
 function recordCommentsSuccess(
   env: AutomationEnv,
   row: DistributionSyncRow,
@@ -940,13 +714,6 @@ function recordCommentsSuccess(
   });
 }
 
-/**
- * The workload-specific surface of distribution sync processing: the adapter
- * read executor, the failure code recorded when a returned cursor repeats the
- * stored one, and the success persistence routine. Everything else — target
- * load, registry and clock resolution, service provisioning, and failure
- * recording — is shared orchestration owned by processDistributionSync.
- */
 interface DistributionSyncOperation<T> {
   execute: (
     registry: ProviderRegistry,
@@ -967,25 +734,6 @@ interface DistributionSyncOperation<T> {
   workload: "analytics" | "comments";
 }
 
-/**
- * Shared orchestration for analytics and comments sync messages.
- *
- * Loads and locks the distribution target, resolves the provider registry and
- * reference timestamp, runs the workload's adapter read inside the live
- * ProviderService layer, then persists the outcome: a stalled cursor (success
- * whose nextCursor repeats the stored one) is recorded as a malformed-response
- * failure under the workload's stalled-cursor code, adapter failures keep their
- * classified failure, and successes dispatch to the workload's recorder.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Provider sync queue message.
- * @param dependencies - Dependencies for token decryption, registry, clock, and transactions.
- * @param operation - Workload-specific executor, stalled-cursor code, and success recorder.
- * @returns Effect producing 'skipped' when no distribution matches the event,
- *   otherwise 'processed'; load and persistence failures land on the
- *   AutomationJobError channel and provider adapter errors pass through
- *   unclassified for the boundary to map.
- */
 function processDistributionSync<T>(
   env: AutomationEnv,
   message: ProviderSyncMessage,
@@ -1061,21 +809,6 @@ function processDistributionSync<T>(
   });
 }
 
-/**
- * Processes an analytics sync message for a published distribution post.
- *
- * Declares the analytics workload for the shared distribution-sync
- * orchestration: the listAnalytics executor, the
- * 'provider_analytics_cursor_stalled' failure code, and metrics-snapshot
- * persistence on success.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Provider sync queue message.
- * @param dependencies - Dependencies for token decryption, registry, and transactions.
- * @returns Effect producing 'processed' or 'skipped'; load and persistence
- *   failures land on the AutomationJobError channel and provider adapter errors
- *   pass through unclassified for the boundary to map.
- */
 function processAnalytics(
   env: AutomationEnv,
   message: ProviderSyncMessage,
@@ -1093,21 +826,6 @@ function processAnalytics(
   });
 }
 
-/**
- * Processes a comments sync message for a published distribution post.
- *
- * Declares the comments workload for the shared distribution-sync
- * orchestration: the listComments executor, the
- * 'provider_comments_cursor_stalled' failure code, and comment upsert
- * persistence on success.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Provider sync queue message.
- * @param dependencies - Dependencies for token decryption, registry, and transactions.
- * @returns Effect producing 'processed' or 'skipped'; load and persistence
- *   failures land on the AutomationJobError channel and provider adapter errors
- *   pass through unclassified for the boundary to map.
- */
 function processComments(
   env: AutomationEnv,
   message: ProviderSyncMessage,
@@ -1125,23 +843,6 @@ function processComments(
   });
 }
 
-/**
- * Records a failed OAuth token refresh attempt, transitioning account connection status and backoff.
- *
- * Marks connection_status as 'reconnect_required' or 'expired' if auth failed or token already expired,
- * sets next attempt timestamps if retryable, and sends delayed trigger messages.
- *
- * @param env - Automation worker environment bindings.
- * @param row - Platform account token refresh row.
- * @param execution - Failed refresh execution result.
- * @param now - Reference timestamp.
- * @param transaction - Transaction runner for database operations.
- * @param random - PRNG function.
- * @param dependencies - Optional dependency overrides.
- * @returns Effect completing once the failure is persisted and any retry
- *   trigger is dispatched; the transaction's throws are classified onto the
- *   AutomationJobError channel while the trigger send stays best-effort.
- */
 function recordTokenFailure(
   env: AutomationEnv,
   row: TokenRefreshRow,
@@ -1202,26 +903,6 @@ function recordTokenFailure(
   });
 }
 
-/**
- * Encrypts and stores newly refreshed OAuth credentials in the platform_accounts table.
- *
- * Encrypts access and refresh tokens, updates expiration timestamps (or clears them to NULL
- * when absent), sets connection_status to 'connected', and schedules the next refresh attempt
- * (7 days before token expiration or minimum 1 hour). When expiration is absent, clears scheduled
- * refresh event ID and next attempt timestamp without queueing a follow-up trigger.
- *
- * @param env - Automation worker environment bindings.
- * @param row - Platform account token refresh row.
- * @param execution - Successful refresh execution result containing new token set.
- * @param now - Reference timestamp.
- * @param transaction - Transaction runner for database operations.
- * @param dependencies - Optional dependency overrides.
- * @returns Effect completing once rotated credentials are persisted and any
- *   next refresh trigger is dispatched. An encryption failure is recorded as a
- *   token-refresh failure outcome instead of failing the job; the
- *   transaction's throws are classified onto the AutomationJobError channel
- *   while the trigger send stays best-effort.
- */
 function recordTokenSuccess(
   env: AutomationEnv,
   row: TokenRefreshRow,
@@ -1328,19 +1009,6 @@ function recordTokenSuccess(
   });
 }
 
-/**
- * Processes an OAuth access token refresh queue message.
- *
- * Loads the account target, invokes the provider adapter's refreshAccessToken method,
- * and delegates outcome handling to recordTokenSuccess or recordTokenFailure.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Provider sync queue message.
- * @param dependencies - Dependencies for token decryption, registry, and transactions.
- * @returns Effect producing 'processed' or 'skipped'; load and persistence
- *   failures land on the AutomationJobError channel and provider adapter errors
- *   pass through unclassified for the boundary to map.
- */
 function processTokenRefresh(
   env: AutomationEnv,
   message: ProviderSyncMessage,
@@ -1389,19 +1057,6 @@ function processTokenRefresh(
   });
 }
 
-/**
- * Main queue consumer router for provider sync queue messages.
- *
- * Directs messages to `processAnalytics`, `processComments`, or `processTokenRefresh` based on workload type.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Provider sync message from the queue.
- * @param dependencies - Optional dependency overrides for testing.
- * @returns Effect producing 'processed' or 'skipped', with no internal
- *   execution boundary; requires QueuePublisher for best-effort trigger
- *   dispatch and fails with classified AutomationJobError or a provider
- *   adapter error the boundary maps.
- */
 export function processProviderSyncMessage(
   env: AutomationEnv,
   message: ProviderSyncMessage,

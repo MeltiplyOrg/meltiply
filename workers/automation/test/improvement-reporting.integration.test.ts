@@ -9,8 +9,6 @@ import { deliverImprovementReports } from "../src/improvement-reporting";
 import { recordDiagnostic } from "../src/diagnostic-reporting";
 import { runSystemTransaction } from "./system-transaction";
 
-// Production delivery and diagnostic enqueueing against PostgreSQL and real capture HTTP.
-
 const connectionString = process.env.MELTIPLY_DATABASE_TEST_URL;
 if (!connectionString) {
   throw new Error("MELTIPLY_DATABASE_TEST_URL is required for PostgreSQL integration suites");
@@ -56,12 +54,10 @@ const env: AutomationEnv = {
   VERSION: "1.0.0-target.0",
 };
 
-/** Runs one production delivery pass. */
 function runDelivery() {
   return Effect.runPromise(deliverImprovementReports(env));
 }
 
-/** Seeds one enabled category with a queued report owned by a fixed identity. */
 async function seedPendingReport(input: {
   category: "diagnostics" | "usage";
   eventName: string;
@@ -107,7 +103,6 @@ async function seedPendingReport(input: {
   });
 }
 
-/** Reads the delivery row state for the seeded report. */
 async function reportState() {
   const result = await runSystemTransaction(env, (client) =>
     client.query<{ last_error_code: string | null; state: string }>(
@@ -212,7 +207,6 @@ describe("scheduled improvement reporting with PostgreSQL", () => {
       eventName: "$exception",
       payload: { diagnostic_category: "unhandled_exception", schema_version: 1 },
     });
-    // Withdrawal records the new choice; the queued row must not be delivered.
     await runSystemTransaction(env, (client) =>
       client.query("UPDATE reporting_preferences SET diagnostics_requested = FALSE"),
     );
@@ -259,7 +253,6 @@ describe("scheduled improvement reporting with PostgreSQL", () => {
       eventName: "meltiply_usage_daily",
       payload: { schema_version: 1 },
     });
-    // Move creation with expiry so the seven-day horizon constraint still holds.
     await runSystemTransaction(env, (client) =>
       client.query(
         `UPDATE reporting_pending_reports
@@ -299,7 +292,6 @@ describe("scheduled improvement reporting with PostgreSQL", () => {
     await runDelivery();
 
     expect(receiver.requests).toHaveLength(0);
-    // Fail-closed: the row is discarded, never delivered later by surprise.
     expect((await reportState())[0]!.state).toBe("discarded");
   });
 });

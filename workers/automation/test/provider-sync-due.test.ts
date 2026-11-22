@@ -19,9 +19,8 @@ import {
   providerAttemptLeaseSeconds,
   requestOnDemandCommentsSync,
   sweepDueProviderJobs,
-  type ProviderDueDependencies,
-  type ProviderSyncProcessingDependencies,
 } from "../src/provider-sync";
+import { fakeQueue, fakeSystemTransaction, fakeTransactionClient } from "./test-doubles";
 
 const targetIds = ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"];
 const eventIds = ["00000000-0000-4000-8000-000000000101", "00000000-0000-4000-8000-000000000102"];
@@ -29,11 +28,6 @@ const organizationId = "00000000-0000-4000-8000-000000000003";
 const cadenceDay = 86_400;
 const syncNow = new Date("2026-07-19T12:00:00Z");
 
-/**
- * QueuePublisher layer for provider-sync programs whose tests assert no queue
- * dispatch or intercept it through the sendTrigger seam. Required because the
- * programs declare QueuePublisher even when a test never reaches a send.
- */
 const queuePublisherLayer = createQueuePublisherTest({
   sendBatch: () => Effect.void,
 });
@@ -128,15 +122,9 @@ function processingHarness(row: Record<string, unknown>, prior?: Record<string, 
     }
     return Effect.succeed({ rowCount: 1, rows: [] });
   });
-  const transactionMock = vi.fn(
-    <T>(
-      _env: AutomationEnv,
-      operation: (client: EffectTransactionClient) => Effect.Effect<T, unknown>,
-    ): Effect.Effect<T, unknown> => operation({ query } as unknown as EffectTransactionClient),
+  const transaction = fakeSystemTransaction((sql, values) =>
+    query(sql, values ? [...values] : undefined),
   );
-  const transaction = transactionMock as unknown as NonNullable<
-    ProviderSyncProcessingDependencies["transaction"]
-  >;
   const env = {
     ENVIRONMENT: "test",
     VERSION: "test",
@@ -330,16 +318,12 @@ describe("provider sync cadence", () => {
       expected: null,
       workload: "analytics" as const,
     },
-    // Comments stopped being scheduled far earlier, at
-    // demandDrivenCommentsAgeSeconds, so this age is already demand-driven.
     {
       active: false,
       age: analyticsTerminalAgeSeconds,
       expected: null,
       workload: "comments" as const,
     },
-    // Relaxed day-zero Comment cadence (#149): halves the first day's calls
-    // against the previous 300s/600s rungs. Analytics day zero is unchanged.
     {
       active: true,
       age: 3_600,
@@ -429,15 +413,12 @@ describe("analytics sync terminal age", () => {
       ),
     ).resolves.toBe("processed");
 
-    // The final page is still persisted: the snapshot is written and only the
-    // schedule terminates.
     expect(
       query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO analytics_snapshots")),
     ).toBe(true);
     const update = query.mock.calls.find(([sql]) => String(sql).includes("SET analytics_cursor"));
     expect(update).toBeDefined();
     expect(String(update?.[0])).toContain("WHEN $4::integer IS NULL THEN NULL");
-    // Null cadence and null event identifier leave the row unarmed.
     expect(update?.[1]?.[3]).toBeNull();
     expect(update?.[1]?.[4]).toBeNull();
     expect(sendTrigger).not.toHaveBeenCalled();
@@ -452,8 +433,6 @@ describe("demand-driven comment sync threshold", () => {
     "stops scheduling comment sync at $age seconds with active $active",
     async ({ active, age }) => {
       const values = await processCadence("comments", active, age);
-      // Null cadence and null event identifier: the row is left unscheduled and
-      // invisible to the hourly sweep until an Inbox open arms it again.
       expect(values?.[3]).toBeNull();
       expect(values?.[4]).toBeNull();
     },
@@ -521,21 +500,13 @@ describe("on-demand comment sync requested by an Inbox open", () => {
       executed.push({ params, sql });
       return Effect.succeed({ rowCount: claimed.length, rows: [...claimed] });
     });
-    const transaction = vi.fn(
-      <T>(
-        _env: AutomationEnv,
-        operation: (client: EffectTransactionClient) => Effect.Effect<T, unknown>,
-      ): Effect.Effect<T, unknown> => operation({ query } as unknown as EffectTransactionClient),
-    ) as unknown as NonNullable<ProviderDueDependencies["transaction"]>;
-    // Sends go through the QueuePublisher service: the stub records the resolved
-    // queue binding and the message entries, so the assertion still proves the
-    // armed work travels on the comments Queue.
+    const transaction = fakeSystemTransaction((sql, params) => query(sql, params));
     const sendBatch = vi.fn((_queue: Queue<unknown>, _messages: readonly unknown[]) => Effect.void);
-    const env = {
-      COMMENTS_QUEUE: { sendBatch: vi.fn() },
+    const env: AutomationEnv = {
+      COMMENTS_QUEUE: fakeQueue({ sendBatch: vi.fn() }),
       ENVIRONMENT: "test",
       VERSION: "test",
-    } as unknown as AutomationEnv;
+    };
     const publisher = createQueuePublisherTest({ sendBatch });
     return { env, executed, publisher, sendBatch, transaction };
   }
@@ -623,10 +594,6 @@ describe("on-demand comment sync requested by an Inbox open", () => {
 
 describe("provider attempt lease", () => {
   it("stays shorter than every queue visibility timeout carrying provider sync messages", () => {
-    // Consumer visibility timeouts configured in infra/cloudflare/main.tf for
-    // the queues that deliver provider sync messages (analytics, comments, and
-    // token-refresh). The Queues Terraform module enforces the same inequality
-    // from the infrastructure side.
     const visibilityTimeoutsMs = [120_000];
     for (const timeoutMs of visibilityTimeoutsMs) {
       expect(providerAttemptLeaseSeconds * 1_000).toBeLessThan(timeoutMs);
@@ -665,7 +632,6 @@ describe("delayed delivery trigger scheduling", () => {
     };
     const { env, transaction } = processingHarness(row);
 
-    // Process analytics: age = 2 hours (< 24h), active = false -> cadence = 1800s
     await Effect.runPromise(
       Effect.provide(
         processProviderSyncMessage(
@@ -724,7 +690,6 @@ describe("delayed delivery trigger scheduling", () => {
     };
     const { env, query, transaction } = processingHarness(row);
 
-    // Age 8 days, inactive -> cadence = 86400 (exact horizon).
     await Effect.runPromise(
       Effect.provide(
         processProviderSyncMessage(
@@ -749,18 +714,15 @@ describe("delayed delivery trigger scheduling", () => {
       ),
     );
 
-    // The horizon is inclusive: 86400s is still a delay a Queue accepts, so the
-    // boundary itself must send rather than be suppressed.
     expect(sentTriggers).toHaveLength(1);
     expect(sentTriggers[0]?.delaySeconds).toBe(86400);
 
-    // Verify row is updated with a fresh event ID in the database
     const updateCall = query.mock.calls.find(([sql]) =>
       String(sql).includes("SET analytics_cursor"),
     );
     expect(updateCall).toBeDefined();
     const updateParams = updateCall?.[1] as unknown[];
-    expect(updateParams[4]).toEqual(expect.any(String)); // nextEventId
+    expect(updateParams[4]).toEqual(expect.any(String));
   });
 });
 
@@ -782,9 +744,7 @@ describe("token refresh authoritative single event guard", () => {
     });
 
     const query = vi.fn((sql: string, params?: readonly unknown[]) => {
-      // loadTokenTarget query
       if (sql.includes("FROM platform_accounts")) {
-        // If the query passes the staleEventId, zero rows match
         if (params?.[1] === staleEventId) {
           return Effect.succeed({ rowCount: 0, rows: [] });
         }
@@ -807,12 +767,7 @@ describe("token refresh authoritative single event guard", () => {
       return Effect.succeed({ rowCount: 1, rows: [] });
     });
 
-    const transactionMock = vi.fn(
-      <T>(
-        _env: AutomationEnv,
-        operation: (client: EffectTransactionClient) => Effect.Effect<T, unknown>,
-      ): Effect.Effect<T, unknown> => operation({ query } as unknown as EffectTransactionClient),
-    );
+    const transaction = fakeSystemTransaction((sql, params) => query(sql, params));
     const env = { ENVIRONMENT: "test", VERSION: "test" } as AutomationEnv;
 
     const outcome = await Effect.runPromise(
@@ -831,9 +786,7 @@ describe("token refresh authoritative single event guard", () => {
             decryptToken: async () => "decrypted",
             now: () => syncNow,
             providerRegistry: registry,
-            transaction: transactionMock as unknown as NonNullable<
-              ProviderSyncProcessingDependencies["transaction"]
-            >,
+            transaction,
           },
         ),
         queuePublisherLayer,
@@ -859,16 +812,19 @@ describe("hourly provider sync recovery sweep", () => {
       <T>(
         _env: AutomationEnv,
         operation: (client: EffectTransactionClient) => Effect.Effect<T, unknown>,
-      ): Effect.Effect<T, unknown> => operation({ query } as unknown as EffectTransactionClient),
+      ): Effect.Effect<T, unknown> =>
+        operation(
+          fakeTransactionClient((sql, params) => query(sql, params ? [...params] : undefined)),
+        ),
     );
 
-    const env = {
-      ANALYTICS_QUEUE: { sendBatch: vi.fn(async () => ({ metadata: {} })) },
-      COMMENTS_QUEUE: { sendBatch: vi.fn(async () => ({ metadata: {} })) },
+    const env: AutomationEnv = {
+      ANALYTICS_QUEUE: fakeQueue(),
+      COMMENTS_QUEUE: fakeQueue(),
       ENVIRONMENT: "test",
-      TOKEN_REFRESH_QUEUE: { sendBatch: vi.fn(async () => ({ metadata: {} })) },
+      TOKEN_REFRESH_QUEUE: fakeQueue(),
       VERSION: "test",
-    } as unknown as AutomationEnv;
+    };
 
     const registry = new ProviderRegistry();
     registry.register("threads", {
@@ -892,9 +848,6 @@ describe("hourly provider sync recovery sweep", () => {
     expect(executedQueries).toHaveLength(3);
     const [analyticsQuery, commentsQuery, tokenRefreshQuery] = executedQueries;
 
-    // The discriminator between the three claims is the cursor column each
-    // one reads; a workload wired to its neighbour's cursor is the regression
-    // these lines exist to catch.
     expect(analyticsQuery?.sql).toContain("analytics_next_sync_at");
     expect(analyticsQuery?.params).toEqual([
       50,

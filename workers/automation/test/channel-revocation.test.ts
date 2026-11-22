@@ -27,17 +27,12 @@ import { createAutomationHandler } from "../src/index";
 import type { OutboxMessage } from "../src/messages";
 import { relayOutbox } from "../src/outbox";
 import { publishingQueueFor } from "../src/publish-queues";
+import { fakeQueue } from "./test-doubles";
 
 const organizationId = "00000000-0000-4000-8000-000000000001";
 const accountId = "00000000-0000-4000-8000-000000000002";
 const eventId = "00000000-0000-4000-8000-0000000000aa";
 
-/**
- * Builds one claimed outbox row whose payload exercises revocation allowlisting.
- *
- * @param overrides - Row fields replacing the deterministic baseline.
- * @returns Outbox row accepted by the relay fixture.
- */
 function revocationRow(overrides: Record<string, unknown> = {}) {
   return {
     aggregate_id: accountId,
@@ -60,12 +55,6 @@ function revocationRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-/**
- * Builds a validated channel-revocation queue message for processor tests.
- *
- * @param payload - Payload replacing the minimal encrypted-token baseline.
- * @returns Outbox message with deterministic organization and account IDs.
- */
 function revocationMessage(
   payload: Record<string, unknown> = {
     access_token: "enc:ciphertext-token",
@@ -85,13 +74,6 @@ function revocationMessage(
   };
 }
 
-/**
- * Configures a two-query outbox claim transaction with deterministic row results.
- *
- * @param rows - Rows returned by the claim query.
- * @param updatedRows - Rows returned after claim state updates.
- * @returns Mock query function for call-level assertions.
- */
 function setupClaim(rows: unknown[], updatedRows: { state: string }[] = []) {
   const query = vi
     .fn()
@@ -105,12 +87,6 @@ function setupClaim(rows: unknown[], updatedRows: { state: string }[] = []) {
   return query;
 }
 
-/**
- * Executes the durable outbox relay with its concrete publish queue layers.
- *
- * @param environment - Automation bindings, including the revocation queue.
- * @returns Promise resolving after all claimed events have been relayed.
- */
 function runRelay(environment: AutomationEnv) {
   return Effect.runPromise(
     Effect.provide(
@@ -123,12 +99,6 @@ function runRelay(environment: AutomationEnv) {
   );
 }
 
-/**
- * Creates a registry containing a minimal TikTok adapter with optional revocation support.
- *
- * @param revoke - Adapter revocation behavior used to model provider outcomes.
- * @returns Registry accepted by the channel-revocation processor.
- */
 function revocationRegistry(revoke?: ProviderAdapter["revoke"]) {
   const registry = new ProviderRegistry();
   const adapter: ProviderAdapter = {
@@ -166,7 +136,9 @@ describe("channel revocation outbox routing", () => {
     });
     const query = setupClaim([revocationRow()]);
     const environment: AutomationEnv = {
-      CHANNEL_REVOCATION_QUEUE: { sendBatch } as unknown as Queue<unknown>,
+      CHANNEL_REVOCATION_QUEUE: fakeQueue({
+        sendBatch: (messages) => sendBatch(messages as Iterable<MessageSendRequest<OutboxMessage>>),
+      }),
       ENVIRONMENT: "test",
       VERSION: "test",
     };
@@ -182,9 +154,6 @@ describe("channel revocation outbox routing", () => {
     const sent = batches[0]?.[0];
     expect(sent?.body.event_id).toBe(eventId);
     expect(sent?.body.topic).toBe("channel.revocation.requested");
-    // The allowlist keeps the encrypted token and routing fields while
-    // dropping producer-only keys (version, request_id, stray_field) — the
-    // ciphertext must reach the consumer because the account row is gone.
     expect(sent?.body.payload).toEqual({
       access_token: "enc:ciphertext-token",
       brand_profile_id: "00000000-0000-4000-8000-000000000003",
@@ -301,8 +270,6 @@ describe("processChannelRevocationMessage", () => {
       Effect.flip(processChannelRevocationMessage(testEnv, revocationMessage(), dependencies)),
     );
 
-    // A revoke that may have committed remotely is safe to replay, so even
-    // ambiguous failures stay retryable for the queue's retry/DLQ policy.
     expect(first).toBeInstanceOf(RetryableJobError);
     expect(second).toBeInstanceOf(RetryableJobError);
     expect(revoke).toHaveBeenCalledTimes(2);

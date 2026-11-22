@@ -16,36 +16,11 @@ import { enqueueDailyUsageReport } from "../src/usage-reporting";
 import { systemPoolFor, withSystemTransactionEffect } from "../src/database";
 import { runSystemTransaction } from "./system-transaction";
 
-/**
- * Acceptance coverage for the opt-in daily usage summary.
- *
- * These cases run the real publication entry point and the real scheduled
- * producer against PostgreSQL. They assert the measurements a maintainer
- * dashboard would receive — not merely that an event exists — and they assert
- * the absence of transmission where consent, interval, or confirmation rules say
- * nothing may be counted.
- *
- * The suite owns a private schema, so every total it asserts is produced by its
- * own fixtures rather than inherited from another suite. Every counting rule is
- * driven through `processDistributionMessage`, so a regression in either
- * success transition fails here.
- */
-
 const connectionString = process.env.MELTIPLY_DATABASE_TEST_URL;
 if (!connectionString) {
   throw new Error("MELTIPLY_DATABASE_TEST_URL is required for PostgreSQL integration suites");
 }
 
-/**
- * This suite runs in its own schema.
- *
- * Publication marks are a domain fact written for every confirmed publish
- * whether or not reporting is enabled, so the other automation suites — which
- * publish against the shared schema before this one runs — necessarily leave
- * marks and daily buckets behind. Measuring absolute totals here would count
- * their work, and clearing those tables would erase their state. A private
- * schema gives this suite an installation of its own instead.
- */
 const schema = "usage_reporting_measurement";
 const adminConnectionString =
   process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
@@ -57,7 +32,6 @@ const isolatedDatabase = new URL(baseSystemConnectionString);
 isolatedDatabase.searchParams.set("options", `-c search_path=${schema},public`);
 const isolatedConnectionString = isolatedDatabase.href;
 
-/** Tables the publish path and the daily producer read or write. */
 const copiedTables = [
   "organizations",
   "brand_profiles",
@@ -87,9 +61,6 @@ const copiedTables = [
 ];
 
 const organizationId = "20000000-0000-4000-8000-000000000001";
-// This suite's Brand Profile. `platform_accounts_brand_profile_platform_unique`
-// allows one Channel per (Brand Profile, Platform), so the two Platforms below
-// both hang off this single Profile — the model the measurement describes.
 const profileId = "a0000000-0000-4000-8000-0000000000c1";
 const youtubeChannelId = "5e000000-0000-4000-8000-000000000001";
 const threadsChannelId = "5e000000-0000-4000-8000-000000000002";
@@ -102,29 +73,15 @@ const threadsDistributionId = "7e000000-0000-4000-8000-000000000002";
 const distributionIds = [youtubeDistributionId, threadsDistributionId];
 const postIds = [postId, threadsPostId];
 
-/** A text-only Post needs no Asset, so these fixtures never touch media. */
 const env: AutomationEnv = {
   DB_SYSTEM: { connectionString: isolatedConnectionString } as Hyperdrive,
   DEPLOYMENT_CATEGORY: "selfhosted",
   ENVIRONMENT: "test",
-  // A valid destination makes the usage category effective; these suites only
-  // enqueue, so nothing is ever sent from here.
   REPORTING_POSTHOG_HOST: "https://us.i.posthog.com",
   REPORTING_POSTHOG_PROJECT_TOKEN: "phc_usageIntegrationToken",
   VERSION: "1.0.0-target.0",
 };
 
-/**
- * Zero-ambiguity contract of the real Threads adapter.
- *
- * Threads normalizes an absent insight to zero, so the canonical adapter
- * declares those metrics ambiguous. The fake has to state the same contract, or
- * it would be asserting that Threads zeros are trustworthy. The adapter is
- * constructed only for its metadata: it performs no request until an operation
- * is invoked, and the producer below must never invoke one.
- *
- * @returns The metric names the canonical adapter cannot distinguish from zero.
- */
 function canonicalThreadsAmbiguousZeroMetrics(): NonNullable<
   ProviderAdapter["ambiguousZeroMetrics"]
 > {
@@ -137,14 +94,10 @@ function canonicalThreadsAmbiguousZeroMetrics(): NonNullable<
   );
 }
 
-/** Declares stored-analytics semantics without permitting reporting to call a Provider. */
 function registryWithAnalytics(platforms: Array<"threads" | "youtube">): ProviderRegistry {
   const registry = new ProviderRegistry();
   for (const platform of platforms) {
     registry.register(platform, {
-      // Declared for every fake, from the canonical adapter when one exists.
-      // An adapter that returns zeros for absent insights must say so, because
-      // the producer treats them as unknown rather than as measured zeroes.
       ...(platform === "threads"
         ? { ambiguousZeroMetrics: canonicalThreadsAmbiguousZeroMetrics() }
         : {}),
@@ -166,8 +119,6 @@ function registryWithAnalytics(platforms: Array<"threads" | "youtube">): Provide
         publish: false,
         reply: false,
       },
-      // Reporting must never read analytics from a Provider. A call here fails
-      // the suite outright, which is stronger than asserting a spy count.
       listAnalytics: async () => {
         throw new Error("reporting must not call listAnalytics");
       },
@@ -177,7 +128,6 @@ function registryWithAnalytics(platforms: Array<"threads" | "youtube">): Provide
   return registry;
 }
 
-/** The publish adapter used to drive the real success transition. */
 function publishRegistry(platform: "threads" | "youtube") {
   const registry = new ProviderRegistry();
   registry.register(platform, {
@@ -213,7 +163,6 @@ function publishRegistry(platform: "threads" | "youtube") {
   return registry;
 }
 
-/** One publish trigger for a Distribution. */
 function publishMessage(eventId: string, distributionId: string): OutboxMessage {
   return {
     aggregate_id: distributionId,
@@ -226,25 +175,15 @@ function publishMessage(eventId: string, distributionId: string): OutboxMessage 
   };
 }
 
-/** One reconciliation trigger for a Distribution. */
 function reconcileMessage(eventId: string, distributionId: string): OutboxMessage {
   return { ...publishMessage(eventId, distributionId), topic: "distribution.reconcile.requested" };
 }
 
-/**
- * Seeds one Owner consent row.
- *
- * @param options - Whether usage is requested, and the instant its interval began.
- */
 async function seedConsent(options: {
   intervalStartedAt: Date | string | null;
   requested?: boolean;
 }): Promise<void> {
   await runSystemTransaction(env, async (client) => {
-    // A stored request without a supported disclosure decision is not consent:
-    // policy reads it as `preference_unavailable` and measures nothing. The
-    // real consent endpoint always records the current version, so the fixture
-    // must too — the column has no default and would otherwise stay NULL.
     await client.query(
       `INSERT INTO reporting_preferences (
          id, schema_version, usage_requested, usage_disclosure_version,
@@ -266,16 +205,6 @@ async function seedConsent(options: {
   });
 }
 
-/**
- * Creates this suite's Brand Profile, its two Channels, two text-only Posts, one
- * Distribution per Channel, in `queued` state.
- *
- * Text-only Posts need no Asset, so these fixtures never touch media. The two
- * Channels use distinct Platforms because
- * `distributions_post_platform_account_unique` allows one Distribution per
- * (Post, Channel), which is what lets the multichannel case repoint both rows at
- * one Post.
- */
 async function seedPublications(): Promise<void> {
   await runSystemTransaction(env, async (client) => {
     await client.query("DELETE FROM provider_operations WHERE distribution_id = ANY($1::uuid[])", [
@@ -308,7 +237,6 @@ async function seedPublications(): Promise<void> {
       `INSERT INTO posts (id, org_id, brand_profile_id, title, default_text, status)
        VALUES ($1, $3, $4, 'Usage one', 'Caption one', 'active'),
               ($2, $3, $4, 'Usage two', 'Caption two', 'active')`,
-      // $1, $2 the Posts; $3, $4 the Workspace and this suite's Brand Profile.
       [postId, threadsPostId, organizationId, profileId],
     );
     await client.query(
@@ -318,8 +246,6 @@ async function seedPublications(): Promise<void> {
        VALUES ($1, $3, $4, $5, $7, 'youtube', 'queued', ARRAY[]::uuid[]),
               ($2, $3, $4, $6, $8, 'threads', 'queued', ARRAY[]::uuid[])`,
       [
-        // $1, $2 distributions; $3, $4 the Workspace and this suite's Profile;
-        // $5, $6 the two Posts; $7, $8 the two Channels.
         youtubeDistributionId,
         threadsDistributionId,
         organizationId,
@@ -333,7 +259,6 @@ async function seedPublications(): Promise<void> {
   });
 }
 
-/** Reads the daily buckets exactly as stored. */
 async function dailyBuckets() {
   return runSystemTransaction(env, async (client) => {
     const result = await client.query<{
@@ -350,7 +275,6 @@ async function dailyBuckets() {
   });
 }
 
-/** Reads the durable dedup marks. */
 async function marks() {
   return runSystemTransaction(env, async (client) => {
     const posts = await client.query<{ count: string }>(
@@ -366,7 +290,6 @@ async function marks() {
   });
 }
 
-/** Publishes one Distribution through the production entry point. */
 async function publish(
   platform: "threads" | "youtube",
   eventId: string,
@@ -380,7 +303,6 @@ async function publish(
   );
 }
 
-/** Reads the queued usage payloads the producer wrote. */
 async function queuedUsageReports() {
   return runSystemTransaction(env, async (client) => {
     const result = await client.query<{
@@ -395,20 +317,12 @@ async function queuedUsageReports() {
   });
 }
 
-/**
- * Reads one nested object from a persisted payload column.
- *
- * JSONB is boundary data: the shape is validated by the reporting module's
- * allowlist before it is stored, so this narrows to a plain record for assertions
- * instead of asserting each nested member type.
- */
 function payloadSection(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 }
 
-/** Reads a per-Platform counter map from a payload section. */
 function platformCounts(value: unknown): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const [platform, count] of Object.entries(payloadSection(value))) {
@@ -430,9 +344,6 @@ beforeAll(async () => {
     );
     await adminPool.query(`GRANT ALL ON ${schema}."${table}" TO meltiply_system`);
   }
-  // The one row the publish path and the producer both resolve: an active
-  // Workspace with an entitled plan. Membership and account rows are not read by
-  // either, so they stay out of this fixture.
   await runSystemTransaction(env, async (client) => {
     await client.query(
       `INSERT INTO organizations (id, name, slug, is_shared)
@@ -444,12 +355,6 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await runSystemTransaction(env, async (client) => {
-    // The schema belongs to this suite alone, so every table holds only what the
-    // previous case produced and can be cleared wholesale. Snapshots matter as
-    // much as the marks: `seedPublications` recreates the same two Distribution
-    // ids each case, so a snapshot left by an earlier case would be read back as
-    // this case's analytics and silently establish metrics this fixture means to
-    // leave absent.
     await client.query("DELETE FROM analytics_snapshots");
     await client.query("DELETE FROM reporting_distribution_marks");
     await client.query("DELETE FROM reporting_post_marks");
@@ -487,15 +392,11 @@ describe("usage publication measurement with PostgreSQL", () => {
       ["threads", 1],
       ["youtube", 1],
     ]);
-    // One Post mark, two Distribution marks: the Post was counted once even
-    // though two success transitions observed it.
     expect(await marks()).toEqual({ distributions: 2, posts: 1 });
   });
 
   it("counts a new Distribution when a sibling published before measurement existed", async () => {
     await seedConsent({ intervalStartedAt: new Date(Date.now() - 60_000) });
-    // An upgrade: this Post already has a published Distribution from a release
-    // that predates the measurement, so there is no Post mark for it.
     await runSystemTransaction(env, async (client) => {
       await client.query(`UPDATE distributions SET post_id = $2 WHERE id = $1`, [
         threadsDistributionId,
@@ -508,11 +409,8 @@ describe("usage publication measurement with PostgreSQL", () => {
       );
     });
 
-    // A second Channel of the same Post publishes after the Owner opted in.
     await publish("threads", "usage-upgrade-sibling", threadsDistributionId);
 
-    // The historical sibling cannot be presented as a new Post, but it must not
-    // suppress the Distribution that actually succeeded inside this interval.
     const buckets = await dailyBuckets();
     expect(buckets).toHaveLength(1);
     expect(buckets[0]).toMatchObject({ distributions: 1, platform: "threads" });
@@ -544,8 +442,6 @@ describe("usage publication measurement with PostgreSQL", () => {
       );
       return result.rows[0];
     });
-    // The first success decided the Post once; the second Channel changes
-    // neither that decision nor its own Distribution counter.
     expect(postMark).toEqual({ counted: true });
     const buckets = await dailyBuckets();
     expect(buckets.map((bucket) => [bucket.platform, bucket.distributions])).toEqual([
@@ -555,13 +451,8 @@ describe("usage publication measurement with PostgreSQL", () => {
   });
 
   it("counts a confirmation in the day the measurement actually commits", async () => {
-    // A transaction that began before midnight and commits after it must be
-    // counted, in the day it truly committed — never dropped because the earlier
-    // day was already measured.
     await seedConsent({ intervalStartedAt: new Date(Date.now() - 60_000) });
     const nextDay = new Date(Date.now() + 24 * 60 * 60 * 1_000);
-    // The measurement seam runs inside a real system transaction so the lock and
-    // the savepoint behave as they do in the publication path.
     await Effect.runPromise(
       withSystemTransactionEffect(env, (client) =>
         recordPublicationUsage(
@@ -585,10 +476,6 @@ describe("usage publication measurement with PostgreSQL", () => {
 
   it("includes an in-flight measurement instead of dropping it", async () => {
     await seedConsent({ intervalStartedAt: new Date(Date.now() - 60_000) });
-    // Two Channel successes race the daily producer. The measurement and the
-    // producer share one lock, so whichever order they run in, both successes
-    // are counted exactly once and the frozen report never omits an increment it
-    // could have waited for.
     await runSystemTransaction(env, (client) =>
       client.query(`UPDATE distributions SET post_id = $2 WHERE id = $1`, [
         threadsDistributionId,
@@ -609,8 +496,6 @@ describe("usage publication measurement with PostgreSQL", () => {
     await measurements;
     await producer;
 
-    // A second pass (the next scheduled run) must not add a duplicate: both
-    // successes were already counted exactly once.
     await Effect.runPromise(
       enqueueDailyUsageReport(env, {
         now: () => new Date(Date.now() + 24 * 60 * 60 * 1_000),
@@ -669,17 +554,12 @@ describe("usage publication measurement with PostgreSQL", () => {
     );
 
     expect(await dailyBuckets()).toEqual([]);
-    // A failed attempt is not an observed success, so it leaves no mark either.
     expect(await marks()).toEqual({ distributions: 0, posts: 0 });
   });
 
   it("counts an ambiguous outcome only once reconciliation confirms it", async () => {
     await seedConsent({ intervalStartedAt: new Date(Date.now() - 60_000) });
     const ambiguousRegistry = new ProviderRegistry();
-    // An ambiguous publish that returned an async operation id is the case a
-    // reconcile can act on: `executeProviderLookupEffect` refuses the lookup
-    // when neither a retained operation id nor a post id exists, so the
-    // adapter's unknown result must carry the operation it started.
     ambiguousRegistry.register("youtube", {
       capability: {
         accepted_mime_types: [],
@@ -728,12 +608,8 @@ describe("usage publication measurement with PostgreSQL", () => {
       }),
     );
     expect(published).toBe("processed");
-    // The publish attempt left the row ambiguous: no counting yet.
     expect(await dailyBuckets()).toEqual([]);
 
-    // The transition, not just the absence of a counter, is what a reconcile
-    // acts on: an unconfirmed attempt must be reconcilable and must retain the
-    // operation identity the lookup needs.
     const afterPublish = await runSystemTransaction(env, async (client) => {
       const distribution = await client.query<{
         provider_operation_id: string | null;
@@ -766,9 +642,6 @@ describe("usage publication measurement with PostgreSQL", () => {
     );
     expect(reconciled).toBe("processed");
 
-    // The lookup is what confirms publication, so the row must be `published`
-    // before the counter is read. Asserting the transition separates "the
-    // measurement did not run" from "the reconcile never confirmed".
     const afterReconcile = await runSystemTransaction(env, (client) =>
       client.query<{ status: string }>("SELECT status FROM distributions WHERE id = $1", [
         youtubeDistributionId,
@@ -780,7 +653,6 @@ describe("usage publication measurement with PostgreSQL", () => {
     expect(buckets).toHaveLength(1);
     expect(buckets[0]).toMatchObject({ distributions: 1, platform: "youtube" });
 
-    // A second reconciliation of the same published row must not increment again.
     await runSystemTransaction(env, (client) =>
       client.query(
         `UPDATE distributions
@@ -813,19 +685,15 @@ describe("usage publication measurement with PostgreSQL", () => {
       await client.query("DELETE FROM posts WHERE id = $1", [postId]);
     });
 
-    // The aggregate is a local measurement, not a projection of live content.
     expect((await dailyBuckets())[0]).toMatchObject({ distributions: 1 });
     expect(await marks()).toEqual({ distributions: 1, posts: 1 });
   });
 
   it("does not count a publication that succeeded before consent", async () => {
-    // The Post's first success happens while reporting is off.
     await publish("youtube", "usage-preconsent-first", youtubeDistributionId);
     expect(await dailyBuckets()).toEqual([]);
     expect(await marks()).toEqual({ distributions: 1, posts: 1 });
 
-    // Consent arrives afterwards; a second Distribution of the same Post
-    // succeeds inside the new interval.
     await seedConsent({ intervalStartedAt: new Date(Date.now() - 60_000) });
     await runSystemTransaction(env, (client) =>
       client.query(`UPDATE distributions SET post_id = $2 WHERE id = $1`, [
@@ -835,8 +703,6 @@ describe("usage publication measurement with PostgreSQL", () => {
     );
     await publish("threads", "usage-preconsent-second", threadsDistributionId);
 
-    // The second success counts as a Distribution, but the Post's first success
-    // was outside every interval, so it must not be presented as a new Post.
     const buckets = await dailyBuckets();
     expect(buckets).toHaveLength(1);
     expect(buckets[0]).toMatchObject({ distributions: 1, platform: "threads" });
@@ -850,7 +716,6 @@ describe("usage publication measurement with PostgreSQL", () => {
     });
     expect(counted).toBe(false);
 
-    // A later report for that day must therefore show no Post.
     await Effect.runPromise(
       enqueueDailyUsageReport(env, {
         now: () => new Date(Date.now() + 24 * 60 * 60 * 1_000),
@@ -868,12 +733,10 @@ describe("usage publication measurement with PostgreSQL", () => {
   });
 
   it("does not count confirmations outside the enabled interval", async () => {
-    // An interval that starts in the future cannot cover a success happening now.
     await seedConsent({ intervalStartedAt: new Date(Date.now() + 60 * 60 * 1_000) });
     await publish("youtube", "usage-future-interval", youtubeDistributionId);
 
     expect(await dailyBuckets()).toEqual([]);
-    // The domain mark is still written: the observation happened.
     expect(await marks()).toEqual({ distributions: 1, posts: 1 });
   });
 
@@ -882,8 +745,6 @@ describe("usage publication measurement with PostgreSQL", () => {
     await publish("youtube", "usage-interval-one", youtubeDistributionId);
     const firstInterval = (await dailyBuckets())[0]!.interval_started_at;
 
-    // Withdrawal, then a fresh consent interval beginning a moment later. The
-    // second Distribution belongs to a different Post, so its Post mark is new.
     await runSystemTransaction(env, async (client) => {
       await client.query(
         `UPDATE reporting_preferences
@@ -899,8 +760,6 @@ describe("usage publication measurement with PostgreSQL", () => {
 
     const buckets = await dailyBuckets();
     expect(buckets).toHaveLength(2);
-    // The re-enabled interval carries its own row rather than extending the
-    // withdrawn one, so declined activity is never replayed into it.
     expect(new Set(buckets.map((bucket) => bucket.interval_started_at.getTime())).size).toBe(2);
     expect(buckets.find((bucket) => bucket.platform === "threads")).toMatchObject({
       distributions: 1,
@@ -924,9 +783,7 @@ describe("usage publication measurement with PostgreSQL", () => {
       ),
     );
 
-    // Operator policy outranks the saved choice, so no aggregate advanced.
     expect(await dailyBuckets()).toEqual([]);
-    // The publication itself still succeeded.
     const status = await runSystemTransaction(env, async (client) => {
       const result = await client.query<{ status: string }>(
         "SELECT status FROM distributions WHERE id = $1",
@@ -942,12 +799,9 @@ describe("daily usage producer with PostgreSQL", () => {
   it("queues one frozen report for a closed UTC day", async () => {
     await seedConsent({ intervalStartedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1_000) });
     await publish("youtube", "usage-producer", youtubeDistributionId);
-    // The measurement is credited to the day it committed under the measurement
-    // lock, so that is the day the producer must report.
     const measuredDay = new Date().toISOString().slice(0, 10);
     expect(await dailyBuckets()).toHaveLength(1);
 
-    // Freeze "now" to the day after measurement so that day is closed.
     const dayAfter = new Date(Date.now() + 24 * 60 * 60 * 1_000);
     const result = await Effect.runPromise(
       enqueueDailyUsageReport(env, {
@@ -986,7 +840,6 @@ describe("daily usage producer with PostgreSQL", () => {
   it("never reports an open UTC day", async () => {
     await seedConsent({ intervalStartedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1_000) });
     await publish("youtube", "usage-open-day", youtubeDistributionId);
-    // "Now" is still the publication day, so that day has not closed.
     await Effect.runPromise(
       enqueueDailyUsageReport(env, {
         now: () => new Date(),
@@ -1027,8 +880,6 @@ describe("daily usage producer with PostgreSQL", () => {
       return platformCounts(report!.payload.channels);
     };
 
-    // The private schema holds only this suite's Channels, so the baseline is
-    // exactly the two seeded here and every move below is an exact count.
     const baseline = await runProducer();
     expect(baseline).toEqual({ threads: 1, youtube: 1 });
     expect(baseline.youtube).toBeGreaterThanOrEqual(1);
@@ -1042,7 +893,6 @@ describe("daily usage producer with PostgreSQL", () => {
       );
     });
     const revoked = await runProducer();
-    // A revoked Channel vacates occupancy immediately.
     expect(revoked.youtube ?? 0).toBe((baseline.youtube ?? 0) - 1);
 
     await runSystemTransaction(env, async (client) => {
@@ -1055,7 +905,6 @@ describe("daily usage producer with PostgreSQL", () => {
       );
     });
     const expired = await runProducer();
-    // An expired authorization is not a usable connection either.
     expect(expired.youtube ?? 0).toBe(revoked.youtube ?? 0);
 
     await runSystemTransaction(env, async (client) => {
@@ -1067,7 +916,6 @@ describe("daily usage producer with PostgreSQL", () => {
       );
     });
     const expiring = await runProducer();
-    // `expiring` still authorizes publishing, so it is occupancy again.
     expect(expiring.youtube ?? 0).toBe((revoked.youtube ?? 0) + 1);
   });
 
@@ -1075,7 +923,6 @@ describe("daily usage producer with PostgreSQL", () => {
     await seedConsent({ intervalStartedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1_000) });
     await publish("youtube", "usage-analytics", youtubeDistributionId);
     await runSystemTransaction(env, async (client) => {
-      // Two cumulative snapshots; only the newer one may contribute.
       await client.query(
         `INSERT INTO analytics_snapshots
            (distribution_id, org_id, views, likes, comments, shares, reach,
@@ -1102,7 +949,6 @@ describe("daily usage producer with PostgreSQL", () => {
       shares: 2,
       views: 160,
     });
-    // Reach and impressions are never relabelled as views.
     expect(payloadSection(engagement.youtube).views).not.toBe(900);
     expect(payloadSection(report!.payload.engagement_coverage).measured).toBe(1);
   });
@@ -1137,8 +983,6 @@ describe("daily usage producer with PostgreSQL", () => {
     await seedConsent({ intervalStartedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1_000) });
     await publish("threads", "usage-unsupported", threadsDistributionId);
     await runSystemTransaction(env, async (client) => {
-      // Threads' adapter normalizes an absent insight to 0, so an all-zero
-      // snapshot cannot establish any counter.
       await client.query(
         `INSERT INTO analytics_snapshots
            (distribution_id, org_id, views, likes, comments, shares, snapshot_at)
@@ -1168,9 +1012,6 @@ describe("daily usage producer with PostgreSQL", () => {
   it("omits a metric one mixed-cohort contributor could not establish", async () => {
     await seedConsent({ intervalStartedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1_000) });
     const secondDistributionId = "7e000000-0000-4000-8000-00000000000b";
-    // Two published Threads Distributions form one Platform cohort, so both
-    // reach `published` through the real publish path — a fixture that only
-    // flipped a column would not be the cohort the producer selects.
     await publish("threads", "usage-mixed-cohort-first", threadsDistributionId);
     await runSystemTransaction(env, async (client) => {
       await client.query(
@@ -1199,8 +1040,6 @@ describe("daily usage producer with PostgreSQL", () => {
 
       const [report] = await queuedUsageReports();
       const gauge = payloadSection(payloadSection(report!.payload.engagement).threads);
-      // One contributor established views and the other could not, so any sum
-      // would understate the Platform: the metric is omitted, not narrowed.
       expect(gauge.views).toBeUndefined();
       expect(gauge.distributions).toBe(2);
       const coverage = payloadSection(report!.payload.engagement_coverage);
@@ -1228,10 +1067,6 @@ describe("daily usage producer with PostgreSQL", () => {
       );
     });
 
-    // A configured registry without a YouTube adapter: capabilities() reports
-    // analytics false for YouTube only because some adapter exists, so this
-    // exercises the genuinely unsupported Platform rather than the local fixture
-    // fallback that keeps every Platform readable when nothing is configured.
     await Effect.runPromise(
       enqueueDailyUsageReport(env, {
         now: () => new Date(Date.now() + 24 * 60 * 60 * 1_000),

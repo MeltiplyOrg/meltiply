@@ -14,6 +14,7 @@ import { AutomationEntrypoint } from "../src/index";
 import type { OutboxMessage } from "../src/messages";
 import { relayOutbox, type OutboxRelayResult } from "../src/outbox";
 import { publishingQueueFor } from "../src/publish-queues";
+import { fakeQueue } from "./test-doubles";
 
 const organizationId = "00000000-0000-4000-8000-000000000001";
 const aggregateId = "00000000-0000-4000-8000-000000000002";
@@ -30,7 +31,7 @@ interface TestOutboxRow {
   org_id: string;
   payload: { request_id: string };
   platform: "facebook" | null;
-  scheduled_at?: Date | null;
+  scheduled_at?: Date | string | null;
   topic: string;
 }
 
@@ -66,12 +67,6 @@ function publishQueueEnv(queue: Queue<unknown>): AutomationEnv {
   };
 }
 
-/**
- * Runs the outbox relay Effect at the test boundary with production wiring:
- * the live QueuePublisher drives the recorded fake bindings, and the live
- * PublishQueueResolver maps platforms through publishingQueueFor against the
- * test env, so distribution rows still exercise real binding lookup.
- */
 function runRelay(env: AutomationEnv, batchSize?: number): Promise<OutboxRelayResult> {
   return Effect.runPromise(
     Effect.provide(
@@ -94,7 +89,9 @@ function recordedQueue() {
   });
   return {
     batches,
-    queue: { sendBatch } as unknown as Queue<unknown>,
+    queue: fakeQueue({
+      sendBatch: (messages) => sendBatch(messages as Iterable<MessageSendRequest<OutboxMessage>>),
+    }),
     sendBatch,
   };
 }
@@ -136,13 +133,14 @@ describe("outbox relay publication", () => {
     const send = vi.fn();
     const query = setupClaim([row(eventId(1)), row(eventId(2))]);
 
-    await expect(
-      runRelay(baseEnv({ send, sendBatch } as unknown as Queue<unknown>), 2),
-    ).resolves.toEqual({ claimed: 2, dead: 0, failed: 0, published: 2 });
+    await expect(runRelay(baseEnv(fakeQueue({ send, sendBatch })), 2)).resolves.toEqual({
+      claimed: 2,
+      dead: 0,
+      failed: 0,
+      published: 2,
+    });
 
     expect(sendBatch).toHaveBeenCalledTimes(1);
-    // QueuePublisher owns the wire payload shape; the binding applies its
-    // default JSON content type.
     expect(sendBatch.mock.calls[0]?.[0]).toEqual([
       expect.objectContaining({
         body: expect.objectContaining({ event_id: eventId(1) }),
@@ -162,9 +160,12 @@ describe("outbox relay publication", () => {
       .mockRejectedValue(new Error("queue unavailable at https://secret.test"));
     const query = setupClaim([row(eventId(5)), row(eventId(6))]);
 
-    await expect(runRelay(baseEnv({ sendBatch } as unknown as Queue<unknown>), 2)).resolves.toEqual(
-      { claimed: 2, dead: 0, failed: 2, published: 0 },
-    );
+    await expect(runRelay(baseEnv(fakeQueue({ sendBatch })), 2)).resolves.toEqual({
+      claimed: 2,
+      dead: 0,
+      failed: 2,
+      published: 0,
+    });
 
     expect(sendBatch).toHaveBeenCalledTimes(1);
     expect(query).toHaveBeenCalledTimes(2);
@@ -181,13 +182,13 @@ describe("outbox relay publication", () => {
     const query = setupClaim([exhausted], [{ state: "dead" }]);
     const sendBatch = vi.fn().mockRejectedValue(new Error("queue unavailable"));
 
-    await expect(runRelay(baseEnv({ sendBatch } as unknown as Queue<unknown>))).resolves.toEqual({
+    await expect(runRelay(baseEnv(fakeQueue({ sendBatch })))).resolves.toEqual({
       claimed: 1,
       dead: 1,
       failed: 1,
       published: 0,
     });
-    await expect(runRelay(baseEnv({ sendBatch } as unknown as Queue<unknown>))).resolves.toEqual({
+    await expect(runRelay(baseEnv(fakeQueue({ sendBatch })))).resolves.toEqual({
       claimed: 0,
       dead: 0,
       failed: 0,
@@ -227,8 +228,6 @@ describe("outbox relay publication", () => {
       });
 
       expect(sendBatch).toHaveBeenCalledTimes(1);
-      // Only claimOutbox + failed markPublished ran; markFailed must NEVER run
-      // for rows the Queue already accepted.
       expect(query).toHaveBeenCalledTimes(2);
       expect(query.mock.calls[1]?.[0]).toContain("SET state = 'published'");
       expect(errorLog).toHaveBeenCalledTimes(1);
@@ -261,12 +260,7 @@ describe("outbox relay delayed delivery", () => {
     expect(sendBatch).toHaveBeenCalledTimes(1);
     const sent = batches[0] ?? [];
     const sentAt = Date.now();
-    // The delay is derived from the durable distribution row at relay time:
-    // one bounded delay per message, and an already-due publish sends
-    // immediately with no delay option.
     expect(delayOf(sent, eventId(1))).toBe(Math.max(0, Math.ceil((now + 600_000 - sentAt) / 1000)));
-    // A schedule a full day out must produce a delay near the 24-hour cap;
-    // `<= 86400` alone would also accept an immediate or zero-delay send.
     expect(delayOf(sent, eventId(2))).toBeGreaterThan(86_390);
     expect(delayOf(sent, eventId(2))).toBeLessThanOrEqual(86_400);
     expect(delayOf(sent, eventId(3))).toBeUndefined();
@@ -290,8 +284,6 @@ describe("outbox relay delayed delivery", () => {
 
     expect(sendBatch).toHaveBeenCalledTimes(1);
     expect((batches[0] ?? []).map(eventOf)).toEqual([eventId(4)]);
-    // The stale command finalizes without a send so it can never fire late;
-    // the Due work claim owns the row until it comes due.
     expect(query.mock.calls[1]?.[1]).toEqual([[eventId(5), eventId(4)]]);
   });
 
@@ -322,7 +314,7 @@ describe("outbox relay delayed delivery", () => {
   it("relays immediately when a recorded schedule cannot be read as a time", async () => {
     const unreadable = row(eventId(6), "distribution.publish.requested", {
       platform: "facebook",
-      scheduled_at: "not-a-timestamp" as unknown as Date,
+      scheduled_at: "not-a-timestamp",
     });
     const query = setupClaim([unreadable]);
     const { batches, queue } = recordedQueue();
@@ -334,7 +326,6 @@ describe("outbox relay delayed delivery", () => {
       published: 1,
     });
 
-    // No delay at all, rather than a non-finite one the Queue would reject.
     expect(batches[0]?.[0]?.delaySeconds).toBeUndefined();
     expect(delayOf(batches[0] ?? [], eventId(6))).toBeUndefined();
     expect(query.mock.calls[1]?.[1]).toEqual([[eventId(6)]]);
@@ -342,9 +333,6 @@ describe("outbox relay delayed delivery", () => {
 });
 
 describe("eager outbox relay through the Automation entrypoint", () => {
-  // Expected-broken until the integrator rewires AutomationEntrypoint.relayOutbox
-  // (src/index.ts) to run the returned Effect with its queue service layers —
-  // the RPC currently resolves to the un-run Effect rather than the result.
   it("relays a bounded batch and cannot double-deliver against a live lease", async () => {
     const query = setupClaim([row(eventId(20), "asset.processing.requested")]);
     const { batches, queue } = recordedQueue();
@@ -362,9 +350,6 @@ describe("eager outbox relay through the Automation entrypoint", () => {
     });
     expect((batches[0] ?? []).map(eventOf)).toEqual([eventId(20)]);
 
-    // The claim leases what it takes and only revisits a lease that has lapsed,
-    // so an eager relay racing the hourly sweep cannot deliver the same entry
-    // twice.
     const claimSql = query.mock.calls[0]?.[0] as string;
     expect(claimSql).toContain("FOR UPDATE OF event SKIP LOCKED");
     expect(claimSql).toContain(

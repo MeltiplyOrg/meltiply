@@ -19,12 +19,6 @@ export interface RetentionOptions {
 const defaultBatchSize = 1_000;
 const maximumBatchSize = 5_000;
 
-/**
- * Error emitted when an R2 operation leaves a due Brand Profile's inventory
- * claimed but not durably removed. The profile row is then never finalized, so
- * the next sweep re-claims the same objects and retries; it stays retryable at
- * the scheduled-job boundary while retaining a narrow cleanup error channel.
- */
 class RetentionStorageError extends Data.TaggedError("RetentionStorageError")<{
   cause: unknown;
   message: string;
@@ -35,14 +29,6 @@ type RetentionCleanup = (
   batchSize: number,
 ) => Effect.Effect<number, DatabaseError | RetentionStorageError>;
 
-/**
- * Executes a parameterized batch deletion query within a system transaction.
- *
- * @param env - Automation worker environment.
- * @param query - SQL DELETE query containing a RETURNING clause.
- * @param values - Query parameters including batch limit and interval strings.
- * @returns Number of rows deleted in this batch.
- */
 function deleteBatch(
   env: AutomationEnv,
   query: string,
@@ -53,10 +39,6 @@ function deleteBatch(
   );
 }
 
-/**
- * Deletes expired idempotency keys older than 30 days that are not referenced by billing operations.
- * Preserves active billing operation audit trails indefinitely.
- */
 const deleteExpiredIdempotencyKeys: RetentionCleanup = (env, batchSize) =>
   deleteBatch(
     env,
@@ -81,9 +63,6 @@ const deleteExpiredIdempotencyKeys: RetentionCleanup = (env, batchSize) =>
     [batchSize, "30 days"],
   );
 
-/**
- * Purges processed, ignored, or failed webhook events older than 90 days.
- */
 const deleteProcessedWebhookEvents: RetentionCleanup = (env, batchSize) =>
   deleteBatch(
     env,
@@ -102,10 +81,6 @@ const deleteProcessedWebhookEvents: RetentionCleanup = (env, batchSize) =>
     [batchSize, "90 days"],
   );
 
-/**
- * Deletes published or dead outbox events older than 90 days.
- * Preserves pending or leased events awaiting delivery.
- */
 const deleteTerminalOutboxEvents: RetentionCleanup = (env, batchSize) =>
   deleteBatch(
     env,
@@ -124,9 +99,6 @@ const deleteTerminalOutboxEvents: RetentionCleanup = (env, batchSize) =>
     [batchSize, "90 days"],
   );
 
-/**
- * Deletes successful or skipped async job events older than 30 days from `async_job_events`.
- */
 const deleteCompletedAsyncJobEvents: RetentionCleanup = (env, batchSize) =>
   deleteBatch(
     env,
@@ -145,9 +117,6 @@ const deleteCompletedAsyncJobEvents: RetentionCleanup = (env, batchSize) =>
     [batchSize, "30 days"],
   );
 
-/**
- * Purges historical usage corrections older than 13 months, keeping one full billing year plus grace.
- */
 const deleteOldUsageCorrections: RetentionCleanup = (env, batchSize) =>
   deleteBatch(
     env,
@@ -165,13 +134,6 @@ const deleteOldUsageCorrections: RetentionCleanup = (env, batchSize) =>
     [batchSize, "13 months"],
   );
 
-/**
- * Trim the analytics history while keeping each Distribution's most recent
- * snapshot indefinitely. Analytics sync stops arming past
- * `analyticsTerminalAgeSeconds`, so without this exemption an old Distribution
- * would eventually read as having no analytics at all rather than as having its
- * last collected figures.
- */
 const deleteOldAnalyticsSnapshots: RetentionCleanup = (env, batchSize) =>
   deleteBatch(
     env,
@@ -195,14 +157,6 @@ const deleteOldAnalyticsSnapshots: RetentionCleanup = (env, batchSize) =>
     [batchSize, "90 days"],
   );
 
-/**
- * Prunes the pre-aggregated usage buckets that are no longer reportable.
- *
- * Only the daily counters are pruned: they exist to be reported, and the
- * producer never reads a day older than its bounded catch-up window. The
- * per-Post and per-Distribution marks are deliberately kept, because a live row
- * can still be re-observed as `published` and must not then be counted twice.
- */
 const deleteStaleUsageBuckets: RetentionCleanup = (env, batchSize) =>
   deleteBatch(
     env,
@@ -226,25 +180,6 @@ interface DueBrandProfileRow extends Record<string, unknown> {
   id: string;
 }
 
-/**
- * Boolean SQL fragment naming the live media work that forbids reclaiming a
- * Brand Profile in the current sweep. A soft-deleted profile's bytes stay
- * protected while any of its Assets is still being uploaded, processed or
- * promoted, while a rendition promotion is uncommitted, while an upload
- * session still holds live session state, or while a publication attempt is
- * running, awaiting reconciliation after an ambiguous outcome, or still inside
- * the retrieval window its signed media URLs are valid for.
- *
- * Deferral is durable, never in-memory: the profile simply stays due and the
- * next daily sweep re-evaluates it, so no hold can leak and no deferred
- * profile is dropped before its media requirements end. A permanently failed
- * or unretained ready Asset is deliberately absent — its objects are ordinary
- * reclaimable inventory, and blocking on it would strand the purge forever.
- *
- * Both the candidate select and the final cascading DELETE interpolate this
- * exact fragment, so a profile that became ineligible between claiming and
- * finalizing is still refused rather than dropped.
- */
 const liveProfileMedia = `
     EXISTS (
       SELECT 1 FROM assets AS asset
@@ -278,30 +213,6 @@ const liveProfileMedia = `
         )
     )`;
 
-/**
- * Permanently purges soft-deleted Brand Profiles whose seven-day retention
- * deadline (`purge_at`) has passed, satisfying the durable lifecycle contract
- * that a deleted brand cannot remain indefinitely.
- *
- * Storage is reclaimed through the Asset lifecycle's per-object inventory
- * protocol instead of a parallel delete path: one transaction claims the
- * profile's `asset_objects` rows for deletion, the object deletes run outside any
- * database transaction, and each object is durably recorded as 'deleted' with
- * its charged bytes released exactly once. Only a profile whose inventory is
- * fully gone — the gate and the cascading DELETE are the same statement — may
- * lose its row, so a crash or a failed bucket call leaves a resumable
- * 'deleting' inventory rather than a profile whose bytes were never removed.
- *
- * The candidate select locks each row `FOR UPDATE`, preserving the
- * serialization with restore: a restore that commits first clears `purge_at`
- * and the profile is no longer a candidate, while a restore arriving after the
- * deadline is refused by the API. Every later statement re-checks `purge_at`
- * and live media eligibility, so nothing claimed earlier can be finalized once
- * the profile became ineligible again. Profiles without stored objects skip
- * the bucket entirely, so unusable object storage only fails cleanup when
- * bytes are actually owed; any failed object delete still settles the
- * successes and then fails the cleanup retryably.
- */
 const purgeDueBrandProfiles: RetentionCleanup = (env, batchSize) =>
   Effect.gen(function* () {
     const due = yield* withSystemTransactionEffect(env, (client) =>
@@ -339,28 +250,31 @@ const purgeDueBrandProfiles: RetentionCleanup = (env, batchSize) =>
           }),
         );
       }
-      for (const object of claimed) {
-        // Deleting an already-removed key is a bucket no-op and the durable
-        // completion below is a guarded status transition, so a re-claimed
-        // object from an interrupted sweep is safe to retry here.
-        const removed = yield* Effect.match(
-          Effect.tryPromise({
-            catch: (cause) =>
-              new RetentionStorageError({
-                cause,
-                message: `unable to delete brand profile object ${object.r2_key}`,
+      const outcomes = yield* Effect.forEach(
+        claimed,
+        (object) =>
+          Effect.match(
+            Effect.tryPromise({
+              catch: (cause) =>
+                new RetentionStorageError({
+                  cause,
+                  message: `unable to delete brand profile object ${object.r2_key}`,
+                }),
+              try: () => store.delete(object.r2_key),
+            }),
+            {
+              onFailure: (error) => ({ error, id: null as string | null }),
+              onSuccess: () => ({
+                error: undefined as RetentionStorageError | undefined,
+                id: object.id,
               }),
-            try: () => store.delete(object.r2_key),
-          }),
-          {
-            onFailure: (error) => {
-              failure ??= error;
-              return false;
             },
-            onSuccess: () => true,
-          },
-        );
-        if (removed) reclaimedObjectIds.push(object.id);
+          ),
+        { concurrency: 8 },
+      );
+      for (const outcome of outcomes) {
+        if (outcome.id !== null) reclaimedObjectIds.push(outcome.id);
+        else failure ??= outcome.error;
       }
     }
 
@@ -406,19 +320,6 @@ const cleanups: readonly RetentionCleanup[] = [
   purgeDueBrandProfiles,
 ];
 
-/**
- * Runs daily bounded retention cleanup across idempotency keys, webhooks, outbox, async jobs, corrections, snapshots, and due Brand Profile purges.
- * Executes each cleanup independently so errors in one table do not block retention across others:
- * every cleanup is adapted through a classified tryPromise whose success adds its
- * deleted count and whose failure is counted into `errors` instead of failing the
- * program. An out-of-range batchSize still signals caller misuse, surfaced inside
- * the Effect as a classified failure (RangeError → RetryableJobError with
- * `cause` "RangeError").
- *
- * @param env - Automation worker environment.
- * @param options - Configuration containing optional batchSize (default 1,000, max 5,000).
- * @returns Effect producing a RetentionResult with total deleted rows and count of failed cleanup operations; fails with a classified AutomationJobError for an invalid batchSize.
- */
 export function runRetention(
   env: AutomationEnv,
   options: RetentionOptions = {},
@@ -436,8 +337,6 @@ export function runRetention(
     let deleted = 0;
     let errors = 0;
     for (const cleanup of cleanups) {
-      // Per-cleanup failures are counted, not thrown: one failing table must not
-      // block retention across the others, matching the previous try/catch loop.
       const outcome = yield* Effect.match(
         cleanup(env, batchSize).pipe(Effect.mapError(classifyJobError)),
         {

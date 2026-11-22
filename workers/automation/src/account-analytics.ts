@@ -29,21 +29,9 @@ export interface AccountAnalyticsSweepResult {
   scanned: number;
 }
 
-/** Twenty-five accounts per hourly sweep keeps provider reads bounded. */
 const sweepBatchSize = 25;
-/** Captures and failed attempts both wait six hours before another provider read. */
 const sweepIntervalHours = 6;
 
-/**
- * Captures follower history for usable, configured accounts due for measurement.
- * Claims the oldest attempts atomically before provider I/O, so failures and crashes
- * back off for six hours instead of starving later accounts. Expiring credentials
- * wait for the token refresh path. Bounds each sweep to 25 accounts and four reads.
- *
- * @param env - Automation bindings containing the database and provider credentials.
- * @param dependencies - Optional registry override for tests.
- * @returns Effect resolving to scanned/recorded/failed counts.
- */
 export function sweepAccountAnalytics(
   env: AutomationEnv,
   dependencies: { providerRegistry?: ProviderRegistry } = {},

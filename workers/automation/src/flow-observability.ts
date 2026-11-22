@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Exit } from "effect";
 import {
   createFlowLedgerRecorder,
   flowDatabaseAvailable,
@@ -6,6 +6,7 @@ import {
   type FlowLedgerRecorder,
 } from "@meltiply/observability";
 
+import { runJobProgram } from "./effect/boundary";
 import type { AutomationEnv } from "./env";
 
 export { flowDatabaseAvailable, flowExplorerEnabled };
@@ -21,7 +22,7 @@ export function flowRecorderFor(env: AutomationEnv): AutomationFlowRecorder {
     env,
     runTransaction: async (operation) => {
       const { withSystemTransactionEffect } = await import("./database");
-      const exit = await Effect.runPromiseExit(withSystemTransactionEffect(env, operation));
+      const exit = await runJobProgram(withSystemTransactionEffect(env, operation));
       if (Exit.isSuccess(exit)) return exit.value;
       throw Cause.squash(exit.cause);
     },

@@ -26,11 +26,6 @@ const retryPolicy = {
   maxDelaySeconds: 300,
 };
 
-/**
- * Builds one frozen attachment entry with a single ready candidate, matching
- * the ordered `PublicationMediaEntry` shape the distribution pipeline freezes
- * into a publication snapshot at claim.
- */
 function mediaEntry(
   patch: Partial<PublicationMediaEntry> = {},
   candidate: Partial<PublicationMediaCandidate> = {},
@@ -71,12 +66,6 @@ function target(patch: Partial<DistributionPublishTarget> = {}): DistributionPub
   };
 }
 
-/**
- * Builds a publish-capable adapter fixture for the given platform.
- * `publish` and `transferModes` are required because every publication test
- * exercises them; the platform defaults to threads so existing fixtures stay
- * unchanged while TikTok targets can declare a matching capability platform.
- */
 function adapter(
   publish: NonNullable<ProviderAdapter["publish"]>,
   transferModes: ProviderAdapter["transferModes"] = ["remote_ingest"],
@@ -108,10 +97,6 @@ function adapter(
   };
 }
 
-/**
- * Registers the supplied adapter under its declared capability platform so the
- * registry key and capability platform always satisfy the registry invariant.
- */
 function registry(value?: ProviderAdapter): ProviderRegistry {
   const result = new ProviderRegistry();
   if (value) result.register(value.capability.platform, value);
@@ -205,7 +190,7 @@ describe("provider publication execution", () => {
   });
 
   it("prefers remote ingest and keeps credentials outside the publish payload", async () => {
-    const publish = vi.fn(async () => ({
+    const publish = vi.fn<NonNullable<ProviderAdapter["publish"]>>(async () => ({
       outcome: "confirmed_success" as const,
       providerPostId: " post-1 ",
       providerUrl: "https://provider.example/posts/1?access_token=must-not-persist#private",
@@ -216,9 +201,6 @@ describe("provider publication execution", () => {
       mode: "remote_ingest" as const,
       url: "https://r2.example/signed-object",
     }));
-    // TikTok publish options are only valid on a TikTok target, so the fixture
-    // publishes to TikTok; the registry also requires a TikTok adapter to
-    // expose creator publication requirements before it accepts registration.
     const tiktok = adapter(publish, ["byte_upload", "resumable_upload", "remote_ingest"], "tiktok");
     tiktok.getPublicationRequirements = async () => ({
       commentAllowed: true,
@@ -277,10 +259,8 @@ describe("provider publication execution", () => {
         },
       }),
     );
-    const publishArguments = publish.mock.calls[0] as unknown as Parameters<
-      NonNullable<ProviderAdapter["publish"]>
-    >;
-    expect(JSON.stringify(publishArguments[2])).not.toContain("provider-token");
+    const publishArguments = publish.mock.calls[0];
+    expect(JSON.stringify(publishArguments?.[2])).not.toContain("provider-token");
     expect(result.result).toEqual({
       outcome: "confirmed_success",
       providerPostId: "post-1",
@@ -498,8 +478,6 @@ describe("provider publication lookup", () => {
     tokenExpiresAt: new Date("2027-01-01T00:00:00Z"),
   };
 
-  // Lookup must use the supplied service, not silently replace it with the
-  // registry adapter; contradictory provider evidence makes substitution visible.
   it("returns publication evidence from the injected provider service", async () => {
     const registered = adapter(async () => ({ outcome: "confirmed_success" }));
     const result = await Effect.runPromise(
@@ -713,10 +691,6 @@ describe("provider reply execution", () => {
 
 describe("expired token refresh before publish", () => {
   const now = new Date("2026-06-01T00:00:00Z");
-  /**
-   * Publish target whose stored token expired before `now`, with a refresh
-   * credential present so the just-in-time refresh path is exercised.
-   */
   const expiredTarget = (
     patch: Partial<DistributionPublishTarget> = {},
   ): DistributionPublishTarget =>
@@ -726,7 +700,6 @@ describe("expired token refresh before publish", () => {
       tokenExpiresAt: new Date("2026-05-01T00:00:00Z"),
       ...patch,
     });
-  /** Remote-ingest media descriptor the publish flow resolves before upload. */
   const mediaFor = async () => ({
     contentType: "image/jpeg",
     fileSize: 100,
@@ -877,8 +850,6 @@ describe("expired token refresh before publish", () => {
       outcome: "confirmed_success" as const,
       providerPostId: "post-1",
     }));
-    // No refreshAccessToken on the adapter: the expired token cannot be
-    // refreshed safely, so the publish must not run.
     const unsupported = await runProviderProgram(
       executeProviderPublishEffect,
       registry(adapter(publish)),
@@ -891,7 +862,6 @@ describe("expired token refresh before publish", () => {
       },
       now,
     );
-    // Refresh-capable adapter rejecting the grant: still no publish.
     const rejecting = adapter(publish);
     rejecting.refreshAccessToken = vi.fn(async () => {
       throw new ProviderAdapterError(
@@ -910,8 +880,6 @@ describe("expired token refresh before publish", () => {
       },
       now,
     );
-    // Refresh-capable adapter but no atomic persistence dependency: the
-    // rotation could not be committed, so the publish must not run either.
     const refreshing = adapter(publish);
     refreshing.refreshAccessToken = vi.fn(async () => ({
       accessToken: "access-new",

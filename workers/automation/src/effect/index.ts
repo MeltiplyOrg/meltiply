@@ -6,9 +6,6 @@ export {
   TerminalJobError,
 } from "./job-errors";
 export type { AutomationJobError } from "./job-errors";
-// Boundary: scope construction, exit→outcome mapping, outcome logging, and
-// backoff math. All modules stay import-time pg-free (database access resolves
-// dynamically inside factories), so unit tests import the barrel directly.
 export { jobScope } from "./scope";
 export type { JobScope } from "./scope";
 export {

@@ -1,8 +1,8 @@
-import type { ObjectUrlSigner } from "@meltiply/storage";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { AutomationEnv } from "../src/env";
 import { createProviderMediaResolver } from "../src/provider-media";
+import { fakeObjectUrlSigner, fakeR2Bucket, fakeR2Object, fakeR2ObjectBody } from "./test-doubles";
 
 const baseEnv = {
   ENVIRONMENT: "test",
@@ -13,17 +13,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function metadata(contentType = "video/mp4", size = 512) {
-  return {
-    etag: "etag-1",
-    httpEtag: '"etag-1"',
+function metadata(contentType = "video/mp4", size = 512): R2Object {
+  return fakeR2Object({
     httpMetadata: { contentType },
-    key: "org-1/asset-1/video.mp4",
     size,
-    uploaded: new Date("2026-07-19T00:00:00.000Z"),
-    version: "version-1",
     writeHttpMetadata: vi.fn(),
-  };
+  });
 }
 
 function request(
@@ -46,9 +41,9 @@ describe("provider media resolver", () => {
     const signDownload = vi.fn(
       async () => "https://r2.example/signed/video.mp4?signature=ephemeral",
     );
-    const signer = { signDownload } as unknown as ObjectUrlSigner;
+    const signer = fakeObjectUrlSigner({ signDownload });
     const resolve = createProviderMediaResolver(
-      { ...baseEnv, ASSETS: { head } as unknown as R2Bucket },
+      { ...baseEnv, ASSETS: fakeR2Bucket({ head }) },
       signer,
     );
 
@@ -69,10 +64,10 @@ describe("provider media resolver", () => {
     "hands %s adapters the R2 stream without buffering",
     async (transferMode) => {
       const body = new ReadableStream<Uint8Array>();
-      const get = vi.fn(async () => ({ ...metadata(), body }));
+      const get = vi.fn(async () => fakeR2ObjectBody(body, metadata()));
       const resolve = createProviderMediaResolver({
         ...baseEnv,
-        ASSETS: { get } as unknown as R2Bucket,
+        ASSETS: fakeR2Bucket({ get }),
       });
 
       const result = await resolve(request(transferMode));
@@ -94,13 +89,10 @@ describe("provider media resolver", () => {
         controller.close();
       },
     });
-    const get = vi.fn(async () => ({
-      ...metadata("video/mp4", fileSize),
-      body,
-    }));
+    const get = vi.fn(async () => fakeR2ObjectBody(body, metadata("video/mp4", fileSize)));
     const resolve = createProviderMediaResolver({
       ...baseEnv,
-      ASSETS: { get } as unknown as R2Bucket,
+      ASSETS: fakeR2Bucket({ get }),
     });
 
     await expect(resolve(request("resumable_upload", fileSize))).resolves.toMatchObject({
@@ -115,13 +107,13 @@ describe("provider media resolver", () => {
 
   it("rejects cross-asset keys and mismatched object metadata before signing", async () => {
     const signDownload = vi.fn();
-    const signer = { signDownload } as unknown as ObjectUrlSigner;
+    const signer = fakeObjectUrlSigner({ signDownload });
     const resolve = createProviderMediaResolver(
       {
         ...baseEnv,
-        ASSETS: {
+        ASSETS: fakeR2Bucket({
           head: vi.fn(async () => metadata("video/mp4", 511)),
-        } as unknown as R2Bucket,
+        }),
       },
       signer,
     );
@@ -142,22 +134,18 @@ describe("provider media resolver", () => {
     const signDownload = vi.fn(
       async () => "https://r2.example/signed/rendition.webp?signature=ephemeral",
     );
-    const signer = { signDownload } as unknown as ObjectUrlSigner;
-    // The mock under assertion is the one the resolver actually holds: an
-    // unwired spy would make the "rejected before any read" claim vacuous.
+    const signer = fakeObjectUrlSigner({ signDownload });
     const head = vi.fn(async (key: string) =>
-      key.endsWith("rendition.webp") ? { ...metadata("image/webp", 256), key } : null,
+      key.endsWith("rendition.webp") ? fakeR2Object({ ...metadata("image/webp", 256), key }) : null,
     );
     const resolve = createProviderMediaResolver(
       {
         ...baseEnv,
-        ASSETS: { head } as unknown as R2Bucket,
+        ASSETS: fakeR2Bucket({ head }),
       },
       signer,
     );
 
-    // A ready rendition keeps the `<org>/<asset>/<name>` layout, so the
-    // resolver can still prove ownership from the key alone.
     await expect(
       resolve({
         assetId: "asset-1",
@@ -174,8 +162,6 @@ describe("provider media resolver", () => {
       url: "https://r2.example/signed/rendition.webp?signature=ephemeral",
     });
 
-    // Staging bytes carry a `staging/` prefix instead of the asset segment, so
-    // they can never be handed to a Provider even with a valid grant.
     await expect(
       resolve({
         assetId: "asset-1",
@@ -186,17 +172,10 @@ describe("provider media resolver", () => {
         transferMode: "remote_ingest",
       }),
     ).rejects.toThrow("object key is invalid");
-    // The promoted request above read metadata once; the rejected staging key
-    // must not add a second read.
     expect(head).toHaveBeenCalledTimes(1);
     expect(head).toHaveBeenCalledWith("org-1/asset-1/rendition.webp");
   });
 
-  /**
-   * Switching provider is a configuration change, not a code change: the same
-   * resolver verifies authoritative metadata against an S3-compatible origin
-   * and signs the same object-scoped download capability there.
-   */
   it("reads and signs against an S3-compatible origin when that provider is selected", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));

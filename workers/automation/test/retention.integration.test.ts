@@ -6,6 +6,7 @@ import { systemPoolFor } from "../src/database";
 import type { AutomationEnv } from "../src/env";
 import { runRetention } from "../src/retention";
 import { runSystemTransaction } from "./system-transaction";
+import { fakeR2Bucket } from "./test-doubles";
 
 const connectionString = process.env.MELTIPLY_DATABASE_TEST_URL;
 if (!connectionString) {
@@ -22,15 +23,8 @@ const env = {
   VERSION: "retention-test",
 } satisfies AutomationEnv;
 
-// The seeded Alpha workspace profile owns the analytics fixtures below:
-// brand_profile_id is mandatory and the composite FKs require same-profile
-// references.
 const seededAlphaProfileId = "a0000000-0000-4000-8000-000000000001";
 
-// Retention fixtures publish through Posts: a Distribution carries the
-// composition identity, so each analytics fixture owns its own text-only Post.
-// Retention never inspects attachments, so zero-attachment Posts are the
-// minimal faithful fixture.
 const seededAlphaPostId = "96000000-0000-4000-8000-0000000000a1";
 const unscheduledPostId = "96000000-0000-4000-8000-0000000000a2";
 
@@ -57,8 +51,6 @@ const asyncEventKeys = [
   "retention-integration-async-fresh",
 ];
 const distributionId = "96000000-0000-4000-8000-000000000001";
-// A Distribution whose analytics stopped being scheduled: its only snapshot is
-// old, and retention must keep it so the creator still sees its final figures.
 const unscheduledDistributionId = "96000000-0000-4000-8000-000000000002";
 const unscheduledSnapshotId = "97000000-0000-4000-8000-000000000003";
 const analyticsSnapshotIds = [
@@ -72,10 +64,6 @@ const idempotencyKeys = [
   "retention-integration-fresh",
 ];
 
-// Brand Profile purge fixtures: one profile past its seven-day purge_at and
-// one still inside the retention window. Each owns a Post, an Asset with its
-// per-object storage inventory, a channel, and a Distribution, so the cascade
-// scope is observable across the whole Post-owned composition.
 const dueProfileId = "98000000-0000-4000-8000-000000000001";
 const dueAssetId = "98000000-0000-4000-8000-000000000002";
 const dueAccountId = "98000000-0000-4000-8000-000000000003";
@@ -99,16 +87,7 @@ const dueR2Keys = [
 const retainedR2Key =
   "org/20000000-0000-4000-8000-000000000001/assets/98000000-0000-4000-8000-000000000012/retained.png";
 
-// Active-work protection fixtures. A due profile must not be purged while one
-// of its Assets is still being processed or is held by a live Provider attempt
-// awaiting reconciliation, so both protected Assets carry a completed storage
-// object plus the durable rows that hold it. They live in their own Workspace so
-// the storage accounting they release is observed in isolation from seeded data
-// other suites mutate concurrently.
 const protectedOrganizationId = "98000000-0000-4000-8000-000000000029";
-// Charged bytes of the three fixture Assets (2048 + 2048 + 4096 + 0 + 4096).
-// Each Asset's file_size mirrors its charged object inventory, so the expected
-// release is identical whether the sweep sums stored objects or Asset rows.
 const protectedChargedBytes = 12_288;
 const protectedProfileId = "98000000-0000-4000-8000-000000000021";
 const protectedPostId = "98000000-0000-4000-8000-000000000022";
@@ -125,8 +104,6 @@ const reclaimableObjectIds = [
   "98000000-0000-4000-8000-000000000034",
   "98000000-0000-4000-8000-000000000035",
 ];
-// A completed optimization output for the reclaimable Asset; a rendition that
-// is still processing is another live-media hold the purge must respect.
 const reclaimableRenditionId = "98000000-0000-4000-8000-000000000036";
 const processingR2Key =
   "org/98000000-0000-4000-8000-000000000029/assets/98000000-0000-4000-8000-000000000023/processing.png";
@@ -137,8 +114,6 @@ const reclaimableR2Keys = [
   "org/98000000-0000-4000-8000-000000000029/assets/98000000-0000-4000-8000-000000000025/reclaimable-thumb.png",
   "org/98000000-0000-4000-8000-000000000029/assets/98000000-0000-4000-8000-000000000025/reclaimable-webp.png",
 ];
-// Teardown removes every fixture profile even when a purge assertion fails
-// mid-test, so a red run never poisons the next sweep.
 const retainedProfileIds = [...purgeProfileIds, protectedProfileId];
 
 type ProtectedPurgeState = {
@@ -150,16 +125,6 @@ type ProtectedPurgeState = {
   storageBytes: string;
 };
 
-/**
- * Reads the externally observable outcome of a Brand Profile purge for the
- * protection fixture: which profile/composition rows survive, how many stored
- * objects are still live versus durably deleted, and how many charged bytes
- * the fixture Workspace still holds. Every count is a text projection so the
- * assertions stay independent of the query that produced them.
- *
- * @returns Counts as decimal strings; throws when the fixture Workspace has no
- *   matching state row, which would mean the fixture was never created.
- */
 async function readProtectedPurgeState(): Promise<ProtectedPurgeState> {
   return runSystemTransaction(env, async (client) => {
     const state = await client.query<ProtectedPurgeState>(
@@ -186,9 +151,6 @@ async function readProtectedPurgeState(): Promise<ProtectedPurgeState> {
 describeIntegration("retention cleanup with PostgreSQL", () => {
   beforeAll(async () => {
     await runSystemTransaction(env, async (client) => {
-      // Recovers a run interrupted before teardown: this Workspace and its
-      // cascade are the only rows the protection fixture owns, and a leftover
-      // due profile would otherwise be reclaimed by the earlier sweeps.
       await client.query("DELETE FROM organizations WHERE id = $1", [protectedOrganizationId]);
       await client.query(
         `DELETE FROM idempotency_keys
@@ -202,8 +164,6 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
       await client.query("DELETE FROM distributions WHERE id = ANY($1::uuid[])", [
         [distributionId, unscheduledDistributionId],
       ]);
-      // Distributions cascade from their Post; clearing the fixture Posts
-      // first also recovers a run interrupted before its own teardown.
       await client.query("DELETE FROM posts WHERE id = ANY($1::uuid[])", [
         [seededAlphaPostId, unscheduledPostId],
       ]);
@@ -323,8 +283,6 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
       await client.query("DELETE FROM distributions WHERE id = ANY($1::uuid[])", [
         [distributionId, unscheduledDistributionId],
       ]);
-      // Distributions cascade from their Post; deleting the Posts explicitly
-      // also cleans up a run that failed between the two statements.
       await client.query("DELETE FROM posts WHERE id = ANY($1::uuid[])", [
         [seededAlphaPostId, unscheduledPostId],
       ]);
@@ -338,14 +296,9 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
       await client.query("DELETE FROM usage_corrections WHERE id = ANY($1::uuid[])", [
         usageCorrectionIds,
       ]);
-      // Purge fixtures cascade from the profile rows; deleting every fixture
-      // id also cleans up if a purge test failed before its own DELETE ran.
       await client.query("DELETE FROM brand_profiles WHERE id = ANY($1::uuid[])", [
         retainedProfileIds,
       ]);
-      // The protection fixtures own a dedicated Workspace, so deleting it
-      // removes their Posts, Assets, stored objects, attempt ledger, and usage
-      // accounting even when every purge assertion above failed.
       await client.query("DELETE FROM organizations WHERE id = $1", [protectedOrganizationId]);
     });
     await systemPoolFor(env).end();
@@ -401,8 +354,6 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
         [analyticsSnapshotIds],
       );
       expect(snapshots.rows).toEqual([{ id: analyticsSnapshotIds[1] }]);
-      // The unscheduled Distribution's only snapshot is 400 days old and is
-      // still readable: retention never removes a Distribution's latest.
       const survivor = await client.query<{ views: string }>(
         "SELECT views::text AS views FROM analytics_snapshots WHERE id = $1",
         [unscheduledSnapshotId],
@@ -410,8 +361,6 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
       expect(survivor.rows[0]?.views).toBe("42");
     });
 
-    // Global retention may also reclaim eligible seed history. Assert fixture
-    // outcomes below, never delete another fixture's data to force a total.
     const remainingCleanup = await Effect.runPromise(runRetention(env, { batchSize: 100 }));
     expect(remainingCleanup.errors).toBe(0);
     await runSystemTransaction(env, async (client) => {
@@ -432,14 +381,14 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
 
   it("purges only due brand profiles and deletes their stored objects first", async () => {
     const deletedKeys: string[] = [];
-    const envWithAssets = {
+    const envWithAssets: AutomationEnv = {
       ...env,
-      ASSETS: {
-        delete: vi.fn(async (key: string) => {
-          deletedKeys.push(key);
+      ASSETS: fakeR2Bucket({
+        delete: vi.fn(async (key: string | string[]) => {
+          deletedKeys.push(...(Array.isArray(key) ? key : [key]));
         }),
-      },
-    } as unknown as AutomationEnv;
+      }),
+    };
 
     await runSystemTransaction(env, async (client) => {
       await client.query(
@@ -462,8 +411,6 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
             now() - INTERVAL '30 days')`,
         [dueAssetId, retainedAssetId, organizationId, dueProfileId, retainedProfileId],
       );
-      // asset_objects is the only keys/bytes inventory, so the purge can only
-      // be observed deleting what a real completed upload would have left.
       await client.query(
         `INSERT INTO asset_objects
            (id, org_id, asset_id, brand_profile_id, kind, r2_key, bytes,
@@ -537,8 +484,6 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
 
     const result = await Effect.runPromise(runRetention(envWithAssets, { batchSize: 100 }));
     expect(result.errors).toBe(0);
-    // Every stored object on the due profile is removed; the retained
-    // profile's object is untouched.
     expect(deletedKeys.sort()).toEqual([...dueR2Keys].sort());
 
     await runSystemTransaction(env, async (client) => {
@@ -565,8 +510,6 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
               WHERE brand_profile_id = ANY($1::uuid[])) AS distributions`,
         [purgeProfileIds],
       );
-      // Only the not-yet-due profile and its owned Post, Asset, stored object,
-      // channel, and Distribution survive.
       expect(remaining.rows[0]).toEqual({
         profiles: "1",
         posts: "1",
@@ -582,7 +525,6 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
       expect(survivor.rows).toEqual([{ id: retainedProfileId }]);
     });
 
-    // A second sweep is a no-op: the purge is idempotent across deliveries.
     const second = await Effect.runPromise(runRetention(envWithAssets, { batchSize: 100 }));
     expect(second.errors).toBe(0);
     expect(deletedKeys.sort()).toEqual([...dueR2Keys].sort());
@@ -590,21 +532,19 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
 
   it("defers a due profile until active work ends, then purges objects", async () => {
     const deletedKeys: string[] = [];
-    // `failingKey` models a crash between the external object delete and the
-    // durable per-object completion: one key fails, the rest must still be
-    // settled and released exactly once by the following sweep.
     let failingKey: string | null = null;
-    const envWithAssets = {
+    const envWithAssets: AutomationEnv = {
       ...env,
-      ASSETS: {
-        delete: vi.fn(async (key: string) => {
-          if (key === failingKey) {
+      ASSETS: fakeR2Bucket({
+        delete: vi.fn(async (key: string | string[]) => {
+          const keys = Array.isArray(key) ? key : [key];
+          if (failingKey !== null && keys.includes(failingKey)) {
             throw new Error("storage delete acknowledgement was lost");
           }
-          deletedKeys.push(key);
+          deletedKeys.push(...keys);
         }),
-      },
-    } as unknown as AutomationEnv;
+      }),
+    };
 
     await runSystemTransaction(env, async (client) => {
       await client.query(
@@ -745,8 +685,6 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
       );
     });
 
-    // Sweep 1: the profile is due, but one Asset is still processing and another
-    // is held by a live Provider attempt, so nothing at all is reclaimed.
     const deferred = await Effect.runPromise(runRetention(envWithAssets, { batchSize: 100 }));
     expect(deferred.errors).toBe(0);
     expect(deletedKeys).toEqual([]);
@@ -759,8 +697,6 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
       storageBytes: protectedChargedBytes.toString(),
     });
 
-    // The attempt finishes and its media hold window lapses while the processing
-    // upload completes into a finalized orphan.
     await runSystemTransaction(env, async (client) => {
       await client.query(
         `UPDATE provider_operations
@@ -783,9 +719,6 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
       );
     });
 
-    // Sweep 2: one object delete fails after others succeeded. The successful
-    // deletions are still durably settled and released, and the profile row
-    // survives because not every object deletion completed.
     failingKey = heldR2Key;
     const interrupted = await Effect.runPromise(runRetention(envWithAssets, { batchSize: 100 }));
     expect(interrupted.errors).toBe(1);
@@ -799,8 +732,6 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
       storageBytes: "2048",
     });
 
-    // Sweep 3: the retry finishes the remaining object, releases its bytes, and
-    // only then does the profile row cascade away.
     failingKey = null;
     const completed = await Effect.runPromise(runRetention(envWithAssets, { batchSize: 100 }));
     expect(completed.errors).toBe(0);
@@ -814,8 +745,6 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
       storageBytes: "0",
     });
 
-    // Sweep 4: a duplicate delivery of the same purge work deletes nothing and
-    // releases nothing a second time.
     const duplicate = await Effect.runPromise(runRetention(envWithAssets, { batchSize: 100 }));
     expect(duplicate.errors).toBe(0);
     expect(deletedKeys.sort()).toEqual([processingR2Key, heldR2Key, ...reclaimableR2Keys].sort());

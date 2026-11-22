@@ -846,9 +846,22 @@ describe("hourly provider sync recovery sweep", () => {
     expect(result).toEqual({ analytics: 0, comments: 0, token_refresh: 0 });
 
     expect(executedQueries).toHaveLength(3);
-    const [analyticsQuery, commentsQuery, tokenRefreshQuery] = executedQueries;
+    const analyticsIndex = executedQueries.findIndex((entry) =>
+      entry.sql.includes("analytics_next_sync_at"),
+    );
+    const commentsIndex = executedQueries.findIndex((entry) =>
+      entry.sql.includes("comments_next_sync_at"),
+    );
+    const tokenRefreshIndex = executedQueries.findIndex((entry) =>
+      entry.sql.includes("token_refresh_next_attempt_at"),
+    );
+    expect(analyticsIndex).toBeGreaterThanOrEqual(0);
+    expect(commentsIndex).toBeGreaterThan(analyticsIndex);
+    expect(tokenRefreshIndex).toBeGreaterThanOrEqual(0);
+    const analyticsQuery = executedQueries[analyticsIndex];
+    const commentsQuery = executedQueries[commentsIndex];
+    const tokenRefreshQuery = executedQueries[tokenRefreshIndex];
 
-    expect(analyticsQuery?.sql).toContain("analytics_next_sync_at");
     expect(analyticsQuery?.params).toEqual([
       50,
       expect.any(Array),
@@ -858,7 +871,6 @@ describe("hourly provider sync recovery sweep", () => {
       60,
     ]);
 
-    expect(commentsQuery?.sql).toContain("comments_next_sync_at");
     expect(commentsQuery?.params).toEqual([
       50,
       expect.any(Array),
@@ -868,7 +880,6 @@ describe("hourly provider sync recovery sweep", () => {
       60,
     ]);
 
-    expect(tokenRefreshQuery?.sql).toContain("token_refresh_next_attempt_at");
     expect(tokenRefreshQuery?.params).toEqual([
       50,
       expect.any(Array),

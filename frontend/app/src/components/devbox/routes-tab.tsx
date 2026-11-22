@@ -5,14 +5,6 @@ import { Button } from "@meltiply/ui/button";
 
 import { authClient } from "@/lib/auth-client";
 
-/**
- * Reads the absolute, same-origin verification URL from a device-code response.
- * Rejects malformed payloads and cross-origin targets so a preview can never
- * navigate outside the installation.
- *
- * @param value - Parsed JSON response body.
- * @returns Absolute same-origin verification URL, or null when unusable.
- */
 function devicePreviewDestination(value: unknown): string | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const target = (value as Record<string, unknown>).verification_uri_complete;
@@ -25,16 +17,6 @@ function devicePreviewDestination(value: unknown): string | null {
   }
 }
 
-/**
- * DevBox tab listing routes added by the current change with a live device
- * request starter. Starting a request uses the real public auth endpoint, then
- * navigates to the consent page so review, approval, and denial render against
- * actual data. In the isolated UI preview the same call is served by the
- * synthetic device handlers and never reaches a backend.
- *
- * @param props.onNavigate - Navigation seam, overridable by tests.
- * @returns Route preview section.
- */
 export function RoutesTab({
   onNavigate = (url) => window.location.assign(url),
 }: {

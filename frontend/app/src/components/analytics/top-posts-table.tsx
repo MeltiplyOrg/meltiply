@@ -6,7 +6,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { platformDisplayName } from "@/lib/platforms";
 import { useI18n } from "@/lib/i18n";
-import type { Language } from "@/lib/i18n";
 import {
   ANALYTICS_METRICS,
   ANALYTICS_MAX_LIMIT,
@@ -23,16 +22,11 @@ interface TopPostsTableProps {
   metric: AnalyticsMetric;
   limit: number;
   hasMore: boolean;
-  /** True while a Load more refetch is in flight; prior rows stay visible. */
   loadingMore: boolean;
   onMetricChange: (metric: AnalyticsMetric) => void;
   onLoadMore: () => void;
 }
 
-/**
- * Row identity: the title when present, else the excerpt, else the documented
- * untitled label. The excerpt stays visible as a secondary line when both exist.
- */
 function PostIdentity({ row }: { row: AnalyticsPostRow }) {
   const { t } = useI18n();
   const title = row.title.trim();
@@ -45,9 +39,8 @@ function PostIdentity({ row }: { row: AnalyticsPostRow }) {
   );
 }
 
-/** Platform icons plus the honest destination count and, for mixed rows, Partial. */
 function PlatformSummary({ row }: { row: AnalyticsPostRow }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const partial = analyticsRowMetricState(row) === "partial";
   const unsupported = row.unsupported_platforms.map(platformDisplayName).join(", ");
   const awaitingSync = row.destination_count - row.synced_destination_count;
@@ -58,7 +51,9 @@ function PlatformSummary({ row }: { row: AnalyticsPostRow }) {
         <PlatformIcon key={platform} provider={platform} className="size-3.5" />
       ))}
       <span className="text-xs text-ink-3">
-        {t("{count} destinations", { count: formatAnalyticsInteger(row.destination_count) })}
+        {t("{count} destinations", {
+          count: formatAnalyticsInteger(row.destination_count, language),
+        })}
       </span>
       {partial && (
         <Badge variant="outline" className="px-1 py-0 text-[10px]" title={unsupported}>
@@ -68,30 +63,16 @@ function PlatformSummary({ row }: { row: AnalyticsPostRow }) {
       )}
       {awaitingSync > 0 && (
         <Badge variant="outline" className="px-1 py-0 text-[10px]">
-          {t("Awaiting sync")} {formatAnalyticsInteger(awaitingSync)}/
-          {formatAnalyticsInteger(row.destination_count)}
+          {t("Awaiting sync")} {formatAnalyticsInteger(awaitingSync, language)}/
+          {formatAnalyticsInteger(row.destination_count, language)}
         </Badge>
       )}
     </div>
   );
 }
 
-/**
- * One metric cell or definition value. The state is decided once per row, so a
- * never-measured destination reads as unsupported or awaiting sync instead of an
- * inferred zero.
- */
-function MetricValue({
-  row,
-  metric,
-  language,
-  t,
-}: {
-  row: AnalyticsPostRow;
-  metric: AnalyticsMetric;
-  language: Language;
-  t: (message: string) => string;
-}) {
+function MetricValue({ row, metric }: { row: AnalyticsPostRow; metric: AnalyticsMetric }) {
+  const { t, language } = useI18n();
   const state = analyticsRowMetricState(row);
   if (state === "unsupported") return <span className="text-ink-3">{t("Not supported")}</span>;
   if (state === "awaiting-sync") return <span className="text-ink-3">{t("Awaiting sync")}</span>;
@@ -100,7 +81,6 @@ function MetricValue({
   );
 }
 
-/** Metric header button that re-ranks the table by the chosen stored metric. */
 function MetricHeader({
   metric,
   activeMetric,
@@ -132,14 +112,6 @@ function MetricHeader({
   );
 }
 
-/**
- * Ranked Post table with a stacked phone layout.
- *
- * The desktop table and the stacked list read the same rows and row state; only
- * their geometry differs, so no view can show a different ranking or invented
- * value. All four stored metrics stay visible; their headers re-rank in place,
- * and Load more raises the top-N window without offset paging.
- */
 export function TopPostsTable({
   posts,
   metric,
@@ -203,7 +175,7 @@ export function TopPostsTable({
                       </TableCell>
                       {ANALYTICS_METRICS.map((key) => (
                         <TableCell key={key} className="whitespace-nowrap text-right">
-                          <MetricValue row={row} metric={key} language={language} t={t} />
+                          <MetricValue row={row} metric={key} />
                         </TableCell>
                       ))}
                     </TableRow>
@@ -238,7 +210,7 @@ export function TopPostsTable({
                       <div key={key} className="flex items-baseline justify-between gap-2">
                         <dt className="text-xs text-ink-3">{analyticsMetricLabel(key, t)}</dt>
                         <dd className="text-sm text-ink">
-                          <MetricValue row={row} metric={key} language={language} t={t} />
+                          <MetricValue row={row} metric={key} />
                         </dd>
                       </div>
                     ))}

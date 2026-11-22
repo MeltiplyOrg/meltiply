@@ -14,9 +14,6 @@ import { installFrontendErrorLogging } from "@/lib/frontend-telemetry";
 import { AppRouter } from "@/app-router";
 import favicon from "@meltiply/ui/favicon.svg?url";
 
-// Consent defaults are applied by the inline bootstrap before React. Load the
-// interactive notice separately so its toast animation dependencies do not block
-// the workspace/authentication first paint; a missing chunk never grants consent.
 const CookieNotice = lazy(async () => {
   const { CookieNotice } = await import("@meltiply/ui/cookie-notice");
   return { default: CookieNotice };
@@ -29,7 +26,6 @@ const DevBox = isDevMode()
     })
   : null;
 
-/** Loads preview modules only in ui-preview mode and installs interception before router/session work; ordinary development never requests the preview graph. */
 async function bootstrap(): Promise<void> {
   let previewControls: ReactNode = null;
   if (isUiPreview()) {
@@ -40,7 +36,6 @@ async function bootstrap(): Promise<void> {
     await startPreview();
     previewControls = <PreviewControls />;
   }
-  /** A data router lets security enrollment block SPA departures, including browser history. */
   const router = createBrowserRouter([
     { path: "*", element: <AppRouter />, errorElement: <FrontendErrorFallback /> },
   ]);

@@ -31,7 +31,6 @@ import {
 const scope = { isSignedIn: true, workspaceId: "workspace-a", brandProfileId: null };
 let client: QueryClient;
 
-/** Keeps the real query hooks, Effect services and HTTP client inside one browser scope. */
 function Wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }

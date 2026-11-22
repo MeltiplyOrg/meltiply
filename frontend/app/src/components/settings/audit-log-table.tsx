@@ -9,14 +9,8 @@ import { TopToolbarReset, TopToolbarSearch } from "@/components/layout/top-toolb
 import { TopToolbarButton } from "@/components/primitives/top-toolbar-button";
 import type { AuditEntry } from "@/types";
 
-/** Audit page size; matches the contract's 100-entry ceiling for one request. */
 export const AUDIT_PAGE_SIZE = 100;
 
-/**
- * Action identifiers the Worker records. Kept as raw codes rather than prose so
- * the filter matches the stored value exactly; an unknown future action remains
- * visible in the log and reachable through search until this list is extended.
- */
 const AUDIT_ACTIONS = [
   "account.deleted",
   "account.reactivated",
@@ -37,7 +31,6 @@ const AUDIT_ACTIONS = [
   "workspace.renamed",
 ] as const;
 
-/** Target kinds stored on an Audit entry. */
 const AUDIT_TARGET_TYPES = [
   "brand_profile",
   "channel",
@@ -46,7 +39,6 @@ const AUDIT_TARGET_TYPES = [
   "workspace",
 ] as const;
 
-/** Applied server-side filters; an empty string means the filter is off. */
 export interface AuditFilters {
   action: string;
   q: string;
@@ -68,20 +60,8 @@ export interface AuditLogTableProps {
   onTargetTypeChange: (targetType: string) => void;
 }
 
-/** Delay before a typed search reaches the server; keeps page history readable. */
 const SEARCH_DEBOUNCE_MS = 300;
 
-/**
- * Renders the Workspace Audit trail as a filtered, paginated log table.
- *
- * Filter state is applied server-side by the route so results stay complete
- * across pages; this component only reflects `entries`, `hasMore`, and `offset`.
- * The body scrolls independently so the page header, filters, and paging stay
- * reachable, and each entry expands to its before/after state and request id.
- *
- * @param props - Audit window, applied filters, and change callbacks.
- * @returns Audit log section with filters, scrollable table, and paging footer.
- */
 export function AuditLogTable({
   entries,
   filters,
@@ -112,9 +92,6 @@ export function AuditLogTable({
     [language],
   );
 
-  // The input keeps typed text until its debounce delivers it to the query key.
-  // Every reset path lives in this component, so clearing `search` here is
-  // enough to keep the visible field and the applied filter in step.
   useEffect(
     () => () => {
       if (searchTimer.current !== null) window.clearTimeout(searchTimer.current);

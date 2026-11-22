@@ -73,105 +73,51 @@ import {
 import { AlertCircle, Check, Plus, Search, Share2, Unplug, UserPlus } from "lucide-react";
 import { cn } from "@meltiply/ui/utils";
 
-/**
- * Metadata definition for a supported external social or publishing platform.
- */
-interface PlatformMeta {
-  /** Unique platform slug identifier (e.g., 'x', 'linkedin', 'instagram'). */
-  id: string;
-  /** Human-readable display label of the platform. */
-  name: string;
-  /** Broad category classification of the publishing destination. */
+interface PlatformPresentation {
   category: "social" | "video";
-  /** Brief description of supported post formats and features on this platform. */
   description: string;
-  /** Optional flag indicating whether the platform is currently linked. */
-  connected?: boolean;
 }
 
-/**
- * Catalog of connectable social media and video sharing Platforms, keyed by the
- * canonical `PLATFORM_IDS` roster from `@meltiply/domain`. Only Platforms with a
- * live Provider appear here, so every row in the add-channel directory can start
- * a real OAuth flow.
- */
-const SUPPORTED_PLATFORMS: PlatformMeta[] = [
-  {
-    id: "instagram",
-    name: "Instagram",
+const PLATFORM_PRESENTATION: Record<Platform, PlatformPresentation> = {
+  instagram: {
     category: "social",
-    description: "Feed posts, Reels, and carousel carousels",
+    description: "Feed posts, Reels, and carousels",
   },
-  {
-    id: "facebook",
-    name: "Facebook",
+  facebook: {
     category: "social",
     description: "Facebook Pages and community groups",
   },
-  {
-    id: "youtube",
-    name: "YouTube",
+  youtube: {
     category: "video",
     description: "Long-form videos and YouTube Shorts",
   },
-  {
-    id: "tiktok",
-    name: "TikTok",
+  tiktok: {
     category: "video",
     description: "Short-form videos with custom sound and caption settings",
   },
-  {
-    id: "threads",
-    name: "Threads",
+  threads: {
     category: "social",
     description: "Text threads, single photos, and link posts",
   },
-];
+};
 
-/**
- * Connection-status filter options for the accounts table, enumerated from the
- * contract's connection roster. Connection health stays separate from
- * Distribution publication status, and labels render through `tStatus` so they
- * share the status translation catalog.
- */
+const PLATFORM_CATALOG = PLATFORM_IDS.map((id) => ({
+  id,
+  name: platformDisplayName(id),
+  ...PLATFORM_PRESENTATION[id],
+}));
+
 const CONNECTION_FILTER_OPTIONS: readonly ("all" | ConnectionStatus)[] = [
   "all",
   ...CONNECTION_STATUSES,
 ];
 
-/** Toolbar status filter value: the aggregate sentinel or one contract status. */
 type StatusFilter = "all" | ConnectionStatus;
 
-/**
- * Props for configuring the ChannelsView management screen.
- */
 export interface ChannelsViewProps {
-  /**
-   * Initial active tab to display. Defaults to checking the URL query parameter
-   * (`?tab=all` or `?tab=add`), otherwise defaulting to `'connected'`.
-   */
   initialTab?: "connected" | "all";
 }
 
-/**
- * Type guard narrowing a directory slug to the contract `Platform` enum, used
- * to gate the OAuth flow and to type the capability lookup.
- *
- * @param id - Platform slug from `SUPPORTED_PLATFORMS`.
- * @returns Whether `id` is a contract-supported Platform.
- */
-function isContractPlatform(id: string): id is Platform {
-  return (PLATFORM_IDS as readonly string[]).includes(id);
-}
-
-/**
- * Manages channel discovery, explicit OAuth account selection, profile
- * directories, and confirmed disconnects. Shared toolbar/dialog primitives
- * preserve filters across OAuth returns; table rows retain profile ownership.
- * `?tab=add|all` opens the connector. Post-OAuth account assignment runs on
- * `/channels/connect`; the callback never persists a Channel before the user
- * chooses its owning Brand Profile. Profile edits never open the connector.
- */
 export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   const {
     integrations,
@@ -197,9 +143,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   const oauthMessage = oauthOutcomeMessage(oauthOutcome, providerParam, language);
   const oauthToastShown = useRef(false);
 
-  // OAuth returns through a full-page redirect, so success is announced as a
-  // toast and the one-shot outcome is removed from the URL. Keeping the query
-  // string would replay the toast on refresh and leave a stale inline banner.
   useEffect(() => {
     if (oauthOutcome !== "connected" || !oauthMessage || oauthToastShown.current) return;
     oauthToastShown.current = true;
@@ -241,14 +184,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   const [editingProfile, setEditingProfile] = useState<BrandProfile | null>(null);
   const [directoryTab, setDirectoryTab] = useState<"accounts" | "profiles">("accounts");
 
-  /**
-   * Bulk disconnect selection bound to the current mutation scope
-   * (workspace + active Brand Profile filter). The scope key rides along so a
-   * render-time reset — the same pattern as `prevShouldOpenAdd` — clears the
-   * set the moment the workspace or Brand Profile selection changes, before any
-   * consumer can act on stale ids. Selection survives view switches and search/
-   * platform/status filter changes inside the same scope.
-   */
   const selectionScopeKey = `${scope.workspaceId ?? ""}/${selectedBrandProfileId ?? ""}`;
   const [selection, setSelection] = useState(() => ({
     scope: selectionScopeKey,
@@ -256,11 +191,8 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   }));
   const selectedIds = selection.ids;
 
-  /** Selected accounts snapshot latched while the bulk confirmation is open. */
   const [bulkTargets, setBulkTargets] = useState<PlatformAccount[] | null>(null);
-  /** True while the confirmed sequential disconnect batch is executing. */
   const [bulkRunning, setBulkRunning] = useState(false);
-  /** Last confirmation targets, rendered through each dialog's exit so its title never blanks while closing. */
   const shownDisconnectTarget = useLatchedValue(disconnectTarget);
   const shownBulkTargets = useLatchedValue(bulkTargets);
   if (selection.scope !== selectionScopeKey) {
@@ -269,12 +201,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
     setDisconnectTarget(null);
   }
 
-  /**
-   * Drops ids the authoritative platform list no longer returns (disconnected
-   * elsewhere, scope data reload). While a bulk batch runs or its confirmation
-   * is open, in-flight snapshot ids are exempt so a mid-run refetch triggered
-   * by per-mutation invalidation cannot prune failed or pending disconnects.
-   */
   if (
     selection.scope === selectionScopeKey &&
     selectedIds.size > 0 &&
@@ -314,43 +240,39 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
 
   const normalizedSearch = search.trim().toLowerCase();
   const filteredPlatforms = normalizedSearch
-    ? SUPPORTED_PLATFORMS.filter(
+    ? PLATFORM_CATALOG.filter(
         (p) =>
           p.name.toLowerCase().includes(normalizedSearch) ||
           p.description.toLowerCase().includes(normalizedSearch),
       )
-    : SUPPORTED_PLATFORMS;
+    : PLATFORM_CATALOG;
 
-  /**
-   * Brand Profile ids claimed by connected accounts, forwarded to the shared
-   * `BrandProfileSelect` as `unresolvedProfileIds`. The component keeps only
-   * ids missing from `brandProfiles` and renders them as name-only "Unknown
-   * profile" rows, so accounts whose owning profile was deleted or left scope
-   * stay selectable instead of silently dropping out of the filter.
-   */
+  const platformChannelSummary = useMemo(() => {
+    const counts = new Map<string, number>();
+    const profileIds = new Map<string, Set<string>>();
+    for (const account of integrations) {
+      const key = account.providerIdentifier.toLowerCase();
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+      let profiles = profileIds.get(key);
+      if (!profiles) {
+        profiles = new Set();
+        profileIds.set(key, profiles);
+      }
+      if (account.brandProfileId) profiles.add(account.brandProfileId);
+    }
+    return { counts, profileIds };
+  }, [integrations]);
+
   const accountProfileIds = useMemo(
     () => accounts.map((account) => account.brand_profile_id),
     [accounts],
   );
 
-  /**
-   * Resolves each connected account's current Brand Profile for row ownership context.
-   *
-   * Missing profiles deliberately remain unresolved so legacy or deleted-profile accounts
-   * can render as "Unknown profile" instead of disappearing from the channel directory.
-   */
   const profileById = useMemo(
     () => new Map(brandProfiles.map((profile) => [profile.id, profile])),
     [brandProfiles],
   );
 
-  /**
-   * Filters connected accounts into the flat row collection displayed by the directory.
-   *
-   * Each account is evaluated independently against platform, profile, status, and keyword
-   * constraints. Profile names participate in keyword search, while unmapped ownership is
-   * presented as "Unknown profile" so every live connection stays reachable.
-   */
   const filteredChannels = useMemo(() => {
     const query = accountQuery.trim().toLowerCase();
 
@@ -382,10 +304,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
     t,
   ]);
 
-  /**
-   * Projects each filtered account into table presentation state: owning profile,
-   * integration display overrides, health annotation, and in-flight OAuth state.
-   */
   const channelEntries = useMemo<ChannelTableEntry[]>(
     () =>
       filteredChannels.map((account) => {
@@ -402,7 +320,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
     [filteredChannels, integrationById, profileById, statusById, connectingPlatform],
   );
 
-  /** Visible-row selection derived values: select-all means the filtered set only. */
   const visibleSelectedCount = useMemo(
     () =>
       channelEntries.reduce(
@@ -414,12 +331,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   const allVisibleSelected =
     channelEntries.length > 0 && visibleSelectedCount === channelEntries.length;
 
-  /**
-   * Toggles every currently visible row at once: a fully-selected visible set
-   * deselects all of it, otherwise all visible ids are unioned into the
-   * selection. Ids hidden by active filters are never touched either way, so
-   * deselect-visible cannot silently discard hidden choices.
-   */
   const handleToggleVisibleSelection = useCallback(() => {
     setSelection((prev) => {
       const next = new Set(prev.ids);
@@ -434,7 +345,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
     });
   }, [channelEntries]);
 
-  /** Toggles one channel's bulk-selection membership; disabled while a batch runs. */
   const handleToggleSelection = useCallback((id: string) => {
     setSelection((prev) => {
       const next = new Set(prev.ids);
@@ -460,10 +370,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
     Number(selectedBrandProfileId !== null) +
     Number(statusFilter !== "all");
 
-  /**
-   * Resets every account-table filter back to its unfiltered default so the
-   * filtered-empty row's "Clear filters" action restores the full listing.
-   */
   const resetAccountFilters = () => {
     setAccountQuery("");
     setSelectedPlatforms([]);
@@ -471,19 +377,8 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
     setStatusFilter("all");
   };
 
-  /**
-   * Initiates the OAuth 2.0 authorization redirect flow for a selected social provider.
-   *
-   * Runs the real `useStartPlatformOAuth` mutation and redirects the browser to
-   * the contract `authorization_url`. No Brand Profile is sent: the callback
-   * stages the authorized account(s) and the assignment route selects the
-   * owning profile immediately before persistence. Non-contract directory
-   * slugs are ignored; failures surface through the inline `Alert`.
-   *
-   * @param platformId - Unique slug identifier of the target provider (e.g. 'tiktok').
-   */
-  const handleConnect = async (platformId: string) => {
-    if (!isAdmin || !isContractPlatform(platformId)) return;
+  const handleConnect = async (platformId: Platform) => {
+    if (!isAdmin) return;
     setConnectingPlatform(platformId);
     setConnectError(null);
     try {
@@ -499,13 +394,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
     }
   };
 
-  /**
-   * Confirms the pending disconnect request inside the `CenterAlertDialog`.
-   *
-   * Calls `useDisconnectPlatform` for the targeted account, closes the dialog,
-   * and reports the outcome via toast. Mutation errors are caught here so the
-   * dialog always settles; the failed account stays listed for retry.
-   */
   const handleConfirmDisconnect = async () => {
     const target = disconnectTarget;
     if (!isAdmin || !target) return;
@@ -525,11 +413,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
     }
   };
 
-  /**
-   * Opens the bulk disconnect confirmation with an exact snapshot of the
-   * currently selected accounts, resolved against loaded data so hidden-by-
-   * filter selections are included and ids disconnected elsewhere are skipped.
-   */
   const openBulkDisconnect = () => {
     if (!isAdmin) return;
     const targets = accounts.filter((account) => selectedIds.has(account.id));
@@ -537,15 +420,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
     setBulkTargets(targets);
   };
 
-  /**
-   * Executes the confirmed bulk disconnect sequentially over the snapshot
-   * latched when the dialog opened — ids added to the selection afterwards are
-   * not disconnectable through this dialog. Each successful mutation removes
-   * its id immediately so a mid-run invalidation refetch can prune only the
-   * resolved rows; failures stay selected for retry. The dialog stays open
-   * (and controls disabled) until every attempt settles, then the toast
-   * reports the real success/failure counts.
-   */
   const handleConfirmBulkDisconnect = async () => {
     const targets = bulkTargets;
     if (!isAdmin || !targets || bulkRunning) return;
@@ -603,17 +477,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
     }
   };
 
-  /**
-   * Opens the in-place Brand Profile editor in create or edit mode.
-   *
-   * An omitted profile starts an empty draft; a supplied profile copies its saved name
-   * and color. Keeping both flows in one dialog lets profile-filter edit actions
-   * and toolbar-level "Create Brand Profile" share one surface, while the latched
-   * `editingProfile` distinguishes them so `onSuccess` can chain only fresh creations
-   * into the connect-account flow.
-   *
-   * @param profile - Existing profile to modify, or `undefined` to create one.
-   */
   const openProfileEditor = (profile?: BrandProfile) => {
     setEditingProfile(profile ?? null);
     setProfileEditorOpen(true);
@@ -869,7 +732,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         </TabsContent>
       </Tabs>
 
-      {/* In-place Brand Profile editor keeps profile management on the Channels page. */}
       <BrandProfileDialog
         open={profileEditorOpen}
         onOpenChange={(open) => {
@@ -878,9 +740,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         }}
         profile={editingProfile}
         onSuccess={(profile) => {
-          // `editingProfile` is still latched here (the dialog fires onSuccess before
-          // onClose), so only a fresh creation selects the new profile and opens
-          // the connector; saving an edit leaves the workspace filter untouched.
           if (editingProfile === null) {
             setSelectedBrandProfileId(profile.id);
             setAddAccountOpen(true);
@@ -888,7 +747,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         }}
       />
 
-      {/* Connect social account dialog */}
       <CenterDialog
         open={isAdmin && addAccountOpen}
         onOpenChange={(open) => setAddAccountOpen(isAdmin && open)}
@@ -904,15 +762,15 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
           </CenterDialogHeader>
 
           <div className="min-w-0 space-y-4 py-2">
-            {/* Social Channels to Connect */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-semibold text-ink">{t("Social Channels")}</label>
-              </div>
+              <label htmlFor="platform-search" className="block text-xs font-semibold text-ink">
+                {t("Social Channels")}
+              </label>
 
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-ink-3" />
                 <Input
+                  id="platform-search"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder={t("Search platforms…")}
@@ -927,20 +785,13 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
               ) : (
                 <div className="flex flex-col gap-2.5 sm:max-h-[48dvh] sm:overflow-y-auto sm:overscroll-contain sm:pr-1">
                   {filteredPlatforms.map((platform) => {
-                    // The directory is the contract roster, so every row is a
-                    // connectable Platform. The guard only narrows `id` to the
-                    // contract union for the capability lookup below.
-                    const capability = isContractPlatform(platform.id)
-                      ? capabilityByPlatform.get(platform.id)
-                      : undefined;
-                    const platformChannels = integrations.filter(
-                      (account) =>
-                        account.providerIdentifier.toLowerCase() === platform.id.toLowerCase(),
-                    );
-                    const eligibleProfileCount = brandProfiles.filter(
-                      (profile) =>
-                        !platformChannels.some((account) => account.brandProfileId === profile.id),
-                    ).length;
+                    const capability = capabilityByPlatform.get(platform.id);
+                    const platformChannelCount =
+                      platformChannelSummary.counts.get(platform.id) ?? 0;
+                    const claimedProfiles = platformChannelSummary.profileIds.get(platform.id);
+                    const eligibleProfileCount = claimedProfiles
+                      ? brandProfiles.filter((profile) => !claimedProfiles.has(profile.id)).length
+                      : brandProfiles.length;
                     const noEligibleProfile =
                       brandProfiles.length === 0 || eligibleProfileCount === 0;
                     const connectUnavailable = capability?.connect_available === false;
@@ -956,7 +807,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="font-semibold text-ink text-[13.5px]">
-                                {platformDisplayName(platform.id)}
+                                {platform.name}
                               </span>
                               <span className="rounded-full bg-line/60 px-2 py-0.5 text-[10px] font-mono text-ink-3 uppercase">
                                 {platform.category}
@@ -969,12 +820,12 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                         </div>
 
                         <div className="flex min-w-0 flex-col items-start gap-2 sm:max-w-[45%] sm:shrink-0 sm:items-end">
-                          {platformChannels.length > 0 && (
+                          {platformChannelCount > 0 && (
                             <div className="flex max-w-full items-center gap-1.5 text-xs text-ink-2">
                               <Check className="size-3.5 shrink-0 text-green" aria-hidden="true" />
                               <span>
                                 {t("{count} connected accounts", {
-                                  count: platformChannels.length,
+                                  count: platformChannelCount,
                                 })}
                               </span>
                             </div>
@@ -1005,7 +856,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         </CenterDialogContent>
       </CenterDialog>
 
-      {/* Disconnect confirmation */}
       <CenterAlertDialog
         open={disconnectTarget !== null}
         onOpenChange={(open) => {
@@ -1040,7 +890,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         </CenterAlertDialogContent>
       </CenterAlertDialog>
 
-      {/* Bulk disconnect confirmation: holds the snapshot latched by the pill. */}
       <CenterAlertDialog
         open={bulkTargets !== null}
         onOpenChange={(open) => {

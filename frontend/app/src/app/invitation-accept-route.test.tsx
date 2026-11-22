@@ -66,12 +66,6 @@ import InvitationAcceptRoute from "@/app/invitation-accept-route";
 
 const token = "permission-preview-token-for-ui";
 
-/**
- * Renders the acceptance route with a query token.
- *
- * @param search - Query string following the route path.
- * @returns Testing-library render result.
- */
 function renderRoute(search: string) {
   return render(
     <MemoryRouter initialEntries={[`/invitations/accept${search}`]}>
@@ -134,6 +128,41 @@ describe("invitation acceptance route", () => {
     expect(screen.getByText("Accepting your invitation…")).toBeInTheDocument();
   });
 
+  it("keeps the joined state when the invitation preview refreshes to accepted", async () => {
+    state.isSignedIn = true;
+    state.preview = {
+      data: {
+        email: "invitee@meltiply.local",
+        expires_at: "2026-01-08T00:00:00.000Z",
+        role: "viewer",
+        status: "pending",
+        workspace_name: "Shared Studio",
+      },
+      error: null,
+      isPending: false,
+    };
+    state.acceptMutate.mockImplementationOnce(
+      (_token: string, callbacks: { onSuccess: () => Promise<void> }) => {
+        void callbacks.onSuccess();
+      },
+    );
+    const view = renderRoute(`?token=${token}`);
+    await screen.findByText("You joined the workspace.");
+
+    state.preview = {
+      ...state.preview,
+      data: { ...state.preview.data!, status: "accepted" },
+    };
+    view.rerender(
+      <MemoryRouter initialEntries={[`/invitations/accept?token=${token}`]}>
+        <InvitationAcceptRoute />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("You joined the workspace.")).toBeInTheDocument();
+    expect(screen.queryByText(/no longer pending/)).not.toBeInTheDocument();
+  });
+
   it("reports an invalid or expired invitation", () => {
     state.preview = {
       data: null,
@@ -146,11 +175,6 @@ describe("invitation acceptance route", () => {
     ).toBeInTheDocument();
   });
 
-  /**
-   * An unverified invited account gets the verify-then-return guidance, keyed
-   * off the API's typed `email_verification_required` code rather than a
-   * substring match on the error message.
-   */
   it("guides an unverified invitee to verify their email", async () => {
     state.isSignedIn = true;
     state.preview = {
@@ -183,10 +207,6 @@ describe("invitation acceptance route", () => {
     ).toBeInTheDocument();
   });
 
-  /**
-   * Any other acceptance failure renders safe user-facing copy: the raw
-   * provider message never reaches the page.
-   */
   it("shows safe copy for a non-verification acceptance failure", async () => {
     state.isSignedIn = true;
     state.preview = {
@@ -207,10 +227,15 @@ describe("invitation acceptance route", () => {
       onError: (cause: unknown) => void;
     };
     act(() => {
-      options.onError(new Error("raw provider detail that must not leak"));
+      options.onError(
+        Object.assign(new Error("We could not verify this invitation."), {
+          code: "invitation_conflict",
+        }),
+      );
     });
 
     expect(await screen.findByText("An error has occurred.")).toBeInTheDocument();
-    expect(screen.queryByText(/raw provider detail/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Verify your email address/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/We could not verify/)).not.toBeInTheDocument();
   });
 });

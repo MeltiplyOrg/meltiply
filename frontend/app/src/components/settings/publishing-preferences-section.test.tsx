@@ -31,7 +31,6 @@ vi.mock("@/components/posts/queue-timezone-picker", () => ({
   QueueTimezonePicker: () => <div>Timezone picker</div>,
 }));
 
-/** Builds one saved preference document with the email channel enabled. */
 function preferences() {
   return {
     email_available: true,

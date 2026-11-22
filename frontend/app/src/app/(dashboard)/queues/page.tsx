@@ -50,7 +50,6 @@ import { QueueCalendar } from "@/components/posts/queue-calendar";
 import { TimeOfDayField } from "@/components/posts/time-of-day-field";
 import { QueueTimezonePicker } from "@/components/posts/queue-timezone-picker";
 
-/** Localizes the Queue contract's Sunday-zero weekdays without interpreting them in the browser's timezone. */
 function queueWeekdayLabels(language: string): string[] {
   const formatter = new Intl.DateTimeFormat(language, { weekday: "long", timeZone: "UTC" });
   return Array.from({ length: 7 }, (_, weekday) =>
@@ -58,7 +57,6 @@ function queueWeekdayLabels(language: string): string[] {
   );
 }
 
-/** Focused recurring-plan form composed from canonical CenterDialog, Input and Select owners. Slot rows keep independent identities so removal does not move keyboard focus to another value. */
 function QueueEditor({
   queue,
   brandProfileId,
@@ -90,7 +88,6 @@ function QueueEditor({
   );
   const [error, setError] = useState<string | null>(null);
   const busy = create.isPending || update.isPending;
-  /** Persists the complete validated plan; server errors keep the creator's inputs and the dialog open. */
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -250,7 +247,6 @@ function QueueEditor({
   );
 }
 
-/** Queue configuration menu shared by the desktop rail and compact phone selector. Callers retain editor/confirmation state and render it only for authorized administrators; selecting an action never changes the active Queue. */
 function QueueActions({
   queue,
   onEdit,
@@ -293,7 +289,6 @@ type Confirmation =
   | { kind: "delete"; queue: PublishingQueue }
   | { kind: "remove"; queue: PublishingQueue; post: Post };
 
-/** Calendar-first Queue workspace. Admin configuration remains in the compact plan rail; the selected Queue owns its timezone-aware calendar, while the directory confirms safe removal and retirement. */
 export default function QueuesPage() {
   const { t, language } = useI18n();
   const scope = useSessionScope();
@@ -306,8 +301,6 @@ export default function QueuesPage() {
     canManageConfiguration,
     isLoading: workspaceLoading,
   } = useWorkspace();
-  // Queue configuration always has one owner, without changing the workspace's
-  // aggregate selection merely because this route supplies its initial default.
   const activeProfileId =
     brandProfiles.find((profile) => profile.id === selectedBrandProfileId)?.id ??
     brandProfiles[0]?.id ??
@@ -328,18 +321,15 @@ export default function QueuesPage() {
   const remove = useRemovePostFromQueue(scope);
   const retire = useDeleteQueue(scope);
   const busy = remove.isPending || retire.isPending;
-  /** Opens an identity-keyed editor without discarding another Queue's persisted configuration. */
   function editQueue(queue: PublishingQueue) {
     setEditor({ queue, key: crypto.randomUUID(), brandProfileId: queue.brand_profile_id });
     setEditorOpen(true);
   }
-  /** Opens the existing destructive confirmation; no retirement occurs until confirmed. */
   function deleteQueue(queue: PublishingQueue) {
     setConfirmation({ kind: "delete", queue });
     setActionError(null);
     setConfirmOpen(true);
   }
-  /** Commits the confirmed scope only; a lifecycle conflict stays visible without discarding the pending confirmation. */
   async function confirm() {
     if (!confirmation || busy) return;
     setActionError(null);

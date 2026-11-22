@@ -22,7 +22,6 @@ const LABELS: Record<string, string> = {
   unknown: "Unknown",
 };
 
-/** Renders one badge through the real i18n provider and returns its shared pill. */
 function renderBadge(status: string) {
   render(
     <I18nProvider>

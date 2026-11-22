@@ -9,7 +9,6 @@ import type {
   Platform,
 } from "@/types";
 
-/** Stable metric order shared by the toolbar, headers, and KPI row. */
 export const ANALYTICS_METRICS: readonly AnalyticsMetric[] = [
   "views",
   "likes",
@@ -17,33 +16,23 @@ export const ANALYTICS_METRICS: readonly AnalyticsMetric[] = [
   "shares",
 ];
 
-const ANALYTICS_FORMATS: readonly AnalyticsFormat[] = ["text", "image", "video", "carousel"];
+export const ANALYTICS_FORMATS: readonly AnalyticsFormat[] = ["text", "image", "video", "carousel"];
+const ANALYTICS_FORMAT_SET: ReadonlySet<string> = new Set(ANALYTICS_FORMATS);
+
+export function isAnalyticsFormat(value: string): value is AnalyticsFormat {
+  return ANALYTICS_FORMAT_SET.has(value);
+}
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/** Default metric when the URL carries no supported value. */
 const DEFAULT_ANALYTICS_METRIC: AnalyticsMetric = "views";
-/** Default range when the URL carries no supported value. */
 export const DEFAULT_ANALYTICS_RANGE: AnalyticsRangePreset = "30d";
-/** Rows raised by one Load more action, bounded by the page's maximum. */
 const ANALYTICS_LIMIT_STEP = 10;
-/** Initial top-Posts page size. */
 export const ANALYTICS_INITIAL_LIMIT = 10;
-/** Maximum top-Posts window the page requests; the API allows up to 100. */
 export const ANALYTICS_MAX_LIMIT = 50;
-/** Daily sync cadence plus margin, after which the page warns about freshness. */
 const ANALYTICS_STALE_AFTER_MS = 26 * 60 * 60 * 1_000;
 
-/** Metric cell meaning derived from real coverage and snapshot state. */
 export type AnalyticsMetricState = "measured" | "partial" | "unsupported" | "awaiting-sync";
 
-/**
- * Resolves URL state without throwing: unknown ranges and metrics fall back to
- * their defaults, and an unsupported platform becomes the aggregate selection.
- *
- * @param searchParams - Current route query string.
- * @param availablePlatforms - Analytics-capable platforms offered by the toolbar.
- * @returns Parsed range, single Platform filter, and ranking metric.
- */
 export function parseAnalyticsSearchParams(
   searchParams: URLSearchParams,
   availablePlatforms: readonly Platform[],
@@ -71,15 +60,6 @@ export function parseAnalyticsSearchParams(
   };
 }
 
-/**
- * Serializes the page's shareable state. The range and metric are always
- * explicit; the platform is omitted for "All platforms".
- *
- * @param range - Selected range preset.
- * @param platform - Selected Platform, or undefined for the aggregate.
- * @param metric - Selected ranking metric.
- * @returns Query-string body without a leading `?`.
- */
 export function formatAnalyticsSearchParams(input: {
   accountId?: string;
   format?: AnalyticsFormat;
@@ -94,24 +74,10 @@ export function formatAnalyticsSearchParams(input: {
   return params.toString();
 }
 
-/** Raises a top-Posts window by one step without exceeding the page maximum. */
 export function nextAnalyticsLimit(current: number): number {
   return Math.min(current + ANALYTICS_LIMIT_STEP, ANALYTICS_MAX_LIMIT);
 }
 
-/**
- * Decides what a Post row's metric cells may display.
- *
- * `unsupported` wins over `awaiting-sync` because an unsupported Destination
- * can never produce a measurement; a row mixing supported and unsupported
- * Destinations reports `partial` with its honest sum, and a row with some
- * destinations still awaiting their first snapshot keeps its measured sum plus
- * the table's Awaiting sync badge. Only a fully supported row with a snapshot
- * is `measured`.
- *
- * @param row - Post row carrying platform coverage and sync state.
- * @returns Display state for every metric cell in the row.
- */
 export function analyticsRowMetricState(
   row: Pick<AnalyticsPostRow, "last_synced_at" | "platforms" | "unsupported_platforms">,
 ): AnalyticsMetricState {
@@ -122,19 +88,8 @@ export function analyticsRowMetricState(
   return row.unsupported_platforms.length > 0 ? "partial" : "measured";
 }
 
-/** Empty cohort state, or null when the page has real coverage to show. */
 export type AnalyticsEmptyState = "no-posts" | "all-unsupported" | "awaiting-sync";
 
-/**
- * Selects the cohort empty state from the summary's published coverage.
- *
- * A cohort with no published destinations is empty before coverage matters.
- * Every unsupported destination is its own state; otherwise all platforms
- * awaiting their first snapshot means metrics will appear later.
- *
- * @param summary - Successful summary response for the current cohort.
- * @returns The matching empty state, or null when metrics are available.
- */
 export function resolveAnalyticsEmptyState(summary: AnalyticsSummary): AnalyticsEmptyState | null {
   if (summary.totals.post_count === 0) return "no-posts";
   const rows = summary.by_platform;
@@ -148,7 +103,6 @@ export function resolveAnalyticsEmptyState(summary: AnalyticsSummary): Analytics
   return null;
 }
 
-/** True when the latest stored snapshot is older than the daily-sync warning margin. */
 export function isAnalyticsStale(lastSyncedAt: string | null, now = Date.now()): boolean {
   if (lastSyncedAt === null) return false;
   const synced = new Date(lastSyncedAt).getTime();
@@ -166,9 +120,38 @@ const INTEGER_FORMATS: Record<Language, Intl.NumberFormat> = {
   vi: new Intl.NumberFormat("vi-VN"),
 };
 
-/** Formats an exact analytics integer with locale thousands separators. */
 export function formatAnalyticsInteger(value: number, language: Language = "en"): string {
   return INTEGER_FORMATS[language].format(value);
+}
+
+const DECIMAL_FORMATS: Record<Language, Intl.NumberFormat> = {
+  en: new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }),
+  es: new Intl.NumberFormat("es-ES", { maximumFractionDigits: 1 }),
+  "pt-BR": new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }),
+  fr: new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }),
+  de: new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 }),
+  it: new Intl.NumberFormat("it-IT", { maximumFractionDigits: 1 }),
+  zh: new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 }),
+  vi: new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1 }),
+};
+
+export function formatAnalyticsDecimal(value: number, language: Language = "en"): string {
+  return DECIMAL_FORMATS[language].format(value);
+}
+
+const WHOLE_FORMATS: Record<Language, Intl.NumberFormat> = {
+  en: new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }),
+  es: new Intl.NumberFormat("es-ES", { maximumFractionDigits: 0 }),
+  "pt-BR": new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 }),
+  fr: new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }),
+  de: new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 }),
+  it: new Intl.NumberFormat("it-IT", { maximumFractionDigits: 0 }),
+  zh: new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 0 }),
+  vi: new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }),
+};
+
+export function formatAnalyticsWhole(value: number, language: Language = "en"): string {
+  return WHOLE_FORMATS[language].format(value);
 }
 const COMPACT_FORMATS: Record<Language, Intl.NumberFormat> = {
   en: new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, notation: "compact" }),
@@ -181,7 +164,6 @@ const COMPACT_FORMATS: Record<Language, Intl.NumberFormat> = {
   vi: new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1, notation: "compact" }),
 };
 
-/** Formats a stored counter compactly with at most one decimal; defaults to English. */
 export function formatAnalyticsCompact(value: number, language: Language = "en"): string {
   return COMPACT_FORMATS[language].format(value);
 }
@@ -205,7 +187,6 @@ const TIMESTAMP_FORMATS: Record<Language, Intl.DateTimeFormat> = {
   vi: new Intl.DateTimeFormat("vi-VN", TIMESTAMP_OPTIONS),
 };
 
-/** Formats an exact timestamp for `title`, tooltips, and the freshness label. */
 export function formatAnalyticsTimestamp(iso: string, language: Language = "en"): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? iso : TIMESTAMP_FORMATS[language].format(date);
@@ -219,10 +200,17 @@ const RELATIVE_UNITS: readonly [Intl.RelativeTimeFormatUnit, number][] = [
   ["minute", 60],
 ];
 
-/**
- * Formats the publication time relative to now, falling back to seconds for
- * very recent Posts. The exact timestamp always accompanies this in the UI.
- */
+const RELATIVE_FORMATS: Record<Language, Intl.RelativeTimeFormat> = {
+  en: new Intl.RelativeTimeFormat("en", { numeric: "auto" }),
+  es: new Intl.RelativeTimeFormat("es", { numeric: "auto" }),
+  "pt-BR": new Intl.RelativeTimeFormat("pt-BR", { numeric: "auto" }),
+  fr: new Intl.RelativeTimeFormat("fr", { numeric: "auto" }),
+  de: new Intl.RelativeTimeFormat("de", { numeric: "auto" }),
+  it: new Intl.RelativeTimeFormat("it", { numeric: "auto" }),
+  zh: new Intl.RelativeTimeFormat("zh", { numeric: "auto" }),
+  vi: new Intl.RelativeTimeFormat("vi", { numeric: "auto" }),
+};
+
 export function formatAnalyticsRelativeTime(
   iso: string,
   language: Language = "en",
@@ -231,7 +219,7 @@ export function formatAnalyticsRelativeTime(
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   const deltaSeconds = Math.round((date.getTime() - now) / 1_000);
-  const formatter = new Intl.RelativeTimeFormat(language, { numeric: "auto" });
+  const formatter = RELATIVE_FORMATS[language];
   for (const [unit, seconds] of RELATIVE_UNITS) {
     if (Math.abs(deltaSeconds) >= seconds) {
       return formatter.format(Math.round(deltaSeconds / seconds), unit);

@@ -5,7 +5,6 @@ import { applyThemeImmediately } from "@meltiply/ui/theme-transition";
 
 let frames: FrameRequestCallback[] = [];
 
-/** Gives each scenario an isolated deterministic browser paint queue. */
 beforeEach(() => {
   frames = [];
   document.documentElement.className = "";
@@ -15,7 +14,6 @@ beforeEach(() => {
   });
 });
 
-/** Releases pending palette paint work before restoring browser globals. */
 afterEach(() => {
   while (frames.length > 0) {
     const pending = frames;

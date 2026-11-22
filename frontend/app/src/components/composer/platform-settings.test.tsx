@@ -89,12 +89,46 @@ it.each([
 );
 
 beforeAll(() => {
-  // Radix focuses the selected option with an API jsdom does not implement.
   Element.prototype.scrollIntoView = vi.fn();
 });
 afterEach(cleanup);
 
-/** Keeps the real settings editor controlled as it is in the composer. */
+it("applies the Channel capability to inline validation", () => {
+  render(
+    <I18nProvider>
+      <PlatformSettings
+        provider="youtube"
+        channelName="Main"
+        channelId="channel"
+        settings={{
+          tags: ["a", "b", "c"].map((tag) => ({ value: tag, label: tag })),
+        }}
+        mediaKinds={["video"]}
+        capability={{
+          accepted_mime_types: [],
+          analytics: false,
+          asset_types: [],
+          comments: false,
+          connect_available: true,
+          max_caption_length: null,
+          max_file_size: null,
+          max_hashtags: 2,
+          max_media_count: null,
+          max_video_duration_sec: null,
+          min_media_count: 0,
+          multi_asset_types: [],
+          notes: [],
+          platform: "youtube",
+          publish: true,
+          reply: false,
+        }}
+        onChange={() => {}}
+      />
+    </I18nProvider>,
+  );
+  expect(screen.getByText("Main: use no more than 2 tags.")).toBeInTheDocument();
+});
+
 function InstagramSettings() {
   const [settings, setSettings] = useState<Record<string, unknown>>({
     post_type: "reel",

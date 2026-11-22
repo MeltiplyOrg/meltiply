@@ -17,12 +17,6 @@ import { useBroadcastControls } from "@/lib/queries";
 import type { BroadcastInfo } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
-/**
- * Reveals encoder credentials only after a writer's explicit request, in local
- * component state rather than a persisted/query cache. Hiding or unmounting
- * aborts reads and discards secrets. Ending requires a separate confirmation
- * and reuses the durable mutation key on an uncertain response.
- */
 export function BroadcastControls({ distributionId }: { distributionId: string }) {
   const { t } = useI18n();
   const controls = useBroadcastControls(useSessionScope());
@@ -33,7 +27,6 @@ export function BroadcastControls({ distributionId }: { distributionId: string }
   const pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
 
-  /** Fetches the current provider state once and rejects any superseded response after hide/unmount. */
   async function reveal() {
     pending.current?.abort();
     const controller = new AbortController();
@@ -53,7 +46,6 @@ export function BroadcastControls({ distributionId }: { distributionId: string }
     }
   }
 
-  /** Ends only this confirmed broadcast, clears credentials, and retains the confirmation on failure. */
   async function end() {
     setError(null);
     try {

@@ -8,11 +8,6 @@ interface ArticleTransition {
   dispose: () => void;
 }
 
-/**
- * Groups the preface and each heading with its following blocks, including
- * nested heading sections. Only layout-neutral content/prose wrappers flatten;
- * lists, tables, callouts and pagination retain their internal layout.
- */
 function articleSections(article: HTMLElement): HTMLElement[][] {
   const sections: HTMLElement[][] = [[]];
   const visit = (parent: HTMLElement) => {
@@ -30,11 +25,6 @@ function articleSections(article: HTMLElement): HTMLElement[][] {
   return sections.filter((section) => section.length > 0);
 }
 
-/**
- * Replaces each painted text line with a rounded loading bar at the same
- * article-relative coordinates. Adjacent inline fragments merge, but table
- * columns remain separate. The overlay is decorative and never changes layout.
- */
 function articleSkeleton(article: HTMLElement): HTMLElement {
   const bounds = article.getBoundingClientRect();
   const lines: { left: number; top: number; right: number; height: number }[] = [];
@@ -83,12 +73,6 @@ function articleSkeleton(article: HTMLElement): HTMLElement {
   return overlay;
 }
 
-/**
- * Owns article-only navigation effects while Astro and the TOC controller own
- * fetching, scrolling and route commits. Abort, failure and supersession restore
- * the outgoing article; initial hydration remains static. Sections cascade in
- * over a bounded ~200ms stagger.
- */
 function createArticleTransition(): ArticleTransition {
   let pending: {
     article: HTMLElement;
@@ -100,7 +84,6 @@ function createArticleTransition(): ArticleTransition {
   let animations: Animation[] = [];
   let generation = 0;
 
-  /** Releases temporary layers and restores interaction, including on an outgoing detached article. */
   const reset = () => {
     generation++;
     for (const animation of animations) animation.cancel();
@@ -114,7 +97,6 @@ function createArticleTransition(): ArticleTransition {
     pending = null;
   };
 
-  /** Starts the text-to-bars cross-morph immediately; fetching runs concurrently without a synthetic loading delay. */
   const prepare = (event: DocumentEventMap["astro:before-preparation"]) => {
     if (event.from.pathname === event.to.pathname) return;
     reset();
@@ -135,7 +117,7 @@ function createArticleTransition(): ArticleTransition {
           block.animate(
             [
               { opacity: style.opacity, filter: style.filter },
-              { opacity: 0, filter: duration ? "blur(2px)" : "none" },
+              { opacity: 0, filter: "blur(2px)" },
             ],
             { duration, easing: effectEasing, fill: "both" },
           ),
@@ -169,7 +151,6 @@ function createArticleTransition(): ArticleTransition {
     };
   };
 
-  /** Reveals sections in order with a gentle six-pixel rise; a softer ease-out avoids the outgoing morph's sharp acceleration. */
   const reveal = () => {
     if (!pending) return;
     reset();
@@ -177,9 +158,6 @@ function createArticleTransition(): ArticleTransition {
     if (!article) return;
     const sections = articleSections(article);
     const sectionDuration = 160;
-    // Fixed stagger budget: sections still cascade top-down, but the whole
-    // sequence fits in ~360ms regardless of heading count (the previous
-    // index * 160ms serial reveal pushed long guides past a second).
     const stagger = sections.length > 1 ? Math.min(200 / (sections.length - 1), 40) : 0;
     const owner = generation;
     for (const [index, section] of sections.entries())
@@ -208,7 +186,6 @@ function createArticleTransition(): ArticleTransition {
   document.addEventListener("astro:before-preparation", prepare);
   return {
     reveal,
-    /** Removes the route listener and all transient effects when the persisted shell unmounts. */
     dispose: () => {
       document.removeEventListener("astro:before-preparation", prepare);
       reset();
@@ -216,11 +193,6 @@ function createArticleTransition(): ArticleTransition {
   };
 }
 
-/**
- * Persists article animation ownership across keyed guide replacements. The
- * pathname layout effect stages entrances before paint; ordinary first loads
- * do not animate or wait for the controller.
- */
 export function DocsArticleTransition({ pathname }: { pathname: string }) {
   const controller = useRef<ArticleTransition | null>(null);
 

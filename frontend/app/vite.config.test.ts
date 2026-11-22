@@ -75,5 +75,15 @@ describe("Vite frontend configuration", () => {
       next,
     );
     expect(next).toHaveBeenCalledTimes(2);
+
+    const openRedirectResponse = { end: vi.fn(), writeHead: vi.fn() };
+    middleware(
+      { headers: { accept: "text/html", host: "100.64.0.1:3000" }, url: "//evil.test/phish" },
+      openRedirectResponse,
+      next,
+    );
+    expect(openRedirectResponse.writeHead).toHaveBeenCalledWith(308, {
+      Location: "http://dashboard.example.test:3000/",
+    });
   });
 });

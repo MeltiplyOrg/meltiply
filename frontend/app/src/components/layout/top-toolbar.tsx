@@ -8,23 +8,11 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@melti
 
 export { TopToolbarButton } from "@/components/primitives/top-toolbar-button";
 
-/**
- * Exit duration of the shared menu surface animation (`menu-surface-out` in
- * `@meltiply/ui/motion.css`); the native disclosure stays mounted this long so
- * the panel leaves like every other menu. Keep the two values in sync.
- */
 const MENU_EXIT_MS = 120;
 
-/**
- * Portalled layers that belong to the disclosure even though the DOM puts them
- * outside it: the shared menu surface, any Radix popper wrapper, and the
- * fallback roles Radix uses for listboxes and menus. A pointer down inside one
- * of these must not close the filter builder.
- */
 const NESTED_LAYER_SELECTOR =
   "[data-menu-surface], [data-radix-popper-content-wrapper], [role='menu'], [role='listbox']";
 
-/** Shared Gr8r collection control row; wrapping preserves mobile access without clipping overlays. */
 export function TopToolbar({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div
@@ -39,7 +27,6 @@ export function TopToolbar({ children, className }: { children: ReactNode; class
   );
 }
 
-/** Controlled compact collection search; the same mounted input survives filter and label updates. */
 export function TopToolbarSearch({
   value,
   onChange,
@@ -82,7 +69,6 @@ export function TopToolbarSearch({
   );
 }
 
-/** A supported equality filter; the route owns its real value, selector, and reset behavior. */
 export interface CollectionFilterField {
   id: string;
   label: string;
@@ -91,16 +77,6 @@ export interface CollectionFilterField {
   onClear: () => void;
 }
 
-/**
- * Ports Gr8r's field-row builder, Add filter chips, per-row removal, and Clear all
- * into the existing real equality filters. Added rows do not apply a filter until
- * their value changes. Route state owns the predicate; this component never
- * invents backend operators. Escape restores focus and nested menus stay open.
- *
- * The panel is a native disclosure, so it stays mounted through the shared menu
- * exit before the browser hides it; its surface, rows, and animation come from
- * the same `[data-menu-surface]` vocabulary as every Radix menu.
- */
 export function TopToolbarFilters({
   activeCount,
   fields,
@@ -110,7 +86,6 @@ export function TopToolbarFilters({
   activeCount: number;
   fields: readonly CollectionFilterField[];
   onClearAll: () => void;
-  /** Optional toolbar-cell placement; the disclosure owns its own surface. */
   className?: string;
 }) {
   const { t } = useI18n();
@@ -123,16 +98,9 @@ export function TopToolbarFilters({
   const [addedFields, setAddedFields] = useState<ReadonlySet<string>>(new Set());
   const visibleFields = fields.filter((field) => field.active || addedFields.has(field.id));
   const availableFields = fields.filter((field) => !field.active && !addedFields.has(field.id));
-  /**
-   * Writes the surface state straight to the panel. A native disclosure shows its
-   * content before React re-renders, so the attribute has to change in the same
-   * handler as `details.open`; otherwise the first painted frame runs the exit
-   * animation and the panel flashes before its entrance.
-   */
   const setSurfaceState = (state: "open" | "closed") => {
     if (panelRef.current) panelRef.current.dataset.state = state;
   };
-  /** Opens the disclosure with its surface already in the entering state. */
   const openPanel = () => {
     const details = ref.current;
     if (!details || details.open) return;
@@ -141,12 +109,6 @@ export function TopToolbarFilters({
     setClosing(false);
     setOpen(true);
   };
-  /**
-   * Holds the native disclosure open for the shared exit animation so the panel
-   * leaves exactly like a Radix menu, then closes it for real. Every close path
-   * (Escape, outside pointer, summary toggle) routes through here; toggling the
-   * summary mid-exit cancels the pending close instead of swallowing the click.
-   */
   const close = useCallback(() => {
     const details = ref.current;
     if (!details?.open || closeTimer.current !== null) return;
@@ -167,10 +129,6 @@ export function TopToolbarFilters({
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
-      // While a nested list is open, Radix owns the press: its modal layer sets
-      // pointer-events on the rest of the page, so the press can surface here
-      // as a target outside the disclosure. The list closes itself; the
-      // builder stays open so the next field can be chosen immediately.
       if (document.querySelector("[data-radix-popper-content-wrapper]")) return;
       const target = event.target;
       if (
@@ -192,10 +150,6 @@ export function TopToolbarFilters({
         onToggle={(event) => setOpen(event.currentTarget.open)}
         onKeyDown={(event) => {
           if (event.key !== "Escape") return;
-          // A nested list closes itself on this key. Its keydown reaches here
-          // through the portal, and the list is still mounted in the same
-          // commit, so the builder stays open for the next field instead of
-          // dismissing both layers with one Escape.
           if (document.querySelector("[data-radix-popper-content-wrapper]")) return;
           close();
           event.currentTarget.querySelector("summary")?.focus();
@@ -340,15 +294,6 @@ export function TopToolbarFilters({
   );
 }
 
-/**
- * Active-filter row stays separate from the dense toolbar, matching the reference chip hierarchy.
- *
- * `inset` keeps the divider on a collection that owns an inset gutter (Channels'
- * directory table): the row is margined by the route gutter instead of padded, so
- * the line ends where the collection, tab underline, and search row end while the
- * chips keep the same content x. Omitted, the divider bleeds to the surface edges
- * like the full-width Post rows and toolbar above it.
- */
 export function TopToolbarFilterChips({
   children,
   inset = false,
@@ -368,7 +313,6 @@ export function TopToolbarFilterChips({
   );
 }
 
-/** Named removable chip centralizes keyboard access, clear icon, and compact treatment. */
 export function TopToolbarFilterChip({ label, onClear }: { label: string; onClear: () => void }) {
   const { t } = useI18n();
   return (
@@ -384,7 +328,6 @@ export function TopToolbarFilterChip({ label, onClear }: { label: string; onClea
   );
 }
 
-/** Renders the shared reset action only while filters are active. */
 export function TopToolbarReset({
   hasActiveFilters,
   onReset,

@@ -356,8 +356,6 @@ describe("analytics view", () => {
 
   it("omits the comparison card when the filter narrows to one platform", () => {
     state.searchParams = new URLSearchParams("metric=views&range=30d&platform=instagram");
-    // Placeholder data can still carry the aggregate rows while the filtered
-    // summary loads; the card must already be gone.
     state.summary = {
       data: summary({
         by_platform: [platformRow(), platformRow({ platform: "threads", views: 80 })],

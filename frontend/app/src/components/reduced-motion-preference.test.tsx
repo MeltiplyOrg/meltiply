@@ -8,10 +8,6 @@ import { useReducedMotionPreference } from "@meltiply/ui/use-reduced-motion";
 
 type Listener = (event: MediaQueryListEvent) => void;
 
-/**
- * Installs one controllable reduced-motion media query. The shared hook reads it
- * on every snapshot and subscribes to its change event, mirroring a browser.
- */
 function installReducedMotionPreference(initial: boolean) {
   const listeners = new Set<Listener>();
   let matches = initial;
@@ -55,7 +51,6 @@ function installReducedMotionPreference(initial: boolean) {
   };
 }
 
-/** Minimal consumer so the test observes re-renders, not an internal value. */
 function PreferenceProbe(): ReactElement {
   return <span data-testid="preference">{String(useReducedMotionPreference())}</span>;
 }

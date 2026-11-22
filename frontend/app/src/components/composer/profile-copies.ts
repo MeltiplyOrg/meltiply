@@ -6,7 +6,6 @@ import { createAssetUpload } from "@/lib/upload";
 import type { Asset, CreatePostInput, Post, SchedulePostInput, UpdatePostInput } from "@/types";
 import type { PostTargetDraft } from "./platform-settings";
 
-/** Per-composition identities retained after partial success; retries update rather than duplicate copies. */
 export interface ProfileCopy {
   postId?: string;
   updatedAt?: string;
@@ -14,7 +13,6 @@ export interface ProfileCopy {
   scheduledIntent?: string;
 }
 
-/** Source media belongs to the anchor profile; other profiles receive their own uploaded Asset. */
 export interface CopyAttachment {
   assetId: string;
   name: string;
@@ -28,19 +26,6 @@ export interface ProfileCopyProgress {
   error?: unknown;
 }
 
-/**
- * Saves one independent Post per selected profile through existing idempotent mutations.
- * Shared media is uploaded once per destination profile and cached by source Asset id.
- * Every draft is saved before scheduling begins. A failed save prevents all scheduling;
- * scheduling failures preserve completed intents so retry never resends successful profiles.
- * Only media used by a Channel target gates delivery; excluded media can remain in the draft.
- * Draft targets retain selections independently of permission-clamped publication
- * targets; both sets remap media to each profile's own uploaded Assets.
- * Each profile's readiness reads and polling share a five-minute deadline; timeout
- * reports a retryable profile failure without discarding its saved Post or media.
- * The caller retains `copies` for this composition only and aborts on identity change/unmount.
- * Returns false for reported profile failures; cancellation rejects with the abort reason.
- */
 export async function persistProfileCopies({
   profileIds,
   sourceProfileId,
@@ -109,8 +94,6 @@ export async function persistProfileCopies({
           const mimeType = attachment.mimeType ?? blob.type;
           const extension = mediaUploadExtension(mimeType);
           if (!extension) throw new Error("The original media has an unsupported content type.");
-          // Asset titles omit the upload suffix; reconstruct it from the same
-          // domain policy the upload endpoint validates, preserving the title.
           file = new File([blob], `${attachment.name}.${extension}`, { type: mimeType });
         }
         const task = createAssetUpload({ workspaceId, brandProfileId: profileId, file });
@@ -180,7 +163,6 @@ export async function persistProfileCopies({
       const saved = id ? await update({ id, input: profileInput }) : await create(profileInput);
       copy.postId = saved.id;
       copy.updatedAt = saved.updated_at;
-      // A new draft write supersedes/cancels the previous delivery intent.
       delete copy.scheduledIntent;
       onProgress({ profileId, phase: "saved" });
     } catch (error) {

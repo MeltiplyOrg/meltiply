@@ -12,18 +12,11 @@ import {
 import type { StatusPillTone } from "@meltiply/ui/status-pill";
 import { resolvePublicationStatus } from "@/lib/publication-status";
 
-/** How one publication status renders: shared pill tone and status icon. */
 export interface PublicationStatusPresentation {
   tone: StatusPillTone;
   Icon: LucideIcon;
 }
 
-/**
- * The single presentation map for publication status. In-flight states share
- * the scheduled accent; Reconciliation and an in-progress cancellation are
- * orange caution; terminal cancellation and unknown values are neutral. Unknown
- * is never accent, so it cannot read as scheduled.
- */
 const PRESENTATION: Record<
   ReturnType<typeof resolvePublicationStatus>,
   PublicationStatusPresentation
@@ -42,12 +35,10 @@ const PRESENTATION: Record<
   unknown: { tone: "neutral", Icon: CircleHelp },
 };
 
-/** Resolves the tone and icon for any raw publication status. */
 export function publicationStatusPresentation(status: string): PublicationStatusPresentation {
   return PRESENTATION[resolvePublicationStatus(status)];
 }
 
-/** Icon foreground per tone, shared by compact calendar chips. */
 export const PUBLICATION_ICON_TONE: Record<StatusPillTone, string> = {
   accent: "text-accent",
   green: "text-green",

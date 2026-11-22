@@ -37,20 +37,9 @@ interface SignUpCredentials extends SignInCredentials {
   name: string;
   setupSecret?: string;
   invitationToken?: string;
-  /**
-   * Chosen shared-Workspace name for the first-run screen. Sent as the
-   * bootstrap `workspace_name` so it survives the verification handoff and is
-   * applied once when the canonical Workspace is created.
-   */
   workspaceName?: string;
 }
 
-/**
- * Normalizes an error response from the Better Auth API into an Error with a readable message.
- *
- * @param response Non-ok fetch Response.
- * @returns An Error instance describing the failure.
- */
 async function parseAuthError(response: Response): Promise<Error> {
   try {
     const data = (await response.json()) as { message?: string; error?: { message?: string } };
@@ -64,30 +53,31 @@ async function parseAuthError(response: Response): Promise<Error> {
   }
 }
 
-/**
- * Retrieves the current user session from Better Auth via the session cookie.
- * Calls `GET /api/auth/get-session` with credentials included — the only
- * transport where the HttpOnly session cookie is sent — and captures the
- * `set-auth-jwt` response header, which the JWT plugin emits only on this
- * endpoint, as the in-memory bearer credential used for `/api/v1` requests.
- * A definitive empty session drops the held JWT so no stale credential is
- * forwarded; transport or server failures leave it untouched because the
- * session may still be valid.
- *
- * @returns The active session result, or null if unauthenticated or expired.
- */
-async function getSession(): Promise<AuthSessionResult | null> {
-  const baseUrl = getApiBaseUrl();
-  const response = await fetch(`${baseUrl}/api/auth/get-session`, {
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-    },
-    method: "GET",
+function authFetch(path: string, init: RequestInit): Promise<Response> {
+  return fetch(`${getApiBaseUrl()}/api/auth/${path}`, { ...init, credentials: "include" });
+}
+
+function postAuthJson(
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return authFetch(path, {
+    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json", ...headers },
+    method: "POST",
   });
+}
 
+async function requireOk(response: Response): Promise<Response> {
   if (!response.ok) throw await parseAuthError(response);
+  return response;
+}
 
+async function getSession(): Promise<AuthSessionResult | null> {
+  const response = await requireOk(
+    await authFetch("get-session", { headers: { Accept: "application/json" }, method: "GET" }),
+  );
   captureAuthJwt(response);
   const data = (await response.json()) as AuthSessionResult | null;
   if (!data?.session || !data.user) {
@@ -97,214 +87,82 @@ async function getSession(): Promise<AuthSessionResult | null> {
   return data;
 }
 
-/**
- * Sends device-consent HTTP requests through the canonical auth transport.
- *
- * The device protocol module owns typed payload and error handling; this
- * adapter owns the installation URL and credentialed fetch so auth traffic
- * continues to have one HTTP boundary.
- *
- * @param endpoint - Device verification, approval, or denial endpoint.
- * @param init - Request method, headers, and optional body/cache policy.
- * @param query - Optional query parameters for verification.
- * @returns Raw HTTP response for device-protocol validation.
- */
 function requestDeviceAuthorization(
   endpoint: "device" | "device/approve" | "device/code" | "device/deny",
   init: RequestInit,
   query?: URLSearchParams,
 ): Promise<Response> {
   const search = query?.toString();
-  return fetch(`${getApiBaseUrl()}/api/auth/${endpoint}${search ? `?${search}` : ""}`, {
-    ...init,
-    credentials: "include",
-  });
+  return authFetch(`${endpoint}${search ? `?${search}` : ""}`, init);
 }
 
-/**
- * Authenticates a user using email and password via Better Auth.
- * Issues `POST /api/auth/sign-in/email`, which either establishes the internal
- * HttpOnly session or returns a pending second-factor challenge. A successful
- * factor verification completes that session. The auth provider obtains the
- * application bearer credential from `getSession` after authentication.
- *
- * @param credentials User email and password.
- * @returns The authenticated user/token result or a second-factor challenge.
- * @throws {Error} When authentication fails or credentials are invalid.
- */
 async function signInEmail(credentials: SignInCredentials): Promise<AuthTokenResult> {
-  const baseUrl = getApiBaseUrl();
-  const response = await fetch(`${baseUrl}/api/auth/sign-in/email`, {
-    body: JSON.stringify(credentials),
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    method: "POST",
-  });
-
-  if (!response.ok) {
-    throw await parseAuthError(response);
-  }
-
+  const response = await requireOk(await postAuthJson("sign-in/email", credentials));
   return (await response.json()) as AuthTokenResult;
 }
 
-/**
- * Creates the installation owner using the private bootstrap secret.
- * The API rejects registration after an owner exists. Deployed signup returns
- * a null token until email verification; only local/test policy can establish
- * an immediate session. The auth provider obtains the bearer from get-session,
- * never from this response.
- *
- * @param credentials Owner details and API-only setup secret.
- * @returns The created user with a nullable initial token.
- * @throws {Error} When registration fails or inputs are rejected.
- */
 async function signUpEmail({
   setupSecret,
   invitationToken,
   workspaceName,
   ...credentials
 }: SignUpCredentials): Promise<AuthTokenResult> {
-  const baseUrl = getApiBaseUrl();
   const callbackURL = invitationToken
     ? `${window.location.origin}/invitations/accept?token=${encodeURIComponent(invitationToken)}`
     : `${window.location.origin}/sign-in?verified=1`;
-  const response = await fetch(`${baseUrl}/api/auth/sign-up/email`, {
-    body: JSON.stringify({
-      ...credentials,
-      callbackURL,
-      // Omitted rather than empty: the API falls back to the derived default
-      // and rejects a blank name as a validation error.
-      ...(workspaceName ? { workspace_name: workspaceName } : {}),
-    }),
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(setupSecret ? { "X-Setup-Secret": setupSecret } : {}),
-      ...(invitationToken ? { "X-Invitation-Token": invitationToken } : {}),
-    },
-    method: "POST",
-  });
-
-  if (!response.ok) {
-    throw await parseAuthError(response);
-  }
-
+  const response = await requireOk(
+    await postAuthJson(
+      "sign-up/email",
+      {
+        ...credentials,
+        callbackURL,
+        ...(workspaceName ? { workspace_name: workspaceName } : {}),
+      },
+      {
+        ...(setupSecret ? { "X-Setup-Secret": setupSecret } : {}),
+        ...(invitationToken ? { "X-Invitation-Token": invitationToken } : {}),
+      },
+    ),
+  );
   return (await response.json()) as AuthTokenResult;
 }
 
-/**
- * Revokes the active session and clears the authentication cookie.
- * Issues `POST /api/auth/sign-out` to terminate the session server-side, then
- * always drops the in-memory bearer JWT — even when the request fails or
- * rejects — so no stale credential is forwarded to `/api/v1` afterwards.
- */
 async function signOut(): Promise<void> {
-  const baseUrl = getApiBaseUrl();
   try {
-    await fetch(`${baseUrl}/api/auth/sign-out`, {
-      body: JSON.stringify({}),
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      method: "POST",
-    });
+    await postAuthJson("sign-out", {});
   } finally {
     clearAuthJwt();
   }
 }
 
-/**
- * Requests a password reset email via Better Auth.
- * Issues `POST /api/auth/request-password-reset` with the app recovery callback.
- *
- * @param params User email address.
- */
 async function requestPasswordReset(params: { email: string }): Promise<void> {
-  const baseUrl = getApiBaseUrl();
-  const response = await fetch(`${baseUrl}/api/auth/request-password-reset`, {
-    body: JSON.stringify({ ...params, redirectTo: `${window.location.origin}/sign-in?recovery=1` }),
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  });
-  if (!response.ok) {
-    throw await parseAuthError(response);
-  }
+  await requireOk(
+    await postAuthJson("request-password-reset", {
+      ...params,
+      redirectTo: `${window.location.origin}/sign-in?recovery=1`,
+    }),
+  );
 }
 
-/**
- * Resets user password using a verified recovery token.
- * Issues `POST /api/auth/reset-password`; the JWT plugin emits
- * `set-auth-jwt` only on get-session, so no bearer credential is captured
- * here.
- *
- * @param params New password and recovery token.
- */
 async function resetPassword(params: { newPassword: string; token: string }): Promise<void> {
-  const baseUrl = getApiBaseUrl();
-  const response = await fetch(`${baseUrl}/api/auth/reset-password`, {
-    body: JSON.stringify(params),
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  });
-  if (!response.ok) {
-    throw await parseAuthError(response);
-  }
+  await requireOk(await postAuthJson("reset-password", params));
 }
 
-/**
- * Verifies email address using an email verification token.
- * Issues `GET /api/auth/verify-email` with the token in the query string.
- *
- * @param params Verification token.
- */
 async function verifyEmail(params: { token: string }): Promise<void> {
-  const baseUrl = getApiBaseUrl();
-  const response = await fetch(`${baseUrl}/api/auth/verify-email?${new URLSearchParams(params)}`, {
-    credentials: "include",
-    method: "GET",
-  });
-  if (!response.ok) {
-    throw await parseAuthError(response);
-  }
+  await requireOk(
+    await authFetch(`verify-email?${new URLSearchParams(params)}`, { method: "GET" }),
+  );
 }
 
-/**
- * Changes user password within an authenticated session.
- * Issues `POST /api/auth/change-password`; the JWT plugin emits
- * `set-auth-jwt` only on get-session, so no bearer credential is captured
- * here.
- *
- * @param params Current password and new password.
- */
 async function changePassword(params: {
   currentPassword: string;
   newPassword: string;
 }): Promise<void> {
-  const baseUrl = getApiBaseUrl();
-  const response = await fetch(`${baseUrl}/api/auth/change-password`, {
-    body: JSON.stringify({ ...params, revokeOtherSessions: true }),
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  });
-  if (!response.ok) {
-    throw await parseAuthError(response);
-  }
+  await requireOk(await postAuthJson("change-password", { ...params, revokeOtherSessions: true }));
 }
 
-/** Reads the no-store initialized bit; configuration failures never look like an empty installation. */
 async function setupStatus(): Promise<{ initialized: boolean }> {
-  const response = await fetch(`${getApiBaseUrl()}/api/auth/setup-status`, {
-    cache: "no-store",
-    credentials: "include",
-  });
-  if (!response.ok) throw await parseAuthError(response);
+  const response = await requireOk(await authFetch("setup-status", { cache: "no-store" }));
   const data: unknown = await response.json();
   if (
     !data ||
@@ -317,44 +175,25 @@ async function setupStatus(): Promise<{ initialized: boolean }> {
   return { initialized: data.initialized };
 }
 
-/** Sends a verification link to the owner; the server controls enumeration and send limits. */
 async function resendVerification(email: string): Promise<void> {
-  const response = await fetch(`${getApiBaseUrl()}/api/auth/send-verification-email`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, callbackURL: `${window.location.origin}/sign-in?verified=1` }),
-  });
-  if (!response.ok) throw await parseAuthError(response);
+  await requireOk(
+    await postAuthJson("send-verification-email", {
+      email,
+      callbackURL: `${window.location.origin}/sign-in?verified=1`,
+    }),
+  );
 }
 
-/** Completes a pending sign-in with a TOTP or one-use backup code; no trusted-device bypass. */
 async function verifySecondFactor(code: string, backup = false): Promise<void> {
   const path = backup ? "verify-backup-code" : "verify-totp";
-  const response = await fetch(`${getApiBaseUrl()}/api/auth/two-factor/${path}`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code, trustDevice: false }),
-  });
-  if (!response.ok) throw await parseAuthError(response);
+  await requireOk(await postAuthJson(`two-factor/${path}`, { code, trustDevice: false }));
 }
 
-/**
- * Password-reauthenticated TOTP lifecycle. Enrollment and regenerated backup
- * codes are returned once to the dialog, never persisted in browser storage.
- */
 async function manageTwoFactor(
   action: "enable" | "disable" | "generate-backup-codes",
   password: string,
 ): Promise<{ totpURI?: string; backupCodes?: string[] }> {
-  const response = await fetch(`${getApiBaseUrl()}/api/auth/two-factor/${action}`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
-  });
-  if (!response.ok) throw await parseAuthError(response);
+  const response = await requireOk(await postAuthJson(`two-factor/${action}`, { password }));
   const data: unknown = await response.json();
   if (!data || typeof data !== "object") throw new Error("Invalid security response.");
   const result: { totpURI?: string; backupCodes?: string[] } = {};

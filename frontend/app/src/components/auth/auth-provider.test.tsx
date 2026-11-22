@@ -27,6 +27,11 @@ function WorkspaceSelector() {
   return <button onClick={() => setWorkspaceId("ws-1")}>select-workspace</button>;
 }
 
+function SignOutButton() {
+  const { signOut } = useMeltiplyAuth();
+  return <button onClick={() => void signOut()}>sign-out</button>;
+}
+
 function renderConsumers() {
   return render(
     <AppAuthProvider>
@@ -37,10 +42,6 @@ function renderConsumers() {
   );
 }
 
-/**
- * A session that is genuinely valid. `new Date()` would hand the provider an
- * already-expired session, which no real sign-in produces.
- */
 const futureSessionExpiry = new Date("2099-07-18T16:00:00Z");
 
 afterEach(() => {
@@ -143,8 +144,6 @@ describe("Better Auth JWT session lifecycle", () => {
       expect(screen.getByLabelText("primary")).toHaveTextContent("first@example.com:ws-1"),
     );
 
-    // A refresh resolving to a different user must drop the previous workspace
-    // selection so a stale workspace ID never leaks into another user's requests.
     await act(async () => {
       window.dispatchEvent(new CustomEvent(authSessionRefreshedEvent));
     });
@@ -152,6 +151,41 @@ describe("Better Auth JWT session lifecycle", () => {
       expect(screen.getByLabelText("primary")).toHaveTextContent("other@example.com:personal"),
     );
     expect(getSessionMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a session read that resolves after sign-out", async () => {
+    const session = {
+      session: { expiresAt: futureSessionExpiry, id: "session-1", userId: "user-1" },
+      user: { email: "user@example.com", id: "user-1" },
+    };
+    const staleRead = Promise.withResolvers<typeof session>();
+    vi.spyOn(authClient, "getSession")
+      .mockResolvedValueOnce(session)
+      .mockReturnValueOnce(staleRead.promise);
+    vi.spyOn(authClient, "signOut").mockResolvedValue();
+
+    render(
+      <AppAuthProvider>
+        <SessionConsumer name="primary" />
+        <SignOutButton />
+      </AppAuthProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("primary")).toHaveTextContent("user@example.com:personal"),
+    );
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent(authSessionRefreshedEvent));
+    });
+    await act(async () => {
+      screen.getByText("sign-out").click();
+    });
+    await waitFor(() => expect(screen.getByLabelText("primary")).toHaveTextContent("signed-out"));
+
+    await act(async () => {
+      staleRead.resolve(session);
+    });
+    expect(screen.getByLabelText("primary")).toHaveTextContent("signed-out");
   });
 
   it("RequireAuth renders children when signed in", async () => {

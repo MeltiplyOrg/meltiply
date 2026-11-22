@@ -13,6 +13,7 @@ import { useI18n } from "@/lib/i18n";
 import { usePublishingTimeZone } from "@/context/publishing-timezone.context";
 import { abbreviateRecordId, postDateFormatters } from "@/lib/format";
 import { cn } from "@meltiply/ui/utils";
+import { formatAnalyticsInteger } from "@/components/analytics/analytics-helpers";
 import { normalizePostStatus, resolveRowCaption, resolveRowProviders } from "./posts-helpers";
 import { groupPostRows, type PostGroupBy } from "./post-groups";
 import { postAnalyticsColumns, type PostAnalyticsColumn } from "./post-view-options";
@@ -38,22 +39,6 @@ export interface PostTableViewProps extends PostSelectionProps {
   onCreatePost: () => void;
 }
 
-/**
- * One cell of a collapsible Post row.
- *
- * The row's height is the `--post-row-h` hook in `globals.css`, and the cell's
- * content sits in an absolutely positioned layer (`data-post-row-content`)
- * because a table cell never shrinks below its content: only content that has
- * left the cell's flow lets an animated zero height clip it, which is what makes
- * a whole group collapse. Padding therefore belongs to the layer, and `className`
- * carries it plus whatever layout that column's content needs.
- *
- * @param props.selectionCell - Applies the coarse-pointer selection-cell geometry.
- * @param props.className - Layout and padding for the content layer.
- * @param props.onClick - Cell-local handler, e.g. stopping row navigation.
- * @param props.children - Real cell content.
- * @returns The cell with its animated content layer.
- */
 function PostRowCell({
   selectionCell = false,
   className,
@@ -69,7 +54,7 @@ function PostRowCell({
     <TableCell
       data-post-cell=""
       data-post-selection-cell={selectionCell ? "" : undefined}
-      className={selectionCell ? POST_SELECTION_CELL_CLASS : undefined}
+      className={selectionCell ? "relative" : undefined}
       onClick={onClick}
     >
       <div data-post-row-content="" className={className}>
@@ -79,22 +64,6 @@ function PostRowCell({
   );
 }
 
-/**
- * Selection checkbox for a Post row or the select-all header.
- *
- * Fine pointers keep the shared 16px native checkbox. On coarse pointers the
- * label becomes an absolutely positioned overlay that fills the whole cell, so
- * the row and header provide a 44px-tall selection target without changing the
- * checkbox's own size or the fine-pointer table density. The wrapper stays local
- * to the Posts table because only this table's first column opts into a
- * full-cell target.
- *
- * @param props.checked - Whether the row (or every visible row) is selected.
- * @param props.disabled - Blocks toggling while a bulk action or empty collection forbids it.
- * @param props.label - Accessible name for the checkbox.
- * @param props.onChange - Toggles the owning row or the visible selection.
- * @returns The labelled checkbox.
- */
 function PostSelectionCheckbox({
   checked,
   disabled,
@@ -119,48 +88,6 @@ function PostSelectionCheckbox({
   );
 }
 
-/**
- * Marks the first cell as the Post selection target.
- *
- * `globals.css` owns the token-backed coarse-pointer height
- * (`--post-selection-row-h`) for `[data-post-selection-cell]`; the later
- * collapsed-row rule still zeroes `--post-row-h` during a group collapse. The
- * cell is already positioned by the row hook, so `relative` anchors the
- * full-cell label on both pointer types.
- */
-const POST_SELECTION_CELL_CLASS = "relative";
-
-/**
- * Publish-date column formats resolve once per publishing timezone through the
- * shared `postDateFormatters` cache, so changing the preference changes display
- * without rewriting stored Schedule instants or rebuilding a formatter per row.
- */
-const METRIC_FORMAT = new Intl.NumberFormat("en-US");
-type AnalyticsColumn = PostAnalyticsColumn;
-
-/**
- * One resolved Post row of the Posts table.
- *
- * Memoized on its own props so a parent re-render that does not change this row
- * - a keystroke elsewhere in the toolbar, a selection change on another row, a
- * collapse in another group - skips the row's subtree entirely. Every prop is a
- * primitive, a stable row object, a memoized map value, or a `useCallback`
- * handler from `PostsView`, so the comparison is cheap and never stale.
- *
- * @param props.post - Row data: caption, channels, date, Brand Profile.
- * @param props.selected - Whether this row is in the shared selection.
- * @param props.collapsed - Whether this row's group is collapsed.
- * @param props.selectionDisabled - Disables the checkbox while a bulk action runs.
- * @param props.profileName - Resolved Brand Profile name.
- * @param props.showStatus - Whether the Status column is visible.
- * @param props.showChannels - Whether the Channels column is visible.
- * @param props.showDate - Whether the Publish date column is visible.
- * @param props.showProfile - Whether the Brand Profile column is visible.
- * @param props.analyticsColumns - Visible measured-counter columns in toolbar order.
- * @param props.onToggleSelection - Toggles this row's selection.
- * @param props.onViewDetails - Opens the Post drawer for this row.
- * @returns The row's table cells.
- */
 const PostTableRow = React.memo(function PostTableRow({
   post,
   selected,
@@ -185,12 +112,12 @@ const PostTableRow = React.memo(function PostTableRow({
   showChannels: boolean;
   showDate: boolean;
   showProfile: boolean;
-  analyticsColumns: readonly AnalyticsColumn[];
+  analyticsColumns: readonly PostAnalyticsColumn[];
   timeZone: string;
   onToggleSelection: (postId: string) => void;
   onViewDetails: (postId: string) => void;
 }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const providers = resolveRowProviders(post);
   const publishDate = new Date(post.date);
   const dateFormats = postDateFormatters(timeZone);
@@ -284,7 +211,11 @@ const PostTableRow = React.memo(function PostTableRow({
         const value = analytics?.[column.id];
         return (
           <PostRowCell key={column.id} className="justify-end px-3 font-mono tabular-nums">
-            {value == null ? <span className="text-ink-3">-</span> : METRIC_FORMAT.format(value)}
+            {value == null ? (
+              <span className="text-ink-3">-</span>
+            ) : (
+              formatAnalyticsInteger(value, language)
+            )}
           </PostRowCell>
         );
       })}
@@ -292,22 +223,6 @@ const PostTableRow = React.memo(function PostTableRow({
   );
 });
 
-/**
- * One placeholder row of the Posts table.
- *
- * Renders the same cell slots as a resolved row - checkbox, id and caption,
- * status, Channels, publish date, Brand Profile - through `PostRowCell`, so the
- * row height, padding, and column widths match the real row exactly and the
- * resolved table does not move when data lands. Hidden from assistive
- * technology; the page's header announces the loading state.
- *
- * @param props.showStatus - Whether the Status column is visible.
- * @param props.showChannels - Whether the Channels column is visible.
- * @param props.showDate - Whether the Publish date column is visible.
- * @param props.showProfile - Whether the Brand Profile column is visible.
- * @param props.analyticsColumns - Visible analytics slots matching resolved rows.
- * @returns A single 36px placeholder row.
- */
 function PostRowSkeleton({
   showStatus,
   showChannels,
@@ -319,7 +234,7 @@ function PostRowSkeleton({
   showChannels: boolean;
   showDate: boolean;
   showProfile: boolean;
-  analyticsColumns: readonly AnalyticsColumn[];
+  analyticsColumns: readonly PostAnalyticsColumn[];
 }) {
   return (
     <TableRow data-post-row="" aria-hidden="true">
@@ -361,18 +276,6 @@ function PostRowSkeleton({
   );
 }
 
-/**
- * Gr8r Tasks' grouped spreadsheet Table shares semantic primitives with the
- * channel directory. Selection includes collapsed filtered rows, not unloaded
- * records; grouping preserves Post identity. Rows open Details instead of a trailing action column.
- *
- * This view adds one behavior the directory does not have: a group's rows
- * collapse in place. They stay mounted, driven by the `data-collapsed` /
- * `--post-row-h` hook in `globals.css`, so expanding and collapsing are one
- * transition in both directions. Rows keep the shared table hover fill.
- * The owner-supplied Load more footer stays within the viewport's width even
- * when the metric columns require horizontal table scrolling.
- */
 export const PostTableView = React.memo(function PostTableView({
   posts,
   isLoading,
@@ -447,10 +350,6 @@ export const PostTableView = React.memo(function PostTableView({
         </colgroup>
         <TableHeader>
           <TableRow>
-            {/* The header cell is `sticky`, which is already a positioned
-                ancestor: the coarse-pointer label fills this cell without a
-                `relative` utility, which would replace `sticky` during class
-                merging and unpin the header. */}
             <TableHead className="pointer-coarse:h-11">
               <PostSelectionCheckbox
                 checked={allSelected}
@@ -521,9 +420,6 @@ export const PostTableView = React.memo(function PostTableView({
                             colSpan={columnCount}
                             className="h-11.5 border-line pt-2.5 group-data-[variant=spreadsheet]/table:h-11.5"
                           >
-                            {/* The row is a label, not a target: it keeps the quiet
-                            surface hover and never paints a pressed fill. The
-                            chevron states the group's phase and turns. */}
                             <Button
                               variant="ghost"
                               className="h-9 justify-start gap-2 p-0 text-(length:--font-size-control) font-semibold text-ink hover:bg-transparent active:bg-transparent"

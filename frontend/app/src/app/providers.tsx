@@ -19,9 +19,6 @@ import {
   type RuntimeStatusDetail,
 } from "@/lib/runtime-events";
 
-// Dev-only: bridges the workspace-scoped QueryClient to the root-mounted
-// DevBox dock. The lazy boundary keeps the devbox module out of production
-// bundles entirely.
 const DevBoxClientBridge = isDevMode()
   ? lazy(async () => {
       const { DevBoxClientBridge } = await import("@/components/devbox/dev-box");
@@ -33,14 +30,6 @@ type AppProvidersProps = {
   children: React.ReactNode;
 };
 
-/**
- * Classifies query transport failures that never produced an HTTP response (e.g. network disconnection,
- * DNS failure, or CORS block) into appropriate user-facing runtime status banners.
- *
- * @param error Caught rejection cause (typically a browser `TypeError` from `fetch`).
- * @param isOnline Current browser online status boolean from `navigator.onLine`.
- * @returns Formatted runtime status detail object indicating offline or recoverable failure.
- */
 export function transportStatus(error: unknown, isOnline: boolean): RuntimeStatusDetail {
   if (!(error instanceof TypeError)) {
     return {
@@ -56,16 +45,9 @@ export function transportStatus(error: unknown, isOnline: boolean): RuntimeStatu
     : { kind: "offline", message: "Changes are paused until your connection returns." };
 }
 
-/**
- * Global QueryCache error callback that reports telemetry, requests a bearer-token
- * refresh on 401s, and surfaces workspace, maintenance, or recoverable network
- * banners via runtime events.
- *
- * @param error Error thrown or rejected by a TanStack Query fetcher.
- */
-function reportQueryError(error: unknown): void {
-  reportFrontendError(error, "query-cache");
+export function reportQueryError(error: unknown): void {
   if (!(error instanceof ApiError)) {
+    reportFrontendError(error, "query-cache");
     dispatchRuntimeStatus(transportStatus(error, navigator.onLine));
     return;
   }
@@ -96,16 +78,6 @@ function reportQueryError(error: unknown): void {
   }
 }
 
-/**
- * Headless bridge component that listens for 401 API errors, renews the in-memory
- * bearer JWT via `refreshSession` (re-minted through the Better Auth lifecycle
- * endpoints, the only cookie-authenticated calls), and invalidates active queries
- * upon success, preventing unauthenticated loops. A failed or expired session
- * surfaces the sign-in-again banner — either immediately when the refresh rejects,
- * or through the throttled re-request path when the retried query 401s again.
- *
- * @returns `null` as a headless lifecycle bridge.
- */
 function AuthRefreshBridge(): null {
   const { refreshSession } = useMeltiplyAuth();
   const queryClient = useQueryClient();
@@ -151,13 +123,6 @@ function AuthRefreshBridge(): null {
   return null;
 }
 
-/**
- * Scoped provider container managing an isolated TanStack `QueryClient` instance, query cache error
- * listeners, and runtime status UI banners for the current workspace.
- *
- * @param props Component children to render within the query scope.
- * @returns React element rendering provider wrappers.
- */
 function ScopedAppProviders({ children }: AppProvidersProps): React.ReactElement {
   const [queryClient] = useState(
     () =>
@@ -182,8 +147,6 @@ function ScopedAppProviders({ children }: AppProvidersProps): React.ReactElement
       }),
   );
 
-  // A replaced identity/Workspace must release private data and cancel its
-  // in-flight reads, not merely leave the old QueryClient to a GC timer.
   useEffect(() => () => queryClient.clear(), [queryClient]);
 
   return (
@@ -200,15 +163,6 @@ function ScopedAppProviders({ children }: AppProvidersProps): React.ReactElement
   );
 }
 
-/**
- * Top-level application provider wrapper that isolates the query cache per workspace boundary.
- *
- * Keys `ScopedAppProviders` by `cacheScope` (user + selected workspace) so that switching
- * workspaces destroys the previous cache completely and prevents cross-tenant data leaks.
- *
- * @param props Component children to render.
- * @returns React element wrapping children in scoped providers.
- */
 export function AppProviders({ children }: AppProvidersProps): React.ReactElement {
   const { cacheScope } = useMeltiplyAuth();
   return <ScopedAppProviders key={cacheScope}>{children}</ScopedAppProviders>;

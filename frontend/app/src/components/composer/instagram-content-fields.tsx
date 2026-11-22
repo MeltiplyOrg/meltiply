@@ -15,19 +15,11 @@ interface Props {
   t: (message: string, values?: TranslationValues) => string;
 }
 
-/**
- * Exposes Instagram-Login metadata on its actual owning container. Per-item alt
- * text and tags preserve the selected attachment order; Story controls contain
- * mentions only. Draft edits remain raw until the publication boundary validates
- * provider identifiers, at most three collaborators, HTTPS URLs, coordinates,
- * and format compatibility.
- */
 export function InstagramContentFields({ settings, mediaKinds, update, updateMany, t }: Props) {
   const method =
     settings.post_type ?? (mediaKinds.length === 1 && mediaKinds[0] === "video" ? "reel" : "feed");
   const content = settings.content ?? {};
   const carousel = mediaKinds.length > 1;
-  /** Replaces one container's metadata while retaining every other attachment's current edit. */
   function save(metadata: Content, index?: number) {
     if (index === undefined) update("content", metadata);
     else {
@@ -40,7 +32,6 @@ export function InstagramContentFields({ settings, mediaKinds, update, updateMan
       });
     }
   }
-  /** Renders tags for a single container; image-feed coordinates are explicit normalized values. */
   function tags(metadata: Content, kind: "image" | "video" | undefined, index?: number) {
     return (
       <fieldset className="flex min-w-0 flex-col gap-2">

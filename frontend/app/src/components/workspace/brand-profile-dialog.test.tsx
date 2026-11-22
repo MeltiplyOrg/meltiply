@@ -25,7 +25,6 @@ vi.mock("@/context/workspace.context", () => ({
 vi.mock("@/hooks/use-session-scope", () => ({
   useSessionScope: () => ({ isSignedIn: true, workspaceId: "workspace-1" }),
 }));
-/** Uses the real English translator so pending and alert copy match the shipped catalog. */
 vi.mock("@/lib/i18n", async (importOriginal) => {
   const actual = await importOriginal<typeof I18nModule>();
   return {
@@ -67,12 +66,6 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-/**
- * Renders the editor for the supplied mode.
- *
- * `rerender` re-reads the mock mutation objects, which stand in for TanStack's
- * reactive mutation state after a rejected request.
- */
 function renderEditor({ editing, onClose = vi.fn() }: { editing: boolean; onClose?: () => void }) {
   const view = render(
     <BrandProfileDialog open onOpenChange={onClose} profile={editing ? profile : null} />,
@@ -88,7 +81,6 @@ function renderEditor({ editing, onClose = vi.fn() }: { editing: boolean; onClos
   };
 }
 
-/** Returns the pinned action region that owns the failure alert and footer buttons. */
 function actionRegion(dialog: HTMLElement): HTMLElement {
   const region = dialog.querySelector<HTMLElement>("[data-brand-profile-dialog-actions]");
   if (!region) throw new Error("the dialog has no pinned action region");
@@ -139,7 +131,6 @@ describe("Brand Profile dialog failure surface", () => {
 
     const palette = dialog.querySelector("[data-brand-color-palette]");
     expect(palette).not.toBeNull();
-    // The pinned region follows the palette so native scrolling can expose every swatch.
     expect(
       palette!.compareDocumentPosition(region) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -194,7 +185,6 @@ describe("Brand Profile dialog failure surface", () => {
 });
 
 describe("Brand Profile dialog deletion selection", () => {
-  /** Opens the destructive confirmation from the editor and confirms it. */
   function confirmDelete(dialog: HTMLElement) {
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete profile" }));
     const confirmation = screen.getByRole("alertdialog", { name: "Delete Brand Profile" });

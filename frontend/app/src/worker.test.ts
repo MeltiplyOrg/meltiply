@@ -315,6 +315,26 @@ describe("frontend Worker diagnostic relay", () => {
     });
   });
 
+  it.each(["constructor", "__proto__"])(
+    "relays the inherited field name %s with the fallback operation",
+    async (field) => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      vi.spyOn(console, "debug").mockImplementation(() => undefined);
+      const api = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })) };
+
+      await worker.fetch(
+        telemetryRequest(
+          { field, kind: "frontend-error", valueType: "TypeError" },
+          { Authorization: "Bearer session-jwt" },
+        ),
+        { ...environment, API: api },
+      );
+
+      const relayed = api.fetch.mock.calls[0]?.[0] as Request;
+      expect(JSON.parse(await relayed.text())).toMatchObject({ operation: "other" });
+    },
+  );
+
   it("forwards nothing without a bearer, so pre-sign-in failures stay local", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const api = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })) };
@@ -348,8 +368,6 @@ describe("frontend Worker diagnostic relay", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const api = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })) };
 
-    // A `frontend-error` whose field is `api-error` is the API boundary's own
-    // failure mislabeled as a client crash; the relay must still refuse it.
     const response = await worker.fetch(
       telemetryRequest(
         { field: "api-error", kind: "frontend-error", valueType: "ApiError" },
@@ -397,9 +415,6 @@ describe("frontend Worker diagnostic relay", () => {
     );
     expect(crossOrigin.status).toBe(403);
 
-    // A payload that parses but violates the approved schema is a 400: the stack
-    // is within the request-size limit and only exceeds the relayed-stack bound.
-    // (An oversized body is a separate 413 case covered above.)
     const malformed = await worker.fetch(
       telemetryRequest(
         { kind: "frontend-error", stack: "x".repeat(2_000) },

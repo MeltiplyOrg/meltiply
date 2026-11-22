@@ -19,7 +19,6 @@ import { calendarSlots } from "./calendar-slots";
 import { PostsDrawer } from "./posts-drawer";
 import { usePostDetailSurface } from "./post-detail-surface";
 
-/** Live Queue calendar: bounded, fully paged immutable assignments in the Queue's timezone, independent Channel outcomes and safe removal. A Queue identity key resets its civil anchor and selection. The 30-second clock also refreshes immediately after tab focus/visibility changes, never changing reservation times. */
 export function QueueCalendar({
   queue,
   onRemove,
@@ -90,14 +89,22 @@ export function QueueCalendar({
           ),
       );
   const inspected = posts.find((post) => post.id === inspectedId);
-  const nextDateLabel = new Intl.DateTimeFormat(language, {
-    timeZone: queue.timezone,
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-  // The Queue inspector is the same Post drawer the Posts page presents, limited
-  // to reading plus the plan actions that belong to this page: safe removal and
-  // a jump to Posts for editing. It opens on the click that selects the Post.
+  const { clockLabel, nextDateLabel } = useMemo(
+    () => ({
+      clockLabel: new Intl.DateTimeFormat(language, {
+        timeZone: queue.timezone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }),
+      nextDateLabel: new Intl.DateTimeFormat(language, {
+        timeZone: queue.timezone,
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    }),
+    [language, queue.timezone],
+  );
   const detailSurface = usePostDetailSurface({
     post: rows.find((row) => row.id === inspectedId) ?? null,
     canMutate: false,
@@ -132,11 +139,9 @@ export function QueueCalendar({
       </>
     ),
   });
-  /** Changes the civil anchor without adding fixed milliseconds across DST; month arithmetic clamps to the destination month. */
   function navigate(offset: number, unit: "days" | "months") {
     setAnchor((day) => day.add({ [unit]: offset }));
   }
-  /** Month-date activation opens the containing Week without scheduling or moving work. */
   function inspectWeek(date: Date) {
     transitionViewEffect(() =>
       flushSync(() => {
@@ -158,14 +163,7 @@ export function QueueCalendar({
         </span>
         <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-ink-2">
           <Clock className="size-3.5 text-red" />
-          <time dateTime={now.toISOString()}>
-            {new Intl.DateTimeFormat(language, {
-              timeZone: queue.timezone,
-              hour: "2-digit",
-              minute: "2-digit",
-              hourCycle: "h23",
-            }).format(now)}
-          </time>
+          <time dateTime={now.toISOString()}>{clockLabel.format(now)}</time>
         </span>
         <div className="min-w-0 basis-full text-xs text-ink-3" role="status">
           {loading ? (

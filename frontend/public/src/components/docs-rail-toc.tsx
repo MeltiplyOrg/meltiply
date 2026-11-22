@@ -17,18 +17,6 @@ import { ChevronDown } from "lucide-react";
 
 const useClientLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
-/**
- * Original reading-progress rail: native document scrolling moves a decorative
- * plane continuously between headings, while Fumadocs owns anchor semantics and
- * active-link tracking. Cached row geometry stays rail-relative even while
- * row transforms change the links' offset parents during route animation;
- * reduced motion retains progress without rotation. During outgoing navigation
- * the return-flight owns the plane; tracking resumes when route state clears.
- * Desktop and mobile share heading hierarchy, decoration and anchor states;
- * `labelledBy` uniquely names each nav and scopes prehydration DOM adoption.
- * The desktop bootstrap paints before hydration; each mobile opening measures
- * independently. `onNavigate` lets mobile dismiss after a heading selection.
- */
 function ReadingRail({
   items,
   labelledBy,
@@ -47,7 +35,6 @@ function ReadingRail({
       typeof document === "undefined" ? null : document.getElementById(`${labelledBy}-rail`);
     if (!root) return null;
     const progress = root.querySelector<SVGPathElement>(".docs-reading-progress");
-    // CSSOM rounds SVG lengths; preserve the bootstrap's exact style strings.
     const progressStyles = Object.fromEntries<string | undefined>(
       (progress?.getAttribute("style") ?? "").split(";").map((declaration) => {
         const [property, value] = declaration.split(":");
@@ -134,11 +121,6 @@ function ReadingRail({
   );
 }
 
-/**
- * Uses the shared reading rail in Fumadocs' desktop sticky column, preserving
- * its empty-page footprint. A stationary clipping frame surrounds the native
- * scroll area so route animation retracts rows without moving article layout.
- */
 function DocsRailToc({ container, header, footer }: TOCProps) {
   const items = useTOCItems();
   if (items.length === 0 && !header && !footer) {
@@ -167,16 +149,6 @@ function DocsRailToc({ container, header, footer }: TOCProps) {
   );
 }
 
-/**
- * Adapts the same rail to a touch-sized disclosure rather than a second TOC
- * design. Selecting a heading or clicking outside closes it; Escape closes and
- * restores trigger focus. Radix owns disclosure semantics and mount lifecycle,
- * so each opening measures current scroll progress, including nested headings.
- * The collapsed trigger retains Fumadocs' heading-based progress circle: the
- * furthest visible heading counts toward completion, with zero before any
- * heading is active. Tracking stays subscribed while the list is unmounted.
- * Pages without headings or supplemental content omit the mobile strip.
- */
 function DocsRailPopover({ container, trigger, content, header, footer }: TOCPopoverProps) {
   const items = useTOCItems();
   const activeAnchor = useActiveAnchor();

@@ -21,10 +21,6 @@ import {
   CenterAlertDialogTitle,
 } from "@meltiply/ui/center-alert-dialog";
 
-/**
- * Ordinary centered dialog with a real trigger and a first form field, so the
- * tests observe the primitive's autofocus and opener-restoration behavior.
- */
 function OrdinaryDialog({ closeLabel }: { closeLabel?: string }): React.ReactElement {
   return (
     <CenterDialog>
@@ -44,7 +40,6 @@ function OrdinaryDialog({ closeLabel }: { closeLabel?: string }): React.ReactEle
   );
 }
 
-/** Destructive confirmation that stays open until its owner answers. */
 function DestructiveDialog(): React.ReactElement {
   const [open, setOpen] = React.useState(true);
   return (
@@ -63,10 +58,6 @@ function DestructiveDialog(): React.ReactElement {
   );
 }
 
-/**
- * Ordinary dialog opened only through owner state, matching row actions and
- * toolbar buttons that have no Radix `Trigger` to restore focus from.
- */
 function ControlledDialog(): React.ReactElement {
   const [open, setOpen] = React.useState(false);
   return (
@@ -86,10 +77,6 @@ function ControlledDialog(): React.ReactElement {
   );
 }
 
-/**
- * Controlled dialog whose owner deliberately focuses a field during the
- * open-autofocus event, so the original opener must still own restoration.
- */
 function CallerDirectedDialog(): React.ReactElement {
   const [open, setOpen] = React.useState(false);
   const fieldRef = React.useRef<HTMLInputElement>(null);
@@ -116,7 +103,6 @@ function CallerDirectedDialog(): React.ReactElement {
   );
 }
 
-/** Destructive confirmation opened from feature state without a Radix trigger. */
 function ControlledDestructiveDialog(): React.ReactElement {
   const [open, setOpen] = React.useState(false);
   return (
@@ -140,10 +126,6 @@ function ControlledDestructiveDialog(): React.ReactElement {
   );
 }
 
-/**
- * Opens the ordinary fixture and waits for Radix's focus scope to settle on the
- * first field, which is also when the dismissable layer starts listening.
- */
 async function openOrdinaryDialog(): Promise<HTMLElement> {
   const trigger = screen.getByRole("button", { name: "Open profile" });
   await act(async () => {
@@ -155,10 +137,6 @@ async function openOrdinaryDialog(): Promise<HTMLElement> {
   return trigger;
 }
 
-/**
- * Presses the shared backdrop as a pointer would. Radix defers dismissal to the
- * click that follows pointer-down, so both events belong to one interaction.
- */
 async function pointerSequenceOnBackdrop(): Promise<void> {
   const backdrop = document.querySelector("[data-dialog-backdrop]");
   if (!(backdrop instanceof HTMLElement)) throw new Error("dialog backdrop is missing");

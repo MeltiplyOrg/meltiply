@@ -5,7 +5,6 @@ import { cn } from "@meltiply/ui/utils";
 
 const whitespacePattern = /\s+/;
 
-/** Derives up to two uppercase initials; blank names use a neutral avatar fallback. */
 function getInitials(name: string): string {
   const parts = name.trim().split(whitespacePattern).filter(Boolean);
   if (parts.length === 0) return "?";
@@ -13,15 +12,6 @@ function getInitials(name: string): string {
   return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
 }
 
-/**
- * Account identity shared by the channel directory and composer destinations.
- * Uses only the supplied account picture; missing or failed images show initials,
- * never a provider logo. The small labelled badge identifies the provider separately.
- * The default is a compact circular directory avatar; `size="card"` uses a
- * 48px rounded-square portrait for compact three-line destination cards.
- * Callers supply the account name beside it and may hide the whole visual from
- * assistive technology when the provider is already named in the same control.
- */
 export function ChannelAvatar({
   provider,
   channelName,

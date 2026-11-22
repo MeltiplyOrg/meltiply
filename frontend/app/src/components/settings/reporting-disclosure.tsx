@@ -4,10 +4,6 @@ import { cn } from "@meltiply/ui/utils";
 import { useI18n } from "@/lib/i18n";
 import type { DiscoverySource, ReportingCategoryStatus, ReportingPolicy } from "@/types";
 
-/**
- * Atomic discovery-source choices in their documented order. The source of
- * truth is the generated contract enum; this list only fixes presentation order.
- */
 export const DISCOVERY_SOURCES: readonly DiscoverySource[] = [
   "github",
   "search_engine",
@@ -20,14 +16,6 @@ export const DISCOVERY_SOURCES: readonly DiscoverySource[] = [
   "prefer_not_to_say",
 ];
 
-/**
- * Resolves the localized label for one fixed discovery-source value.
- *
- * @param t Active translation function.
- * @param source Contract enum value.
- * @returns The translated label; an unknown runtime value falls back to `Other`
- *   rather than inventing free text.
- */
 export function discoverySourceLabel(t: (message: string) => string, source: DiscoverySource) {
   const labels: Record<DiscoverySource, string> = {
     article_newsletter: t("Article or newsletter"),
@@ -43,17 +31,6 @@ export function discoverySourceLabel(t: (message: string) => string, source: Dis
   return labels[source] ?? t("Other");
 }
 
-/**
- * Explains one category's requested-versus-effective state.
- *
- * The reason describes why a category is or is not sending, so a disabled
- * destination, an unreadable preference record, or an operator override never
- * reads as working consent.
- *
- * @param t Active translation function.
- * @param status One category's status from the policy document.
- * @returns The reason sentence.
- */
 function categoryReason(t: (message: string) => string, status: ReportingCategoryStatus) {
   switch (status.reason) {
     case "enabled":
@@ -69,18 +46,6 @@ function categoryReason(t: (message: string) => string, status: ReportingCategor
   }
 }
 
-/**
- * Renders the improvement-reporting disclosure shared by the first-run wizard
- * and Settings: what each category sends, who receives it, the persistent
- * installation identifier, and the operator override.
- *
- * The disclosure is copy plus state, never an implicit choice: reading it does
- * not enable a category, and every mutation stays in the calling surface.
- *
- * @param props.policy Current installation policy, or `null` while unreadable.
- * @param props.className Optional layout classes.
- * @returns React element rendering the disclosure block.
- */
 export function ReportingDisclosure({
   policy,
   className,

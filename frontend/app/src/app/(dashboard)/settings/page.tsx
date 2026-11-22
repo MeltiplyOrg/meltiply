@@ -4,6 +4,7 @@ import { Crown, MoreHorizontal, ShieldCheck, UserPlus, Users } from "lucide-reac
 
 import { useWorkspace } from "@/context/workspace.context";
 import { useSessionScope } from "@/hooks/use-session-scope";
+import { workspaceRoleLabel } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import {
   useCreateWorkspaceInvitation,
@@ -65,40 +66,14 @@ import type { WorkspaceMember, WorkspaceRole } from "@/types";
 
 const ROLE_ORDER: readonly WorkspaceRole[] = ["admin", "editor", "viewer"];
 
-/**
- * Returns the roles the current caller may assign.
- *
- * Workspace Admins may assign Editor and Viewer; only the Installation Owner
- * may assign Admin. The server enforces the same capability map.
- *
- * @param installationOwner - Whether the caller owns the installation.
- * @returns Assignable roles in descending authority order.
- */
 function assignableRoles(installationOwner: boolean): readonly WorkspaceRole[] {
   return installationOwner ? ROLE_ORDER : (["editor", "viewer"] as const);
 }
 
-/**
- * Formats a Workspace member display name with the email fallback.
- *
- * @param member - Member row.
- * @returns Display label.
- */
 function memberLabel(member: WorkspaceMember): string {
   return member.display_name?.trim() || member.email;
 }
 
-/**
- * Renders the installation settings surface: Members, Workspace, and Audit.
- *
- * The route and tabs are visible only to Workspace Admins and the Installation
- * Owner. Every action is also authorized server-side; hiding controls is a
- * usability affordance, never the authorization boundary.
- *
- * @param props.embedded - When true, render inside the master Settings shell
- *   without repeating its page header.
- * @returns React element rendering the settings page or a redirect for non-admins.
- */
 export default function SettingsPage({
   embedded = false,
 }: {
@@ -157,8 +132,6 @@ export default function SettingsPage({
   const [transferPassword, setTransferPassword] = useState("");
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState<string | null>(null);
 
-  // Every filter change restarts at the first page; the audit table keeps the
-  // search input's local text until its debounce delivers it here.
   const applyAuditFilters = useCallback((patch: Partial<AuditFilters>) => {
     setAuditFilters((previous) => ({ ...previous, ...patch }));
     setAuditOffset(0);
@@ -197,11 +170,15 @@ export default function SettingsPage({
     return <Navigate to="/posts" replace />;
   }
 
-  const error =
-    (invitationsQuery.error instanceof Error ? invitationsQuery.error.message : null) ??
-    (membersQuery.error instanceof Error ? membersQuery.error.message : null) ??
-    (auditQuery.error instanceof Error ? auditQuery.error.message : null) ??
-    (installation.error instanceof Error ? installation.error.message : null);
+  const loadFailed = Boolean(
+    invitationsQuery.error ?? membersQuery.error ?? auditQuery.error ?? installation.error,
+  );
+  const failureToast = (title: string) => (cause: unknown) => {
+    toast(title, {
+      description: cause instanceof Error ? cause.message : t("Try again in a moment."),
+      variant: "error",
+    });
+  };
 
   const runInvite = async () => {
     try {
@@ -217,10 +194,7 @@ export default function SettingsPage({
         variant: "success",
       });
     } catch (cause) {
-      toast(t("The invitation could not be sent"), {
-        description: cause instanceof Error ? cause.message : t("Try again in a moment."),
-        variant: "error",
-      });
+      failureToast(t("The invitation could not be sent"))(cause);
     }
   };
 
@@ -235,10 +209,7 @@ export default function SettingsPage({
         variant: "success",
       });
     } catch (cause) {
-      toast(t("The workspace could not be renamed"), {
-        description: cause instanceof Error ? cause.message : t("Try again in a moment."),
-        variant: "error",
-      });
+      failureToast(t("The workspace could not be renamed"))(cause);
     }
   };
 
@@ -263,7 +234,7 @@ export default function SettingsPage({
         </header>
       )}
 
-      {error && (
+      {loadFailed && (
         <Alert variant="destructive">
           {t("Some settings could not be loaded. Try again in a moment.")}
         </Alert>
@@ -359,14 +330,7 @@ export default function SettingsPage({
                             reactivateMember.mutate(
                               { memberId: member.user_id, workspaceId },
                               {
-                                onError: (cause) =>
-                                  toast(t("The member could not be reactivated"), {
-                                    description:
-                                      cause instanceof Error
-                                        ? cause.message
-                                        : t("Try again in a moment."),
-                                    variant: "error",
-                                  }),
+                                onError: failureToast(t("The member could not be reactivated")),
                                 onSuccess: () =>
                                   toast(t("Member reactivated"), {
                                     description: t("The member can sign in again."),
@@ -380,14 +344,7 @@ export default function SettingsPage({
                             updateRole.mutate(
                               { memberId: member.user_id, role, workspaceId },
                               {
-                                onError: (cause) =>
-                                  toast(t("The role could not be changed"), {
-                                    description:
-                                      cause instanceof Error
-                                        ? cause.message
-                                        : t("Try again in a moment."),
-                                    variant: "error",
-                                  }),
+                                onError: failureToast(t("The role could not be changed")),
                                 onSuccess: () =>
                                   toast(t("Role updated"), {
                                     description: t(
@@ -402,14 +359,7 @@ export default function SettingsPage({
                             suspendMember.mutate(
                               { memberId: member.user_id, reason: undefined, workspaceId },
                               {
-                                onError: (cause) =>
-                                  toast(t("The member could not be suspended"), {
-                                    description:
-                                      cause instanceof Error
-                                        ? cause.message
-                                        : t("Try again in a moment."),
-                                    variant: "error",
-                                  }),
+                                onError: failureToast(t("The member could not be suspended")),
                                 onSuccess: () =>
                                   toast(t("Member suspended"), {
                                     description: t(
@@ -477,7 +427,9 @@ export default function SettingsPage({
                           </span>
                         </TableCell>
                         <TableCell>
-                          <StatusPill tone="neutral">{roleLabel(t, invitation.role)}</StatusPill>
+                          <StatusPill tone="neutral">
+                            {workspaceRoleLabel(t, invitation.role)}
+                          </StatusPill>
                         </TableCell>
                         <TableCell>
                           <time
@@ -498,14 +450,7 @@ export default function SettingsPage({
                                 resend.mutate(
                                   { invitationId: invitation.id, workspaceId },
                                   {
-                                    onError: (cause) =>
-                                      toast(t("The invitation could not be resent"), {
-                                        description:
-                                          cause instanceof Error
-                                            ? cause.message
-                                            : t("Try again in a moment."),
-                                        variant: "error",
-                                      }),
+                                    onError: failureToast(t("The invitation could not be resent")),
                                     onSuccess: () =>
                                       toast(t("Invitation resent"), {
                                         description: t("The previous link no longer works."),
@@ -526,14 +471,7 @@ export default function SettingsPage({
                                 revoke.mutate(
                                   { invitationId: invitation.id, workspaceId },
                                   {
-                                    onError: (cause) =>
-                                      toast(t("The invitation could not be revoked"), {
-                                        description:
-                                          cause instanceof Error
-                                            ? cause.message
-                                            : t("Try again in a moment."),
-                                        variant: "error",
-                                      }),
+                                    onError: failureToast(t("The invitation could not be revoked")),
                                     onSuccess: () =>
                                       toast(t("Invitation revoked"), {
                                         description: t("The reserved Seat is free again."),
@@ -699,7 +637,7 @@ export default function SettingsPage({
                 <SelectContent>
                   {roles.map((role) => (
                     <SelectItem key={role} value={role}>
-                      {roleLabel(t, role)}
+                      {workspaceRoleLabel(t, role)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -747,12 +685,7 @@ export default function SettingsPage({
                 removeMember.mutate(
                   { memberId: removeTarget.user_id, workspaceId },
                   {
-                    onError: (cause) =>
-                      toast(t("The member could not be removed"), {
-                        description:
-                          cause instanceof Error ? cause.message : t("Try again in a moment."),
-                        variant: "error",
-                      }),
+                    onError: failureToast(t("The member could not be removed")),
                     onSuccess: () => {
                       setRemoveTarget(null);
                       toast(t("Member removed"), {
@@ -816,12 +749,7 @@ export default function SettingsPage({
                     workspaceId,
                   },
                   {
-                    onError: (cause) =>
-                      toast(t("The account could not be deleted"), {
-                        description:
-                          cause instanceof Error ? cause.message : t("Try again in a moment."),
-                        variant: "error",
-                      }),
+                    onError: failureToast(t("The account could not be deleted")),
                     onSuccess: () => {
                       setDeleteTarget(null);
                       toast(t("Account deleted"), {
@@ -889,12 +817,7 @@ export default function SettingsPage({
                 transferOwner.mutate(
                   { password: transferPassword, targetUserId: transferTarget, workspaceId },
                   {
-                    onError: (cause) =>
-                      toast(t("Ownership could not be transferred"), {
-                        description:
-                          cause instanceof Error ? cause.message : t("Try again in a moment."),
-                        variant: "error",
-                      }),
+                    onError: failureToast(t("Ownership could not be transferred")),
                     onSuccess: () => {
                       setTransferOpen(false);
                       setTransferPassword("");
@@ -916,12 +839,6 @@ export default function SettingsPage({
   );
 }
 
-/**
- * Renders one member row with role and lifecycle controls the caller may use.
- *
- * @param props - Member, caller capabilities, and action callbacks.
- * @returns Member row element.
- */
 function MemberRow({
   actorUserId,
   assignableRoles: roles,
@@ -999,7 +916,7 @@ function MemberRow({
             {ROLE_ORDER.filter((role) => roles.includes(role) || role === member.role).map(
               (role) => (
                 <SelectItem key={role} value={role}>
-                  {roleLabel(t, role)}
+                  {workspaceRoleLabel(t, role)}
                 </SelectItem>
               ),
             )}
@@ -1047,15 +964,4 @@ function MemberRow({
       </TableCell>
     </TableRow>
   );
-}
-
-/**
- * Maps a Workspace role to its translated display label.
- *
- * @param t - Translation function from the active i18n context.
- * @param role - Workspace role.
- * @returns Human-readable role label.
- */
-function roleLabel(t: (message: string) => string, role: WorkspaceRole): string {
-  return role === "admin" ? t("Admin") : role === "editor" ? t("Editor") : t("Viewer");
 }

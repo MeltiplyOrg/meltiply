@@ -39,15 +39,12 @@ import {
   POST_COLLECTION_MODES,
   POST_VIEW_OPTIONS,
   postAnalyticsColumns,
+  postViewLabel,
   type PostCollectionMode,
 } from "./post-view-options";
 
-/**
- * Grid column bounds: the narrowest and widest card row the collection supports.
- */
 const GRID_COLUMN_MIN = 2;
 const GRID_COLUMN_MAX = 5;
-/** How long a revealed view control takes to grow in or out, in milliseconds. */
 const VIEW_CONTROL_MORPH_MS = 220;
 
 export interface PostsToolbarProps {
@@ -75,15 +72,6 @@ export interface PostsToolbarProps {
   unresolvedProfileIds: readonly string[];
 }
 
-/**
- * Phone-sized view switcher. The desktop segmented track keeps every view
- * visible; below 640px it becomes a compact dropdown on the filter row so the
- * view choice does not consume a full toolbar row of its own. The trigger shows
- * the active view's icon and chevron, with the label added on wider phones.
- *
- * @param props.value - Selected collection view.
- * @param props.onChange - Applies the chosen collection view.
- */
 function MobilePostViewMenu({
   value,
   onChange,
@@ -92,24 +80,20 @@ function MobilePostViewMenu({
   onChange: (mode: PostCollectionMode) => void;
 }) {
   const { t } = useI18n();
-  const labels: Record<PostCollectionMode, string> = {
-    table: t("Table"),
-    calendar: t("Calendar"),
-    grid: t("Grid"),
-  };
   const current = POST_VIEW_OPTIONS[value];
   const CurrentIcon = current.icon;
+  const activeLabel = postViewLabel(value, t);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
           size="sm"
-          aria-label={`${t("Post view")}: ${labels[value]}`}
+          aria-label={`${t("Post view")}: ${activeLabel}`}
           className="max-sm:order-4 pointer-coarse:min-w-11 max-sm:justify-center sm:hidden"
         >
           <CurrentIcon className="size-3.5" aria-hidden="true" />
-          <span className="hidden min-[360px]:inline">{labels[value]}</span>
+          <span className="hidden min-[360px]:inline">{activeLabel}</span>
           <ChevronDown className="size-3" aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
@@ -126,7 +110,7 @@ function MobilePostViewMenu({
             return (
               <DropdownMenuRadioItem key={mode} value={mode}>
                 <Icon className="size-3.75" aria-hidden="true" />
-                {labels[mode]}
+                {postViewLabel(mode, t)}
               </DropdownMenuRadioItem>
             );
           })}
@@ -136,7 +120,6 @@ function MobilePostViewMenu({
   );
 }
 
-/** Gr8r Tasks controls composed from the reusable toolbar, filter, selector, and segment implementations. */
 export const PostsToolbar = React.memo(function PostsToolbar({
   searchQuery,
   onSearchChange,
@@ -380,9 +363,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
             return (
               <>
                 <Icon className="size-3.5" aria-hidden="true" />
-                <span className="sr-only sm:not-sr-only">
-                  {mode === "table" ? t("Table") : mode === "grid" ? t("Grid") : t("Calendar")}
-                </span>
+                <span className="sr-only sm:not-sr-only">{postViewLabel(mode, t)}</span>
               </>
             );
           }}
@@ -439,23 +420,6 @@ export const PostsToolbar = React.memo(function PostsToolbar({
   );
 });
 
-/**
- * A toolbar control that appears with the selected view. It stays mounted so its
- * box can grow from nothing and push the controls beside it over smoothly — and
- * shrink again on the way out — instead of the row snapping to a new layout.
- *
- * The growth is a WAAPI effect rather than a transition: switching to the Grid
- * mounts a whole view, and that render can block the main thread past a
- * transition's entire duration, so the morph would start and finish with no frame
- * in between. The effect is created in a layout effect, after that render has
- * finished and before the view's first paint, and rests on styles the browser
- * resolves alone: the box's width is its content's, so nothing stale is kept.
- * Intent changes cancel queued frames and the running effect; stale completion
- * callbacks cannot hide a control that the current view has reopened.
- *
- * @param props.open - Whether the selected view uses this control.
- * @param props.children - The control's content, unclipped inside the morphing box.
- */
 function MorphingControl({
   open,
   children,
@@ -477,22 +441,13 @@ function MorphingControl({
     let active = true;
     let animation: Animation | null = null;
 
-    // The change lands in the frame after the view has settled. Switching views
-    // mounts a whole view, and its render, effects, and layout run as their own
-    // tasks: an effect created inside that work spends its whole duration there and
-    // the user sees the end state instead of the move.
     let inner = 0;
     const outer = requestAnimationFrame(() => {
       inner = requestAnimationFrame(() => {
-        // Hiding the box also drops the row gap before it, so the travel has to give
-        // that width back: the closing animation ends exactly where the row sits with
-        // no box at all, and the opening one starts there.
         const gap = Number.parseFloat(getComputedStyle(box.parentElement ?? box).columnGap) || 0;
         const closedEdge = { width: "0px", marginLeft: `-${gap}px` };
 
         if (open) {
-          // The box is rendered before it is measured — hidden content has no width —
-          // and the effect starts from the row's closed edge in that same frame.
           box.dataset.morph = "open";
           const width = content.getBoundingClientRect().width;
           if (width > 0) {
@@ -509,8 +464,6 @@ function MorphingControl({
           return;
         }
 
-        // Closing keeps the box rendered for the effect, then removes it in the same
-        // frame the effect's fill is released, so the row never sees the swap.
         const width = content.getBoundingClientRect().width;
         const effect =
           width > 0

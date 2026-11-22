@@ -19,34 +19,55 @@ import { platformDisplayName } from "@/lib/platforms";
 import { cn } from "@meltiply/ui/utils";
 import { Trans, useI18n } from "@/lib/i18n";
 
-/**
- * Optional callback configuration for the DestinationSelector toolbar.
- */
 export interface DestinationSelectorProps {
   selectedProfileIds: string[];
   onProfilesChange: (ids: string[]) => void;
-  /**
-   * Optional navigation handler to transition between workspace views.
-   * Accepts optional query options (e.g. `{ search: '?tab=add' }`) to deep link into sub-tabs.
-   */
   onNavigate?: (view: WorkspaceView, options?: { search?: string }) => void;
-  /**
-   * Optional direct callback to trigger the channel connection flow or open a connection modal.
-   */
   onAddChannel?: () => void;
 }
 
-/**
- * Destination channel selector toolbar for choosing target social media accounts.
- *
- * The composer owns the selected Brand Profiles. Their channels are grouped by
- * provider, with account identity and owning profile shown on each row. Channel
- * toggles retain their explicit selection independently of profile visibility;
- * unavailable connections remain visible but cannot be selected for publishing.
- *
- * @param props - Navigation and channel addition action handlers.
- * @returns The rendered destination toolbar with the profile picker, selection pills, and quick-add actions.
- */
+function ChannelIdentityLines({
+  channel,
+  profileName,
+  usernameLabel,
+  mutedClass,
+  idLabel,
+}: {
+  channel: ChannelIntegration;
+  profileName: string;
+  usernameLabel: string;
+  mutedClass?: string;
+  idLabel: string;
+}) {
+  return (
+    <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+      <span className="flex w-full min-w-0 items-baseline gap-2">
+        <span className="min-w-0 flex-1 truncate text-left font-medium">{channel.name}</span>
+        <span className={cn("shrink-0 text-(length:--font-size-micro)", mutedClass)}>
+          {platformDisplayName(channel.providerIdentifier)}
+        </span>
+      </span>
+      <span
+        className={cn(
+          "w-full whitespace-normal break-all text-left text-(length:--font-size-micro)",
+          mutedClass,
+        )}
+      >
+        {usernameLabel}
+      </span>
+      <span className="text-left text-(length:--font-size-micro)">{profileName}</span>
+      <span
+        className={cn(
+          "w-full whitespace-normal break-all text-left font-mono text-(length:--font-size-micro)",
+          mutedClass,
+        )}
+      >
+        {idLabel}
+      </span>
+    </span>
+  );
+}
+
 export function DestinationSelector({
   selectedProfileIds,
   onProfilesChange,
@@ -63,13 +84,6 @@ export function DestinationSelector({
   } = useWorkspace();
   const { t } = useI18n();
 
-  /**
-   * Dispatches quick navigation to the channels view with the add-channel platform directory tab active.
-   *
-   * Uses `onAddChannel` when supplied; otherwise triggers `onNavigate('channels', { search: '?tab=add' })`.
-   * Without either handler the button is inert — the composer always receives `onNavigate`
-   * from its page wrapper, so no synthetic history fallback is attempted.
-   */
   const handleAddChannel = useCallback(() => {
     if (onAddChannel) {
       onAddChannel();
@@ -90,9 +104,6 @@ export function DestinationSelector({
     else groupedChannels.set(provider, [channel]);
   }
   const profileNames = new Map(brandProfiles.map((profile) => [profile.id, profile.name]));
-  // Both loops below read these two collections per channel, so index them once
-  // rather than scanning either list inside the render map. First occurrence wins,
-  // matching the `find` calls they replace.
   const selectedChannelIdSet = new Set(selectedChannelIds);
   const statusByChannelId = new Map<string, ChannelStatusInfo>();
   for (const status of channelStatuses) {
@@ -202,33 +213,22 @@ export function DestinationSelector({
                     </span>
                   );
 
-                  // Unavailable connections stay visible with their actual reason.
+                  const profileName =
+                    profileNames.get(channel.brandProfileId ?? "") ?? t("Unknown profile");
+                  const idLabel = t("ID: {id}", { id: channel.platformUserId });
+
                   if (!isAvailable) {
                     return (
                       <Tooltip key={channel.id}>
                         <TooltipTrigger asChild>
                           <div className="flex cursor-not-allowed select-none items-center gap-2 rounded-control border border-line bg-inset p-2 text-(length:--font-size-control) text-ink-3">
                             {avatar}
-                            <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                              <span className="flex w-full min-w-0 items-baseline gap-2">
-                                <span className="min-w-0 flex-1 truncate font-medium">
-                                  {channel.name}
-                                </span>
-                                <span className="shrink-0 text-(length:--font-size-micro)">
-                                  {platformDisplayName(channel.providerIdentifier)}
-                                </span>
-                              </span>
-                              <span className="w-full whitespace-normal break-all text-left text-(length:--font-size-micro)">
-                                {usernameLabel}
-                              </span>
-                              <span className="text-left text-(length:--font-size-micro)">
-                                {profileNames.get(channel.brandProfileId ?? "") ??
-                                  t("Unknown profile")}
-                              </span>
-                              <span className="w-full whitespace-normal break-all text-left font-mono text-(length:--font-size-micro)">
-                                {t("ID: {id}", { id: channel.platformUserId })}
-                              </span>
-                            </span>
+                            <ChannelIdentityLines
+                              channel={channel}
+                              profileName={profileName}
+                              usernameLabel={usernameLabel}
+                              idLabel={idLabel}
+                            />
                             {(channel.disabled || channel.refreshNeeded) && (
                               <span className="flex shrink-0 items-center gap-1 text-(length:--font-size-micro) text-red">
                                 {channel.disabled ? t("Disabled") : t("Expired")}
@@ -253,48 +253,19 @@ export function DestinationSelector({
                       onClick={() => toggleChannelSelection(channel.id)}
                       className={cn(
                         "h-auto w-full justify-start gap-2 rounded-control border p-2 text-(length:--font-size-control) font-normal",
-                        // Selected rows pin their own hover colors so the ghost
-                        // variant's default hover cannot repaint the active state.
                         isSelected
                           ? "border-accent bg-accent-tint text-accent-ink hover:bg-accent-tint hover:text-accent-ink"
                           : "border-line bg-surface text-ink-2 hover:bg-hover hover:text-ink",
                       )}
                     >
                       {avatar}
-                      <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                        <span className="flex w-full min-w-0 items-baseline gap-2">
-                          <span className="min-w-0 flex-1 truncate text-left font-medium">
-                            {channel.name}
-                          </span>
-                          <span
-                            className={cn(
-                              "shrink-0 text-(length:--font-size-micro)",
-                              isSelected ? "text-accent-ink/70" : "text-ink-3",
-                            )}
-                          >
-                            {platformDisplayName(channel.providerIdentifier)}
-                          </span>
-                        </span>
-                        <span
-                          className={cn(
-                            "w-full whitespace-normal break-all text-left text-(length:--font-size-micro)",
-                            isSelected ? "text-accent-ink/70" : "text-ink-3",
-                          )}
-                        >
-                          {usernameLabel}
-                        </span>
-                        <span className="text-left text-(length:--font-size-micro)">
-                          {profileNames.get(channel.brandProfileId ?? "") ?? t("Unknown profile")}
-                        </span>
-                        <span
-                          className={cn(
-                            "w-full whitespace-normal break-all text-left font-mono text-(length:--font-size-micro)",
-                            isSelected ? "text-accent-ink/70" : "text-ink-3",
-                          )}
-                        >
-                          {t("ID: {id}", { id: channel.platformUserId })}
-                        </span>
-                      </span>
+                      <ChannelIdentityLines
+                        channel={channel}
+                        profileName={profileName}
+                        usernameLabel={usernameLabel}
+                        idLabel={idLabel}
+                        mutedClass={isSelected ? "text-accent-ink/70" : "text-ink-3"}
+                      />
                       <span
                         aria-hidden="true"
                         className={cn(

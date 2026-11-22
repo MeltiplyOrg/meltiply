@@ -4,17 +4,6 @@ export interface RunQueryEffectOptions {
   readonly signal?: AbortSignal;
 }
 
-/**
- * Approved execution boundary adapter that runs an Effect program for React Query.
- *
- * Rejects pre-aborted signals before synchronous work can start, delegates active
- * cancellation to Effect's runner (which removes its listener on fiber completion),
- * and inspects defects before recoverable failures.
- *
- * @param effect - Effect computation to execute, optionally requiring Scope for resource management.
- * @param options - Optional query configuration including AbortSignal.
- * @returns Promise resolving to the effect outcome value or rejecting with the failure/abort error/defect.
- */
 export async function runQueryEffect<A, E>(
   effect: Effect.Effect<A, E, Scope.Scope>,
   options?: RunQueryEffectOptions,

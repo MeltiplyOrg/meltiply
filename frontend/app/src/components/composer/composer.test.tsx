@@ -38,9 +38,6 @@ vi.mock("@/lib/upload", async (importActual) => {
   return { ...actual, createAssetUpload: vi.fn() };
 });
 
-// Creator information is a live public API read even when a draft is reopened.
-// Keep composer tests isolated at that HTTP boundary, not by making stale
-// permission data permanently fresh in the QueryClient.
 vi.mock("@/lib/api", async (original) => ({
   ...(await original<typeof ApiModule>()),
   getPlatformPublishingRequirements: vi.fn(),
@@ -50,10 +47,6 @@ vi.mock("@/lib/api", async (original) => ({
   schedulePost: vi.fn(),
 }));
 
-/**
- * Task whose transfer never settles on its own: the suite can only observe
- * abandonment through the composer's explicit cancel call.
- */
 function neverSettlingUploadTask(): AssetUploadTask {
   const { promise } = Promise.withResolvers<Asset>();
   return {
@@ -64,7 +57,6 @@ function neverSettlingUploadTask(): AssetUploadTask {
   };
 }
 
-/** Sidebar probe driving the same Brand Profile switch the workspace shell performs. */
 function ProfileSwitchProbe({ profileId }: { profileId: string }) {
   const { brandProfileId, setBrandProfileId } = useMeltiplyAuth();
   return (
@@ -76,35 +68,26 @@ function ProfileSwitchProbe({ profileId }: { profileId: string }) {
   );
 }
 
-/** The shared-content textarea every composer interaction in this suite types into. */
 function composerTextarea() {
   return screen.getByPlaceholderText(/what do you want to publish/i);
 }
 
-/** Mounts the composer inside the real auth, workspace, i18n, and query providers. */
 function renderComposer(
   options: {
     initialPostId?: string;
     initialDate?: ComposerProps["initialDate"];
     post?: Post;
-    /** Connected accounts the workspace sees; the composer selects eligible ones. */
     accounts?: PlatformAccount[];
-    /** Published platform capabilities, keyed by platform like the API response. */
     capabilities?: ReturnType<typeof platformCapability>[];
-    /** Ordered real profile records used to exercise default owner selection. */
     brandProfiles?: BrandProfile[];
-    /** Composer-initiated workspace navigation, e.g. Manage Queues. */
     onNavigate?: ComposerProps["onNavigate"];
-    /** Creator restrictions loaded for the TikTok destination, or unavailable. */
     requirements?: TikTokPublishingRequirements | null;
-    /** Saved publishing preferences, including the default signature. */
     preferences?: PublishingPreferences;
   } = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  // Seeded data stays fresh so focused tests never hit the network for it.
   queryClient.setQueryDefaults(queryKeys.posts(), { staleTime: Infinity });
   queryClient.setQueryDefaults(queryKeys.platforms(), { staleTime: Infinity });
   queryClient.setQueryDefaults(queryKeys.platformCapabilities(), { staleTime: Infinity });
@@ -160,7 +143,6 @@ function renderComposer(
   return { ...view, queryClient };
 }
 
-/** A session that is genuinely valid this century; `new Date()` models an expired one. */
 const futureSessionExpiry = new Date("2099-07-18T16:00:00Z");
 
 beforeEach(() => {
@@ -202,10 +184,6 @@ const hydratedPost: Post = {
   updated_at: "2026-10-01T10:00:00.000Z",
 };
 
-/**
- * One published capability record as the API sends it, with the caption bound
- * under test. Everything else is inert so a caption assertion reads one number.
- */
 function platformCapability(
   platform: PlatformAccount["platform"],
   maxCaptionLength: number | null,
@@ -230,7 +208,6 @@ function platformCapability(
   };
 }
 
-/** Connected Instagram account owned by the switched identity (`profile-b`). */
 const instagramAccount: PlatformAccount = {
   avatar_url: null,
   username: null,
@@ -250,7 +227,6 @@ const instagramAccount: PlatformAccount = {
   updated_at: "2026-01-01T00:00:00.000Z",
 };
 
-/** Two ordered owners make default selection distinguishable from saved ownership. */
 const composerProfiles: BrandProfile[] = ["profile-a", "profile-b"].map((id, index) => ({
   id,
   name: index === 0 ? "Alpha Brand" : "Beta Brand",
@@ -269,11 +245,8 @@ describe("Composer default ownership", () => {
     fireEvent.pointerDown(await screen.findByRole("button", { name: "Alpha Brand" }));
     expect(await screen.findByRole("menuitemcheckbox", { name: "Alpha Brand" })).toBeChecked();
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
-    // The composer owns its destination picker: the Posts collection it was
-    // opened over stays aggregate instead of re-filtering behind the drawer.
     expect(screen.getByLabelText("Collection profile")).toHaveTextContent("all");
 
-    // A later collection switch must not replace the composition's own owner.
     fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
     await waitFor(() =>
       expect(screen.getByLabelText("Collection profile")).toHaveTextContent("profile-b"),
@@ -298,11 +271,6 @@ describe("Composer default ownership", () => {
 });
 
 describe("Composer recovery consent", () => {
-  /**
-   * Regression: the recovery read is consent-gated, so without a functional
-   * choice the read effect never marks the namespace read — initialization must
-   * not keep the composer disabled waiting for a read that cannot run.
-   */
   it("stays editable for a new composition when functional consent was never given", async () => {
     renderComposer();
 
@@ -312,10 +280,6 @@ describe("Composer recovery consent", () => {
     expect(textarea).toHaveValue("draft without consent");
   });
 
-  /**
-   * Regression: an explicit functional rejection takes the same optional
-   * storage path, so a deep-linked Post must still hydrate and become editable.
-   */
   it("stays editable after hydrating a saved Post when functional consent is rejected", async () => {
     writeCookieConsent({ functional: false });
     renderComposer({ initialPostId: hydratedPost.id, post: hydratedPost });
@@ -325,11 +289,6 @@ describe("Composer recovery consent", () => {
     await waitFor(() => expect(textarea).toBeEnabled());
   });
 
-  /**
-   * Regression: consent accepted after mount must still perform the deferred
-   * recovery read for the namespace that is current at that moment, restoring
-   * the saved draft before persistence reopens for it.
-   */
   it("restores the current namespace's recovery record when functional consent arrives later", async () => {
     renderComposer();
     const textarea = composerTextarea();
@@ -418,12 +377,47 @@ describe("Composer recovery consent", () => {
   );
 });
 
+describe("Composer caption counter", () => {
+  it("marks a Channel counter when its signature pushes the caption past the limit", async () => {
+    const account = { ...instagramAccount, brand_profile_id: "profile-a" };
+    window.localStorage.setItem(
+      "meltiply.composer.v2.personal::profile-a::post-hydrated",
+      JSON.stringify({
+        version: 2,
+        updatedAt: "2026-10-01T12:00:00.000Z",
+        sharedContent: "Recovered composition",
+        scheduleDate: "",
+        attachments: [],
+        removedAssetIds: [],
+        channelOverrides: {
+          [account.id]: {
+            content: "short",
+            hasOverride: true,
+            settings: {},
+            signature: "Long footer",
+          },
+        },
+        attachmentOverrides: {},
+        profileIds: ["profile-a"],
+        selectedChannelIds: [account.id],
+        profileCopies: {},
+      }),
+    );
+    writeCookieConsent({ functional: true });
+    renderComposer({
+      initialPostId: hydratedPost.id,
+      post: hydratedPost,
+      brandProfiles: composerProfiles,
+      accounts: [account],
+      capabilities: [platformCapability("instagram", 12)],
+    });
+
+    await waitFor(() => expect(composerTextarea()).toHaveValue("Recovered composition"));
+    expect(screen.getAllByText(/\/12 characters/).at(-1)).toHaveClass("text-red");
+  });
+});
+
 describe("Composer and collection scope", () => {
-  /**
-   * The composition belongs to the composer, not the Posts collection filter:
-   * re-scoping the list behind an open drawer must neither discard the draft
-   * nor rebuild the composer from the new collection profile.
-   */
   it("keeps the composition when the collection profile changes", async () => {
     renderComposer({ brandProfiles: composerProfiles });
     const textarea = composerTextarea();
@@ -444,11 +438,6 @@ describe("Composer and collection scope", () => {
     expect(textarea).toHaveValue("profile b draft");
   });
 
-  /**
-   * Two attachments selected in the same millisecond must still get distinct
-   * React keys: the row key is a UUID, not a timestamp composite that collides
-   * for same-size files chosen together.
-   */
   it("gives same-millisecond file selections distinct attachment keys", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { container } = renderComposer({ brandProfiles: composerProfiles });
@@ -474,14 +463,9 @@ describe("Composer and collection scope", () => {
     consoleError.mockRestore();
   });
 
-  /**
-   * A collection switch is not a composition identity switch, so it must not
-   * abandon the upload tasks the composer owns.
-   */
   it("keeps an in-flight upload when the collection profile changes", async () => {
     renderComposer({ brandProfiles: composerProfiles });
     await waitFor(() => expect(composerTextarea()).toBeEnabled());
-    // Wait for owner adoption: uploads need the composer's own Brand Profile.
     await screen.findByRole("button", { name: "Alpha Brand" });
 
     fireEvent.change(screen.getByLabelText("Add Media"), {
@@ -499,7 +483,6 @@ describe("Composer and collection scope", () => {
   });
 });
 
-/** Inline captions inherit live shared text until edited, including intentional blanks. */
 describe("Composer channel captions", () => {
   it("keeps blank channel edits independent and restores live inheritance on reset", async () => {
     renderComposer({
@@ -526,19 +509,12 @@ describe("Composer channel captions", () => {
 });
 
 describe("Composer caption bound", () => {
-  /**
-   * The shared caption reaches every selected Channel, so the field locks at the
-   * tightest selected platform's limit and states it beside the count instead of
-   * letting the creator write text the API will reject per Channel.
-   */
   it("locks the shared caption at the tightest selected platform limit", async () => {
     renderComposer({
       accounts: [instagramAccount],
       capabilities: [platformCapability("instagram", 12)],
     });
     const textarea = composerTextarea();
-    // The probe switches the identity the composer composes under; wait for the
-    // providers to settle first, or the switch is dropped while auth loads.
     await waitFor(() => expect(textarea).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
     await waitFor(() => expect(textarea).toBeEnabled());
@@ -549,11 +525,6 @@ describe("Composer caption bound", () => {
     expect(textarea).toHaveValue("x".repeat(12));
   });
 
-  /**
-   * Regression: the lock counts code points, exactly like the provider
-   * validator, so a caption of emoji is not cut at half its real limit — and the
-   * field reports one character per emoji rather than two.
-   */
   it("counts an emoji as one character when locking the caption", async () => {
     renderComposer({
       accounts: [instagramAccount],
@@ -571,11 +542,6 @@ describe("Composer caption bound", () => {
     expect(value.length).toBe(24);
   });
 
-  /**
-   * A platform that publishes no caption bound leaves the field unbounded: the
-   * counter drops the limit and the caption keeps every character the creator
-   * types.
-   */
   it("leaves the caption unbounded when the platform publishes no limit", async () => {
     renderComposer({
       accounts: [instagramAccount],
@@ -591,11 +557,6 @@ describe("Composer caption bound", () => {
   });
 });
 
-/**
- * Navigation out of the composer unmounts it. Without functional-storage
- * consent the recovery record is never written, so leaving from an in-composer
- * link must not silently discard the creator's composition.
- */
 describe("Composer leave guard", () => {
   it("asks before leaving unsaved work that recovery cannot restore", async () => {
     const onNavigate = vi.fn();
@@ -917,8 +878,6 @@ describe("Composer provider publication choices", () => {
     await waitFor(() => expect(composerTextarea()).toHaveValue(savedPost.default_text));
     const channelCaption = await screen.findByLabelText("Custom Text for Video destination");
 
-    // Editing the Channel caption rebuilds the override row; the stored
-    // signature must survive so the current default template cannot replace it.
     fireEvent.change(channelCaption, { target: { value: "Edited per-channel caption" } });
     expect(screen.getByText("Saved footer")).toBeVisible();
     expect(screen.queryByText("New template footer")).toBeNull();

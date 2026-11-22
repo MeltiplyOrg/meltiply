@@ -1,14 +1,6 @@
 import { copyText } from "@meltiply/ui/copy-text";
 import { toast } from "@meltiply/ui/toast";
 
-/**
- * Gives statically rendered heading buttons native click/keyboard activation
- * before React hydration and after every guide swap. Copies the current page
- * URL with the clicked heading's hash, preserving query parameters. Successful
- * writes show the shared app-style success toast with the exact copied URL and
- * retain the inline 1.5s confirmation. Failure shows an error toast plus selected
- * manual-copy recovery; navigation removes recovery, not the persistent toaster.
- */
 export function initializeHeadingCopying(): void {
   const resets = new WeakMap<HTMLButtonElement, number>();
   let recovery: {
@@ -16,7 +8,6 @@ export function initializeHeadingCopying(): void {
     button: HTMLButtonElement;
   } | null = null;
 
-  /** Removes recovery UI and resets its error state; dismissal restores focus if it was inside the panel. */
   const clearRecovery = (restoreFocus = false) => {
     if (!recovery) return;
     const { panel, button } = recovery;
@@ -32,11 +23,6 @@ export function initializeHeadingCopying(): void {
     if (restoreFocus && hadFocus && button.isConnected) button.focus({ preventScroll: true });
   };
 
-  /**
-   * Shows clipboard-denial recovery beside the affected heading without a modal.
-   * The read-only URL is focused/selected for native copying; retry uses the same
-   * heading handler, and dismiss returns keyboard focus to its copy control.
-   */
   const showRecovery = (button: HTMLButtonElement, heading: HTMLElement, url: string) => {
     clearRecovery();
     const panel = document.createElement("div");
@@ -71,7 +57,6 @@ export function initializeHeadingCopying(): void {
     input.select();
   };
 
-  /** Copies marked controls, reports the actual outcome through Sileo, and retains manual recovery when both clipboard methods fail. */
   const onClick = async (event: MouseEvent) => {
     const button =
       event.target instanceof Element

@@ -11,12 +11,6 @@ interface MobileNavigationSidebarProps {
   onNavigate: (view: WorkspaceView, options?: { search?: string }) => void;
 }
 
-/**
- * Reuses desktop SidebarNav below the 1024px rail breakpoint. The shared dialog
- * owns modal focus, nested Escape, scrim dismissal and left-edge motion; this
- * feature supplies destinations, localized labels and desktop-breakpoint closure.
- * The shell keeps its workspace inert until navigation is dismissed.
- */
 export function MobileNavigationSidebar({
   open,
   onOpenChange,

@@ -13,12 +13,6 @@ type FrontendErrorBoundaryState = {
   hasError: boolean;
 };
 
-/**
- * Fallback presentation displayed when an uncaught React render error occurs.
- * Renders an accessible alert container offering "Reload workspace" and "Return to overview" recovery actions.
- *
- * @returns A full-screen accessible alert section with workspace reload and home links.
- */
 export function FrontendErrorFallback(): React.ReactElement {
   const { t } = useI18n();
 
@@ -53,11 +47,6 @@ export function FrontendErrorFallback(): React.ReactElement {
   );
 }
 
-/**
- * Top-level React error boundary catching uncaught rendering exceptions across the client application.
- * Captures errors, safely reports anonymized error names and message hashes to frontend telemetry,
- * and presents an accessible recovery fallback view (`FrontendErrorFallback`) without exposing sensitive state.
- */
 export class FrontendErrorBoundary extends Component<
   FrontendErrorBoundaryProps,
   FrontendErrorBoundaryState
@@ -69,8 +58,6 @@ export class FrontendErrorBoundary extends Component<
   }
 
   componentDidCatch(error: unknown): void {
-    // Only the error name and a one-way message hash leave the browser, which is
-    // enough to tell a failed chunk load apart from a logic error.
     reportFrontendError(error, "react-render");
   }
 

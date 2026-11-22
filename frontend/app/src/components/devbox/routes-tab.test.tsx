@@ -14,10 +14,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/**
- * Verifies the live request starter uses the canonical auth transport and opens
- * only the verification URL returned for this origin.
- */
 describe("Routes tab", () => {
   it("starts a device request and opens the consent route", async () => {
     const destination = new URL("/device?user_code=ABC234", window.location.origin).href;

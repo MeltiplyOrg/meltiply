@@ -11,8 +11,6 @@ import type * as envModule from "@/lib/env";
 
 import { SignInForm } from "./sign-in-form";
 
-// The form reads `isDevMode()` before prefill; tests flip the seam rather than
-// relying on whatever mode Vitest itself runs under.
 const devMode = vi.hoisted(() => ({ enabled: true }));
 
 vi.mock("@/lib/env", async (importOriginal) => {

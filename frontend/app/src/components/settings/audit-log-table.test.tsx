@@ -44,12 +44,6 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/**
- * Renders the audit log with inert callbacks.
- *
- * @param overrides - Entry window, filter, and pagination overrides.
- * @returns Callback spies bound to the rendered table.
- */
 function renderTable(overrides: Partial<React.ComponentProps<typeof AuditLogTable>> = {}) {
   const spies = {
     onActionChange: vi.fn(),

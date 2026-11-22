@@ -13,15 +13,6 @@ const titles: Record<RuntimeStatusDetail["kind"], string> = {
   recoverable: "Meltiply could not refresh this view",
 };
 
-/**
- * Fixed overlay banner rendering global runtime health notifications without shifting page layout.
- * Listens to browser network status (offline/online) and custom `runtimeStatusEvent` notices
- * (expired authentication, active organization requirement, maintenance, or recoverable query failures).
- * Uses polite live regions for offline status and assertive live alerts for urgent states,
- * and includes contextual action links and an explicit dismiss button.
- *
- * @returns A fixed-position alert or status banner element, or null when no status is active.
- */
 export function RuntimeStatus(): React.ReactElement | null {
   const [status, setStatus] = useState<RuntimeStatusDetail | null>(null);
   const { t } = useI18n();
@@ -51,8 +42,6 @@ export function RuntimeStatus(): React.ReactElement | null {
 
   if (!status) return null;
 
-  // Only an expired session has somewhere to go; the other states can be
-  // dismissed, and `active-organization` has no in-app remedy to link to.
   const action =
     status.kind === "auth-expired" ? { href: "/sign-in", label: "Sign in again" } : null;
 

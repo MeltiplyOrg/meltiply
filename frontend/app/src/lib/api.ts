@@ -28,12 +28,10 @@ import type {
   WorkspaceRole,
 } from "@/types";
 import { applyAuthJwt } from "./auth-token";
-import { getApiBaseUrl, type PublicEnvSource } from "./env";
+import { getApiBaseUrl } from "./env";
 import { reportFrontendApiError } from "./frontend-telemetry";
 import { createMutationKey } from "./mutation-idempotency";
 
-const apiVersionPrefix = "/api/v1";
-const absoluteUrlPattern = /^[a-z][a-z\d+\-.]*:\/\//i;
 const unknownErrorCode = "unknown_error";
 
 type ErrorEnvelope = components["schemas"]["ErrorEnvelope"];
@@ -56,12 +54,6 @@ type JsonResponse<Op extends keyof operations> = {
 type HasNoContent<Op extends keyof operations> = 204 extends keyof operations[Op]["responses"]
   ? true
   : false;
-/**
- * Derives the resolved payload type of an OpenAPI operation directly from the
- * generated schema: JSON 2xx bodies become the payload, pure 204 endpoints become
- * `void`, and mixed 202/204 endpoints (such as `cancelDistribution`) become
- * `Body | undefined`.
- */
 type OperationSuccess<Op extends keyof operations> = [JsonResponse<Op>] extends [never]
   ? void
   : HasNoContent<Op> extends true
@@ -70,20 +62,12 @@ type OperationSuccess<Op extends keyof operations> = [JsonResponse<Op>] extends 
 
 let cachedClient: { baseUrl: string; value: MeltiplyClient } | undefined;
 
-/**
- * Fetch implementation bound to the generated OpenAPI client. Stamps the
- * in-memory bearer JWT and forces `credentials: "same-origin"` so callers
- * cannot override credential handling.
- */
 const runtimeFetch: typeof globalThis.fetch = (input, init) => {
   const headers = new Headers(input instanceof Request ? input.headers : undefined);
   new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
   applyAuthJwt(headers);
   return globalThis.fetch(input, { ...init, credentials: "same-origin", headers });
 };
-
-export type ApiPath = string;
-export type NormalizedApiPath = `/${string}`;
 
 export interface ApiRequestOptions {
   idempotencyKey?: string;
@@ -99,10 +83,6 @@ export class ApiError extends Error {
   readonly retryable: boolean;
   readonly status: number;
 
-  /**
-   * Constructs an `ApiError` from a non-ok HTTP Response and parsed ErrorEnvelope
-   * payload, reporting one `api-error` telemetry event.
-   */
   constructor(response: Response, payload: unknown) {
     const envelope = isErrorEnvelope(payload) ? payload : null;
     const message =
@@ -162,10 +142,6 @@ function parseRetryAfter(value: string | null): number | null {
   return Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
 }
 
-/**
- * Builds the `X-Workspace-ID` selection header when a non-blank workspace UUID
- * is provided; omitting it targets the caller's personal workspace.
- */
 function workspaceHeaders(workspaceId: string | null) {
   const selected = workspaceId?.trim();
   return selected ? { "X-Workspace-ID": selected } : {};
@@ -175,15 +151,6 @@ function mutationKey(key?: string) {
   return key ?? createMutationKey();
 }
 
-/**
- * Lifts a generated OpenAPI client call into an Effect whose success type is
- * derived from `operations[Op]` in `@meltiply/contracts/schema`.
- *
- * The thunk keeps execution lazy for retries and interruption. The fiber abort
- * signal cancels in-flight requests unless the caller supplied an explicit
- * `options.signal`. Non-2xx responses fail with typed `ApiError`; transport
- * rejections propagate as defects.
- */
 function unwrapOp<Op extends keyof operations>(
   execute: (signal: AbortSignal) => Promise<ApiResult<OperationSuccess<Op>>>,
   signal?: AbortSignal,
@@ -197,7 +164,6 @@ function unwrapOp<Op extends keyof operations>(
   );
 }
 
-/** Lifts a non-OpenAPI fetch (such as signed object-storage reads) into an Effect. */
 function unwrapBinary(
   execute: (signal: AbortSignal) => Promise<ApiResult<Blob>>,
   signal?: AbortSignal,
@@ -222,26 +188,6 @@ function client() {
   return value;
 }
 
-function normalizeApiPath(path: ApiPath): NormalizedApiPath {
-  if (typeof path !== "string" || path.trim().length === 0) {
-    throw new Error("API path is required");
-  }
-  const trimmed = path.trim();
-  if (absoluteUrlPattern.test(trimmed)) {
-    throw new Error("Use a relative API path, not an absolute URL");
-  }
-  return (trimmed.startsWith("/") ? trimmed : `/${trimmed}`) as NormalizedApiPath;
-}
-
-/** Builds an absolute `/api/v1` URL from a relative API path and optional env overrides. */
-export function apiUrl(path: ApiPath, source?: PublicEnvSource) {
-  const normalizedPath = normalizeApiPath(path);
-  const versionPrefix = normalizedPath.startsWith(apiVersionPrefix) ? "" : apiVersionPrefix;
-
-  return `${getApiBaseUrl(source)}${versionPrefix}${normalizedPath}`;
-}
-
-/** Fetches the authenticated user's profile and active organization context. */
 export function getCurrentUser(workspaceId: string | null, options?: ApiRequestOptions) {
   return unwrapOp<"getCurrentUser">(
     (signal) =>
@@ -253,7 +199,6 @@ export function getCurrentUser(workspaceId: string | null, options?: ApiRequestO
   );
 }
 
-/** Lists active Brand Profiles in the selected workspace. */
 export function listBrandProfiles(workspaceId: string | null, options?: ApiRequestOptions) {
   return unwrapOp<"listBrandProfiles">(
     (signal) =>
@@ -265,7 +210,6 @@ export function listBrandProfiles(workspaceId: string | null, options?: ApiReque
   );
 }
 
-/** Creates a Brand Profile in the active workspace (admin only). */
 export function createBrandProfile(
   workspaceId: string | null,
   input: CreateBrandProfileInput,
@@ -285,7 +229,6 @@ export function createBrandProfile(
   );
 }
 
-/** Updates a Brand Profile's name or color (admin only). */
 export function updateBrandProfile(
   workspaceId: string | null,
   profileId: string,
@@ -307,7 +250,6 @@ export function updateBrandProfile(
   );
 }
 
-/** Permanently deletes a Brand Profile and its owned records (admin only). */
 export function deleteBrandProfile(
   workspaceId: string | null,
   profileId: string,
@@ -327,7 +269,6 @@ export function deleteBrandProfile(
   );
 }
 
-/** Lists paginated Posts with attachments, saved targets, and Channel outcomes. */
 export function listPosts(
   workspaceId: string | null,
   params?: PostQueryParams,
@@ -344,7 +285,6 @@ export function listPosts(
   );
 }
 
-/** Lists one bounded page of recurring publishing Queues for a Brand Profile. */
 export function listQueues(
   workspaceId: string | null,
   params: QueueQueryParams,
@@ -361,7 +301,6 @@ export function listQueues(
   );
 }
 
-/** Reads the workspace's publishing timezone, signature templates, and notifications. */
 export function getPublishingPreferences(workspaceId: string | null, options?: ApiRequestOptions) {
   return unwrapOp<"getPublishingPreferences">(
     (signal) =>
@@ -373,7 +312,6 @@ export function getPublishingPreferences(workspaceId: string | null, options?: A
   );
 }
 
-/** Replaces the complete workspace publishing-preference document atomically. */
 export function updatePublishingPreferences(
   workspaceId: string | null,
   input: PublishingPreferencesUpdate,
@@ -391,7 +329,6 @@ export function updatePublishingPreferences(
   );
 }
 
-/** Creates a recurring publishing Queue with a stable idempotency key. */
 export function createQueue(
   workspaceId: string | null,
   input: CreateQueueInput,
@@ -409,7 +346,6 @@ export function createQueue(
   );
 }
 
-/** Updates a Queue's future slot configuration without moving existing reservations. */
 export function updateQueue(
   workspaceId: string | null,
   id: string,
@@ -431,7 +367,6 @@ export function updateQueue(
   );
 }
 
-/** Retires an idle Queue; pending or in-flight memberships fail with a conflict. */
 export function deleteQueue(
   workspaceId: string | null,
   id: string,
@@ -453,7 +388,6 @@ export function deleteQueue(
   );
 }
 
-/** Cancels editable pending Channel intents and releases a Post's Queue slot. */
 export function removePostFromQueue(
   workspaceId: string | null,
   queueId: string,
@@ -476,7 +410,6 @@ export function removePostFromQueue(
   );
 }
 
-/** Fetches one Post with its ordered attachments, saved targets, and Channel outcomes. */
 export function getPost(workspaceId: string | null, id: string, options?: ApiRequestOptions) {
   return unwrapOp<"getPost">(
     (signal) =>
@@ -489,7 +422,6 @@ export function getPost(workspaceId: string | null, id: string, options?: ApiReq
   );
 }
 
-/** Creates a nonempty draft Post; retries with the same idempotency key return the same Post. */
 export function createPost(
   workspaceId: string | null,
   input: CreatePostInput,
@@ -507,7 +439,6 @@ export function createPost(
   );
 }
 
-/** Saves a Post's draft content, ordered attachments, and saved per-Channel targets. */
 export function updatePost(
   workspaceId: string | null,
   id: string,
@@ -529,7 +460,6 @@ export function updatePost(
   );
 }
 
-/** Schedules a Post to its target Channels, or publishes immediately when `scheduled_at` is null. */
 export function schedulePost(
   workspaceId: string | null,
   id: string,
@@ -551,7 +481,6 @@ export function schedulePost(
   );
 }
 
-/** Soft-deletes a Post owned by `brandProfileId` while keeping delivered history immutable. */
 export function deletePost(
   workspaceId: string | null,
   id: string,
@@ -573,7 +502,6 @@ export function deletePost(
   );
 }
 
-/** Fetches Asset metadata and processing status by ID. */
 export function getAsset(workspaceId: string | null, id: string, options?: ApiRequestOptions) {
   return unwrapOp<"getAsset">(
     (signal) =>
@@ -586,7 +514,6 @@ export function getAsset(workspaceId: string | null, id: string, options?: ApiRe
   );
 }
 
-/** Requests a short-lived presigned preview URL for an Asset. */
 export function getAssetPreviewUrl(
   workspaceId: string | null,
   id: string,
@@ -615,7 +542,6 @@ function getAssetDownloadUrl(workspaceId: string | null, id: string, options?: A
   );
 }
 
-/** Downloads original Asset bytes via its signed URL with credentials omitted. */
 export function getAssetBlob(
   workspaceId: string | null,
   id: string,
@@ -629,7 +555,6 @@ export function getAssetBlob(
   );
 }
 
-/** Creates a single-part or multipart upload session for a media file. */
 export function createUploadSession(
   workspaceId: string | null,
   input: CreateUploadSessionInput,
@@ -649,7 +574,6 @@ export function createUploadSession(
   );
 }
 
-/** Fetches the current state and completed parts of an upload session. */
 export function getUploadSession(
   workspaceId: string | null,
   sessionId: string,
@@ -666,7 +590,6 @@ export function getUploadSession(
   );
 }
 
-/** Requests presigned upload URLs for a batch of multipart part numbers. */
 export function createUploadPartUrls(
   workspaceId: string | null,
   sessionId: string,
@@ -688,7 +611,6 @@ export function createUploadPartUrls(
   );
 }
 
-/** Completes an upload session and queues the resulting Asset for verification. */
 export function completeUploadSession(
   workspaceId: string | null,
   sessionId: string,
@@ -710,7 +632,6 @@ export function completeUploadSession(
   );
 }
 
-/** Aborts an upload session and cleans up partial chunks in object storage. */
 export function abortUploadSession(
   workspaceId: string | null,
   sessionId: string,
@@ -730,7 +651,6 @@ export function abortUploadSession(
   );
 }
 
-/** Lists connected social platform accounts in the workspace. */
 export function listPlatforms(
   workspaceId: string | null,
   params?: PlatformQueryParams,
@@ -747,7 +667,6 @@ export function listPlatforms(
   );
 }
 
-/** Lists deployment-defined publishing and media capabilities across supported platforms. */
 export function listPlatformCapabilities(workspaceId: string | null, options?: ApiRequestOptions) {
   return unwrapOp<"listPlatformCapabilities">(
     (signal) =>
@@ -759,7 +678,6 @@ export function listPlatformCapabilities(workspaceId: string | null, options?: A
   );
 }
 
-/** Initiates a provider OAuth handshake and returns the external authorization URL. */
 export function startPlatformOAuth(
   workspaceId: string | null,
   platform: Platform,
@@ -776,7 +694,6 @@ export function startPlatformOAuth(
   );
 }
 
-/** Reads an owner-bound OAuth account-selection ticket without exposing credentials. */
 export function getOAuthSelection(
   workspaceId: string | null,
   selectionId: string,
@@ -793,7 +710,6 @@ export function getOAuthSelection(
   );
 }
 
-/** Confirms one candidate account from an active OAuth selection ticket. */
 export function confirmOAuthSelection(
   workspaceId: string | null,
   selectionId: string,
@@ -815,7 +731,6 @@ export function confirmOAuthSelection(
   );
 }
 
-/** Discards an unconfirmed OAuth selection ticket. */
 export function cancelOAuthSelection(
   workspaceId: string | null,
   selectionId: string,
@@ -835,7 +750,6 @@ export function cancelOAuthSelection(
   );
 }
 
-/** Fetches live creator publishing requirements for a connected platform account. */
 export function getPlatformPublishingRequirements(
   workspaceId: string | null,
   id: string,
@@ -852,7 +766,6 @@ export function getPlatformPublishingRequirements(
   );
 }
 
-/** Disconnects a platform account from the workspace and revokes its tokens. */
 export function disconnectPlatform(
   workspaceId: string | null,
   id: string,
@@ -874,7 +787,6 @@ export function disconnectPlatform(
 
 export type BroadcastInfo = OperationSuccess<"getBroadcast">;
 
-/** Reads no-store encoder credentials on explicit writer demand; never cache the result. */
 export function getBroadcast(workspaceId: string | null, id: string, options?: ApiRequestOptions) {
   return unwrapOp<"getBroadcast">(
     (signal) =>
@@ -888,7 +800,6 @@ export function getBroadcast(workspaceId: string | null, id: string, options?: A
   );
 }
 
-/** Ends an active live broadcast with a stable idempotency key. */
 export function endBroadcast(workspaceId: string | null, id: string, options?: ApiRequestOptions) {
   return unwrapOp<"endBroadcast">(
     (signal) =>
@@ -904,7 +815,6 @@ export function endBroadcast(workspaceId: string | null, id: string, options?: A
   );
 }
 
-/** Fetches status and attempt details for one Distribution. */
 export function getDistribution(
   workspaceId: string | null,
   id: string,
@@ -921,7 +831,6 @@ export function getDistribution(
   );
 }
 
-/** Reschedules or updates content overrides for a pending Distribution. */
 export function updateScheduledDistribution(
   workspaceId: string | null,
   id: string,
@@ -943,7 +852,6 @@ export function updateScheduledDistribution(
   );
 }
 
-/** Cancels a scheduled or queued Distribution before provider delivery. */
 export function cancelDistribution(
   workspaceId: string | null,
   id: string,
@@ -963,7 +871,6 @@ export function cancelDistribution(
   );
 }
 
-/** Re-enqueues a failed Distribution while preserving idempotency. */
 export function retryDistribution(
   workspaceId: string | null,
   id: string,
@@ -983,7 +890,6 @@ export function retryDistribution(
   );
 }
 
-/** Lists Calendar events representing scheduled and published Distributions in a range. */
 export function getCalendar(
   workspaceId: string | null,
   params: CalendarQueryParams,
@@ -1000,7 +906,6 @@ export function getCalendar(
   );
 }
 
-/** Lists Workspace members with role, lifecycle status, and join date. */
 export function listWorkspaceMembers(workspaceId: string, options?: ApiRequestOptions) {
   return unwrapOp<"listWorkspaceMembers">(
     (signal) =>
@@ -1013,7 +918,6 @@ export function listWorkspaceMembers(workspaceId: string, options?: ApiRequestOp
   );
 }
 
-/** Fetches stored-snapshot Analytics dashboard aggregates for a cohort window. */
 export function getAnalyticsDashboard(
   workspaceId: string | null,
   params: AnalyticsDashboardQueryParams,
@@ -1030,7 +934,6 @@ export function getAnalyticsDashboard(
   );
 }
 
-/** Lists pending, unexpired Workspace invitations. */
 export function listWorkspaceInvitations(workspaceId: string, options?: ApiRequestOptions) {
   return unwrapOp<"listWorkspaceInvitations">(
     (signal) =>
@@ -1043,7 +946,6 @@ export function listWorkspaceInvitations(workspaceId: string, options?: ApiReque
   );
 }
 
-/** Fetches ranked per-Post Analytics rows for a published cohort window. */
 export function getAnalyticsPosts(
   workspaceId: string | null,
   params: AnalyticsPostsQueryParams,
@@ -1060,7 +962,6 @@ export function getAnalyticsPosts(
   );
 }
 
-/** Reads up to 500 chronological stored Analytics snapshots for one Distribution. */
 export function getDistributionAnalytics(
   workspaceId: string | null,
   id: string,
@@ -1077,7 +978,6 @@ export function getDistributionAnalytics(
   );
 }
 
-/** Invites an email address to the Workspace with an assignable role. */
 export function createWorkspaceInvitation(
   workspaceId: string,
   input: { email: string; role: WorkspaceRole },
@@ -1098,7 +998,6 @@ export function createWorkspaceInvitation(
   );
 }
 
-/** Rotates an invitation token and resends the acceptance email. */
 export function resendWorkspaceInvitation(
   workspaceId: string,
   invitationId: string,
@@ -1118,7 +1017,6 @@ export function resendWorkspaceInvitation(
   );
 }
 
-/** Revokes a pending Workspace invitation and frees its reserved Seat. */
 export function revokeWorkspaceInvitation(
   workspaceId: string,
   invitationId: string,
@@ -1138,7 +1036,6 @@ export function revokeWorkspaceInvitation(
   );
 }
 
-/** Updates a Workspace member's role. */
 export function updateWorkspaceMember(
   workspaceId: string,
   memberId: string,
@@ -1160,7 +1057,6 @@ export function updateWorkspaceMember(
   );
 }
 
-/** Removes a member from the Workspace and frees their Seat. */
 export function removeWorkspaceMember(
   workspaceId: string,
   memberId: string,
@@ -1180,7 +1076,6 @@ export function removeWorkspaceMember(
   );
 }
 
-/** Renames the shared Workspace. */
 export function updateWorkspaceName(
   workspaceId: string,
   input: { name: string },
@@ -1201,7 +1096,6 @@ export function updateWorkspaceName(
   );
 }
 
-/** Reads installation Seat usage, shared Workspace metadata, and Installation Owner. */
 export function getInstallation(workspaceId: string, options?: ApiRequestOptions) {
   return unwrapOp<"getInstallation">(
     (signal) =>
@@ -1213,7 +1107,6 @@ export function getInstallation(workspaceId: string, options?: ApiRequestOptions
   );
 }
 
-/** Suspends a member account, revoking active sessions and freeing their Seat. */
 export function suspendInstallationMember(
   workspaceId: string,
   memberId: string,
@@ -1235,7 +1128,6 @@ export function suspendInstallationMember(
   );
 }
 
-/** Reactivates a suspended member when a Seat is available. */
 export function reactivateInstallationMember(
   workspaceId: string,
   memberId: string,
@@ -1255,7 +1147,6 @@ export function reactivateInstallationMember(
   );
 }
 
-/** Permanently deletes a member account after matching email confirmation. */
 export function deleteInstallationMember(
   workspaceId: string,
   memberId: string,
@@ -1277,7 +1168,6 @@ export function deleteInstallationMember(
   );
 }
 
-/** Transfers installation ownership to an active Workspace Admin after password verification. */
 export function transferInstallationOwnership(
   workspaceId: string,
   targetUserId: string,
@@ -1298,7 +1188,6 @@ export function transferInstallationOwnership(
   );
 }
 
-/** Lists reverse-chronological Workspace audit log entries. */
 export function listWorkspaceAudit(
   workspaceId: string,
   params: AuditQueryParams,
@@ -1315,7 +1204,6 @@ export function listWorkspaceAudit(
   );
 }
 
-/** Inspects a Workspace invitation token before sign-in. */
 export function getInvitationPreview(token: string, options?: ApiRequestOptions) {
   return unwrapOp<"getWorkspaceInvitation">(
     (signal) =>
@@ -1327,7 +1215,6 @@ export function getInvitationPreview(token: string, options?: ApiRequestOptions)
   );
 }
 
-/** Accepts a Workspace invitation for the authenticated account. */
 export function acceptWorkspaceInvitation(token: string, options?: ApiRequestOptions) {
   return unwrapOp<"acceptWorkspaceInvitation">(
     (signal) =>
@@ -1339,7 +1226,6 @@ export function acceptWorkspaceInvitation(token: string, options?: ApiRequestOpt
   );
 }
 
-/** Reads Installation Owner onboarding progress; upgrades report `not_applicable`. */
 export function getOnboarding(options?: ApiRequestOptions) {
   return unwrapOp<"getOnboarding">(
     (signal) => client().GET("/onboarding", { signal }),
@@ -1347,7 +1233,6 @@ export function getOnboarding(options?: ApiRequestOptions) {
   );
 }
 
-/** Persists the reached onboarding screen idempotently. */
 export function saveOnboarding(
   input: { step: "improvement" | "ready" },
   options?: ApiRequestOptions,
@@ -1365,7 +1250,6 @@ export function saveOnboarding(
   );
 }
 
-/** Marks onboarding complete idempotently without renaming the Workspace. */
 export function completeOnboarding(options?: ApiRequestOptions) {
   return unwrapOp<"completeOnboarding">(
     (signal) =>
@@ -1379,7 +1263,6 @@ export function completeOnboarding(options?: ApiRequestOptions) {
   );
 }
 
-/** Reads the installation improvement-reporting policy and effective outbound state. */
 export function getReportingPolicy(options?: ApiRequestOptions) {
   return unwrapOp<"getReportingPolicy">(
     (signal) => client().GET("/installation/reporting", { signal }),
@@ -1387,7 +1270,6 @@ export function getReportingPolicy(options?: ApiRequestOptions) {
   );
 }
 
-/** Updates installation usage and diagnostics reporting preferences (Owner only). */
 export function updateReportingPreferences(
   input: { usage: boolean; diagnostics: boolean },
   options?: ApiRequestOptions,
@@ -1405,7 +1287,6 @@ export function updateReportingPreferences(
   );
 }
 
-/** Reads the one-time installation discovery-source answer and delivery state (Owner only). */
 export function getReportingFeedback(options?: ApiRequestOptions) {
   return unwrapOp<"getReportingFeedback">(
     (signal) => client().GET("/installation/reporting/feedback", { signal }),
@@ -1413,7 +1294,6 @@ export function getReportingFeedback(options?: ApiRequestOptions) {
   );
 }
 
-/** Submits the one-time installation discovery-source answer (Owner only). */
 export function submitReportingFeedback(
   input: { discovery_source: DiscoverySource },
   options?: ApiRequestOptions,

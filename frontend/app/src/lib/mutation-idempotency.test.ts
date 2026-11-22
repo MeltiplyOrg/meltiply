@@ -45,21 +45,16 @@ describe("mutation idempotency", () => {
     const first = { post_id: "post-1", text: "First" };
     const second = { post_id: "post-2", text: "Second" };
 
-    // Interleaved attempts of two in-flight mutations: each fingerprint keeps
-    // its own key, so neither overwrites the other.
     expect(tracker.keyFor(first)).toBe("key-a");
     expect(tracker.keyFor(second)).toBe("key-b");
     expect(tracker.keyFor(first)).toBe("key-a");
     expect(tracker.keyFor(second)).toBe("key-b");
     expect(createKey).toHaveBeenCalledTimes(2);
 
-    // Settling the first mutation clears only its fingerprint: the second
-    // mutation's retry still reuses its original key.
     tracker.clear(mutationFingerprint(first));
     expect(tracker.keyFor(second)).toBe("key-b");
     expect(createKey).toHaveBeenCalledTimes(2);
 
-    // A fresh attempt of the settled payload mints a new key.
     expect(tracker.keyFor(first)).toBe("key-c");
     expect(createKey).toHaveBeenCalledTimes(3);
   });
@@ -73,8 +68,6 @@ describe("mutation idempotency", () => {
     }
     expect(createKey).toHaveBeenCalledTimes(64);
 
-    // The 65th distinct fingerprint evicts the oldest entry; re-asking for it
-    // mints a fresh key instead of resurrecting the evicted one.
     tracker.keyFor({ index: 64 });
     tracker.keyFor({ index: 0 });
     expect(createKey).toHaveBeenCalledTimes(66);

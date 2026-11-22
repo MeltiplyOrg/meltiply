@@ -36,9 +36,6 @@ import {
   usePlatforms,
 } from "./queries";
 
-// Exercise the real frontend Effect layer, query hooks, mutation invalidations,
-// and QueryClient. Only the HTTP adapter is replaced so each test can observe
-// transport work and return distinguishable data without a browser or API.
 vi.mock("./api", async (original) => ({
   ...(await original<typeof ApiModule>()),
   disconnectPlatform: vi.fn(),
@@ -67,12 +64,6 @@ function accountSignature(items: readonly PlatformAccount[]): string {
   return items.map((item) => `${item.id}:${item.connection_status}`).join(",") || "empty";
 }
 
-/**
- * Mounts the shared capability/platform/requirement query hooks as a rendered
- * consumer. It deliberately uses the production hooks instead of query-option
- * assertions so the tests observe what a surface receives and what reaches the
- * transport adapter.
- */
 function CapabilityConsumer() {
   const capabilitiesQuery = usePlatformCapabilities(scope);
   const platformsQuery = usePlatforms(scope);
@@ -101,14 +92,6 @@ function CapabilityConsumer() {
   );
 }
 
-/**
- * Mirrors the production scoped-client defaults that own the freshness and
- * retention policies. `gcTime` matters as much as `staleTime` here: the
- * retention assertions advance the clock past ten minutes, which exceeds
- * TanStack's five-minute default garbage collection, so omitting the
- * production 30-minute window would let a collected entry masquerade as a
- * deliberately retained one.
- */
 function createScopedClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
@@ -174,12 +157,6 @@ describe("scoped Platform capabilities retention", () => {
     );
   });
 
-  /**
-   * Navigation remounts consumers but keeps the Workspace-scoped QueryClient.
-   * Advancing past the 60-second general policy proves the capability read is
-   * reused while an ordinary query and the dynamic requirement read still
-   * refresh at their existing freshness.
-   */
   it("reuses a capability read across navigation after the general freshness window", async () => {
     const client = createScopedClient();
     const first = renderConsumer(client);
@@ -213,12 +190,6 @@ describe("scoped Platform capabilities retention", () => {
     expect(listPlatformCapabilities).toHaveBeenCalledTimes(1);
   });
 
-  /**
-   * Tab focus and network reconnect are explicit invalidation-adjacent events.
-   * A retained successful capability result must survive them, while the
-   * dynamic requirement and general platform reads still refresh because they
-   * remain stale under their unchanged policies.
-   */
   it("keeps retained capabilities through focus and reconnect events", async () => {
     const client = createScopedClient();
     renderConsumer(client);
@@ -256,11 +227,6 @@ describe("scoped Platform capabilities retention", () => {
     expect(listPlatformCapabilities).toHaveBeenCalledTimes(1);
   });
 
-  /**
-   * A replacement scoped QueryClient represents sign-out or an identity or
-   * Workspace switch. It starts empty, loads fresh data, and cannot display the
-   * previous client's retained capabilities.
-   */
   it("loads fresh capabilities in a replacement scoped client", async () => {
     const firstClient = createScopedClient();
     const first = renderConsumer(firstClient);
@@ -285,11 +251,6 @@ describe("scoped Platform capabilities retention", () => {
     expect(listPlatformCapabilities).toHaveBeenCalledTimes(2);
   });
 
-  /**
-   * Disconnecting an account invalidates its account data and publishing
-   * requirements. The rendered consumer must receive the refreshed dynamic
-   * values while the static capability array remains the same retained read.
-   */
   it("refreshes Channel data without refetching static capabilities", async () => {
     const revokedAccounts: PlatformAccountsResponse = {
       accounts: accounts.accounts.map((account) => ({

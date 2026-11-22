@@ -48,8 +48,6 @@ describe("frontend telemetry boundary", () => {
       retryable: true,
       status: 503,
     });
-    // Exactly one event per failure: a second `frontend-error` event would be
-    // relayed to diagnostics as a client crash the API Worker already owns.
     expect(listener).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(detail.detail)).not.toContain("raw-response-secret");
     const fetchSpy = vi.mocked(globalThis.fetch);

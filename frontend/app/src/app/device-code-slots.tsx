@@ -4,20 +4,8 @@ import { Input } from "@meltiply/ui/input";
 
 import { normalizeDeviceUserCode } from "@/lib/device-authorization";
 
-/** A device user code is exactly six characters; the server generates the same length. */
 export const DEVICE_USER_CODE_LENGTH = 6;
 
-/**
- * Six single-character slots for the user-facing matching code.
- *
- * Typing advances to the next slot, Backspace clears or steps back, arrow keys
- * move between slots, and a pasted code fills from the first slot. The value is
- * always the normalized contiguous code; empty slots are display-only.
- *
- * @param props.value - Current normalized code, possibly shorter than six while typing.
- * @param props.onChange - Receives the next normalized contiguous code.
- * @returns Grouped, individually labelled one-character inputs.
- */
 export function DeviceCodeSlots({
   value,
   onChange,
@@ -31,21 +19,15 @@ export function DeviceCodeSlots({
     (_, index) => value[index] ?? "",
   );
 
-  /**
-   * Moves focus to a slot, clamped to the six inputs.
-   *
-   * @param index - Requested slot index.
-   */
   const focusSlot = (index: number) => {
     slots.current[Math.min(DEVICE_USER_CODE_LENGTH - 1, Math.max(0, index))]?.focus();
   };
 
-  /**
-   * Applies one slot edit and advances focus.
-   *
-   * @param index - Edited slot.
-   * @param raw - Raw input value; may contain a whole pasted code.
-   */
+  const fillSlots = (code: string) => {
+    onChange(code.slice(0, DEVICE_USER_CODE_LENGTH));
+    focusSlot(code.length - 1);
+  };
+
   const updateSlot = (index: number, raw: string) => {
     const normalized = normalizeDeviceUserCode(raw);
     if (!normalized) {
@@ -53,8 +35,7 @@ export function DeviceCodeSlots({
       return;
     }
     if (normalized.length > 1) {
-      onChange(normalized.slice(0, DEVICE_USER_CODE_LENGTH));
-      focusSlot(Math.min(DEVICE_USER_CODE_LENGTH - 1, normalized.length - 1));
+      fillSlots(normalized);
       return;
     }
     onChange(
@@ -103,9 +84,7 @@ export function DeviceCodeSlots({
             onPaste={(event) => {
               event.preventDefault();
               const pasted = normalizeDeviceUserCode(event.clipboardData.getData("text"));
-              if (!pasted) return;
-              onChange(pasted.slice(0, DEVICE_USER_CODE_LENGTH));
-              focusSlot(Math.min(DEVICE_USER_CODE_LENGTH - 1, pasted.length - 1));
+              if (pasted) fillSlots(pasted);
             }}
           />
         </div>

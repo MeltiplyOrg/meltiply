@@ -1,32 +1,4 @@
 #!/usr/bin/env node
-/**
- * Public-content gate for meltiply.com/docs.
- *
- * Validates the publishing contract for the public docs collection
- * (content/docs) at check time, inside `bun run check`:
- *
- *   - Only .mdx files, directly under content/docs (no nested directories),
- *     and every file must be one of the fixed public page slugs. All 15
- *     approved pages must exist.
- *   - Frontmatter must declare title, description, section (one of the public
- *     sections), and a non-negative integer order — the same contract the
- *     collection schema validates and src/lib/source.ts sorts by.
- *   - Body must be plain markdown. The MDX AST must not contain mdxjsEsm
- *     (import/export), expression nodes (mdxFlowExpression/mdxTextExpression),
- *     or JSX elements (mdxJsxFlowElement/mdxJsxTextElement), so pages cannot
- *     pull in code, components, or evaluated values. Fenced code blocks are
- *     ordinary `code` nodes and stay safe.
- *   - Links must target the public site itself (root-absolute paths into the
- *     15 approved slugs, optionally with an in-page anchor that exists as a
- *     heading on the target page), mailto:, or external http(s) sites —
- *     except the internal repository host, which is rejected. Relative paths,
- *     protocol-relative // URLs, and other schemes are rejected, so internal
- *     repository paths cannot be referenced.
- *
- * This is a bounded source-contract gate for the public collection, not a
- * universal leak guarantee; review of page prose remains a human concern.
- * Usage: node scripts/check-content.mjs
- */
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,29 +9,11 @@ import GithubSlugger from "github-slugger";
 
 const docsRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const contentDir = join(docsRoot, "content", "docs");
+const catalog = JSON.parse(readFileSync(join(docsRoot, "src", "lib", "docs-catalog.json"), "utf8"));
 
-const SECTIONS = new Set(["Getting started", "Publishing", "Workspace", "Help", "Legal"]);
+const SECTIONS = new Set(catalog.sections);
+const ALLOWED_SLUGS = new Set(catalog.allowedSlugs);
 
-/** Every public page is a deliberate, reviewed file — nothing else may ship. */
-const ALLOWED_SLUGS = new Set([
-  "index",
-  "getting-started",
-  "workspaces",
-  "channels",
-  "media",
-  "publishing",
-  "analytics",
-  "inbox",
-  "resource-limits",
-  "agent",
-  "settings",
-  "troubleshooting",
-  "terms",
-  "privacy",
-  "cookies",
-]);
-
-/** MDX AST node kinds that make content depend on code or evaluated values. */
 const FORBIDDEN_NODE_TYPES = new Set([
   "mdxjsEsm",
   "mdxFlowExpression",
@@ -68,19 +22,12 @@ const FORBIDDEN_NODE_TYPES = new Set([
   "mdxJsxTextElement",
 ]);
 
-/** External hosts that carry internal-only material; public pages must not
- * link to them (the monorepo source tree, issues, or internal docs). */
 const FORBIDDEN_LINK_HOSTS = /(^|\.)github\.com$/i;
 
 const errors = [];
 
 const parser = unified().use(remarkParse).use(remarkMdx);
 
-/**
- * Walk every node of an mdast tree depth-first and invoke `visit` on each.
- * mdast children always live under `children`, so a single generic walker is
- * enough — no per-node-type dispatch needed.
- */
 function walk(node, visit) {
   visit(node);
   if (Array.isArray(node.children)) {
@@ -88,22 +35,12 @@ function walk(node, visit) {
   }
 }
 
-/**
- * Concatenate the plain text of a heading's inline children. Used for anchor
- * slugs; text and inlineCode carry `value`, richer inline nodes are flattened
- * recursively so link text inside headings still contributes.
- */
 function nodeText(node) {
   if (typeof node.value === "string") return node.value;
   if (!Array.isArray(node.children)) return "";
   return node.children.map(nodeText).join("");
 }
 
-/**
- * Collect the GitHub-style anchor slugs of every heading in one AST.
- * remark-heading (fumadocs pipeline) uses github-slugger semantics, so
- * matching it here keeps link validation aligned with emitted heading ids.
- */
 function headingSlugs(tree) {
   const slugger = new GithubSlugger();
   const slugs = new Set();
@@ -113,22 +50,12 @@ function headingSlugs(tree) {
   return slugs;
 }
 
-/**
- * Extract the frontmatter block (--- ... ---) from raw file source.
- * Returns [frontmatterText, bodyText]; frontmatterText is null when absent so
- * callers can report the missing block instead of validating nothing.
- */
 function splitFrontmatter(source) {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) return [null, source];
   return [match[1], source.slice(match[0].length)];
 }
 
-/**
- * Validate the flat key: value frontmatter contract for one page. Only
- * top-level scalars are expected, so a line parser suffices — richer YAML is
- * out of contract anyway.
- */
 function checkFrontmatter(slug, frontmatter) {
   if (frontmatter === null) {
     errors.push(`${slug}: missing frontmatter block`);
@@ -152,14 +79,6 @@ function checkFrontmatter(slug, frontmatter) {
   }
 }
 
-/**
- * Validate one link/image target found in the AST. Public pages may link to
- * other public pages (/docs/slug or /docs/slug#anchor, verified against the real
- * page set and heading anchors), to mailto:, or to external http(s) hosts
- * other than the internal repository. Everything else — relative paths,
- * protocol-relative //, paths outside /docs, unknown paths, other schemes — is
- * rejected so navigation cannot point at non-public or non-existent targets.
- */
 function checkLink(slug, url, anchorsBySlug) {
   if (url.startsWith("//")) {
     errors.push(`${slug}: protocol-relative link is not allowed: ${url}`);
@@ -188,7 +107,6 @@ function checkLink(slug, url, anchorsBySlug) {
     return;
   }
   const [rawPath, anchor] = url.replace(/^\/docs\/?/, "").split("#");
-  // "/docs/" targets the docs home page, emitted from index.mdx.
   const pathPart = rawPath === "" ? "index" : rawPath;
   if (!ALLOWED_SLUGS.has(pathPart)) {
     errors.push(
@@ -201,12 +119,6 @@ function checkLink(slug, url, anchorsBySlug) {
   }
 }
 
-/**
- * Validate one content file: frontmatter contract, then MDX-AST checks for
- * forbidden code/component nodes, heading-anchor collection, and link target
- * collection. Link checks run in a second pass (run()) once all pages'
- * anchors are known, so this function returns the collected data.
- */
 function checkPage(slug, filePath) {
   const source = readFileSync(filePath, "utf8");
   const [frontmatter, body] = splitFrontmatter(source);
@@ -236,12 +148,6 @@ function checkPage(slug, filePath) {
   return { slugs: headingSlugs(tree), links };
 }
 
-/**
- * Validate the whole public collection: directory shape, per-page checks, the
- * presence of every approved slug, and finally cross-page link targets using
- * the anchors collected from each page's own AST. Returns the number of
- * validated pages (0 when the content directory is absent).
- */
 function run() {
   if (!existsSync(contentDir)) {
     errors.push(`missing content directory: ${contentDir}`);

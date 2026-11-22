@@ -19,13 +19,6 @@ interface NavigationShellProps {
   children: ReactNode;
 }
 
-/**
- * Persistent Gr8r frame rewritten as Tailwind compositions: workspace rail,
- * 46px breadcrumb/search bar, and one full-height route viewport. Navigation
- * swaps real routes directly; no cloned slots, CSS page roles, or morph state.
- * `MobileNavigationSidebar` owns the phone rail layer; the shared center dialog
- * owns jump-search focus and dismissal.
- */
 export function NavigationShell({ currentView, onNavigate, children }: NavigationShellProps) {
   const { selectedBrandProfile, isLoading: workspaceLoading } = useWorkspace();
   const { t } = useI18n();
@@ -33,7 +26,6 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
   const [searchOpen, setSearchOpen] = useState(false);
   const searchTriggerRef = useRef<HTMLButtonElement>(null);
   useHotkey(hotkeys.commandMenu, () => setSearchOpen((open) => !open));
-  /** Keeps mobile dismissal and URL navigation together for every real destination. */
   const handleNavClick = (view: WorkspaceView, options?: { search?: string }) => {
     onNavigate(view, options);
     setMobileMenuOpen(false);

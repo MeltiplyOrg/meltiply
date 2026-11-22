@@ -15,12 +15,6 @@ export interface BulkSelectionBarProps {
   busy?: boolean;
 }
 
-/**
- * Gr8r's compact inverse-ink bulk pill, portalled outside clipped collections.
- * Real selection and confirmation stay with callers. No task-only bulk fields
- * are implied; busy state disables both mutation and deselection. The inverse
- * palette adapts to both themes and safe-area padding keeps mobile controls reachable.
- */
 export function BulkSelectionBar({
   count,
   actionLabel,

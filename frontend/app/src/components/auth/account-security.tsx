@@ -7,13 +7,6 @@ import { useMeltiplyAuth } from "./auth-provider";
 import { authClient } from "@/lib/auth-client";
 import { useI18n } from "@/lib/i18n";
 
-/**
- * Inline account-security controls, always password-reauthenticated.
- * Secrets remain local and clear on an allowed departure. Requests and unconfirmed
- * enrollment block section/route/history changes; document departures warn before
- * unloading. TOTP must be confirmed or explicitly cancelled on the server.
- * Security changes require a fresh sign-in; new backup codes replace the old set.
- */
 export function AccountSecurity(): React.ReactElement {
   const { user, signOut } = useMeltiplyAuth();
   const { t } = useI18n();

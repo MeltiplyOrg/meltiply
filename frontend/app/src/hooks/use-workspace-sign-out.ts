@@ -3,7 +3,6 @@ import { toast } from "@meltiply/ui/toast";
 import { useWorkspace } from "@/context/workspace.context";
 import { useI18n } from "@/lib/i18n";
 
-/** Ends the real workspace session; failed server sign-out remains visible from every entrypoint. */
 export function useWorkspaceSignOut(): () => Promise<void> {
   const { logout } = useWorkspace();
   const { t } = useI18n();

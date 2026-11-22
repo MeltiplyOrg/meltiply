@@ -4,14 +4,6 @@ import type { Root } from "fumadocs-core/page-tree";
 import type { AstroProviderProps } from "fumadocs-core/framework/astro";
 import type { DocsPageProps } from "fumadocs-ui/layouts/docs/page";
 
-/**
- * Renders the trusted, build-time MDX slot into an explicit page-content prop.
- * Astro updates persisted islands' props but retains their original slots;
- * passing HTML lets the article change while the React navigation shell lives
- * across routes. Only the gated public docs collection supplies this content.
- * The home link stays same-origin; `appUrl` pins the separate app to its
- * configured preview origin.
- */
 interface Props {
   tree: Root;
   pathname: string;
@@ -37,11 +29,6 @@ const appUrl = process.env.APP_URL?.trim() || "https://app.meltiply.com";
 
   initializeHeadingCopying();
 
-  /**
-   * Paints the server-rendered rail independently of the React island bundle.
-   * Hydration later takes over its observers without hiding or resetting it;
-   * the existing plane geometry is adopted without replaying initial motion.
-   */
   const rail = document.querySelector<HTMLElement>(".docs-reading-rail");
   if (rail) initializeReadingRail(rail, true);
 </script>

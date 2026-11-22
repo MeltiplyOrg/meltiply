@@ -53,11 +53,9 @@ describe("runQueryEffect (React Query Effect adapter)", () => {
     });
 
     const promise = runQueryEffect(program, { signal: controller.signal });
-    // Abort after a small tick
     setTimeout(() => controller.abort(), 10);
 
     await expect(promise).rejects.toThrow();
-    // Verify interruption triggered finalizer
     expect(cleanedUp).toBe(true);
   });
 

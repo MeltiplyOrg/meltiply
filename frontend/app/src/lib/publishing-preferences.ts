@@ -3,25 +3,12 @@ import { parseDateTime, toZoned } from "@internationalized/date";
 import { platformDisplayName } from "@/lib/platforms";
 import type { Platform, SignatureTemplate } from "@/types";
 
-/** Values a saved signature resolves against one actual publication target. */
 export interface SignatureValues {
   brandProfileName: string;
   channelName: string;
   platform: Platform | string;
 }
 
-/**
- * Resolves the supported placeholders in one signature body.
- *
- * Only `{brand_profile}`, `{platform}`, and `{channel}` are substituted; the
- * server rejects any other placeholder when the template is saved, so a body
- * that reaches the composer always resolves completely. Unknown values fall
- * back to a neutral label rather than leaking an internal identifier.
- *
- * @param body - Template body.
- * @param values - Brand Profile, Platform, and Channel display names.
- * @returns The resolved signature text.
- */
 export function resolveSignature(body: string, values: SignatureValues): string {
   const replacements: Readonly<Record<string, string>> = {
     brand_profile: values.brandProfileName,
@@ -33,17 +20,6 @@ export function resolveSignature(body: string, values: SignatureValues): string 
   );
 }
 
-/**
- * Appends a resolved signature to a Channel caption as its own paragraph.
- *
- * The composer preview, caption-limit validation, and the target snapshot all
- * use this one join so whitespace-only signatures never add a blank paragraph
- * and the counted text matches what the Provider receives.
- *
- * @param content - Channel caption text, possibly empty.
- * @param signature - Resolved signature, or null when none applies.
- * @returns Caption with the signature appended, or the trimmed caption alone.
- */
 export function captionWithSignature(
   content: string,
   signature: string | null | undefined,
@@ -51,32 +27,12 @@ export function captionWithSignature(
   return [content.trim(), signature?.trim()].filter(Boolean).join("\n\n");
 }
 
-/**
- * Selects the default template from a saved list.
- *
- * @param templates - Persisted signature templates.
- * @returns The template marked default, or null when none is configured.
- */
 export function defaultSignatureTemplate(
   templates: readonly SignatureTemplate[],
 ): SignatureTemplate | null {
   return templates.find((template) => template.is_default) ?? null;
 }
 
-/**
- * Converts a wall-clock value ('YYYY-MM-DDTHH:mm') in the selected publishing
- * timezone into the exact instant the Scheduler stores.
- *
- * `compatible` disambiguation is the documented behavior: a nonexistent
- * spring-forward time moves forward by the DST gap, and an ambiguous
- * fall-back time selects the earlier occurrence. The returned instant is
- * independent of the browser's own timezone, so changing the preference later
- * never reinterprets an existing Schedule.
- *
- * @param value - Minute-precision wall-clock value.
- * @param timeZone - Supported IANA timezone identifier.
- * @returns ISO instant, or null when the value is incomplete or invalid.
- */
 export function wallClockToInstant(value: string, timeZone: string): string | null {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return null;
   try {
@@ -86,16 +42,6 @@ export function wallClockToInstant(value: string, timeZone: string): string | nu
   }
 }
 
-/**
- * Formats an instant's wall-clock parts in a publishing timezone for the
- * composer's minute-precision input. The result always describes the selected
- * zone, not the browser's zone.
- *
- * @param instant - ISO instant, Date, or existing minute-precision value.
- * @param timeZone - Supported IANA timezone identifier.
- * @param defaultMidnightToDaytime - Apply the calendar-click 10:00 suggestion.
- * @returns Wall-clock value, or an empty string when unparseable.
- */
 export function instantToWallClock(
   instant: string | Date,
   timeZone: string,

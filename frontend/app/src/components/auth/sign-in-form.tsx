@@ -22,15 +22,6 @@ export interface SignInFormProps {
 
 type Mode = "loading" | "unavailable" | "setup" | "signin" | "recovery" | "reset" | "factor";
 
-/**
- * Coordinates installation-aware owner setup, sign-in, and recovery state.
- * Server status selects setup; it never grants signup authority. Passwords and
- * setup/challenge secrets stay in component memory and support paste/autofill.
- * In development mode only, the resolved sign-in state prefills the seeded
- * local owner credentials; setup and password-reset flows stay empty.
- * Deployed signup waits for email verification instead of claiming a session.
- * Async errors preserve inputs, announce recovery, and never expose account data.
- */
 function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -43,11 +34,6 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
   const [name, setName] = useState(() => draft?.name ?? "");
   const [password, setPassword] = useState("");
   const [setupSecret, setSetupSecret] = useState("");
-  // One coherent draft: the field's text and whether the owner chose it are a
-  // single piece of state, so the displayed value, the value persisted to the
-  // setup draft and the value sent to the API always agree. The default follows
-  // the typed display name until the owner edits the field, so finishing quickly
-  // needs no typing and a deliberate name is never overwritten.
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState(() => ({
     touched: Boolean(draft?.workspaceName),
     value: draft?.workspaceName ?? "",
@@ -69,9 +55,6 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
         if (!cancelled) {
           const initialMode: Mode = !status.initialized ? "setup" : resetToken ? "reset" : "signin";
           setMode(initialMode);
-          // Prefill only the first resolved sign-in state: setup, reset, and
-          // post-reset sign-in must keep their own credentials. Existing input
-          // always wins so a retry never overwrites what the owner typed.
           if (initialMode === "signin" && isDevMode()) {
             setEmail((current) => current || localDevOwnerSignIn.email);
             setPassword((current) => current || localDevOwnerSignIn.password);
@@ -95,12 +78,9 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
   }, [attempt, resetToken, linkError]);
 
   useEffect(() => {
-    // Remove recovery credentials from browser history immediately, not on submit.
     if (params.has("token")) setParams({}, { replace: true });
   }, [params, setParams]);
 
-  // Remember only non-secret progress. The password and setup secret are never
-  // written, so a reload cannot recover a credential from browser storage.
   useEffect(() => {
     if (mode !== "setup") return;
     writeSetupDraft({
@@ -115,10 +95,6 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
     else navigate(redirectTo, { replace: true });
   };
 
-  // The input shows the server's derived default while untouched; sending that
-  // default back would freeze a guess, so an untouched field stays omitted and
-  // the API derives the same name from the real account. The displayed default
-  // is translated for the reader; only a name the owner actually edits is sent.
   const derivedLabel = (name.trim() || email.trim().split("@")[0] || "Meltiply").slice(0, 180);
   const derivedWorkspaceName = t("{name}'s workspace", { name: derivedLabel });
   const chosenWorkspaceName = workspaceNameDraft.touched ? workspaceNameDraft.value.trim() : "";
@@ -187,7 +163,7 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
             );
           }
         } catch {
-          // Preserve the original signup failure when readiness is also unavailable.
+          return;
         }
       }
     } finally {
@@ -254,11 +230,6 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
   };
 }
 
-/**
- * Renders the responsive owner-access surface from the private lifecycle hook.
- * Shared controls own focus/disabled states; the page adds no decorative motion.
- * Input state survives recoverable errors, and only server status exposes setup.
- */
 export function SignInForm(props: SignInFormProps): React.ReactElement {
   const { t } = useI18n();
   const {

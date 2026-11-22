@@ -22,23 +22,11 @@ import { brandProfileColorClass, type OAuthSelectionAccount } from "@/types";
 import { cn } from "@meltiply/ui/utils";
 
 export interface ChannelAssignmentProps {
-  /** Opaque server assignment ticket nonce from callback parameters. */
   selectionId: string;
-  /** Returns to the workspace without connecting a Channel. */
   onClose: () => void;
-  /** Fired after the Channel is persisted under the chosen Brand Profile. */
   onSuccess: () => void;
 }
 
-/**
- * Resolves the authorized accounts and offers the Brand Profile choice.
- *
- * Account and Profile choices use native radios. Only connectable Profiles
- * appear in the bounded scrolling list, preserving workspace order. An already
- * connected account can only refresh its current owner; other accounts require
- * an empty Platform slot.
- * Confirmation supplies both ids; dismissal discards the ticket.
- */
 function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAssignmentProps) {
   const { t } = useI18n();
   const scope = useSessionScope();
@@ -85,7 +73,6 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
       ? selectedProfileId
       : null;
 
-  /** Persists the chosen account under the chosen Profile; API conflicts stay visible for retry. */
   const handleConfirm = useCallback(() => {
     if (!effectiveAccountId || !selectedProfile || workspaceLoading || isSubmitting) return;
     setActionError(null);
@@ -112,12 +99,10 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
     isSubmitting,
     confirmMutation,
     selectionId,
-
     onSuccess,
     t,
   ]);
 
-  /** Cancels a usable ticket before dismissal; missing/expired tickets close locally. */
   const handleCancel = useCallback(() => {
     if (isSubmitting) return;
     if (selectionUnavailable) {
@@ -467,19 +452,6 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
   );
 }
 
-/**
- * Full-page Channel assignment surface rendered after the OAuth callback.
- *
- * The callback hands over a sealed, owner-bound ticket; this view chooses the
- * authorized account (when more than one exists) and the owning Brand Profile
- * before any Channel is persisted. Success returns to Channels with the
- * connected outcome; cancel discards the ticket.
- *
- * @param props.selectionId - Sealed assignment ticket.
- * @param props.onClose - Returns without a connected Channel.
- * @param props.onSuccess - Reports the connected account before returning.
- * @returns Full-page assignment surface.
- */
 export function ChannelAssignment({
   selectionId,
   onClose,

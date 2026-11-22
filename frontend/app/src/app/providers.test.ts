@@ -1,6 +1,40 @@
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { transportStatus } from "./providers";
+import { ApiError } from "@/lib/api";
+import { reportFrontendError } from "@/lib/frontend-telemetry";
+
+import { reportQueryError, transportStatus } from "./providers";
+
+vi.mock("@/lib/frontend-telemetry", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/frontend-telemetry")>()),
+  reportFrontendError: vi.fn(),
+}));
+
+describe("reportQueryError", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(reportFrontendError).mockClear();
+  });
+
+  it("leaves an API failure to its own api-error record", () => {
+    vi.stubGlobal("window", new EventTarget());
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null)));
+
+    reportQueryError(new ApiError(new Response(null, { status: 404 }), null));
+
+    expect(reportFrontendError).not.toHaveBeenCalled();
+  });
+
+  it("reports a client failure as one query-cache exception", () => {
+    vi.stubGlobal("window", new EventTarget());
+    const failure = new RangeError("bad index");
+
+    reportQueryError(failure);
+
+    expect(reportFrontendError).toHaveBeenCalledTimes(1);
+    expect(reportFrontendError).toHaveBeenCalledWith(failure, "query-cache");
+  });
+});
 
 describe("transportStatus", () => {
   it("names an unreachable API when the browser is online", () => {

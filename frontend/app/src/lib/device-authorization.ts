@@ -3,19 +3,8 @@ import { authClient } from "./auth-client";
 const nonAlphanumericPattern = /[^a-zA-Z0-9]/g;
 const integerPattern = /^\d+$/;
 
-/**
- * Verification state reported by Better Auth's device-authorization plugin.
- * `pending` still allows a decision; `approved` and `denied` are terminal.
- */
 type DeviceAuthorizationStatus = "approved" | "denied" | "pending";
 
-/**
- * Reviewable device request returned to the browser session that claimed it.
- * `client_id` and `scope` are present only for the owning session; a pending
- * response without them belongs to another account. `scope` is informational
- * and never grants capabilities: the CLI acts with the approving member's
- * current Workspace permissions.
- */
 export interface DeviceAuthorizationReview {
   client_id?: string;
   scope?: string;
@@ -23,7 +12,6 @@ export interface DeviceAuthorizationReview {
   user_code: string;
 }
 
-/** Stable device-flow error identifiers the consent surface can explain. */
 export type DeviceAuthorizationErrorCode =
   | "access_denied"
   | "device_code_already_processed"
@@ -36,20 +24,11 @@ export type DeviceAuthorizationErrorCode =
 
 export interface DeviceAuthorizationErrorDetails {
   code: DeviceAuthorizationErrorCode;
-  /** Plugin or Worker description; retained for diagnostics, never rendered raw. */
   description?: string;
-  /** `Retry-After` hint from the distributed auth rate limiter. */
   retryAfterSeconds?: number;
   status: number;
 }
 
-/**
- * Typed failure from one device-authorization HTTP call.
- *
- * `code` distinguishes expiry, ownership, session, and throttling outcomes so
- * the consent page can name the recovery instead of showing plugin prose.
- * Successful plugin payloads never travel through this class.
- */
 export class DeviceAuthorizationError extends Error {
   readonly code: DeviceAuthorizationErrorCode;
   readonly description: string | undefined;
@@ -76,25 +55,10 @@ const DEVICE_ERROR_CODES: Record<string, true> = {
   unauthorized: true,
 };
 
-/**
- * Normalizes a submitted code the same way the plugin does before lookup:
- * separators and whitespace are display affordances, not part of the secret.
- * The user code is not a credential, so normalizing it for manual entry and
- * URL retention is safe.
- *
- * @param value - Code typed by the member or read from the verification URL.
- * @returns Uppercase alphanumeric code.
- */
 export function normalizeDeviceUserCode(value: string): string {
   return value.replace(nonAlphanumericPattern, "").toUpperCase();
 }
 
-/**
- * Reads `Retry-After` only when it is the delta-seconds form the API emits.
- *
- * @param response - Non-ok HTTP response.
- * @returns Whole seconds to wait, or undefined for absent/date-form headers.
- */
 function retryAfterSecondsFor(response: Response): number | undefined {
   const value = response.headers.get("Retry-After")?.trim();
   if (!value || !integerPattern.test(value)) return undefined;
@@ -102,30 +66,18 @@ function retryAfterSecondsFor(response: Response): number | undefined {
   return Number.isSafeInteger(seconds) && seconds >= 0 ? seconds : undefined;
 }
 
-/**
- * Parses both error envelopes used on this path: Better Auth's
- * `{ error, error_description }` and the Worker's
- * `{ error: { code, message } }` rate-limit body.
- *
- * @param response - Non-ok HTTP response from a device endpoint.
- * @returns Typed error carrying the status, code, and retry hint.
- */
 async function deviceAuthorizationError(response: Response): Promise<DeviceAuthorizationError> {
   let errorCode: unknown;
   let description: unknown;
-  try {
-    const body: unknown = await response.json();
-    if (body && typeof body === "object" && !Array.isArray(body) && "error" in body) {
-      if (typeof body.error === "string") {
-        errorCode = body.error;
-        if ("error_description" in body) description = body.error_description;
-      } else if (body.error && typeof body.error === "object" && !Array.isArray(body.error)) {
-        if ("code" in body.error) errorCode = body.error.code;
-        if ("message" in body.error) description = body.error.message;
-      }
+  const body: unknown = await response.json().catch(() => null);
+  if (body && typeof body === "object" && !Array.isArray(body) && "error" in body) {
+    if (typeof body.error === "string") {
+      errorCode = body.error;
+      if ("error_description" in body) description = body.error_description;
+    } else if (body.error && typeof body.error === "object" && !Array.isArray(body.error)) {
+      if ("code" in body.error) errorCode = body.error.code;
+      if ("message" in body.error) description = body.error.message;
     }
-  } catch {
-    // A non-JSON failure still carries the HTTP status the UI maps to recovery.
   }
   const retryAfterSeconds = retryAfterSecondsFor(response);
   return new DeviceAuthorizationError({
@@ -139,16 +91,6 @@ async function deviceAuthorizationError(response: Response): Promise<DeviceAutho
   });
 }
 
-/**
- * Verifies a user code through the authenticated auth HTTP interface. The
- * plugin claims an unclaimed pending request for this browser session, which
- * is what makes later approval same-session-owned; it never approves.
- *
- * @param userCode - Normalized user-facing matching code.
- * @returns The request status and, for the owning session, client context.
- * @throws {DeviceAuthorizationError} For invalid, expired, throttled, or
- *   malformed responses.
- */
 export async function verifyDeviceAuthorization(
   userCode: string,
 ): Promise<DeviceAuthorizationReview> {
@@ -186,14 +128,6 @@ export async function verifyDeviceAuthorization(
   throw new DeviceAuthorizationError({ code: "unknown", status: response.status });
 }
 
-/**
- * Submits one explicit consent decision for the signed-in browser session.
- *
- * @param decision - Plugin endpoint decision.
- * @param userCode - Matching code the member reviewed.
- * @throws {DeviceAuthorizationError} When the request is unauthenticated,
- *   expired, already processed, not owned by this session, or throttled.
- */
 async function decideDeviceAuthorization(
   decision: "approve" | "deny",
   userCode: string,
@@ -219,20 +153,10 @@ async function decideDeviceAuthorization(
   }
 }
 
-/**
- * Explicitly approves the reviewed request for the CLI client.
- *
- * @param userCode - Matching code the member confirmed.
- */
 export function approveDeviceAuthorization(userCode: string): Promise<void> {
   return decideDeviceAuthorization("approve", userCode);
 }
 
-/**
- * Explicitly denies the reviewed request without creating a CLI session.
- *
- * @param userCode - Matching code the member rejected.
- */
 export function denyDeviceAuthorization(userCode: string): Promise<void> {
   return decideDeviceAuthorization("deny", userCode);
 }

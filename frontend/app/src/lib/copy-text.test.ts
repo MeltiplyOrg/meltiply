@@ -47,17 +47,21 @@ describe("copyText", () => {
   it("bypasses asynchronous Clipboard API when context is explicitly insecure", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     const execCommand = vi.mocked(document.execCommand).mockReturnValue(true);
+    const originalIsSecureContext = Object.getOwnPropertyDescriptor(window, "isSecureContext");
+    Object.defineProperty(window, "isSecureContext", {
+      configurable: true,
+      value: false,
+    });
 
-    // Create an insecure document mock where isSecureContext is explicitly false
-    const mockDocument = {
-      defaultView: { isSecureContext: false },
-      activeElement: null,
-      createElement: document.createElement.bind(document),
-      body: document.body,
-      execCommand: execCommand,
-    } as unknown as Document;
-
-    await copyText("insecure tailnet feedback", { writeText }, mockDocument);
+    try {
+      await copyText("insecure tailnet feedback", { writeText }, document);
+    } finally {
+      if (originalIsSecureContext) {
+        Object.defineProperty(window, "isSecureContext", originalIsSecureContext);
+      } else {
+        Reflect.deleteProperty(window, "isSecureContext");
+      }
+    }
 
     expect(writeText).not.toHaveBeenCalled();
     expect(execCommand).toHaveBeenCalledWith("copy");

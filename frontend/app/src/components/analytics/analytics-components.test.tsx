@@ -3,6 +3,8 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
+import { useLayoutEffect } from "react";
+import { I18nProvider, useI18n } from "@/lib/i18n";
 import { AnalyticsToolbar } from "./analytics-toolbar";
 import { MetricCards } from "./metric-cards";
 import { PlatformEngagementChart } from "./platform-engagement-chart";
@@ -95,6 +97,33 @@ const toolbarProps = {
   selectedPlatform: undefined,
   selectedRange: "30d" as const,
 };
+
+function InGerman({ children }: { children: React.ReactNode }) {
+  const { language, setLanguage } = useI18n();
+  useLayoutEffect(() => setLanguage("de"), [setLanguage]);
+  return language === "de" ? children : null;
+}
+
+describe("top posts localization", () => {
+  it("formats destination counts in the active language", () => {
+    render(
+      <I18nProvider>
+        <InGerman>
+          <TopPostsTable
+            posts={[postRow({ destination_count: 1234, synced_destination_count: 1234 })]}
+            metric="views"
+            limit={10}
+            hasMore={false}
+            loadingMore={false}
+            onMetricChange={vi.fn()}
+            onLoadMore={vi.fn()}
+          />
+        </InGerman>
+      </I18nProvider>,
+    );
+    expect(screen.getAllByText(/1\.234/).length).toBeGreaterThan(0);
+  });
+});
 
 describe("analytics toolbar", () => {
   it("offers filters and a reload without a single-metric mode", () => {
@@ -234,8 +263,6 @@ describe("platform engagement chart", () => {
       />,
     );
     const hiddenTable = screen.getByRole("table");
-    // sr-only belongs on a block wrapper: table layout ignores its 1px sizing
-    // and can leave the caption visibly floating.
     expect(hiddenTable.closest(".sr-only")).not.toBeNull();
     expect(hiddenTable).not.toHaveClass("sr-only");
     const table = within(hiddenTable);

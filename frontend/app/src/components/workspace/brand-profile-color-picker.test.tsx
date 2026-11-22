@@ -37,9 +37,7 @@ describe("Brand Profile palette layout", () => {
 
   it("resolves the same thresholds in rem when the root font size changes", () => {
     expect(resolvePaletteLayout(426, 16)).toBe("honeycomb");
-    // 426px is 21.3rem at a 20px root: no longer the honeycomb's 26.625rem.
     expect(resolvePaletteLayout(426, 20)).toBe("grid-6");
-    // 234px is 14.625rem at 16px, but only 11.7rem at 20px.
     expect(resolvePaletteLayout(234, 16)).toBe("grid-5");
     expect(resolvePaletteLayout(234, 20)).toBe("grid-4");
   });

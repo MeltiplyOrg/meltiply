@@ -43,7 +43,6 @@ const GROUPING_LABELS: Record<Grouping, string> = {
   week: "Week",
 };
 
-/** Controlled consumer: proves selection travels and the tab stop follows it. */
 function GroupingSelector({
   initial = "week",
   onSelect,
@@ -66,7 +65,6 @@ function GroupingSelector({
   );
 }
 
-/** Account-menu theme preference shape: Radix menu radio items in a segment track. */
 function ThemeMenu() {
   const [theme, setTheme] = useState("light");
   return (
@@ -183,7 +181,6 @@ describe("SegmentedControl single-select semantics", () => {
       expect(onSelect).not.toHaveBeenCalled();
     }
 
-    // The unmodified key still selects, proving the guard is limited to shortcuts.
     expect(fireEvent.keyDown(week, { key: "ArrowRight" })).toBe(false);
     expect(within(group).getByRole("radio", { name: "Month" })).toHaveAttribute(
       "aria-checked",
@@ -244,9 +241,6 @@ describe("menu segment radio group", () => {
       "false",
     ]);
 
-    // The selection track owns one presentational highlight, and every segment
-    // item is excluded from the menu's own hover pill selector so the two cannot
-    // fight. Geometry itself is browser-only.
     expect(group.firstElementChild).toHaveAttribute("aria-hidden", "true");
     items.forEach((item) => {
       expect(item).toHaveAttribute("data-segment-item");

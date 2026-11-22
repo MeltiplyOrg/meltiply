@@ -20,11 +20,6 @@ import type {
   TikTokPublishingRequirements,
 } from "@/types";
 
-/**
- * One saved Post target: a Channel paired with its own caption overrides,
- * provider options, and attachment selection. Draft saving and scheduling
- * both send this shape, so a target round-trips through the same field names.
- */
 export type PostTargetDraft = PostTargetInput;
 
 type FacebookComposerSettings = NonNullable<
@@ -33,14 +28,8 @@ type FacebookComposerSettings = NonNullable<
 interface YouTubeComposerSettings extends YoutubeSettings {
   post_type?: "video" | "live";
 }
-/** Localized translate function signature shared by descriptor hooks. */
 type Translate = (message: string, values?: TranslationValues) => string;
 
-/**
- * Composer-only TikTok settings: the contract `TikTokSettings` plus disclosure
- * flags that persist through `provider_options.tiktok` but live outside the
- * base settings interface.
- */
 interface TikTokComposerSettings extends TikTokSettings {
   post_mode?: "direct" | "inbox";
   auto_add_music?: boolean;
@@ -50,61 +39,30 @@ interface TikTokComposerSettings extends TikTokSettings {
   disclose?: boolean;
 }
 
-/**
- * Props handed to a provider descriptor's settings editor. `settings` is the
- * provider-narrowed view produced by the descriptor's `read` boundary, so
- * editors never cast the raw settings map themselves.
- */
 interface ProviderEditorProps<S> {
-  /** Display name of the connected channel destination. */
   channelName: string;
-  /** Provider-typed view over the channel's raw settings map. */
   settings: Partial<S>;
-  /** Merges one key into the raw settings map and reports the change upward. */
   update: (key: string, value: unknown) => void;
-  /** Applies related choices atomically against the same settings snapshot. */
   updateMany: (patch: Record<string, unknown>) => void;
-  /** Live TikTok publishing requirements when the descriptor opted in; otherwise null. */
   requirements: TikTokPublishingRequirements | null;
-  /** Actual attachment kinds for this Channel, not the Post's full media set. */
   mediaKinds: readonly ("image" | "video")[];
-  /** Localized translate function. */
   t: Translate;
 }
 
-/**
- * Context handed to a provider descriptor's `validate` hook during composer's
- * submit-time validation.
- */
 interface ProviderValidationContext<S> {
-  /** Display name used to prefix violation messages. */
   channelName: string;
-  /** Provider-typed view over the channel's raw settings map. */
   settings: Partial<S>;
-  /** Contract capability record for the provider, when loaded. */
   capability: PlatformCapability | undefined;
-  /** Live TikTok publishing requirements reported by the settings panel. */
   requirements: TikTokPublishingRequirements | null;
   mediaKinds: readonly ("image" | "video")[];
-  /** Localized translate function. */
   t: Translate;
 }
 
-/**
- * Typed per-provider specification: the single provider boundary owning
- * settings narrowing, editor rendering, contract target mapping, and
- * submit-time validation for one provider family.
- */
 interface ProviderSpec<S> {
-  /** Normalized provider identifiers this descriptor serves (compared lowercase). */
   providers: readonly string[];
-  /** When true, the panel fetches live TikTok publishing requirements for the channel. */
   usesRequirements?: boolean;
-  /** Narrows the raw settings map to the provider's typed settings shape. */
   read: (settings: Record<string, unknown>) => Partial<S>;
-  /** Settings editor panel rendered inside the channel tab. */
   Editor: React.ComponentType<ProviderEditorProps<S>>;
-  /** Maps settings to draft intent or permission-clamped delivery; omit when no contract fields apply. */
   applyTarget?: (
     target: PostTargetDraft,
     settings: Partial<S>,
@@ -112,21 +70,10 @@ interface ProviderSpec<S> {
     requirements: TikTokPublishingRequirements | null,
     purpose: "draft" | "publication",
   ) => void;
-  /**
-   * Rebuilds the raw settings map from a persisted Post target so an edited
-   * post rehydrates its provider controls. Fields the provider does not write
-   * (or wrote as `null`) remain unanswered unless that control has a documented default.
-   */
   readTarget?: (target: PostTargetDraft) => Partial<S>;
-  /** Returns localized submit-time violations for the channel; empty when valid. */
   validate?: (context: ProviderValidationContext<S>) => string[];
 }
 
-/**
- * Public provider descriptor shape: the type-erased form of `ProviderSpec`
- * stored in the registry and consumed by `PlatformSettings` and the composer.
- * Narrowing happens once inside `read`, so consumers stay provider-agnostic.
- */
 export interface ProviderDescriptor {
   usesRequirements?: boolean;
   providers: readonly string[];
@@ -143,17 +90,6 @@ export interface ProviderDescriptor {
   validate?: (context: ProviderValidationContext<Record<string, unknown>>) => string[];
 }
 
-/**
- * Registers a typed provider spec into the erased registry shape.
- *
- * The wrapper performs the single raw→typed narrowing through `spec.read`, so
- * each provider's editor, target mapping, and validation operate on
- * `Partial<S>` while `PlatformSettings` and the composer handle only the raw
- * settings map.
- *
- * @param spec - Provider-typed specification.
- * @returns Erased descriptor for the provider registry.
- */
 function defineProviderDescriptor<S>(spec: ProviderSpec<S>): ProviderDescriptor {
   const { Editor, applyTarget, read, readTarget, validate } = spec;
   const ErasedEditor = (props: ProviderEditorProps<Record<string, unknown>>) => (
@@ -183,11 +119,6 @@ function defineProviderDescriptor<S>(spec: ProviderSpec<S>): ProviderDescriptor 
   };
 }
 
-/**
- * Shared panel chrome for a provider settings editor: the bordered card with
- * the "{name} Configuration" heading. The enclosing section identifies its provider.
- * Its inline-size container makes setting grids respond to the panel, not the viewport.
- */
 function ProviderPanel({
   channelName,
   t,
@@ -209,11 +140,6 @@ function ProviderPanel({
   );
 }
 
-/**
- * YouTube settings editor: title/tags plus the existing target's audience and
- * visibility options. Both choices remain unanswered until explicitly selected
- * and survive draft reopen without borrowing the adapter's Public default.
- */
 function YoutubeEditor({
   channelName,
   settings: yt,
@@ -223,11 +149,6 @@ function YoutubeEditor({
   const fieldId = useId();
   const tagsString = (yt.tags ?? []).map((tag) => tag.label).join(", ");
 
-  /**
-   * Parses a comma-delimited tag string into the label/value tag objects the
-   * YouTube settings shape requires, trimming whitespace and dropping empties.
-   * Example: `"tech, news"` -> `[{ value: "tech", label: "tech" }, { value: "news", label: "news" }]`
-   */
   const handleTagsChange = (val: string) => {
     const parsed = val
       .split(",")
@@ -328,12 +249,6 @@ function YoutubeEditor({
   );
 }
 
-/**
- * TikTok's creator-scoped controls: no fallback privacy options or implicit
- * interaction grants. Photo targets hide video-only features and the payload
- * boundary clears them. Disclosure subtypes and policy guidance follow the
- * current Direct Post requirements; publishing is the explicit consent action.
- */
 function TikTokEditor({
   channelName,
   settings: tt,
@@ -579,21 +494,10 @@ function TikTokEditor({
   );
 }
 
-/**
- * Composer-only Instagram choices persisted in `provider_options.instagram`.
- * `post_type` is deliberately unanswered until the creator selects a shape so
- * the adapter's documented image/feed and video/Reel defaults remain in force.
- */
 type InstagramComposerSettings = NonNullable<
   NonNullable<PostTargetDraft["provider_options"]>["instagram"]
 >;
 
-/**
- * Instagram publication shape controls. Feed accepts one or a carousel; Reel
- * and Story require exactly one attachment, and a trial Reel must be a Reel.
- * The controls are limited by the actual attachment kinds so an impossible
- * choice is never offered.
- */
 function InstagramEditor({
   channelName,
   settings: instagram,
@@ -690,11 +594,6 @@ function InstagramEditor({
   );
 }
 
-/**
- * Selects the actual Page endpoint and its method-specific inputs. External
- * resources use provider IDs, never invented public Post IDs. Switching methods
- * preserves local edits; applyTarget sends only fields for the chosen method.
- */
 function FacebookEditor({
   channelName,
   settings,
@@ -942,7 +841,6 @@ function FacebookEditor({
   );
 }
 
-/** Keeps the canonical provider panel while the Threads module owns its typed content forms. */
 function ThreadsEditor(props: ProviderEditorProps<ThreadsComposerSettings>): React.ReactElement {
   return (
     <ProviderPanel channelName={props.channelName} t={props.t}>
@@ -951,13 +849,6 @@ function ThreadsEditor(props: ProviderEditorProps<ThreadsComposerSettings>): Rea
   );
 }
 
-/**
- * Registry of typed provider descriptors — the single provider boundary for
- * settings narrowing, editor selection, Post target mapping (both directions),
- * and submit-time validation. Provider lookup is by normalized identifier.
- * Captionless methods explicitly clear inherited titles as well as requiring an
- * empty Channel body/signature; hidden Post titles must not become Story text.
- */
 const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
   defineProviderDescriptor<YouTubeComposerSettings>({
     providers: ["youtube"],
@@ -978,7 +869,6 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
         },
       };
     },
-    // Rehydrate the same contract fields the controls save, including false audience.
     readTarget: (target) => {
       const hashtags = target.hashtags ?? [];
       return {
@@ -1031,9 +921,6 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
   defineProviderDescriptor<TikTokComposerSettings>({
     providers: ["tiktok", "tiktok-business"],
     usesRequirements: true,
-    // TikTok options round-trip through `provider_options.tiktok`; every editable
-    // pending Distribution is rewritten by Post scheduling, so no recreate dance
-    // is needed for an edited scheduled target.
 
     read: (settings) => settings as Partial<TikTokComposerSettings>,
     Editor: TikTokEditor,
@@ -1042,7 +929,6 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
       if (title) target.title_override = title;
       const photo = mediaKinds.includes("image");
       const disclose = tt.disclose ?? Boolean(tt.brand_content || tt.brand_organic);
-      // Drafts retain creator intent; only delivery obeys current permissions.
       const publishing = purpose === "publication";
       target.provider_options = {
         tiktok: {
@@ -1065,9 +951,6 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
         },
       };
     },
-    // Rebuilds the TikTok controls from the persisted target: every editable field
-    // lives inside `provider_options.tiktok`, with the optional caption title in
-    // `title_override`. Absent options yield an empty map so the editor defaults.
     readTarget: (target) => {
       const options = target.provider_options?.tiktok;
       if (!options) return {};
@@ -1203,46 +1086,25 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
   }),
 ];
 
-/**
- * Resolves the provider descriptor for a channel's provider identifier.
- * Matching is case-insensitive against each descriptor's `providers` list.
- *
- * @param provider - Raw provider identifier (e.g. `YouTube`, `tiktok-business`).
- * @returns The matching descriptor, or `undefined` for providers without settings.
- */
 export function providerDescriptorFor(provider: string): ProviderDescriptor | undefined {
   const normalized = provider.toLowerCase();
   return PROVIDER_DESCRIPTORS.find((descriptor) => descriptor.providers.includes(normalized));
 }
 
-/**
- * Properties for configuring channel-specific social network publication settings.
- */
 interface PlatformSettingsProps {
   provider: string;
   channelName: string;
-  /** Platform account id — required to fetch live TikTok publishing requirements. */
   channelId: string;
+  capability?: PlatformCapability;
   settings: Record<string, unknown>;
   mediaKinds: readonly ("image" | "video")[];
   onChange: (newSettings: Record<string, unknown>) => void;
-  /**
-   * Reports the creator's live TikTok publishing requirements to the parent composer
-   * so submit-time validation can enforce privacy/permission constraints. Called with
-   * `null` when requirements are unavailable or the channel is not TikTok.
-   */
   onRequirementsChange?: (
     channelId: string,
     requirements: TikTokPublishingRequirements | null,
   ) => void;
 }
 
-/**
- * Keeps positional Instagram metadata attached to the same Asset as selection
- * and ordering change. The private identity list lives only in composer recovery;
- * descriptors emit just the reordered native metadata, never these UI keys.
- * New Assets get empty metadata; detached Assets cannot donate tags or alt text.
- */
 export function settingsForAttachmentOrder(
   settings: Record<string, unknown>,
   assetIds: readonly string[],
@@ -1281,31 +1143,11 @@ export function settingsForAttachmentOrder(
   };
 }
 
-/**
- * Dynamic platform-specific settings editor for social destinations.
- *
- * Resolves the channel's provider to its typed descriptor in
- * `PROVIDER_DESCRIPTORS` and renders that descriptor's editor — provider
- * branching and settings narrowing live behind the descriptor boundary rather
- * than in this component. YouTube title/tags and audience/visibility, and TikTok
- * creator options, persist through the existing target contract.
- * The descriptor's `readTarget` restores the same controls when editing.
- *
- * For descriptors marked `usesRequirements` (TikTok) the editor fetches live
- * `PublishingRequirements` and reports them upward via `onRequirementsChange`
- * so the composer can validate before submitting.
- *
- * @param props.provider - Social platform provider identifier (e.g. 'youtube', 'tiktok', 'facebook', 'instagram').
- * @param props.channelName - Display name of the connected channel destination.
- * @param props.channelId - Platform account id used to load live TikTok publishing requirements.
- * @param props.settings - Key-value map of current platform configuration values.
- * @param props.onChange - Callback receiving updated settings map whenever any parameter changes.
- * @param props.onRequirementsChange - Optional sink for live TikTok requirements used by composer validation.
- */
 export function PlatformSettings({
   provider,
   channelName,
   channelId,
+  capability,
   mediaKinds,
   settings,
   onChange,
@@ -1324,8 +1166,6 @@ export function PlatformSettings({
       ? requirementsQuery.data
       : null;
 
-  // Cached permissions cannot authorize a new composition before its live lookup.
-  // Failed refreshes also clear availability; draft settings still round-trip.
   useEffect(() => {
     onRequirementsChange?.(channelId, usesRequirements ? requirements : null);
   }, [channelId, usesRequirements, requirements, onRequirementsChange]);
@@ -1334,14 +1174,13 @@ export function PlatformSettings({
     descriptor?.validate?.({
       channelName,
       settings,
-      capability: undefined,
+      capability,
       requirements,
       mediaKinds,
       t,
     }) ?? [];
   if (!descriptor) return null;
 
-  // Merges one key into the raw settings map and reports the change upward.
   const update = (key: string, value: unknown) => {
     onChange({
       ...settings,
@@ -1349,7 +1188,6 @@ export function PlatformSettings({
     });
   };
 
-  /** Commits coupled Provider choices together so one cannot overwrite another. */
   const updateMany = (patch: Record<string, unknown>) => {
     onChange({ ...settings, ...patch });
   };

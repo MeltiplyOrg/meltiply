@@ -11,7 +11,6 @@ import { useI18n } from "@/lib/i18n";
 const HOURS = Array.from({ length: 24 }, (_, value) => String(value).padStart(2, "0"));
 const MINUTES = Array.from({ length: 60 }, (_, value) => String(value).padStart(2, "0"));
 
-/** Canonical app wall-time editor shared by scheduling and recurring slots. Accepts/emits complete 24-hour HH:mm strings without date/timezone conversion. React Aria owns keyboard segments; shared Input, Popover and Select owners provide one styled hour/minute chooser. Disabled controls cannot open the chooser or emit edits; Done/Escape restore the clock trigger. */
 export function TimeOfDayField({
   value: time,
   onChange,

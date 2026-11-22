@@ -12,7 +12,6 @@ const shapes: CSSProperties & {
   "--docs-toc-circle-shape": `path("${circlePath}")`,
 };
 
-/** Matches the reading marker with compatible four-curve outlines, allowing a real plane↔ring morph rather than an icon swap. */
 export function DocsTocPlane() {
   return (
     <svg
@@ -34,23 +33,27 @@ export function DocsTocPlane() {
   );
 }
 
-/** A shell-owned marker survives the keyed guide swap; cancellation removes all animation layers and announcements. */
 export function createLoadingPlane(marker: HTMLElement) {
-  const outline = marker.querySelector<SVGPathElement>("[data-toc-plane-outline]")!;
-  const fold = marker.querySelector<SVGPathElement>("[data-toc-plane-fold]")!;
-  const icon = marker.querySelector<SVGSVGElement>("svg")!;
-  const label = marker.querySelector<HTMLElement>("[data-toc-loading-label]")!;
+  const outline = marker.querySelector<SVGPathElement>("[data-toc-plane-outline]");
+  const fold = marker.querySelector<SVGPathElement>("[data-toc-plane-fold]");
+  const icon = marker.querySelector<SVGSVGElement>("svg");
+  const label = marker.querySelector<HTMLElement>("[data-toc-loading-label]");
+  if (!outline || !fold || !icon || !label) {
+    return {
+      show: () => {},
+      restore: () => Promise.resolve(),
+      hide: () => {},
+    };
+  }
   let animations: Animation[] = [];
   let generation = 0;
 
-  /** Invalidates stale completions before cancelling their native animation layers. */
   const cancel = () => {
     generation++;
     for (const animation of animations) animation.cancel();
     animations = [];
   };
 
-  /** Restores the plane from the currently painted ring and rotation, including an interrupted return. */
   const restore = async () => {
     const outlineStyle = getComputedStyle(outline);
     const start = {
@@ -88,12 +91,10 @@ export function createLoadingPlane(marker: HTMLElement) {
     );
     await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
     if (generation !== owner) return;
-    marker.dataset.state = "returning";
     cancel();
   };
 
   return {
-    /** Preserves the arrived ring through every guide swap; only pending loads spin and announce, while ready guides retain a static ring. */
     show: (list: HTMLElement, loading: boolean) => {
       const track = list.querySelector<SVGPathElement>(".docs-reading-remaining");
       if (!track?.ownerSVGElement || track.getTotalLength() === 0) return;
@@ -106,12 +107,10 @@ export function createLoadingPlane(marker: HTMLElement) {
       label.textContent = loading ? "Loading guide" : "";
       marker.dataset.state = loading ? "loading" : "ready";
     },
-    /** Keeps the same visible node through commit, restoring its plane shape before the new rail unfolds. */
     restore: () => {
       label.textContent = "";
       return marker.dataset.state === "idle" ? Promise.resolve() : restore();
     },
-    /** Removes the marker after handoff, abort, error, or unmount; a later navigation starts without stale state. */
     hide: () => {
       cancel();
       marker.dataset.state = "idle";

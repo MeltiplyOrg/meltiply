@@ -21,6 +21,13 @@ describe("platformDisplayName", () => {
   it("returns raw string for unknown platform", () => {
     expect(platformDisplayName("unknown")).toBe("unknown");
   });
+
+  it.each(["constructor", "__proto__", "toString"])(
+    "treats the inherited key %s from a callback URL as an unknown platform",
+    (provider) => {
+      expect(platformDisplayName(provider)).toBe(provider);
+    },
+  );
 });
 
 describe("getAvailablePlatforms", () => {

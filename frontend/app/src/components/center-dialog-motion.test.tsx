@@ -11,7 +11,6 @@ import {
   CenterAlertDialogTitle,
 } from "@meltiply/ui/center-alert-dialog";
 
-/** Keeps an editable form mounted behind its nested destructive confirmation. */
 function ProfileFlow(): React.ReactElement {
   const [confirm, setConfirm] = React.useState(false);
   return (
@@ -43,9 +42,6 @@ afterEach(async () => {
 
 describe("centered dialog handoff accessibility", () => {
   it("keeps the edited input alive and excludes outgoing copies from accessible content", async () => {
-    // Supply layout only: jsdom cannot measure a centered surface. Browser smoke
-    // coverage verifies interpolation; this regression covers live form identity
-    // and accessible content while the inert outgoing copy is still mounted.
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(
       new DOMRect(200, 200, 400, 200),
     );

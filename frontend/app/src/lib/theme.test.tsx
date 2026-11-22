@@ -11,7 +11,6 @@ import { resolveTheme } from "@meltiply/ui/theme-controller";
 import { themeStorageKey } from "@meltiply/ui/theme-preference";
 import { ThemeProvider, useTheme } from "./theme";
 
-/** Exposes the committed and requested palette while driving the real theme provider. */
 function ToggleProbe(): React.ReactElement {
   const { requestedTheme, theme, toggleTheme } = useTheme();
   return (
@@ -25,7 +24,6 @@ function ToggleProbe(): React.ReactElement {
   );
 }
 
-/** Drives explicit selections and re-selection without replacing the provider. */
 function SelectProbe(): React.ReactElement {
   const { requestedTheme, setTheme, theme } = useTheme();
   return (
@@ -53,7 +51,6 @@ function SelectProbe(): React.ReactElement {
     </>
   );
 }
-/** Isolates current-page intent, consent, and optional storage between scenarios. */
 beforeEach(() => {
   document.cookie = "meltiply-consent=; Path=/; Max-Age=0";
   document.cookie = "meltiply-theme=; Path=/; Max-Age=0";
@@ -63,7 +60,6 @@ beforeEach(() => {
   writeCookieConsent({ functional: true });
 });
 
-/** Removes hydrated page intent so later scenarios cannot inherit a transferred palette. */
 afterEach(() => {
   cleanup();
   document.documentElement.removeAttribute("data-theme-preference");
@@ -89,7 +85,6 @@ describe("theme resolution", () => {
   });
 });
 
-/** Hydration and an initial optional-cookie rejection preserve transferred light intent without storage, even on a dark OS. */
 it("preserves a transferred light palette through hydration without functional consent", () => {
   document.cookie = "meltiply-consent=; Path=/; Max-Age=0";
   document.documentElement.removeAttribute("data-cookie-functional");
@@ -138,10 +133,6 @@ it("keeps theme usable in memory without reading or writing optional storage", (
   set.mockRestore();
 });
 
-/**
- * Preserves a theme selected in memory before acceptance, then proves
- * withdrawal clears both optional stores and returns to the OS palette.
- */
 it("persists the current choice on acceptance and clears it on withdrawal", () => {
   act(() => {
     writeCookieConsent({ functional: false });
@@ -167,7 +158,6 @@ it("persists the current choice on acceptance and clears it on withdrawal", () =
   expect(screen.getByTestId("committed")).toHaveTextContent("light");
 });
 
-/** A storage clear elsewhere must not erase an explicit page choice while optional storage remains allowed. */
 it("retains current-page intent when optional stores are cleared", () => {
   render(
     <ThemeProvider>
@@ -188,7 +178,6 @@ it("retains current-page intent when optional stores are cleared", () => {
   expect(screen.getByTestId("requested")).toHaveTextContent("dark");
 });
 
-/** Withdrawal must also drop page intent when the optional stores were already empty. */
 it("drops current-page intent when functional consent is withdrawn", () => {
   render(
     <ThemeProvider>
@@ -214,7 +203,6 @@ it("drops current-page intent when functional consent is withdrawn", () => {
   expect(screen.getByTestId("requested")).toHaveTextContent("system");
 });
 
-/** OS changes update System mode without overwriting intent; explicit choices remain authoritative. */
 it("follows live OS changes only while System is selected", () => {
   const media = Object.assign(new EventTarget(), { matches: false });
   vi.stubGlobal("matchMedia", () => media);
@@ -286,8 +274,6 @@ describe("ThemeProvider", () => {
 
     act(() => screen.getByRole("button", { name: "light" }).click());
 
-    // A denied write must not swallow the selection: the palette still
-    // commits for the current session even though nothing was persisted.
     expect(screen.getByTestId("requested")).toHaveTextContent("light");
     expect(screen.getByTestId("committed")).toHaveTextContent("light");
     expect(document.documentElement.classList.contains("dark")).toBe(false);

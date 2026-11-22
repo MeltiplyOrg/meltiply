@@ -31,7 +31,6 @@ export default defineConfig({
   server: { allowedHosts: [new URL(publicUrl).hostname] },
   prefetch: { prefetchAll: true, defaultStrategy: "viewport" },
   markdown: {
-    // Fumadocs owns heading ids, indexed structure, and highlighted code.
     syntaxHighlight: false,
     processor: unified({ remarkPlugins, rehypePlugins }),
   },

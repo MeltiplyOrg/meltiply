@@ -29,18 +29,6 @@ const filenameExtensionPattern = /\.[^.]+$/;
 type SignedRequest = NonNullable<UploadSession["single_upload"]>;
 type SignedPart = CreateUploadPartsResponse["parts"][number];
 
-/**
- * Effect-returning upload API seam consumed by the orchestrator.
- * The error channel is `unknown` because the orchestrator treats every failure
- * generically (retry/stop propagation), which also keeps test fakes free to
- * fail with plain errors instead of constructing `ApiError`s.
- *
- * The first argument of every member is the explicit Workspace selection
- * (`null` targets the personal workspace) forwarded to `lib/api.ts`, which
- * sends it as `x-workspace-id`. Authentication stays ambient: the HttpOnly
- * Better Auth session cookie travels with the same-origin request, so no
- * credential ever passes through this seam.
- */
 export interface UploadApi {
   abortUploadSession: (
     workspaceId: string | null,
@@ -101,20 +89,9 @@ export interface ResumableUpload {
 
 export interface UploadAssetFileOptions {
   api?: UploadApi;
-  /**
-   * Active Brand Profile UUID that will own the uploaded Asset; required because
-   * `CreateUploadSessionRequest.brand_profile_id` is mandatory on the contract.
-   */
   brandProfileId: string;
   file: File;
   onProgress?: (percent: number) => void;
-  /**
-   * Reports the durable Asset id as soon as the upload session exists, before any
-   * byte is transferred. Callers that must persist ownership of an upload that is
-   * still in flight (the Post composer attaching a pending upload to a saved draft)
-   * need that id while `result` is still pending. Throwing from this callback is
-   * ignored so a subscriber bug can never fail an upload.
-   */
   onSessionStart?: (assetId: string) => void;
   onStatusChange?: (status: AssetUploadStatus) => void;
   resumeSessionId?: string;
@@ -167,17 +144,18 @@ interface UploadStopState {
 
 type UploadStopReader = () => UploadStopState;
 
-interface PendingUploadCreation {
+interface UploadOwner {
+  brandProfileId: string;
+  workspaceId: string | null;
+}
+
+interface PendingUploadCreation extends UploadOwner {
   createdAt: number;
   file: FileFingerprint;
   idempotencyKey: string;
   version: 1;
 }
 
-/**
- * Returns localStorage only after functional consent, catching browser security
- * errors; uploads proceed without optional recovery when storage is unavailable.
- */
 function browserStorage(): Storage | null {
   if (!hasCookieConsent("functional")) return null;
   try {
@@ -187,12 +165,6 @@ function browserStorage(): Storage | null {
   }
 }
 
-/**
- * Extracts identifying attributes of a local file to form a stable fingerprint.
- *
- * @param file Local `File` object selected by the user.
- * @returns Fingerprint object containing name, size, type, and modification timestamp.
- */
 function fingerprint(file: File): FileFingerprint {
   return {
     lastModified: file.lastModified,
@@ -202,13 +174,6 @@ function fingerprint(file: File): FileFingerprint {
   };
 }
 
-/**
- * Checks whether a candidate fingerprint exactly matches the properties of a local file.
- *
- * @param candidate Stored fingerprint record.
- * @param file Local file to compare.
- * @returns `true` if all identifying attributes match.
- */
 function matchesFileFingerprint(candidate: FileFingerprint, file: File): boolean {
   return (
     candidate.lastModified === file.lastModified &&
@@ -218,52 +183,45 @@ function matchesFileFingerprint(candidate: FileFingerprint, file: File): boolean
   );
 }
 
-/**
- * Validates whether a selected local file matches the fingerprint of an active resumable upload.
- *
- * @param record Persisted resumable upload record.
- * @param file Local file selected by the user.
- * @returns `true` if the file matches the recorded upload session.
- */
-function matchesResumableFile(record: ResumableUpload, file: File): boolean {
-  return matchesFileFingerprint(record.file, file);
+function isFileFingerprint(value: unknown): value is FileFingerprint {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.lastModified === "number" &&
+    typeof record.name === "string" &&
+    typeof record.size === "number" &&
+    typeof record.type === "string"
+  );
 }
 
-/**
- * Generates the localStorage key for tracking in-flight session creation idempotency.
- *
- * @param file Local file being uploaded.
- * @returns Prefixed storage key containing the file fingerprint.
- */
+function isCompletedPart(value: unknown): value is CompletedPart {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.etag === "string" && typeof record.part_number === "number";
+}
+
 function pendingCreateStorageKey(file: File): string {
   return `${pendingCreateKeyPrefix}${encodeURIComponent(JSON.stringify(fingerprint(file)))}`;
 }
 
-/**
- * Type guard verifying if an object is a valid `PendingUploadCreation` descriptor.
- *
- * @param value Arbitrary value from storage.
- * @returns `true` if the value conforms to the schema.
- */
 function isPendingUploadCreation(value: unknown): value is PendingUploadCreation {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
   return (
     record.version === 1 &&
+    typeof record.brandProfileId === "string" &&
+    (typeof record.workspaceId === "string" || record.workspaceId === null) &&
     typeof record.createdAt === "number" &&
     typeof record.idempotencyKey === "string" &&
-    typeof record.file === "object" &&
-    record.file !== null
+    isFileFingerprint(record.file)
   );
 }
 
-/**
- * Reads pending upload creation state only after functional consent, expiring items older than 24 hours.
- * @param file Local file being uploaded.
- * @param storage Browser storage instance or null.
- * @returns Stored pending creation record or `null` if missing or expired.
- */
-function pendingUploadCreation(file: File, storage: Storage | null): PendingUploadCreation | null {
+function pendingUploadCreation(
+  file: File,
+  owner: UploadOwner,
+  storage: Storage | null,
+): PendingUploadCreation | null {
   if (!storage || !hasCookieConsent("functional")) return null;
   const key = pendingCreateStorageKey(file);
   const raw = storage.getItem(key);
@@ -271,11 +229,12 @@ function pendingUploadCreation(file: File, storage: Storage | null): PendingUplo
 
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!isPendingUploadCreation(parsed)) {
-      storage.removeItem(key);
-      return null;
-    }
-    if (Date.now() - parsed.createdAt > pendingCreateMaxAgeMs) {
+    if (
+      !isPendingUploadCreation(parsed) ||
+      parsed.brandProfileId !== owner.brandProfileId ||
+      parsed.workspaceId !== owner.workspaceId ||
+      Date.now() - parsed.createdAt > pendingCreateMaxAgeMs
+    ) {
       storage.removeItem(key);
       return null;
     }
@@ -286,21 +245,15 @@ function pendingUploadCreation(file: File, storage: Storage | null): PendingUplo
   }
 }
 
-/**
- * Caches an in-flight upload session creation idempotency key only after
- * functional consent. Without consent, the request uses an in-memory key.
- *
- * @param file Local file being uploaded.
- * @param idempotencyKey Generated UUID for the creation request.
- * @param storage Browser storage instance or null.
- */
 function savePendingUploadCreation(
   file: File,
+  owner: UploadOwner,
   idempotencyKey: string,
   storage: Storage | null,
 ): void {
   if (!storage || !hasCookieConsent("functional")) return;
   const record: PendingUploadCreation = {
+    ...owner,
     createdAt: Date.now(),
     file: fingerprint(file),
     idempotencyKey,
@@ -309,27 +262,14 @@ function savePendingUploadCreation(
   try {
     storage.setItem(pendingCreateStorageKey(file), JSON.stringify(record));
   } catch {
-    // Storage quota exceeded or disabled; ignore.
+    return;
   }
 }
 
-/**
- * Removes pending upload creation state after server acknowledgement; deletion
- * remains permitted after consent withdrawal.
- *
- * @param file Local file being uploaded.
- * @param storage Browser storage instance or null.
- */
 function discardPendingUploadCreation(file: File, storage: Storage | null): void {
   storage?.removeItem(pendingCreateStorageKey(file));
 }
 
-/**
- * Type guard asserting whether an object conforms to the `ResumableUpload` schema.
- *
- * @param value Arbitrary value from storage.
- * @returns `true` if the value conforms to the schema.
- */
 function isResumableUpload(value: unknown): value is ResumableUpload {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
@@ -338,22 +278,20 @@ function isResumableUpload(value: unknown): value is ResumableUpload {
     typeof record.assetId === "string" &&
     typeof record.sessionId === "string" &&
     typeof record.expiresAt === "string" &&
+    (record.strategy === "single" || record.strategy === "multipart") &&
     Array.isArray(record.completedParts) &&
-    typeof record.file === "object" &&
-    record.file !== null
+    record.completedParts.every(isCompletedPart) &&
+    isFileFingerprint(record.file)
   );
 }
 
-/**
- * Lists resumable upload records only after functional consent, sorted by expiry.
- * @param storage Browser storage instance or null.
- * @returns Array of active resumable upload records.
- */
 export function listResumableUploads(
   storage: Storage | null = browserStorage(),
 ): ResumableUpload[] {
   if (!storage || !hasCookieConsent("functional")) return [];
   const records: ResumableUpload[] = [];
+  const expiredKeys: string[] = [];
+  const now = Date.now();
   for (let index = 0; index < storage.length; index += 1) {
     const key = storage.key(index);
     if (!key?.startsWith(resumeKeyPrefix)) continue;
@@ -361,19 +299,21 @@ export function listResumableUploads(
     if (raw === null) continue;
     try {
       const parsed: unknown = JSON.parse(raw);
-      if (isResumableUpload(parsed)) records.push(parsed);
+      if (!isResumableUpload(parsed)) continue;
+      const expiresAtMs = Date.parse(parsed.expiresAt);
+      if (Number.isNaN(expiresAtMs) || expiresAtMs <= now) {
+        expiredKeys.push(key);
+        continue;
+      }
+      records.push(parsed);
     } catch {
-      // Ignore malformed records.
+      continue;
     }
   }
+  for (const key of expiredKeys) storage.removeItem(key);
   return records.sort((left, right) => right.expiresAt.localeCompare(left.expiresAt));
 }
 
-/**
- * Removes a resumable upload record by session ID; removal is allowed after consent withdrawal.
- * @param sessionId Upload session ID.
- * @param storage Browser storage instance or null.
- */
 function discardResumableUpload(
   sessionId: string,
   storage: Storage | null = browserStorage(),
@@ -381,25 +321,12 @@ function discardResumableUpload(
   storage?.removeItem(`${resumeKeyPrefix}${sessionId}`);
 }
 
-/**
- * Persists an active resumable upload record only while functional consent is
- * enabled; the upload continues if recovery storage is unavailable.
- * @param record Upload session state to persist.
- * @param storage Browser storage instance or null.
- */
 function saveResumableUpload(record: ResumableUpload, storage: Storage | null): void {
   if (storage && hasCookieConsent("functional")) {
     storage.setItem(`${resumeKeyPrefix}${record.sessionId}`, JSON.stringify(record));
   }
 }
 
-/**
- * Constructs the standard `CreateUploadSessionInput` payload from a local `File` object.
- *
- * @param file Local file selected by the user.
- * @param brandProfileId Active Brand Profile UUID that will own the uploaded Asset.
- * @returns Input payload for the create upload session API.
- */
 function sessionInput(file: File, brandProfileId: string): CreateUploadSessionInput {
   const isVideo = file.type.startsWith("video/");
   return {
@@ -412,20 +339,6 @@ function sessionInput(file: File, brandProfileId: string): CreateUploadSessionIn
   };
 }
 
-/**
- * Executes an HTTP PUT request using XMLHttpRequest to upload a binary blob directly to
- * signed R2/S3 storage, tracking transfer progress and capturing returned ETag headers.
- *
- * Lifted into `Effect.callback` so fiber interruption aborts the in-flight XHR
- * through the returned cleanup effect; the callback's own `signal` is unused
- * because `xhr.abort()` is the actual cancellation mechanism.
- *
- * @param request Signed upload descriptor with target URL and pre-signed headers.
- * @param body Binary payload (full file or multipart chunk).
- * @param onProgress Callback receiving total bytes loaded so far.
- * @param track Registration hook allowing callers to cancel or abort in-flight requests.
- * @returns Effect resolving to the response ETag header value, or `null` if omitted.
- */
 function sendSignedRequest(
   request: SignedRequest | SignedPart,
   body: Blob,
@@ -471,18 +384,6 @@ function sendSignedRequest(
   });
 }
 
-/**
- * Stateful browser controller managing resilient single-part or multipart asset uploads.
- * Handles pause/resume, automatic network offline/online recovery, URL expiration refreshes,
- * and consent-gated optional local recovery state.
- *
- * The upload lifecycle is an Effect program executed through the approved
- * `runQueryEffect` boundary: `cancel()` aborts an `AbortController` whose signal
- * interrupts the program fiber, which in turn aborts in-flight XHRs via
- * `Effect.callback` cleanup and unblocks paused waiters. Upload operations remain
- * available without functional consent; recovery storage is rechecked on access
- * and stops immediately when consent is withdrawn.
- */
 class BrowserAssetUploadTask implements AssetUploadTask {
   readonly result: Promise<Asset>;
   readonly #abortController = new AbortController();
@@ -503,12 +404,6 @@ class BrowserAssetUploadTask implements AssetUploadTask {
   #serverAbort?: Promise<void>;
   #sessionId?: string;
 
-  /**
-   * Initializes the upload task, sets up browser online/offline listeners, and kicks off
-   * the Effect upload program through the `runQueryEffect` boundary.
-   *
-   * @param options Task configuration including file, workspace selection, and event callbacks.
-   */
   constructor(options: UploadAssetFileOptions) {
     this.#api = options.api ?? defaultApi;
     this.#file = options.file;
@@ -544,20 +439,11 @@ class BrowserAssetUploadTask implements AssetUploadTask {
       });
   }
 
-  /**
-   * Resolves optional recovery storage at each access, so in-flight uploads
-   * immediately stop using it after withdrawal and can use it after acceptance.
-   *
-   * @returns The explicit storage override or consented browser localStorage.
-   */
   #storageForAccess(): Storage | null {
     if (!hasCookieConsent("functional")) return null;
     return this.#providedStorage === undefined ? browserStorage() : this.#providedStorage;
   }
 
-  /**
-   * Manually pauses the upload task, aborting any active XHR transfers and updating status to 'paused'.
-   */
   pause(): void {
     if (this.#cancelled || this.#manualPause) return;
     this.#manualPause = true;
@@ -565,9 +451,6 @@ class BrowserAssetUploadTask implements AssetUploadTask {
     this.#status("paused");
   }
 
-  /**
-   * Resumes an upload that was paused manually, waking pending workers and updating status.
-   */
   resume(): void {
     if (this.#cancelled || !this.#manualPause) return;
     this.#manualPause = false;
@@ -575,13 +458,6 @@ class BrowserAssetUploadTask implements AssetUploadTask {
     this.#status(this.#offline ? "offline" : "uploading");
   }
 
-  /**
-   * Cancels the upload task: interrupts the Effect program fiber (which aborts
-   * in-flight XHRs and wakes paused waiters), removes the local resume record,
-   * and notifies the API to abort the server-side session.
-   *
-   * @returns Promise that resolves once server abort notifications complete.
-   */
   async cancel(): Promise<void> {
     if (!this.#cancelled) {
       this.#cancelled = true;
@@ -604,9 +480,6 @@ class BrowserAssetUploadTask implements AssetUploadTask {
     this.#status("cancelled");
   }
 
-  /**
-   * Browser event listener invoked when network connectivity is lost, pausing in-flight requests.
-   */
   readonly #handleOffline = () => {
     if (this.#cancelled) return;
     this.#offline = true;
@@ -614,9 +487,6 @@ class BrowserAssetUploadTask implements AssetUploadTask {
     this.#status("offline");
   };
 
-  /**
-   * Browser event listener invoked when network connectivity is restored, waking blocked workers.
-   */
   readonly #handleOnline = () => {
     if (this.#cancelled) return;
     this.#offline = false;
@@ -624,28 +494,15 @@ class BrowserAssetUploadTask implements AssetUploadTask {
     this.#status(this.#manualPause ? "paused" : "uploading");
   };
 
-  /**
-   * Emits status transition events to the configured task subscriber.
-   *
-   * @param status Current lifecycle state of the upload task.
-   */
   #status(status: AssetUploadStatus): void {
     this.#onStatusChange(status);
   }
 
-  /**
-   * Aborts all active XMLHttpRequest instances registered in the task and clears the tracking set.
-   */
   #abortActiveRequests(): void {
     for (const xhr of this.#activeRequests) xhr.abort();
     this.#activeRequests.clear();
   }
 
-  /**
-   * Tracks active XMLHttpRequest instances or removes completed ones from the active set.
-   *
-   * @param xhr Active XMLHttpRequest instance, or `null` when a request completes.
-   */
   #registerRequest(xhr: XMLHttpRequest | null): void {
     if (xhr) this.#activeRequests.add(xhr);
     else {
@@ -657,22 +514,11 @@ class BrowserAssetUploadTask implements AssetUploadTask {
     }
   }
 
-  /**
-   * Resolves and clears all pending waiters blocked on pause/offline conditions.
-   */
   #wake(): void {
     for (const resolve of this.#waiters) resolve();
     this.#waiters.clear();
   }
 
-  /**
-   * Effect that suspends while the task is paused or offline, resuming when a
-   * waiter fires, and fails with the sibling stop reason or
-   * `UploadCancelledError` when the task can no longer proceed.
-   *
-   * @param stop Optional callback to inspect sibling failure state.
-   * @returns Effect resolving once the task may run, or failing with the stop reason.
-   */
   #waitUntilRunnable(stop?: UploadStopReader): Effect.Effect<void, unknown> {
     const loop = (): Effect.Effect<void, unknown> => {
       const state = stop?.();
@@ -690,23 +536,9 @@ class BrowserAssetUploadTask implements AssetUploadTask {
     return Effect.suspend(loop);
   }
 
-  /**
-   * Executes a direct binary upload with automatic exponential backoff retry and URL refresh on expiry.
-   *
-   * Runs inside the Effect runtime: `Effect.sleep` backoff is interruptible by
-   * task cancellation, and each attempt re-checks pause/offline state through
-   * `#waitUntilRunnable` before touching the network.
-   *
-   * @param initialRequest Initial signed upload request or part descriptor.
-   * @param refreshRequest Effect returning refreshed signed parameters if expired or failed.
-   * @param body Payload chunk or complete file blob.
-   * @param onProgress Callback receiving cumulative uploaded bytes for this transfer.
-   * @param stop Optional callback inspecting sibling failure states.
-   * @returns Effect resolving to the uploaded asset/part ETag.
-   */
   #sendWithRetry(
     initialRequest: SignedRequest | SignedPart,
-    refreshRequest: () => Effect.Effect<SignedRequest | SignedPart, unknown>,
+    refreshRequest: (attempt: number) => Effect.Effect<SignedRequest | SignedPart, unknown>,
     body: Blob,
     onProgress: (loaded: number) => void,
     stop?: UploadStopReader,
@@ -719,7 +551,7 @@ class BrowserAssetUploadTask implements AssetUploadTask {
       this.#waitUntilRunnable(stop).pipe(
         Effect.andThen(() => {
           if (!refreshedForExpiry && new Date(request.expires_at).getTime() <= Date.now() + 5_000) {
-            return Effect.flatMap(refreshRequest(), (refreshed) => {
+            return Effect.flatMap(refreshRequest(attempt), (refreshed) => {
               const state = stop?.();
               if (state?.stopped && state.reason) return Effect.failCause(state.reason);
               return loop(refreshed, attempt, true);
@@ -744,7 +576,7 @@ class BrowserAssetUploadTask implements AssetUploadTask {
               return Effect.sleep(250 * 2 ** (nextAttempt - 1)).pipe(
                 Effect.andThen(() => this.#waitUntilRunnable(stop)),
                 Effect.andThen(() =>
-                  Effect.flatMap(refreshRequest(), (refreshed) => {
+                  Effect.flatMap(refreshRequest(nextAttempt), (refreshed) => {
                     const refreshedState = stop?.();
                     if (refreshedState?.stopped && refreshedState.reason)
                       return Effect.failCause(refreshedState.reason);
@@ -760,12 +592,6 @@ class BrowserAssetUploadTask implements AssetUploadTask {
     return Effect.suspend(() => loop(initialRequest, 0, false));
   }
 
-  /**
-   * Executes a single-shot PUT upload for files smaller than the multipart threshold.
-   *
-   * @param session Active upload session with single upload signed URL.
-   * @returns Effect resolving once the file body is uploaded.
-   */
   #singleUpload(session: UploadSession): Effect.Effect<void, unknown> {
     return Effect.suspend(() => {
       const initial = session.single_upload;
@@ -789,20 +615,6 @@ class BrowserAssetUploadTask implements AssetUploadTask {
     });
   }
 
-  /**
-   * Executes a parallel multipart upload, slicing the file into chunks, requesting pre-signed part URLs,
-   * uploading chunks up to `max_parallel_parts`, and recording completed ETags.
-   *
-   * Part workers run as forked child fibers bounded by `max_parallel_parts`. A
-   * sibling failure records the stop state, aborts in-flight XHRs, and wakes
-   * waiters so the other workers unwind; `Fiber.awaitAll` then lets the
-   * original failure (not an interrupt) surface as the program's error.
-   *
-   * @param session Active upload session containing multipart configuration.
-   * @param completedParts Previously completed parts if resuming.
-   * @param persist Callback to persist progress updates to local storage.
-   * @returns Effect resolving to all completed parts with ETags sorted by part number.
-   */
   #multipartUpload(
     session: UploadSession,
     completedParts: CompletedPart[],
@@ -867,14 +679,14 @@ class BrowserAssetUploadTask implements AssetUploadTask {
               start,
               Math.min(this.#file.size, start + multipart.part_size),
             );
-            const refresh = () =>
+            const refresh = (attempt: number) =>
               Effect.flatMap(
                 this.#api.createUploadPartUrls(
                   this.#workspaceId,
                   session.id,
                   { part_numbers: [signedPart.part_number] },
                   {
-                    idempotencyKey: `upload-part-refresh-${session.id}-${signedPart.part_number}-${createMutationKey()}`,
+                    idempotencyKey: `upload-part-refresh-${session.id}-${signedPart.part_number}-${attempt}`,
                   },
                 ),
                 (response) => {
@@ -931,14 +743,6 @@ class BrowserAssetUploadTask implements AssetUploadTask {
     );
   }
 
-  /**
-   * Retrieves an existing upload session when resuming, or provisions a new upload session via the API.
-   * Persists optional recovery data only while functional consent is enabled, then
-   * notifies `onSessionStart` with the durable Asset id so callers can track an
-   * upload that is still transferring bytes even when browser recovery is disabled.
-   *
-   * @returns Effect resolving to the upload session detail response and initialized resumable upload record.
-   */
   #loadSession(): Effect.Effect<
     {
       detail: UploadSessionDetailResponse | UploadSessionResponse;
@@ -954,17 +758,18 @@ class BrowserAssetUploadTask implements AssetUploadTask {
           const existing = listResumableUploads(this.#storageForAccess()).find(
             (record) => record.sessionId === this.#resumeSessionId,
           );
-          if (!existing || !matchesResumableFile(existing, this.#file)) {
+          if (!existing || !matchesFileFingerprint(existing.file, this.#file)) {
             return yield* Effect.fail(
               new Error("Select the same local file to resume this upload"),
             );
           }
           detail = yield* this.#api.getUploadSession(this.#workspaceId, this.#resumeSessionId);
         } else {
-          const pending = pendingUploadCreation(this.#file, this.#storageForAccess());
+          const owner = { brandProfileId: this.#brandProfileId, workspaceId: this.#workspaceId };
+          const pending = pendingUploadCreation(this.#file, owner, this.#storageForAccess());
           const idempotencyKey = pending?.idempotencyKey ?? `upload-create-${createMutationKey()}`;
           if (!pending) {
-            savePendingUploadCreation(this.#file, idempotencyKey, this.#storageForAccess());
+            savePendingUploadCreation(this.#file, owner, idempotencyKey, this.#storageForAccess());
           }
           detail = yield* this.#api.createUploadSession(
             this.#workspaceId,
@@ -993,7 +798,9 @@ class BrowserAssetUploadTask implements AssetUploadTask {
         const record: ResumableUpload = {
           assetId: session.asset_id,
           completedParts:
-            local && matchesResumableFile(local, this.#file) ? local.completedParts : serverParts,
+            local && matchesFileFingerprint(local.file, this.#file)
+              ? local.completedParts
+              : serverParts,
           expiresAt: session.expires_at,
           file: fingerprint(this.#file),
           sessionId: session.id,
@@ -1001,15 +808,7 @@ class BrowserAssetUploadTask implements AssetUploadTask {
           version: 1,
         };
         saveResumableUpload(record, this.#storageForAccess());
-        try {
-          // Subscriber failures are ignored — a synchronous throw lands in the
-          // catch, and a callback that returns a rejected promise (legal for a
-          // `(assetId) => void` subscriber) is swallowed by the trailing
-          // `.catch` so it can never fail or cancel the upload.
-          void Promise.resolve(this.#onSessionStart(session.asset_id)).catch(() => undefined);
-        } catch {
-          // Ignored per the contract documented on `onSessionStart`.
-        }
+        this.#notifySessionStart(session.asset_id);
         if (!this.#resumeSessionId) {
           discardPendingUploadCreation(this.#file, this.#storageForAccess());
         }
@@ -1018,14 +817,14 @@ class BrowserAssetUploadTask implements AssetUploadTask {
     );
   }
 
-  /**
-   * The complete upload lifecycle as an Effect program: session setup, file
-   * transfer, and completion, with status transitions emitted at each step.
-   * Typed failures mark the task `failed` (or `cancelled` for
-   * `UploadCancelledError`); fiber interruption marks it `cancelled`.
-   *
-   * @returns Effect resolving to the finalized `Asset` record.
-   */
+  #notifySessionStart(assetId: string): void {
+    try {
+      void Promise.resolve(this.#onSessionStart(assetId)).catch(() => undefined);
+    } catch {
+      return;
+    }
+  }
+
   #program(): Effect.Effect<Asset, unknown> {
     return Effect.gen(
       function* (this: BrowserAssetUploadTask) {
@@ -1055,37 +854,14 @@ class BrowserAssetUploadTask implements AssetUploadTask {
         this.#status(asset.status === "processing" ? "processing" : "complete");
         return asset;
       }.bind(this),
-    ).pipe(
-      Effect.tapError((error) =>
-        Effect.sync(() => {
-          this.#status(error instanceof UploadCancelledError ? "cancelled" : "failed");
-        }),
-      ),
-      Effect.onInterrupt(() =>
-        Effect.sync(() => {
-          this.#status("cancelled");
-        }),
-      ),
     );
   }
 }
 
-/**
- * Factory creating an `AssetUploadTask` instance to handle managed file uploads with pause/resume support.
- *
- * @param options Upload options including the file, workspace selection, and progress listeners.
- * @returns Configured asset upload task.
- */
 export function createAssetUpload(options: UploadAssetFileOptions): AssetUploadTask {
   return new BrowserAssetUploadTask(options);
 }
 
-/**
- * Convenience helper that initiates an upload task and returns its resulting `Asset` promise.
- *
- * @param options Upload options including the file, workspace selection, and progress listeners.
- * @returns Resolves with the completed or processing asset.
- */
 export function uploadAssetFile(options: UploadAssetFileOptions): Promise<Asset> {
   return createAssetUpload(options).result;
 }

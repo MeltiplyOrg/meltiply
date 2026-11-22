@@ -11,11 +11,6 @@ import type { CalendarDayCell, PostRow } from "./types";
 import { calendarDateKey } from "./calendar-dates";
 import type { CalendarSlot } from "./calendar-slots";
 
-/**
- * Dense Week-canvas tint per canonical tone, opaque enough to sit over the hour
- * lines. The tone travels as `data-tone`, keeping the class list static for the
- * design-system linter.
- */
 const CANVAS_CHIP_TONE_CLASS = `
   border-line bg-surface
   data-[tone=accent]:border-accent/20 data-[tone=accent]:bg-accent-tint-solid
@@ -32,13 +27,11 @@ interface GridEntry {
 
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 
-/** Positions instant markers on a 24-hour wall-clock grid; repeated DST hours share a position but retain distinct offset labels and identities. */
 function minuteOfDay(instant: Date | string, timeZone: string): number {
   const date = fromDate(typeof instant === "string" ? new Date(instant) : instant, timeZone);
   return date.hour * 60 + date.minute + date.second / 60;
 }
 
-/** Partitions overlapping 45-minute visual chips into lanes, preserving every actual instant rather than covering nearby reservations. These are point-in-time publications, not claimed event durations. */
 function eventLanes(entries: GridEntry[], timeZone: string) {
   const ends: number[] = [];
   const events = entries
@@ -53,7 +46,6 @@ function eventLanes(entries: GridEntry[], timeZone: string) {
   return { placed, lanes: Math.max(1, ends.length) };
 }
 
-/** Hourly Week canvas with independent scrolling, sticky dates/time axis, real timestamp chips and a current-time rule only when today is visible. The caller owns the clock and timezone. Initial scroll centers now and today's column (or 08:00/Monday for other weeks), including on narrow screens; subsequent clock ticks never steal scroll or focus. */
 export function CalendarTimeGrid({
   days,
   posts,

@@ -1,3 +1,4 @@
+import type { Language } from "@/lib/i18n";
 import { platformDisplayName } from "@/lib/platforms";
 import {
   isCancellablePublicationStatus,
@@ -8,22 +9,10 @@ import {
 import type { Distribution, Platform, Post, PostAttachment, PostTarget } from "@/types";
 import type { ChannelMediaItem, FilterCriteria, PostRow, PostSelectionEntry } from "./types";
 
-/**
- * Normalizes the lifecycle status of a Post row consistently across all views and dialogs.
- *
- * Reads the row aggregate first and falls back to its first channel entry, then
- * canonicalizes the result so every surface agrees on what an unknown or
- * superseded value means. Unknown values become the neutral `unknown` state, not
- * `scheduled`.
- *
- * @param row - The Post row to inspect.
- * @returns Canonical publication status (e.g. 'published', 'scheduled', 'draft', 'failed', 'unknown').
- */
 export function normalizePostStatus(row: PostRow): PublicationStatus {
   return resolvePublicationStatus(row.status || row.channels?.[0]?.status);
 }
 
-/** Fixed counter order for a Post's stored analytics, matching the Posts columns. */
 const POST_ANALYTICS_COUNTERS = [
   "likes",
   "comments",
@@ -35,50 +24,26 @@ const POST_ANALYTICS_COUNTERS = [
   "reach",
 ] as const satisfies readonly (keyof NonNullable<Post["analytics"]>)[];
 
-/** One measured counter of a Post's stored analytics. */
 interface PostAnalyticsMetric {
   id: keyof NonNullable<Post["analytics"]>;
   value: number;
 }
 
-/** One published Channel's latest stored counters, ready for the inspector chart. */
 interface PostChannelAnalytics {
-  /** Distribution id; stable join key to the row's Channel outcome. */
   id: string;
   platform: Platform;
-  /** Saved Channel name, falling back to the Platform display name. */
   label: string;
   analytics: NonNullable<Post["analytics"]>;
 }
 
-/** What the Post inspector may show about one Post's stored analytics. */
 export interface PostAnalyticsSummary {
-  /** Analytics belongs to a Post only once at least one Channel published. */
   visible: boolean;
-  /** Published, but no counter has been measured yet (awaiting the first sync). */
   awaiting: boolean;
-  /** Measured counters in the Posts column order; unmeasured counters are omitted. */
   metrics: readonly PostAnalyticsMetric[];
-  /** Per-Channel latest snapshots, ordered by Platform then Distribution id. */
   channels: readonly PostChannelAnalytics[];
-  /** Counters no connected provider measured; named in the inspector footnote. */
   untracked: readonly PostAnalyticsMetric["id"][];
 }
 
-/**
- * Resolves the analytics the Post inspector may show.
- *
- * A Post's analytics is the sum of each published Channel's latest stored
- * snapshot, so it is only meaningful after a publication exists: drafts and
- * pending Posts resolve to `visible: false` even if a stale aggregate is
- * present. A row without its Post loaded — a calendar event outside the loaded
- * page — also resolves to `visible: false`, because it cannot report the
- * aggregate. Measured zeros stay zeros; null counters are reported as untracked
- * rather than rendered as a measured zero.
- *
- * @param row - The inspected Post row.
- * @returns Visibility, measured counters, and untracked counters.
- */
 export function resolvePostAnalytics(row: PostRow): PostAnalyticsSummary {
   const visible =
     Boolean(row.post) && row.channels.some((channel) => channel.status === "published");
@@ -110,17 +75,6 @@ export function resolvePostAnalytics(row: PostRow): PostAnalyticsSummary {
   };
 }
 
-/**
- * Resolves the single display instant and sort key of a Post row.
- *
- * Drafts sort by creation; an active Post sorts by its earliest scheduled slot
- * so a long calendar range reads chronologically, falling back to its most
- * recent publication and finally to creation. Only the row's date changes with
- * its outcome — never its `Post.id` identity.
- *
- * @param post - Durable Post whose outcomes supply the instants.
- * @returns ISO timestamp used for row display, ordering, and day bucketing.
- */
 export function resolvePostDisplayDate(post: Post): string {
   if (post.status === "draft") return post.created_at;
   let scheduled: string | null = null;
@@ -134,22 +88,6 @@ export function resolvePostDisplayDate(post: Post): string {
   return scheduled ?? published ?? post.created_at;
 }
 
-/**
- * Resolves the ordered media one Channel publishes, in delivered order.
- *
- * A claimed Distribution's frozen `publication.media` is authoritative, so
- * later Post edits never rewrite what a published Channel displays; a frozen
- * Asset detached from the Post keeps its slot with `attachment` undefined and
- * its frozen facts on the item. An unclaimed Channel reflects live
- * composition: `null` `attachment_ids` inherits the Post order, `[]` is
- * text-only, and a list overrides membership and order.
- *
- * @param post - Durable Post owning the ordered attachments.
- * @param target - Saved per-Channel settings, when the Post carries one.
- * @param distribution - Outcome backing the Channel; its frozen publication
- *   governs media once a Provider attempt claimed it.
- * @returns Media items in publication order; empty for text-only Channels.
- */
 export function resolveChannelMedia(
   post: Post,
   target: Pick<PostTarget, "attachment_ids"> | undefined,
@@ -195,19 +133,6 @@ export function resolveChannelMedia(
   return ordered;
 }
 
-/**
- * Resolves the caption a Channel shows in a row preview.
- *
- * A claimed Distribution's frozen `publication` is authoritative — `title`,
- * then `text` — so a published Channel keeps displaying the caption it
- * delivered after later Post or override edits. Unclaimed Channels resolve
- * `title_override` → `description_override` → the Post's `default_text`.
- *
- * @param post - Durable Post holding the default caption.
- * @param overrides - Channel entry supplying `title_override`/`description_override`.
- * @param publication - Frozen publication of the Channel's claimed attempt, when one exists.
- * @returns Caption preview text for the Channel; empty for media-only frozen publications.
- */
 export function resolveChannelText(
   post: Post,
   overrides: { title_override?: string | null; description_override?: string | null },
@@ -217,15 +142,6 @@ export function resolveChannelText(
   return overrides.title_override ?? overrides.description_override ?? post.default_text;
 }
 
-/**
- * Picks the attachment a list/grid/card preview renders: the first media item
- * of the row's first Channel that still has a live Post attachment. A claimed
- * Channel whose frozen media is no longer renderable contributes nothing —
- * but never falls back to media the Channel did not publish.
- *
- * @param row - Post row to inspect.
- * @returns Attachment to preview, or `null` when nothing renderable remains.
- */
 export function resolveRowPreviewAttachment(row: PostRow): PostAttachment | null {
   for (const channel of row.channels) {
     const preview = channel.attachments.find((m) => m.attachment)?.attachment;
@@ -235,19 +151,25 @@ export function resolveRowPreviewAttachment(row: PostRow): PostAttachment | null
   return row.post?.attachments[0] ?? null;
 }
 
-/**
- * Resolves a row's caption preview for Table, Grid, Calendar, and Details.
- *
- * A frozen publication supplies its own caption, so a published Channel
- * displays what it delivered rather than text reconstructed from the edited
- * Post; a frozen media-only publication yields no text instead of claiming the
- * Post's revised caption. Unclaimed Channels resolve their pending caption,
- * then the Post's default text or label; a calendar row whose Post is outside
- * the loaded page uses the event's `post_title`.
- *
- * @param row - Post row to inspect.
- * @returns Resolved Channel caption, else the Post's label or calendar title.
- */
+export function formatPostDate(
+  value: string | null | undefined,
+  timeZone: string,
+  language: Language,
+): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (isNaN(date.getTime())) return null;
+  return date.toLocaleString(language, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    timeZone,
+  });
+}
+
 export function resolveRowCaption(row: PostRow): string {
   let sawFrozenChannel = false;
   for (const channel of row.channels) {
@@ -268,14 +190,6 @@ export function resolveRowCaption(row: PostRow): string {
   return "";
 }
 
-/**
- * Collects the distinct Platform providers a Post row targets, from the loaded
- * workspace channel integrations with the contract platform as fallback so a
- * disconnected account still renders its provider icon.
- *
- * @param row - Post row to inspect.
- * @returns Unique provider identifiers for the row's platforms cell.
- */
 export function resolveRowProviders(row: PostRow): string[] {
   const providers = new Set<string>();
   for (const channel of row.channels) {
@@ -285,33 +199,12 @@ export function resolveRowProviders(row: PostRow): string[] {
   return [...providers];
 }
 
-/**
- * Collects every Channel entry of a Post that still accepts cancel/reschedule
- * mutations, as the Distribution ids the destructive confirmation acts on.
- *
- * @param row - Post row to inspect.
- * @returns Distribution ids of pending outcomes; empty when nothing is cancellable.
- */
 export function resolveCancellableDistributionIds(row: PostRow): string[] {
   return row.channels
     .filter((c) => c.distribution && isCancellablePublicationStatus(c.distribution.status))
     .map((c) => c.distribution!.id);
 }
 
-/**
- * Converts a Date object or ISO timestamp string into a local 'YYYY-MM-DD' calendar key.
- *
- * Uses the local browser timezone rather than UTC string slicing to ensure consistent day grouping
- * and cell highlighting across positive and negative UTC offset regions.
- *
- * @param d - Date object or ISO timestamp string.
- * @returns Formatted date key in local calendar time (e.g. '2026-09-11'), or empty string on invalid date.
- *
- * @example
- * ```ts
- * toLocalDateKey(new Date(2026, 8, 11)) // '2026-09-11'
- * ```
- */
 export function toLocalDateKey(d: Date | string): string {
   const date = typeof d === "string" ? new Date(d) : d;
   if (isNaN(date.getTime())) return "";
@@ -321,20 +214,6 @@ export function toLocalDateKey(d: Date | string): string {
   return `${y}-${m}-${day}`;
 }
 
-/**
- * Filters and sorts Post rows by status, selected platforms, profile, search
- * query, and date.
- *
- * Buckets other than `draft` are derived from the row's Channel outcomes, since
- * one Post can hold published, pending, and failed Channels at the same time and
- * still needs to be findable under each of them. A Channel maps to a bucket
- * through the canonical publication status table.
- *
- * @param posts - Complete list of Post rows.
- * @param filters - Active criteria; empty arrays mean all, values within a field
- * are OR-matched, and separate fields are AND-matched.
- * @returns Filtered and sorted Post rows array.
- */
 export function filterAndSortPosts(posts: PostRow[], filters: FilterCriteria): PostRow[] {
   let list = [...posts];
 
@@ -357,8 +236,8 @@ export function filterAndSortPosts(posts: PostRow[], filters: FilterCriteria): P
     );
     list = list.filter((row) =>
       row.channels.some((c) => {
-        const provider = c.integration?.providerIdentifier?.toLowerCase();
-        return provider ? platformTargets.has(provider) : false;
+        const provider = c.integration?.providerIdentifier ?? c.distribution?.platform;
+        return provider ? platformTargets.has(provider.toLowerCase()) : false;
       }),
     );
   }
@@ -368,8 +247,8 @@ export function filterAndSortPosts(posts: PostRow[], filters: FilterCriteria): P
     list = list.filter((row) => profileIds.has(row.brandProfileId));
   }
 
-  if (filters.searchQuery.trim()) {
-    const q = filters.searchQuery.toLowerCase();
+  const q = filters.searchQuery.trim().toLowerCase();
+  if (q) {
     list = list.filter((row) => {
       const content = resolveRowCaption(row).toLowerCase();
       return content.includes(q) || row.id.toLowerCase().includes(q);
@@ -406,33 +285,6 @@ export function filterAndSortPosts(posts: PostRow[], filters: FilterCriteria): P
   return list;
 }
 
-/**
- * Drops selection entries whose Post is absent from the loaded data once that
- * data is authoritative, so a Post deleted elsewhere (or pushed out of the
- * loaded page) cannot linger in the selection and later receive a doomed
- * mutation. Two escape hatches keep pruning honest:
- *
- * - `dataSettled` is false while any feeding query is loading or refetching —
- *   mid-flight invalidation snapshots may still list a just-deleted Post or
- *   transiently omit a failed one, so nothing is pruned off a moving target.
- * - `draftFilter` narrows the Post query to drafts only, making non-draft
- *   selection unverifiable; the helper then retains entries without a loaded
- *   row (a row present as a draft stays prunable when it disappears, since
- *   under the draft filter it can only ever have been a draft).
- *
- * The union of the loaded Post page and the fetched calendar events covers
- * calendar rows whose Post fell outside the page, and refreshes each retained
- * entry's `brandProfileId` so deletion always authorizes against the latest
- * owning profile.
- *
- * @param selection - Selected entries keyed by `Post.id`.
- * @param known - Loaded Posts plus calendar events that carry
- *   `post_id`/`brand_profile_id`.
- * @param options - `dataSettled` marks loaded data authoritative;
- *   `draftFilter` marks the draft-only Post query.
- * @returns The same map when nothing changed (stable identity for state
- *   comparisons), otherwise a pruned/refreshed copy.
- */
 export function prunePostSelection(
   selection: ReadonlyMap<string, PostSelectionEntry>,
   known: readonly { id: string; brandProfileId: string | null }[],

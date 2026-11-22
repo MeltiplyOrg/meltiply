@@ -3,7 +3,8 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { I18nProvider } from "@/lib/i18n";
+import { useLayoutEffect } from "react";
+import { I18nProvider, useI18n } from "@/lib/i18n";
 import { CalendarDateDetailDialog } from "./calendar-date-detail-dialog";
 import type { PostRow } from "./types";
 
@@ -19,26 +20,42 @@ const post: PostRow = {
   brandProfileId: "profile",
 };
 
-/** Renders the real day dialog over one Post with every action enabled. */
-function renderDialog() {
-  return render(
-    <I18nProvider>
-      <CalendarDateDetailDialog
-        selectedDate={date}
-        posts={[post]}
-        canMutate
-        onClose={() => {}}
-        onEdit={() => {}}
-        onDelete={() => {}}
-        onScheduleNew={() => {}}
-        onViewDetails={() => {}}
-        selectedIds={new Set()}
-        onToggleSelection={() => {}}
-        onSetSelection={() => {}}
-      />
-    </I18nProvider>,
-  );
+function InGerman({ children }: { children: React.ReactNode }) {
+  const { language, setLanguage } = useI18n();
+  useLayoutEffect(() => setLanguage("de"), [setLanguage]);
+  return language === "de" ? children : null;
 }
+
+const dialog = (
+  <CalendarDateDetailDialog
+    selectedDate={date}
+    posts={[post]}
+    canMutate
+    onClose={() => {}}
+    onEdit={() => {}}
+    onDelete={() => {}}
+    onScheduleNew={() => {}}
+    onViewDetails={() => {}}
+    selectedIds={new Set()}
+    onToggleSelection={() => {}}
+    onSetSelection={() => {}}
+  />
+);
+
+function renderDialog() {
+  return render(<I18nProvider>{dialog}</I18nProvider>);
+}
+
+describe("Calendar date detail localization", () => {
+  it("titles the day in the active language", () => {
+    render(
+      <I18nProvider>
+        <InGerman>{dialog}</InGerman>
+      </I18nProvider>,
+    );
+    expect(screen.getByRole("heading", { name: /Oktober 2026/ })).toBeInTheDocument();
+  });
+});
 
 describe("Calendar date detail action semantics", () => {
   it("uses the primary treatment for creating and scheduling, and danger only for deletion", () => {

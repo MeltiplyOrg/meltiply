@@ -11,8 +11,6 @@ import { translate } from "./i18n";
 
 const sourceRoot = fileURLToPath(new URL("../", import.meta.url));
 
-// The shared glossary is the single source for terms that are deliberately
-// identical across languages. It also feeds generation and the Shipi18n check.
 const intentionalIdenticalValues: Record<string, true> = Object.fromEntries(
   [...Object.keys(glossary.keepVerbatim), ...glossary.intentionallyIdentical].map((term) => [
     term,
@@ -20,18 +18,12 @@ const intentionalIdenticalValues: Record<string, true> = Object.fromEntries(
   ]),
 );
 
-// English is the translation key: every translatable callsite must be present
-// in the source catalog, which the locale check then requires in each target.
-
-// Dynamic keys are finite values selected by application state. Their source
-// expressions are reviewed here so a new dynamic callsite cannot bypass the catalog guard.
 const allowedDynamicTranslationExpressions: Record<string, true> = {
   "asset.asset_type": true,
   "card.definition": true,
   'grouping === "day" ? "Day" : grouping === "week" ? "Week" : "Month"': true,
   "FORMAT_LABELS[format]": true,
   "card.label": true,
-  // Settings rail groups own a finite reviewed label roster in `SECTION_GROUPS`.
   "group.label": true,
   genericErrorMessage: true,
   error: true,
@@ -44,8 +36,6 @@ const allowedDynamicTranslationExpressions: Record<string, true> = {
   "RANGE_LABELS[range]": true,
   "status.message": true,
   "titles[status.kind]": true,
-  // The shell's page title is the canonical destination's catalogue label; the
-  // roster owns the finite set of keys, so this reflects an already-reviewed list.
   "workspaceNavItem(currentView).label": true,
 };
 
@@ -54,12 +44,7 @@ async function sourceFiles(directory: string): Promise<string[]> {
   const nested = await Promise.all(
     entries.map(async (entry) => {
       const path = join(directory, entry.name);
-      // The DevBox dock is dev-only chrome — its labels are developer tooling,
-      // not user-facing copy, so they are exempt from the translation catalog.
       if (entry.isDirectory() && entry.name === "devbox") return [];
-      // EvilCharts registry source is vendored third-party implementation; its
-      // internal loading chrome is not an authored product surface. The page
-      // passes translated labels into the chart instead of changing the source.
       if (entry.isDirectory() && entry.name === "evilcharts") return [];
       if (entry.isDirectory()) return sourceFiles(path);
       if (/\.(?:ts|tsx)$/.test(entry.name) && !entry.name.includes(".test.")) return [path];
@@ -69,13 +54,6 @@ async function sourceFiles(directory: string): Promise<string[]> {
   return nested.flat();
 }
 
-/**
- * Reports whether a translatable callsite is registered in the English source
- * catalog or explicitly allowed to stay identical by the shared glossary.
- *
- * @param message English source string found in the app.
- * @returns True when the catalog guard may accept the string.
- */
 function isCovered(message: string): boolean {
   return Object.hasOwn(sourceCatalog, message) || Boolean(intentionalIdenticalValues[message]);
 }
@@ -100,8 +78,6 @@ describe("Spanish i18n catalog", () => {
       });
       if (ast.errors.length) throw new Error(`${file}: ${ast.errors[0].message}`);
 
-      // oxc emits ESTree-compatible nodes whose children are own object/array
-      // properties, so a generic walk replaces the tsc visitor API.
       function visit(node: Node): void {
         if (node.type === "CallExpression" && node.callee?.type === "Identifier") {
           const argumentIndex = node.callee.name === "translate" ? 1 : 0;

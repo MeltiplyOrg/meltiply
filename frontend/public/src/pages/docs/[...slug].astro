@@ -14,11 +14,6 @@ interface Props {
   markdownPath: string;
 }
 
-/**
- * Prerenders every public guide under `/docs`, including `/docs/` for the
- * index. Metadata, TOC and agent discovery links come from the same collection;
- * the Markdown alternate is generated alongside HTML without a runtime API.
- */
 export async function getStaticPaths() {
   return source.getPages().map((page) => ({
     params: {

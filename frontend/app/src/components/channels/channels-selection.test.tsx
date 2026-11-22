@@ -82,7 +82,6 @@ vi.mock("@/context/workspace.context", () => ({
 vi.mock("@/hooks/use-session-scope", () => ({
   useSessionScope: () => ({ isSignedIn: true, workspaceId: "workspace-1" }),
 }));
-/** Uses the real English translator so bulk counts and confirmation snapshots exercise interpolation. */
 vi.mock("@/lib/i18n", async (importOriginal) => {
   const actual = await importOriginal<typeof I18nModule>();
   return {
@@ -197,7 +196,6 @@ const betaAccount: PlatformAccount = {
   platform_user_id: "beta-instagram",
 };
 
-/** Resets mocked workspace and query state so each rendered surface starts independent. */
 function resetScope() {
   workspace.brandProfiles = [alphaProfile, betaProfile];
   workspace.channelStatuses = [];
@@ -215,7 +213,6 @@ function resetScope() {
   toastMock.mockClear();
 }
 
-/** The routed ChannelsView element, reused for re-renders that simulate data refetches. */
 function channelsElement() {
   return (
     <MemoryRouter>
@@ -225,26 +222,19 @@ function channelsElement() {
   );
 }
 
-/** Reports the settled router location so outcome consumption can be asserted. */
 function LocationProbe() {
   const location = useLocation();
   return <div data-testid="location">{`${location.pathname}${location.search}`}</div>;
 }
 
-/** Mounts the channels view inside a router context for its search-param reads. */
 function renderChannels() {
   return render(channelsElement());
 }
 
-/** The single bulk pill action button, disambiguated from settings-disconnect buttons. */
 function bulkActionButton() {
   return screen.getByRole("button", { name: "Disconnect" });
 }
 
-/**
- * The selection dock. Its live count is a `RollingCount`, so the sentence is split
- * across nodes — read it as the text a person sees rather than as one element's label.
- */
 function selectionDock() {
   const region = screen.queryByRole("region", { name: "Selection actions" });
   return region ? within(region).queryByRole("status") : null;
@@ -255,8 +245,6 @@ async function expectSelection(text: string) {
 }
 
 beforeAll(() => {
-  // jsdom does not implement scrollIntoView; Radix Select calls it when its
-  // popover content mounts and focuses the selected item.
   Element.prototype.scrollIntoView = vi.fn();
 });
 
@@ -268,10 +256,6 @@ beforeEach(() => {
 });
 
 describe("Channels OAuth outcome", () => {
-  /**
-   * OAuth success arrives through a redirect. It must surface as a one-shot
-   * toast, not a persistent banner, and must not replay on subsequent renders.
-   */
   it("announces a connected Channel as a one-shot toast and keeps unrelated params", async () => {
     navigation.searchParams = new URLSearchParams("oauth=connected&provider=facebook&review=keep");
     renderChannels();
@@ -291,10 +275,6 @@ describe("Channels OAuth outcome", () => {
 });
 
 describe("Channels selection", () => {
-  /**
-   * The table header select-all acts on exactly the visible rows: hidden-by-filter
-   * channels are untouched, and the same checkbox clears the visible set.
-   */
   it("selects only visible channels through the table header select-all", async () => {
     queryResults.platforms.data = [connectedAccount, youtubeAccount, betaAccount];
     renderChannels();
@@ -315,10 +295,6 @@ describe("Channels selection", () => {
     await waitFor(() => expect(selectionDock()).toBeNull());
   });
 
-  /**
-   * Selection survives rows being filtered out: a hidden selected channel still
-   * counts toward the bulk pill and stays checked once it becomes visible again.
-   */
   it("keeps hidden selected rows latched and restores them checked", async () => {
     queryResults.platforms.data = [connectedAccount, youtubeAccount];
     renderChannels();
@@ -329,7 +305,6 @@ describe("Channels selection", () => {
     fireEvent.click(within(youtubeRow).getByRole("checkbox", { name: "Select channel" }));
     await expectSelection("2 selected");
 
-    // Hiding a selected channel does not shrink the pill count.
     fireEvent.change(screen.getByLabelText("Search accounts"), {
       target: { value: "tiktok" },
     });
@@ -341,7 +316,6 @@ describe("Channels selection", () => {
       }),
     ).toBeChecked();
 
-    // Clearing the filter restores the hidden row with its selection intact.
     fireEvent.change(screen.getByLabelText("Search accounts"), { target: { value: "" } });
     expect(
       within(screen.getByTestId(`channel-row-${youtubeAccount.id}`)).getByRole("checkbox", {
@@ -350,10 +324,6 @@ describe("Channels selection", () => {
     ).toBeChecked();
   });
 
-  /**
-   * The Brand Profile filter is the mutation scope: switching it clears the
-   * selection so ids from another profile can never be bulk-disconnected.
-   */
   it("clears the selection when the Brand Profile scope changes", async () => {
     queryResults.platforms.data = [connectedAccount, betaAccount];
     renderChannels();
@@ -377,11 +347,6 @@ describe("Channels selection", () => {
     ).not.toBeChecked();
   });
 
-  /**
-   * Sequential bulk disconnect keeps failed channels selected while successful
-   * ids drop out per-id, and the confirmation only ever mutates the latched
-   * snapshot — never the live selection.
-   */
   it("retains failed disconnects in the selection after a confirmed batch", async () => {
     queryResults.platforms.data = [connectedAccount, youtubeAccount, betaAccount];
     queryMutations.disconnect.mutateAsync.mockImplementation((id: string) =>
@@ -405,7 +370,6 @@ describe("Channels selection", () => {
       betaAccount.id,
     ]);
 
-    // The successful id left the selection; both failures remain selected.
     await expectSelection("2 selected");
     expect(
       within(screen.getByTestId(`channel-row-${connectedAccount.id}`)).getByRole("checkbox", {
@@ -423,7 +387,6 @@ describe("Channels selection", () => {
       }),
     ).toBeChecked();
 
-    // A mid-run refetch without the disconnected row cannot drop the failures.
     act(() => {
       queryResults.platforms.data = [youtubeAccount, betaAccount];
       view.rerender(channelsElement());
@@ -440,10 +403,6 @@ describe("Channels selection", () => {
     );
   });
 
-  /**
-   * The confirmation snapshot protects exactly the selected rows: a bulk run
-   * over a single selection issues exactly one mutation for that id.
-   */
   it("confirms bulk disconnect against the snapshot only", async () => {
     queryResults.platforms.data = [connectedAccount, youtubeAccount];
     queryMutations.disconnect.mutateAsync.mockResolvedValue(undefined);
@@ -471,11 +430,6 @@ describe("Channels selection", () => {
     );
   });
 
-  /**
-   * The Filter disclosure badge counts every active filter field, including
-   * the connection-status segmented control that is not one of the dropdown
-   * fields — a status-only selection must still read as one active filter.
-   */
   it("counts the status filter in the Filter badge", async () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
@@ -489,10 +443,6 @@ describe("Channels selection", () => {
     await waitFor(() => expect(filterSummary).toHaveTextContent("1"));
   });
 
-  /**
-   * Deselect empties the selection and removes the pill without disconnecting
-   * anything.
-   */
   it("clears the selection from the pill's Deselect action", async () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();

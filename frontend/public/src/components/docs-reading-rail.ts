@@ -1,4 +1,3 @@
-/** A measured heading binds document scroll position to distance along the bent rail. */
 interface RailStop {
   top: number;
   distance: number;
@@ -7,13 +6,6 @@ interface RailStop {
 
 const owners = new WeakMap<HTMLElement, () => void>();
 
-/**
- * Measures TOC links with numeric parent data-depth and tracks native scrolling.
- * Resize/font changes remeasure geometry; hidden rails wait for resize.
- * beforeHydration preserves exact React style serialization for DOM adoption.
- * Returns observer cleanup; reinitialization releases the previous owner without
- * hiding its painted rail. Missing decoration returns no cleanup.
- */
 export function initializeReadingRail(root: HTMLElement, beforeHydration = false) {
   owners.get(root)?.();
   const track = root.querySelector<SVGPathElement>(".docs-reading-remaining");
@@ -29,7 +21,6 @@ export function initializeReadingRail(root: HTMLElement, beforeHydration = false
   let frame = 0;
   let disposed = false;
 
-  // One coalesced frame writes decoration only; article layout remains untouched.
   const paint = () => {
     frame = 0;
     if (stops.length === 0) return;
@@ -52,7 +43,6 @@ export function initializeReadingRail(root: HTMLElement, beforeHydration = false
     const rotation = (Math.atan2(ahead.y - behind.y, ahead.x - behind.x) * 180) / Math.PI + 45;
     const transform = `translate(${point.x}px, ${point.y}px) rotate(${rotation}deg)`;
     if (beforeHydration) {
-      // Match React's inline-style serialization when adopting the prepainted DOM.
       plane.setAttribute("style", `transform:${transform}`);
       progress.setAttribute(
         "style",
@@ -71,8 +61,6 @@ export function initializeReadingRail(root: HTMLElement, beforeHydration = false
     if (!frame && stops.length > 0) frame = requestAnimationFrame(paint);
   };
 
-  // The li remains rail-relative; its animated transform makes the link's
-  // offsetTop relative to that li instead, so link offsets cannot locate rows.
   const measure = () => {
     if (disposed) return;
     if (root.getClientRects().length === 0) {

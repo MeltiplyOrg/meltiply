@@ -8,57 +8,17 @@ function requestAt(fetchMock: Mock, index: number): Request {
   return input instanceof Request ? input : new Request(String(input));
 }
 
-/**
- * Resolves the effective credentials mode of one recorded fetch call whether
- * the client forwarded a `Request` object or a URL plus init.
- */
 function credentialsAt(fetchMock: Mock, index: number): RequestCredentials | undefined {
   const [input, init] = fetchMock.mock.calls[index] ?? [];
   return init?.credentials ?? (input instanceof Request ? input.credentials : undefined);
 }
 
-/**
- * Resolves one header from a recorded fetch call, merging `Request` headers
- * with any `init.headers` override so assertions hold regardless of which side
- * of the call carries the header.
- */
 function headerAt(fetchMock: Mock, index: number, name: string): string | null {
   const [input, init] = fetchMock.mock.calls[index] ?? [];
   const headers = new Headers(input instanceof Request ? input.headers : undefined);
   new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
   return headers.get(name);
 }
-
-describe("API URL helpers", () => {
-  it("defaults to the local backend origin", () => {
-    expect(api.apiUrl("/assets", {})).toBe("http://localhost:8787/api/v1/assets");
-  });
-
-  it("normalizes configured backend origins and paths", () => {
-    const env = {
-      APP_URL: "https://api.example.com/",
-    };
-
-    expect(api.apiUrl("calendar", env)).toBe("https://api.example.com/api/v1/calendar");
-  });
-
-  it("does not double-prefix paths that already include the API version", () => {
-    expect(api.apiUrl("/api/v1/assets", {})).toBe("http://localhost:8787/api/v1/assets");
-  });
-
-  it("normalizes paths missing a leading slash", () => {
-    expect(api.apiUrl("distributions", {})).toBe("http://localhost:8787/api/v1/distributions");
-  });
-
-  it("rejects empty and whitespace-only paths", () => {
-    expect(() => api.apiUrl("", {})).toThrow("API path is required");
-    expect(() => api.apiUrl("   ", {})).toThrow("API path is required");
-  });
-
-  it("rejects absolute API paths so callers cannot bypass the configured backend", () => {
-    expect(() => api.apiUrl("https://api.example.com/assets", {})).toThrow("relative API path");
-  });
-});
 
 describe("generated API client adapters", () => {
   afterEach(() => {
@@ -178,7 +138,6 @@ describe("generated API client adapters", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            // A valid session: an already-expired one would exercise the refresh path instead.
             session: { expiresAt: "2099-07-18T16:00:00.000Z", id: "session-1", userId: "user-1" },
             user: { email: "user@example.com", id: "user-1" },
           }),
@@ -197,8 +156,6 @@ describe("generated API client adapters", () => {
       });
     vi.stubGlobal("fetch", fetchMock);
 
-    // Fresh module instances so the module-local bearer token holder starts
-    // empty; the get-session lifecycle response seeds it before the API calls.
     vi.resetModules();
     const { authClient } = await import("./auth-client");
     const isolatedApi = await import("./api");
@@ -209,8 +166,6 @@ describe("generated API client adapters", () => {
     const blob = await Effect.runPromise(isolatedApi.getAssetBlob("ws-123", "asset-1"));
     expect(new Uint8Array(await blob.arrayBuffer())).toEqual(originalBytes);
 
-    // Auth and same-origin API calls may traverse Cloudflare Access. Signed
-    // object-store downloads must never inherit API headers or session cookies.
     expect(credentialsAt(fetchMock, 0)).toBe("include");
     expect(headerAt(fetchMock, 1, "Authorization")).toBe("Bearer session-jwt-1");
     expect(credentialsAt(fetchMock, 1)).toBe("same-origin");

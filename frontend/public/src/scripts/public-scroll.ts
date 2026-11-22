@@ -3,19 +3,19 @@ import "lenis/dist/lenis.css";
 import { navigate } from "astro:transitions/client";
 
 let scroll: Lenis | undefined;
+let listenersBound = false;
 
-/** Releases inertia before Astro's native route scroll, root replacement, or page exit. */
 function destroyScroll() {
+  if (listenersBound) {
+    document.removeEventListener("click", pullAnchor, true);
+    document.removeEventListener("keydown", interruptPull);
+    document.removeEventListener("touchstart", interruptPull);
+    listenersBound = false;
+  }
   scroll?.destroy();
   scroll = undefined;
 }
 
-/**
- * Gives the public document longer wheel travel and slip (Facebook-FYP-like
- * inertia) without changing native touch, keyboard, or nested overflow
- * scrolling. A lower 0.1 lerp keeps a coasting tail and a raised wheel
- * multiplier covers more distance per gesture.
- */
 function syncMotion() {
   scroll ??= new Lenis({
     autoRaf: true,
@@ -25,24 +25,19 @@ function syncMotion() {
     wheelMultiplier: 1.5,
     syncTouch: false,
   });
+  if (!listenersBound) {
+    document.addEventListener("click", pullAnchor, true);
+    document.addEventListener("keydown", interruptPull);
+    document.addEventListener("touchstart", interruptPull, { passive: true });
+    listenersBound = true;
+  }
 }
 
-/**
- * Recreates the scroll controller after Astro replaces the root and restores position.
- * One controller survives hydration, never a route swap; deep links and Back use
- * Astro's native positioning before new wheel input starts smoothing.
- */
 function loadPage() {
   destroyScroll();
   syncMotion();
 }
 
-/**
- * Pulls same-page anchors to their CSS heading offset in a bounded 320ms ease-out
- * (440ms for non-TOC links). Astro commits fragment history before travel; focus
- * and mobile callbacks stay intact, and modified or missing links stay native.
- * No mounted controller means no interception; links retain native navigation.
- */
 function pullAnchor(event: MouseEvent) {
   if (
     !scroll ||
@@ -74,14 +69,9 @@ function pullAnchor(event: MouseEvent) {
   if (!heading) return;
   event.preventDefault();
   const origin = window.scrollY;
-  // Astro's same-page navigation commits history synchronously. Restore the
-  // starting position in the same task, before paint, then animate from there;
-  // committing on arrival would record the destination as Back's saved position.
   void navigate(link.href);
   window.scrollTo({ top: origin, behavior: "instant" });
   scroll.resize();
-  // Focus before travel so keyboard users land at the heading and new input can
-  // interrupt without a delayed completion callback stealing focus back.
   if (!heading.hasAttribute("tabindex")) {
     heading.tabIndex = -1;
     heading.addEventListener("blur", () => heading.removeAttribute("tabindex"), { once: true });
@@ -94,21 +84,16 @@ function pullAnchor(event: MouseEvent) {
   });
 }
 
-/** Stops a scripted heading pull before native keyboard or touch input takes over. */
 function interruptPull(event: KeyboardEvent | TouchEvent) {
   if (
     event instanceof KeyboardEvent &&
     !["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)
   )
     return;
-  // stop/start cancels even an animation whose first frame has not moved yet.
   scroll?.stop();
   scroll?.start();
 }
 
-document.addEventListener("click", pullAnchor, true);
-document.addEventListener("keydown", interruptPull);
-document.addEventListener("touchstart", interruptPull, { passive: true });
 document.addEventListener("astro:before-preparation", destroyScroll);
 document.addEventListener("astro:page-load", loadPage);
 window.addEventListener("pagehide", destroyScroll);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import {
   Eye,
   LogOut,
@@ -37,11 +37,6 @@ const SECTION_IDS = [
 type SettingsSection = (typeof SECTION_IDS)[number] | "administration";
 const LANGUAGE_CODES = supportedLanguages.map(({ code }) => code);
 
-/**
- * Section rail groups. General and Account are personal surfaces; Workspace
- * carries the admin-only directory. A group with no visible section disappears
- * with its last member, so a member never sees an empty heading.
- */
 const SECTION_GROUPS = [
   { id: "general", label: "General", sections: ["appearance", "language", "publishing"] },
   { id: "account", label: "Account", sections: ["account", "privacy", "security"] },
@@ -52,7 +47,6 @@ const SECTION_GROUPS = [
   sections: readonly SettingsSection[];
 }[];
 
-/** Decorative miniature lines shared by both halves of every theme preview; no palette values are copied. */
 function PreviewLines() {
   return (
     <>
@@ -63,83 +57,72 @@ function PreviewLines() {
   );
 }
 
-/**
- * Gr8r's full-height Settings composition, adapted only to supported preferences
- * and account operations. Section URLs are reloadable; language/theme delegate
- * to existing consent-aware providers. Identity is read-only and security keeps
- * password reauthentication. No demo billing, teams, or fake controls survive.
- *
- * The section rail marks its rows as `data-sidebar-item` targets so the shared
- * `SidebarGlideHighlight` pill owns the hover background here too, exactly as in
- * the workspace rail. The rail centers the reloadable route's active section on
- * mount, section or language change, resize, late label growth, and when the
- * section roster resolves (Administration can appear after the workspace loads);
- * changing sections also returns the content pane to its top while a language
- * change leaves its position alone.
- */
 export default function WorkspaceSettings() {
   const { requestedTheme, setTheme } = useTheme();
   const { user, workspaceName, canManageSettings } = useWorkspace();
   const { t, language, setLanguage } = useI18n();
-  const sections: Record<
-    SettingsSection,
-    { label: string; navLabel: string; description: string; icon: typeof Palette }
-  > = {
-    administration: {
-      label: t("Administration"),
-      navLabel: t("Administration"),
-      description: t(
-        "Manage who can access this installation, the shared workspace, and its audit trail.",
-      ),
-      icon: Users,
-    },
-    appearance: {
-      label: t("Appearance"),
-      navLabel: t("Appearance"),
-      description: t("Choose the palette for this device."),
-      icon: Palette,
-    },
-    language: {
-      label: t("Language"),
-      navLabel: t("Language"),
-      description: t("Choose the language used throughout your workspace."),
-      icon: Languages,
-    },
-    publishing: {
-      label: t("Publishing"),
-      navLabel: t("Publishing"),
-      description: t(
-        "Choose the publishing timezone, reusable signatures, and notification choices.",
-      ),
-      icon: Send,
-    },
-    account: {
-      label: t("Account and workspace"),
-      navLabel: t("Account"),
-      description: t("Your installation identity. These details are read-only."),
-      icon: UserRound,
-    },
-    privacy: {
-      label: t("Privacy"),
-      navLabel: t("Privacy"),
-      description: t(
-        "Review what this installation shares with the Meltiply maintainer and who decides it.",
-      ),
-      icon: Eye,
-    },
-    security: {
-      label: t("Account security"),
-      navLabel: t("Security"),
-      description: t(
-        "Change your password, set up an authenticator, or replace recovery codes. Security changes require your current password.",
-      ),
-      icon: ShieldCheck,
-    },
-  };
+  const sections = useMemo<
+    Record<
+      SettingsSection,
+      { label: string; navLabel: string; description: string; icon: typeof Palette }
+    >
+  >(
+    () => ({
+      administration: {
+        label: t("Administration"),
+        navLabel: t("Administration"),
+        description: t(
+          "Manage who can access this installation, the shared workspace, and its audit trail.",
+        ),
+        icon: Users,
+      },
+      appearance: {
+        label: t("Appearance"),
+        navLabel: t("Appearance"),
+        description: t("Choose the palette for this device."),
+        icon: Palette,
+      },
+      language: {
+        label: t("Language"),
+        navLabel: t("Language"),
+        description: t("Choose the language used throughout your workspace."),
+        icon: Languages,
+      },
+      publishing: {
+        label: t("Publishing"),
+        navLabel: t("Publishing"),
+        description: t(
+          "Choose the publishing timezone, reusable signatures, and notification choices.",
+        ),
+        icon: Send,
+      },
+      account: {
+        label: t("Account and workspace"),
+        navLabel: t("Account"),
+        description: t("Your installation identity. These details are read-only."),
+        icon: UserRound,
+      },
+      privacy: {
+        label: t("Privacy"),
+        navLabel: t("Privacy"),
+        description: t(
+          "Review what this installation shares with the Meltiply maintainer and who decides it.",
+        ),
+        icon: Eye,
+      },
+      security: {
+        label: t("Account security"),
+        navLabel: t("Security"),
+        description: t(
+          "Change your password, set up an authenticator, or replace recovery codes. Security changes require your current password.",
+        ),
+        icon: ShieldCheck,
+      },
+    }),
+    [t],
+  );
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSection = searchParams.get("section");
-  // Publishing and Administration are admin-managed, so their groups shrink or
-  // disappear for everyone else before the route resolves its active section.
   const visibleGroups = SECTION_GROUPS.map((group) => ({
     ...group,
     sections: group.sections.filter(
@@ -153,14 +136,6 @@ export default function WorkspaceSettings() {
   const navRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
 
-  /**
-   * Centers the active section button inside the horizontal Settings rail.
-   *
-   * Writes the rail's own `scrollLeft` rather than calling `scrollIntoView`, so
-   * centering a tab can never move the vertically scrolling page. The offset is
-   * clamped to the rail's scrollable range, and a rail that does not scroll
-   * horizontally (the desktop vertical rail) is left untouched.
-   */
   const centerActiveSection = useCallback(() => {
     const railElement = navRef.current;
     if (!railElement) return;
@@ -173,10 +148,6 @@ export default function WorkspaceSettings() {
     railElement.scrollLeft = Math.min(Math.max(centeredOffset, 0), maxScrollLeft);
   }, []);
 
-  // A reload or history entry mounts with its section already selected, so
-  // center before paint. Label widths change with the language, a resized rail
-  // moves the scrollable range, and the section roster can gain Administration
-  // after the workspace resolves, so all re-run the same centering.
   useLayoutEffect(() => {
     centerActiveSection();
   }, [canManageSettings, centerActiveSection, section, language]);
@@ -186,11 +157,6 @@ export default function WorkspaceSettings() {
     return () => window.removeEventListener("resize", centerActiveSection);
   }, [centerActiveSection]);
 
-  // Self-hosted fonts widen the section labels after the first layout pass, the
-  // dialog/viewport can resize the rail without a window resize event, and a
-  // late-capability Administration button changes the roster. Every section
-  // button is observed: a label change on any tab shifts the active tab's
-  // position even when the rail box and the active label keep their own size.
   useEffect(() => {
     if (typeof ResizeObserver === "undefined") return;
     const railElement = navRef.current;
@@ -203,9 +169,6 @@ export default function WorkspaceSettings() {
     return () => observer.disconnect();
   }, [canManageSettings, centerActiveSection, section, language]);
 
-  // `document.fonts` is absent in jsdom. `ready` can resolve before the request
-  // that widens these labels, so the loading event is the late-growth trigger;
-  // `ready` remains a cheap retry for browsers that only settle once.
   useEffect(() => {
     const fonts: FontFaceSet | undefined = document.fonts;
     if (!fonts) return;
@@ -221,8 +184,6 @@ export default function WorkspaceSettings() {
     };
   }, [centerActiveSection]);
 
-  // Section changes open the new form at its own top; a language change keeps the
-  // reader's position in the current form.
   const previousSectionRef = useRef(section);
   useLayoutEffect(() => {
     if (previousSectionRef.current === section) return;
@@ -236,8 +197,6 @@ export default function WorkspaceSettings() {
         aria-label={t("Settings sections")}
         className="relative flex gap-1 overflow-x-auto border-b border-line bg-surface px-3 py-3 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r md:px-2.5 md:py-5"
       >
-        {/* The section rail reuses the rail pill: a 12px snap radius crosses the
-            4px row gap without lighting a row from the neighbouring content. */}
         <SidebarGlideHighlight containerRef={navRef} snapThreshold={12} />
         <span className="hidden px-2 pb-2 text-(length:--font-size-micro) font-semibold uppercase tracking-wide text-ink-3 md:block">
           {t("Settings")}

@@ -106,14 +106,11 @@ vi.mock("@/context/workspace.context", () => ({
 vi.mock("@/hooks/use-session-scope", () => ({
   useSessionScope: () => ({ isSignedIn: true, workspaceId: "workspace-1" }),
 }));
-/** Uses the real English translator so bulk counts and confirmation snapshots exercise interpolation. */
 vi.mock("@/lib/i18n", async (importOriginal) => {
   const actual = await importOriginal<typeof I18nModule>();
   return {
     ...actual,
     useI18n: () => ({
-      // Consumers format dates and numbers with this language, so pinning it to
-      // "en" keeps every calendar label assertion independent of the machine locale.
       language: "en" as const,
       t: (value: string, values?: Record<string, string | number>) =>
         actual.translate("en", value, values),
@@ -236,12 +233,6 @@ const betaAccount: PlatformAccount = {
   platform_user_id: "beta-instagram",
 };
 
-/**
- * Published Post built from the contract fixtures: an active composition whose
- * sole Channel claimed a frozen publication, so every Posts surface projects a
- * real published row. `published_at` is stamped at render time so the row
- * always lands inside the calendar month under test.
- */
 const publishedPost: Post = {
   ...contractSuccessBody<Post>("getPost"),
   brand_profile_id: alphaProfile.id,
@@ -256,14 +247,12 @@ const publishedPost: Post = {
   ],
 };
 
-/** Calendar event for the published Post, folded back onto its `post_id`. */
 const publishedEvent: CalendarEvent = {
   ...contractSuccessBody<{ events: CalendarEvent[] }>("listCalendarEvents").events[0]!,
   brand_profile_id: alphaProfile.id,
   status: "published",
 };
 
-/** Resets mocked workspace and query state so each rendered surface starts independent. */
 function resetScope() {
   workspace.brandProfiles = [alphaProfile];
   workspace.canWriteContent = true;
@@ -294,12 +283,6 @@ function resetScope() {
   queryResults.calendar.data = [];
 }
 
-/**
- * Renders the channels view inside a router context.
- *
- * The view reads router search params for its initial tab, so a `MemoryRouter`
- * is required even though navigation itself is mocked.
- */
 function renderChannels() {
   return render(
     <MemoryRouter>
@@ -308,11 +291,6 @@ function renderChannels() {
   );
 }
 
-/**
- * Opens the profile editor through its surviving entry point: the Channels
- * directory card action. The toolbar Brand Profile picker is selection-only.
- * Radix tabs activate on pointer down, so the tab needs a real press.
- */
 function openProfileEditorFromDirectory(name: string) {
   const tab = screen.getByRole("tab", { name: /Brand Profiles/ });
   fireEvent.mouseDown(tab);
@@ -320,7 +298,6 @@ function openProfileEditorFromDirectory(name: string) {
   fireEvent.click(screen.getByRole("button", { name: `Edit ${name}` }));
 }
 
-/** Opens the field-row builder and adds the supported channel filters through its visible chips. */
 function openChannelFilters() {
   fireEvent.click(screen.getByText("Filter").closest("summary")!);
   for (const label of ["Platform", "Brand Profile"]) {
@@ -329,10 +306,6 @@ function openChannelFilters() {
   }
 }
 
-/**
- * Renders the posts view inside a router context at the requested mode, with a
- * profile selected so channel mutations stay affordanced.
- */
 function renderPosts(initialViewMode: "table" | "grid" | "calendar" = "table") {
   workspace.selectedBrandProfile = alphaProfile;
   workspace.selectedBrandProfileId = alphaProfile.id;
@@ -343,10 +316,6 @@ function renderPosts(initialViewMode: "table" | "grid" | "calendar" = "table") {
   );
 }
 
-/**
- * Loads the published contract Post into the mocked posts and calendar queries
- * so list, grid, and calendar surfaces all project the same row.
- */
 function seedPublishedPost() {
   const publishedAt = new Date().toISOString();
   const post: Post = {
@@ -367,7 +336,6 @@ function seedPublishedPost() {
   ];
 }
 
-/** Metric column and tile labels no Posts surface may render without a data path. */
 const METRIC_LABELS = [
   "Likes",
   "Cmts",
@@ -382,18 +350,12 @@ const METRIC_LABELS = [
   "Analytics",
 ];
 
-/**
- * The selection dock's count, once the roll that announces a change has settled:
- * a `RollingCount` splits the sentence across nodes while it plays.
- */
 async function settleSelection(text: string) {
   const region = screen.getByRole("region", { name: "Selection actions" });
   await waitFor(() => expect(within(region).getByRole("status")).toHaveTextContent(text));
 }
 
 beforeAll(() => {
-  // jsdom does not implement scrollIntoView; Radix Select calls it when its
-  // popover content mounts and focuses the selected item.
   Element.prototype.scrollIntoView = vi.fn();
 });
 
@@ -403,18 +365,11 @@ afterEach(() => {
 });
 beforeEach(() => {
   resetScope();
-  // The calendar fixtures are stamped at render time and the assertions rebuild
-  // today's label from the clock. Pinning only `Date` (timers stay real) keeps a
-  // run that crosses local midnight from seeding one day and asserting another.
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-15T12:00:00.000Z"));
 });
 
 describe("Channels table contract", () => {
-  /**
-   * Bulk disconnect snapshots the selected table rows and retains failures, so
-   * retrying never disconnects an already-successful account again.
-   */
   it("retains only failed channels after confirmed bulk disconnect", async () => {
     queryResults.platforms.data = [connectedAccount, expiredAccount];
     queryMutations.disconnect.mutateAsync
@@ -473,7 +428,6 @@ describe("Channels table contract", () => {
     await settleSelection("1 selected");
   });
 
-  /** Channel settings expose granted scopes and require confirmation before disconnecting. */
   it("reveals permissions and confirms disconnect from channel settings", async () => {
     queryResults.platforms.data = [{ ...connectedAccount, scopes: ["video.upload"] }];
     renderChannels();
@@ -489,10 +443,6 @@ describe("Channels table contract", () => {
     expect(queryMutations.disconnect.mutateAsync).toHaveBeenCalledWith(connectedAccount.id);
   });
 
-  /**
-   * An empty workspace keeps filters and both creation actions in the header.
-   * Connection stays blocked until profile creation; Reset clears typed search.
-   */
   it("disables Add account without Brand Profiles and opens in-place profile creation", () => {
     workspace.brandProfiles = [];
     renderChannels();
@@ -534,8 +484,6 @@ describe("Channels table contract", () => {
     workspace.isAdmin = false;
     renderChannels();
 
-    // "Add account" is the directory's only channel-adding affordance; asserting
-    // on it is the real guard (a plural "Add Channels" control never existed).
     expect(screen.queryByRole("button", { name: "Add account" })).not.toBeInTheDocument();
     expect(screen.getByText("Ask a workspace admin to create a Brand Profile.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Create Brand Profile" })).not.toBeInTheDocument();
@@ -599,7 +547,6 @@ describe("Channels table contract", () => {
       target: { value: "Delta Brand" },
     });
 
-    // Select a color from the honeycomb beehive
     const colorNode = within(dialog).getByRole("radio", { name: "#0369a1" });
     fireEvent.click(colorNode);
 
@@ -611,11 +558,6 @@ describe("Channels table contract", () => {
     );
   });
 
-  /**
-   * Guards the WAI-ARIA radio-group contract in the beehive picker: arrow,
-   * Home, and End keys must move DOM focus to the newly checked swatch so
-   * focus can never strand on the previously selected radio.
-   */
   it("moves focus to the newly selected swatch on arrow, Home, and End keys", () => {
     renderChannels();
 
@@ -641,10 +583,6 @@ describe("Channels table contract", () => {
     expect(firstSwatch).toHaveAttribute("aria-checked", "true");
   });
 
-  /**
-   * Confirms the color picker swatch cells omit rectangular hover backgrounds
-   * and rely solely on scale transformation (hover:scale-110) for hover feedback.
-   */
   it("omits rectangular button backgrounds on hover of the color picker cells", () => {
     renderChannels();
 
@@ -666,15 +604,11 @@ describe("Channels table contract", () => {
 
     const connectDialog = screen.getByRole("dialog", { name: "Connect social account" });
     expect(connectDialog).toBeVisible();
+    expect(within(connectDialog).getByRole("textbox", { name: "Social Channels" })).toBeVisible();
     expect(within(connectDialog).getByPlaceholderText("Search platforms…")).toBeVisible();
     expect(within(connectDialog).queryByRole("combobox")).not.toBeInTheDocument();
   });
 
-  /**
-   * A Provider remains connectable while any Brand Profile does not own it.
-   * The existing Channel is summarized in the row, and assignment happens
-   * after OAuth rather than from the active profile filter.
-   */
   it("offers Connect when another Brand Profile can still own the Provider", () => {
     workspace.brandProfiles = [alphaProfile, betaProfile];
     workspace.selectedBrandProfileId = alphaProfile.id;
@@ -700,7 +634,6 @@ describe("Channels table contract", () => {
     expect(within(dialog).getAllByRole("button", { name: "Connect" })).toHaveLength(5);
   });
 
-  /** A Provider is unavailable only when every Brand Profile already owns one. */
   it("disables Connect when every Brand Profile owns the Provider", () => {
     workspace.brandProfiles = [alphaProfile];
     workspace.selectedBrandProfileId = alphaProfile.id;
@@ -728,10 +661,6 @@ describe("Channels table contract", () => {
     expect(within(dialog).getAllByRole("button", { name: "Connect" })).toHaveLength(4);
   });
 
-  /**
-   * With profiles but zero connected accounts, Add account remains a single
-   * enabled header action and opens the connection dialog from that fixed location.
-   */
   it("presents a single usable Add account action when profiles exist without accounts", () => {
     renderChannels();
 
@@ -748,10 +677,6 @@ describe("Channels table contract", () => {
     expect(screen.getByRole("dialog", { name: "Connect social account" })).toBeVisible();
   });
 
-  /**
-   * Reproduces the empty-directory profile edit path: the card action must open
-   * the same dialog exposing edit and deletion before any accounts are connected.
-   */
   it("opens the profile editor from the empty Channels directory action", () => {
     workspace.selectedBrandProfile = alphaProfile;
     workspace.selectedBrandProfileId = alphaProfile.id;
@@ -764,10 +689,6 @@ describe("Channels table contract", () => {
     expect(within(dialog).getByRole("button", { name: "Delete profile" })).toBeVisible();
   });
 
-  /**
-   * Guards the confirmation requirement: cancelling the AlertDialog must leave
-   * the editor open and must not invoke the delete mutation.
-   */
   it("does not delete when cancelling the delete confirmation dialog", async () => {
     workspace.selectedBrandProfile = alphaProfile;
     workspace.selectedBrandProfileId = alphaProfile.id;
@@ -789,10 +710,6 @@ describe("Channels table contract", () => {
     expect(screen.getByRole("dialog", { name: "Update Brand Profile" })).toBeVisible();
   });
 
-  /**
-   * Confirms the AlertDialog flow: the editor's delete button only opens the
-   * confirmation, and its Delete action executes the mutation.
-   */
   it("deletes the profile after confirming the delete dialog in the profile editor", async () => {
     workspace.selectedBrandProfile = alphaProfile;
     workspace.selectedBrandProfileId = alphaProfile.id;
@@ -817,7 +734,6 @@ describe("Channels table contract", () => {
     );
   });
 
-  /** Toolbar editing preserves the selected profile while saving its changed name. */
   it("edits a profile from the toolbar editor", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
@@ -846,12 +762,6 @@ describe("Channels table contract", () => {
     );
   });
 
-  /**
-   * Guards the edit-mode contract: saving an existing Brand Profile must not
-   * chain into the connect-account flow — that hand-off is reserved for fresh
-   * profile creation — and must leave the active workspace filter selection
-   * untouched, so the editor simply closes after a successful update.
-   */
   it("does not open the connect-account dialog after editing a profile", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
@@ -875,12 +785,6 @@ describe("Channels table contract", () => {
     ).not.toBeInTheDocument();
   });
 
-  /**
-   * Guards the selection-only contract of the toolbar Brand Profile picker:
-   * the list carries profiles and the aggregate row, nothing else — profile
-   * rows stay plain selectable options that keep the standard selected
-   * checkmark, and no editing affordance lives inside the dropdown.
-   */
   it("keeps profile rows selection-only with the standard check indicator", () => {
     queryResults.platforms.data = [connectedAccount];
     workspace.selectedBrandProfileId = alphaProfile.id;
@@ -892,16 +796,11 @@ describe("Channels table contract", () => {
     const selectedOption = screen.getByRole("option", { name: "Alpha Brand" });
     const listbox = selectedOption.closest('[role="listbox"]');
     if (!(listbox instanceof HTMLElement)) throw new Error("Brand Profile listbox is missing");
-    // The list is pure selection: no button of any label may live inside it.
     expect(within(listbox).queryAllByRole("button")).toEqual([]);
     expect(selectedOption).toHaveAttribute("data-state", "checked");
     expect(selectedOption.querySelector("svg")).not.toBeNull();
   });
 
-  /**
-   * Guards the permanent-deletion failure path: a rejected mutation surfaces an
-   * inline error alert while the editor dialog stays mounted and retryable.
-   */
   it("reports deletion failure and keeps the editor dialog retryable", async () => {
     try {
       queryResults.platforms.data = [connectedAccount];
@@ -941,10 +840,6 @@ describe("Channels table contract", () => {
       queryMutations.delete.error = null;
     }
   });
-  /**
-   * Ensures focused controls filter independent table rows while
-   * retaining their accessible control identity through label transitions.
-   */
   it("renders focused channel controls and narrows connected channel rows with each filter", () => {
     workspace.brandProfiles = [alphaProfile, betaProfile];
     queryResults.platforms.data = [connectedAccount, expiredAccount, betaAccount];
@@ -970,7 +865,6 @@ describe("Channels table contract", () => {
     expect(screen.getByText("Alpha YouTube")).toBeVisible();
     expect(screen.getByText("Beta Instagram")).toBeVisible();
 
-    // Keyword filter matches the account display name.
     fireEvent.change(screen.getByLabelText("Search accounts"), {
       target: { value: "YouTube" },
     });
@@ -979,8 +873,6 @@ describe("Channels table contract", () => {
     expect(screen.queryByText("Beta Instagram")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Search accounts"), { target: { value: "" } });
 
-    // Platform filter narrows to a single provider; the trigger's accessible
-    // name tracks the visible selection text instead of a static field label.
     fireEvent.pointerDown(platformControl);
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Instagram" }));
     fireEvent.keyDown(document.body, { key: "Escape" });
@@ -992,7 +884,6 @@ describe("Channels table contract", () => {
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "All platforms" }));
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(screen.getByRole("button", { name: "All platforms" })).toBe(platformControl);
-    // Brand Profile filter narrows to accounts owned by that profile.
     fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
     fireEvent.click(screen.getByRole("option", { name: "Beta Brand" }));
     expect(screen.getByRole("combobox", { name: "Beta Brand" })).toHaveTextContent("Beta Brand");
@@ -1011,13 +902,6 @@ describe("Channels table contract", () => {
     expect(screen.queryByText("Beta Instagram")).not.toBeInTheDocument();
   }, 15_000);
 
-  /**
-   * Guards the platform filter's accessible contract: it is a multi-select
-   * checkbox menu, not a single-choice combobox, so the trigger stays a button
-   * named by its visible selection, every canonical `PLATFORM_IDS` option keeps
-   * the menuitemcheckbox role with an observable checked state, and the menu
-   * stays open across toggles for multi-pick workflows.
-   */
   it("keeps checkbox-menu semantics in the platform multi-select", () => {
     queryResults.platforms.data = [connectedAccount, betaAccount];
     renderChannels();
@@ -1026,7 +910,6 @@ describe("Channels table contract", () => {
     const platformFilter = screen.getByRole("button", { name: "All platforms" });
     fireEvent.pointerDown(platformFilter);
 
-    // Radix names the opened menu from its trigger via aria-labelledby.
     expect(screen.getByRole("menu", { name: "All platforms" })).toBeVisible();
     expect(screen.getByRole("menuitemcheckbox", { name: "All platforms" })).toBeChecked();
     for (const name of ["TikTok", "YouTube", "Instagram", "Facebook", "Threads"]) {
@@ -1042,8 +925,6 @@ describe("Channels table contract", () => {
     expect(screen.getByRole("menuitemcheckbox", { name: "TikTok" })).toBeChecked();
     expect(screen.getByRole("menuitemcheckbox", { name: "Instagram" })).toBeChecked();
 
-    // Closing and reopening preserves the trigger and checked menu choices,
-    // independently of the translated count label.
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(platformFilter).toBeVisible();
     expect(platformFilter).toHaveAttribute("aria-expanded", "false");
@@ -1078,10 +959,6 @@ describe("Channels table contract", () => {
 });
 
 describe("Posts surfaces", () => {
-  /**
-   * Aggregate bulk deletion uses each Post's owning profile, waits for confirmation,
-   * and retains only failed identities rather than retrying successful deletions.
-   */
   it("deletes selected posts with their owning profiles and retains partial failures", async () => {
     const first: Post = {
       ...publishedPost,
@@ -1186,7 +1063,6 @@ describe("Posts surfaces", () => {
     expect(within(dialog).getByRole("button", { name: "Edit" })).toBeVisible();
   });
 
-  /** Measured zero is data; drafts, missing snapshots, and unsupported metrics are not. */
   it("shows published measurements and keeps untracked metrics as dashes", () => {
     seedPublishedPost();
     const source = queryResults.posts.data.posts[0]!;
@@ -1241,7 +1117,6 @@ describe("Posts surfaces", () => {
     }
   });
 
-  /** Grid counters preserve measured zero and never expose stale draft or absent measurements. */
   it("distinguishes measured, untracked, and unpublished counters in grid cards", () => {
     seedPublishedPost();
     const source = queryResults.posts.data.posts[0]!;
@@ -1290,7 +1165,6 @@ describe("Posts surfaces", () => {
     }
   });
 
-  /** Cached pages preserve selection, while each Grid page stays bounded to 60 cards. */
   it("pages the cached grid without refetching and resets the page when filters change", () => {
     seedPublishedPost();
     const source = queryResults.posts.data.posts[0]!;
@@ -1327,10 +1201,6 @@ describe("Posts surfaces", () => {
     expect(queryResults.posts.fetchNextPage).not.toHaveBeenCalled();
   });
 
-  /**
-   * Guards the calendar surface and its day-detail dialog: the folded Post
-   * chip keeps status, caption, and day actions while no metric tile renders.
-   */
   it("renders the calendar day dialog without metric tiles", () => {
     seedPublishedPost();
     renderPosts("calendar");

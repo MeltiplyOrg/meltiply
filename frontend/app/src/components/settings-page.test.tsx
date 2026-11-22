@@ -97,8 +97,6 @@ vi.mock("@/lib/queries", () => ({
           user_id: "10000000-0000-4000-8000-000000000005",
         },
         {
-          // A second, non-owner admin: only the Installation Owner may remove
-          // an admin, so this row is the one that actually exercises that guard.
           avatar_url: null,
           created_at: "2026-01-04T00:00:00.000Z",
           display_name: "Beta Admin",
@@ -171,11 +169,6 @@ import SettingsPage from "@/app/(dashboard)/settings/page";
 
 afterEach(cleanup);
 
-/**
- * Renders the settings route with the router context the page expects.
- *
- * @returns Testing-library render result.
- */
 function renderSettings() {
   return render(
     <MemoryRouter initialEntries={["/settings"]}>

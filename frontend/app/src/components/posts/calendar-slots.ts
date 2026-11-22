@@ -9,7 +9,6 @@ export interface CalendarSlot {
   postId: string | undefined;
 }
 
-/** Projects validated weekly Queue configuration onto the bounded visible civil days. Like the PostgreSQL allocator, skips DST gaps and takes the later overlap instant. Exact-instant membership fills a slot; off-plan immutable reservations remain separate Posts. This is a display projection, never an allocation guarantee or a mutation. At most 42 days × 168 configured slots are examined. */
 export function calendarSlots(
   queue: Pick<PublishingQueue, "timezone" | "slots">,
   days: CalendarDayCell[],

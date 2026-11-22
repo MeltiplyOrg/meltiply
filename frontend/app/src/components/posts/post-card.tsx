@@ -20,7 +20,7 @@ import {
   formatAnalyticsCompact,
   formatAnalyticsInteger,
 } from "@/components/analytics/analytics-helpers";
-import { postAnalyticsColumns } from "./post-view-options";
+import { postAnalyticsLabelMap } from "./post-view-options";
 import { PostActions, type PostActionsProps } from "./post-actions";
 import { StatusBadge } from "./status-badge";
 import {
@@ -31,7 +31,6 @@ import {
 } from "./posts-helpers";
 import type { PostRow } from "./types";
 
-/** Card metric icons, rendered in the stored-analytics footer. */
 const CARD_METRICS = [
   { key: "views", icon: Eye },
   { key: "likes", icon: Heart },
@@ -48,15 +47,6 @@ export interface PostCardProps extends PostActionsProps {
   onViewDetails: (postId: string) => void;
 }
 
-/**
- * Canonical media Grid card over real caption, profile, channel, date, and
- * attachment data, followed by one non-wrapping icon-led analytics footer.
- * Four essential latest stored counters use compact locale formatting; exact
- * values stay accessible. Draft, unpublished, and unmeasured counters show a
- * dash, while measured zeros remain zero. No per-card network reads are made.
- * The title button's stretched hit area opens inspection with native keyboard
- * semantics; selection and quick actions sit above that area.
- */
 export const PostCard = React.memo(function PostCard({
   post,
   postId,
@@ -77,7 +67,7 @@ export const PostCard = React.memo(function PostCard({
     post.post?.status !== "draft" && post.channels.some((channel) => channel.status === "published")
       ? post.post?.analytics
       : null;
-  const labels = new Map(postAnalyticsColumns(t).map((column) => [column.id, column.name]));
+  const labels = postAnalyticsLabelMap(t);
   return (
     <Card
       role="article"

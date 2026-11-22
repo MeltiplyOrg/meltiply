@@ -10,7 +10,6 @@ import type { PostRow } from "./types";
 const date = new Date(2026, 9, 23);
 const fullDate = new Intl.DateTimeFormat("en", { dateStyle: "full" }).format(date);
 
-/** Renders one civil day with mixed, deliberately unordered Queue entries using the real calendar surface. */
 function renderDay(overrides: Partial<PostCalendarGridViewProps> = {}) {
   const props: PostCalendarGridViewProps = {
     posts: ["18:00", "08:00", "11:00"].map((time) => ({
@@ -57,7 +56,6 @@ function renderDay(overrides: Partial<PostCalendarGridViewProps> = {}) {
 
 afterEach(cleanup);
 
-/** One status probe Post on the rendered day, independent of the Queue slot fixtures. */
 function statusPost(status: string): PostRow {
   return {
     id: `status-${status}`,
@@ -76,6 +74,21 @@ function statusPost(status: string): PostRow {
     brandProfileId: "profile",
   };
 }
+
+describe("Posts Month entries", () => {
+  it("caps a day at three Posts and counts the rest", () => {
+    const posts = ["08:00", "09:00", "10:00", "11:00", "12:00"].map((time) => ({
+      id: time,
+      date: `2026-10-23T${time}:00Z`,
+      status: "scheduled",
+      channels: [],
+      brandProfileId: "profile",
+    }));
+    renderDay({ posts, timeline: undefined });
+    expect(screen.getAllByRole("button", { name: /Untitled post/ })).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "+2 more" })).toBeInTheDocument();
+  });
+});
 
 describe("Queue Month entries", () => {
   it("shows the earliest three slots and off-plan Posts in chronological order", () => {

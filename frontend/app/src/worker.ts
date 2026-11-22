@@ -16,11 +16,7 @@ interface Env {
 
 const telemetryPath = "/__frontend-telemetry";
 const maximumTelemetryBodyBytes = 4096;
-const telemetryKinds: Record<string, true> = {
-  "api-error": true,
-  "frontend-error": true,
-  "unknown-contract-value": true,
-};
+const telemetryKinds = new Set(["api-error", "frontend-error", "unknown-contract-value"]);
 
 type TelemetryPayload = {
   code?: unknown;
@@ -37,25 +33,13 @@ type TelemetryPayload = {
   valueType?: unknown;
 };
 
-/** Longest stack text the relay will forward; the API bounds it again. */
 const maximumRelayStackCharacters = 1_500;
 
-/** Approved diagnostic operation for a client-side failure context. */
-const operationByField: Record<string, string> = {
-  "api-error": "other",
-  "auth-refresh": "auth",
-  "auth-refresh-throttled": "auth",
-  "query-cache": "other",
-  "react-render": "other",
-  "unhandled-rejection": "other",
-  "window-error": "other",
-};
+const operationByField = new Map([
+  ["auth-refresh", "auth"],
+  ["auth-refresh-throttled", "auth"],
+]);
 
-/**
- * Generates a fallback 500 Internal Server Error plain-text HTTP response.
- *
- * @returns 500 Response instance.
- */
 function genericErrorResponse(): Response {
   return new Response("An error has occurred.", {
     headers: { "Content-Type": "text/plain; charset=utf-8" },
@@ -63,11 +47,6 @@ function genericErrorResponse(): Response {
   });
 }
 
-/**
- * Generates a fallback 502 Bad Gateway plain-text HTTP response for API proxy failures.
- *
- * @returns 502 Response instance.
- */
 function apiUnavailableResponse(): Response {
   return new Response("The API is unavailable.", {
     headers: { "Content-Type": "text/plain; charset=utf-8" },
@@ -75,105 +54,42 @@ function apiUnavailableResponse(): Response {
   });
 }
 
-/**
- * Generates an empty HTTP response with the specified client error status code.
- *
- * @param status 400, 403, 405, or 413 error status code.
- * @returns Empty Response with the designated status.
- */
 function invalidTelemetryResponse(status: 400 | 403 | 405 | 413): Response {
   return new Response(null, { status });
 }
 
-/**
- * Sanitizes arbitrary string input to alphanumeric, underscore, dot, and hyphen characters, capped at 64 characters.
- *
- * @param value Candidate string value.
- * @returns Sanitized string or `undefined` if empty/non-string.
- */
 function safeField(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length === 0) return undefined;
   return value.replace(unsafeFieldCharactersPattern, "_").slice(0, 64);
 }
 
-/**
- * Validates whether an input represents a valid HTTP status code (100–599 integer).
- *
- * @param value Candidate status value.
- * @returns Integer status code or `undefined` if invalid.
- */
+function invalidOptionalText(value: unknown, maximumLength: number): boolean {
+  return (
+    value !== undefined &&
+    (typeof value !== "string" || value.length === 0 || value.length > maximumLength)
+  );
+}
+
 function safeStatus(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599
     ? value
     : undefined;
 }
 
-/**
- * Validates whether an input is a valid hexadecimal hash string (8–64 hex chars), returning lowercase.
- *
- * @param value Candidate hash string.
- * @returns Normalized lowercase hash string or `undefined` if invalid.
- */
 function safeHash(value: unknown): string | undefined {
   return typeof value === "string" && hashPattern.test(value)
     ? value.slice(0, 64).toLowerCase()
     : undefined;
 }
 
-/**
- * Validates whether an input is a valid SCREAMING_SNAKE_CASE configuration key name.
- *
- * @param value Candidate configuration key.
- * @returns Validated key name or `undefined` if invalid.
- */
 function safeConfigurationKey(value: unknown): string | undefined {
   return typeof value === "string" && configurationKeyPattern.test(value) ? value : undefined;
 }
 
-/**
- * Verifies that the incoming request's `Origin` header matches the target worker origin, preventing CSRF.
- *
- * @param request Inbound HTTP request.
- * @param url Parsed target URL.
- * @returns `true` if same-origin.
- */
 function sameOrigin(request: Request, url: URL): boolean {
   return request.headers.get("Origin") === url.origin;
 }
 
-/**
- * Forwards one sanitized client failure to the API's consent-gated diagnostics route.
- *
- * This is the second half of the existing producer, not a new pipeline: the same
- * `POST /__frontend-telemetry` request that records the installation-local log
- * line also carries the approved diagnostic facts to the API Worker, which alone
- * re-checks persisted consent before any third-party transmission.
- *
- * Four guarantees hold here:
- *
- * - Only an authenticated browser relays. The browser's bearer JWT is the only
- *   credential the SPA holds, and it is forwarded unchanged; without one nothing
- *   is forwarded, so a pre-sign-in or setup-screen failure never leaves the
- *   browser.
- * - Only a genuine client exception is relayed. An `api-error` is the API
- *   Worker's own failure, already reported at that boundary when it was
- *   unexpected; forwarding it here would report one failure twice.
- * - Only the approved fields travel: fixed category, fixed operation, error type
- *   name and frame lines. The runtime message, request URL, request id and every
- *   availability flag stay local.
- * - No flag on the wire is authority. The API decides from persisted policy, so a
- *   tampered client cannot cause a single extra outbound request.
- *
- * The relay runs on the invocation lifecycle, is bounded, and never changes the
- * response: local observability is already recorded and a relay failure is
- * invisible to the browser.
- *
- * @param payload Validated telemetry payload.
- * @param request Inbound telemetry request, source of the bearer credential.
- * @param env Worker environment bindings.
- * @param executionCtx Invocation lifecycle for the bounded relay.
- * @param context Structured log context for the relay's own outcome.
- */
 function relayAuthenticatedDiagnostic(
   payload: TelemetryPayload,
   request: Request,
@@ -182,8 +98,6 @@ function relayAuthenticatedDiagnostic(
   context: FrontendTelemetryContext,
 ): void {
   if (payload.kind !== "frontend-error") return;
-  // A client exception tagged `api-error` is the API boundary's own failure
-  // mislabeled by an older producer; it is never a crash to report upstream.
   if (safeField(payload.field) === "api-error") return;
   const authorization = request.headers.get("Authorization");
   if (!authorization || !/^Bearer \S+$/.test(authorization)) return;
@@ -194,7 +108,7 @@ function relayAuthenticatedDiagnostic(
     category: "client_exception",
     ...(stack ? { error_stack: stack } : {}),
     error_name: safeField(payload.valueType) ?? "Error",
-    operation: (field && operationByField[field]) ?? "other",
+    operation: (field && operationByField.get(field)) ?? "other",
   });
   const work = (async () => {
     try {
@@ -218,8 +132,6 @@ function relayAuthenticatedDiagnostic(
         retry_class: "none",
       });
     } catch {
-      // Best-effort: the local log line is the operational record and the browser
-      // must never see a reporting failure.
       log("debug", context, {
         event: "frontend_diagnostic_relay",
         outcome: "failed",
@@ -227,32 +139,13 @@ function relayAuthenticatedDiagnostic(
       });
     }
   })();
-  try {
-    executionCtx?.waitUntil(work);
-  } catch {
-    void work;
-  }
+  executionCtx?.waitUntil(work);
 }
 
-/**
- * Reports whether a request path belongs to the bearer-authenticated public API.
- * Only these paths must have the Better Auth session cookie stripped before
- * proxying, so the API Worker never receives it.
- *
- * @param pathname Request URL pathname.
- * @returns `true` when the path is `/api/v1` or below.
- */
 function isPublicApiPath(pathname: string): boolean {
   return pathname === "/api/v1" || pathname.startsWith("/api/v1/");
 }
 
-/**
- * Removes Better Auth session cookies from a `Cookie` header value, preserving
- * any other cookies (such as a Cloudflare Access session) that the edge needs.
- *
- * @param cookieHeader Raw `Cookie` header value or null.
- * @returns Filtered cookie string, or null when no cookies remain.
- */
 function stripBetterAuthCookies(cookieHeader: string | null): string | null {
   if (!cookieHeader) return null;
   const kept = cookieHeader
@@ -266,21 +159,6 @@ function stripBetterAuthCookies(cookieHeader: string | null): string | null {
   return kept.length > 0 ? kept.join("; ") : null;
 }
 
-/**
- * Proxies an `/api/*` request to the Meltiply API Worker, keeping the browser
- * strictly same-origin so the HttpOnly Better Auth session cookie flows without
- * CORS. A defined `API_ORIGIN` (local development and preview builds) is used
- * first; deployed environments omit it and route through the `API` service
- * binding instead. Method, headers, and body are preserved, and the original
- * `Origin` header is forwarded untouched so the API's own origin checks still
- * apply. `/api/v1` requests carry their Better Auth cookies only as far as this
- * Worker: `isPublicApiPath` scopes the stripping so `/api/auth` keeps its session.
- *
- * @param request Inbound HTTP request targeting `/api/*`.
- * @param env Worker environment bindings (`API_ORIGIN` local upstream or `API` service binding).
- * @param url Parsed inbound request URL.
- * @returns The API Worker's response; the caller maps a missing upstream to 502.
- */
 async function proxyApiRequest(request: Request, env: Env, url: URL): Promise<Response> {
   const headers = new Headers(request.headers);
   if (isPublicApiPath(url.pathname)) {
@@ -300,11 +178,6 @@ async function proxyApiRequest(request: Request, env: Env, url: URL): Promise<Re
     ...(request.body ? { duplex: "half" } : {}),
   };
 
-  // A local API origin wins over a deployed service binding: local development
-  // and preview builds define API_ORIGIN for the Wrangler API process, while
-  // deployed environments never define it and route through `API` instead.
-  // Checking the binding first made a built preview call the not-running
-  // `meltiply-api` service, so every session request failed with 503.
   if (env.API_ORIGIN) {
     const target = new URL(`${url.pathname}${url.search}`, env.API_ORIGIN);
     return fetch(new Request(target, init));
@@ -315,12 +188,6 @@ async function proxyApiRequest(request: Request, env: Env, url: URL): Promise<Re
   throw new Error("API upstream is not configured");
 }
 
-/**
- * Structured log context for this Worker's own records.
- *
- * Named rather than inferred from the builder so the relay helper and the
- * handlers can state the contract they pass around.
- */
 export interface FrontendTelemetryContext {
   readonly environment: string;
   readonly request_id: string;
@@ -329,14 +196,6 @@ export interface FrontendTelemetryContext {
   readonly version: string;
 }
 
-/**
- * Builds standard structured logging context with request ID, trace ID, service name, and environment.
- *
- * @param env Worker environment bindings.
- * @param requestId Request trace identifier.
- * @param traceId Distributed trace identifier.
- * @returns Structured log context object.
- */
 function telemetryContext(env: Env, requestId: string, traceId: string): FrontendTelemetryContext {
   return {
     environment: safeField(env.ENVIRONMENT) ?? "unknown",
@@ -347,12 +206,6 @@ function telemetryContext(env: Env, requestId: string, traceId: string): Fronten
   };
 }
 
-/**
- * Safely streams the request body up to 4096 bytes, returning 413 if the payload exceeds limits.
- *
- * @param request Inbound HTTP request.
- * @returns Decoded text body, 413 status indicator if oversized, or null on stream error.
- */
 async function readTelemetryBody(request: Request): Promise<string | 413 | null> {
   if (!request.body) return "";
   const reader = request.body.getReader();
@@ -364,11 +217,7 @@ async function readTelemetryBody(request: Request): Promise<string | 413 | null>
       if (done) break;
       total += value.byteLength;
       if (total > maximumTelemetryBodyBytes) {
-        try {
-          await reader.cancel();
-        } catch {
-          // The request is already over the limit; preserve the 413 result.
-        }
+        await reader.cancel().catch(() => undefined);
         return 413;
       }
       chunks.push(value);
@@ -385,18 +234,6 @@ async function readTelemetryBody(request: Request): Promise<string | 413 | null>
   return new TextDecoder().decode(bytes);
 }
 
-/**
- * Validates, deserializes, sanitizes, and logs client-side telemetry events forwarded from the frontend SPA.
- *
- * The local record is written first and always. Afterwards, an authenticated
- * browser exception is relayed to the API's consent-gated diagnostics route on
- * the invocation lifecycle, so forwarding cannot delay or alter the 204.
- *
- * @param request Inbound POST request containing telemetry JSON.
- * @param env Worker environment bindings.
- * @param executionCtx Invocation lifecycle for the bounded diagnostic relay.
- * @returns 204 No Content on success, or 400/413 error response.
- */
 async function handleTelemetry(
   request: Request,
   env: Env,
@@ -425,36 +262,18 @@ async function handleTelemetry(
     return invalidTelemetryResponse(400);
   }
 
-  if (typeof payload.kind !== "string" || telemetryKinds[payload.kind] !== true) {
+  if (typeof payload.kind !== "string" || !telemetryKinds.has(payload.kind)) {
     return invalidTelemetryResponse(400);
   }
   if (
-    (payload.code !== undefined &&
-      (typeof payload.code !== "string" ||
-        payload.code.length === 0 ||
-        payload.code.length > 128)) ||
+    invalidOptionalText(payload.code, 128) ||
     (payload.configurationKey !== undefined &&
       safeConfigurationKey(payload.configurationKey) === undefined) ||
-    (payload.configurationSource !== undefined &&
-      (typeof payload.configurationSource !== "string" ||
-        payload.configurationSource.length === 0 ||
-        payload.configurationSource.length > 64)) ||
-    (payload.configurationState !== undefined &&
-      (typeof payload.configurationState !== "string" ||
-        payload.configurationState.length === 0 ||
-        payload.configurationState.length > 64)) ||
-    (payload.diagnosticCode !== undefined &&
-      (typeof payload.diagnosticCode !== "string" ||
-        payload.diagnosticCode.length === 0 ||
-        payload.diagnosticCode.length > 64)) ||
-    (payload.field !== undefined &&
-      (typeof payload.field !== "string" ||
-        payload.field.length === 0 ||
-        payload.field.length > 128)) ||
-    (payload.valueType !== undefined &&
-      (typeof payload.valueType !== "string" ||
-        payload.valueType.length === 0 ||
-        payload.valueType.length > 64)) ||
+    invalidOptionalText(payload.configurationSource, 64) ||
+    invalidOptionalText(payload.configurationState, 64) ||
+    invalidOptionalText(payload.diagnosticCode, 64) ||
+    invalidOptionalText(payload.field, 128) ||
+    invalidOptionalText(payload.valueType, 64) ||
     (payload.stack !== undefined &&
       (typeof payload.stack !== "string" || payload.stack.length > maximumRelayStackCharacters)) ||
     (payload.retryable !== undefined && typeof payload.retryable !== "boolean") ||
@@ -497,17 +316,6 @@ async function handleTelemetry(
 }
 
 export default {
-  /**
-   * Primary entry point for the Cloudflare Worker fronting frontend static assets.
-   * Routes `/api/*` to the API Worker (service binding in deployed environments,
-   * `API_ORIGIN` fallback locally), handles `/health` checks and
-   * `/__frontend-telemetry` reporting, and serves static assets via `env.ASSETS`.
-   *
-   * @param request Inbound HTTP request.
-   * @param env Worker environment bindings containing ASSETS and API bindings.
-   * @param executionCtx Invocation lifecycle; keeps a best-effort diagnostic relay alive after the response.
-   * @returns HTTP Response for the client.
-   */
   async fetch(
     request: Request,
     env: Env,

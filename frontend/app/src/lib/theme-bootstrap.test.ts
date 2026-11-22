@@ -16,23 +16,19 @@ import {
   themeStorageKey,
 } from "@meltiply/ui/theme-preference";
 
-/** Executes the exact checked-in runtime as a blocking classic script would. */
 function runBootstrap(settings: ThemeBootstrapSettings = {}): void {
   new Function(renderThemeBootstrap(themeBootstrapRuntime, settings))();
 }
 
-/** Restores the runtime's delegated listener so scenarios cannot leak into one another. */
 function releaseListeners(): void {
   document.dispatchEvent(new Event("meltiply:theme-link-reset"));
 }
 
-/** Activates a link without letting jsdom navigate away from the test document. */
 function clickAnchor(anchor: HTMLAnchorElement): void {
   anchor.addEventListener("click", (event) => event.preventDefault(), { once: true });
   anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 }
 
-/** Clears root intent, consent attributes, optional stores, and history between scenarios. */
 function clearBrowserState(): void {
   releaseListeners();
   document.documentElement.className = "";
@@ -198,7 +194,6 @@ describe("before-paint theme runtime", () => {
     );
     expect(external.searchParams.has(themeQueryParam)).toBe(false);
 
-    // The delegated listener observes the newest intent instead of the first-paint palette.
     document.documentElement.setAttribute(themePreferenceAttribute, "light");
     const configured = document.getElementById("configured");
     if (!(configured instanceof HTMLAnchorElement)) throw new Error("configured anchor missing");

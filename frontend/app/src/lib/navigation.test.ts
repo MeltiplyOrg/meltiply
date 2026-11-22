@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   WORKSPACE_NAV_ITEMS,
   resolveWorkspaceView,
+  sameOriginPath,
   workspaceNavItem,
   workspaceNavItems,
   workspaceViewPath,
@@ -60,5 +61,28 @@ describe("canonical workspace navigation", () => {
     const unsupported = "scheduled-posts" as WorkspaceView;
     expect(workspaceViewPath(unsupported)).toBe("/posts");
     expect(workspaceNavItem(unsupported).id).toBe("posts");
+  });
+});
+
+describe("sameOriginPath", () => {
+  it.each(["/invitations/accept?token=abc", "/device?user_code=ABC234", "/posts#composer"])(
+    "keeps the in-app path %s",
+    (path) => {
+      expect(sameOriginPath(path)).toBe(path);
+    },
+  );
+
+  it.each([
+    null,
+    "",
+    "posts",
+    "https://evil.test/",
+    "//evil.test",
+    "/\\evil.test",
+    "/\t/evil.test",
+    "/\n/evil.test",
+    "/.//evil.test",
+  ])("rejects %j, which a browser would not resolve to an in-app path", (requested) => {
+    expect(sameOriginPath(requested)).toBeNull();
   });
 });

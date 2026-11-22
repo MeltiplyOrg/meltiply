@@ -12,7 +12,6 @@ import {
   writeThemePreference,
 } from "@meltiply/ui/theme-preference";
 
-/** Isolates page-only requests and optional stores so no scenario inherits another visitor's choice. */
 function clearPreferences(): void {
   document.documentElement.removeAttribute(themePreferenceAttribute);
   document.documentElement.removeAttribute("data-cookie-functional");
@@ -25,7 +24,6 @@ function clearPreferences(): void {
 beforeEach(clearPreferences);
 afterEach(clearPreferences);
 
-/** Navigation choices remain usable without storage, reject invalid palettes, and stop reviving withdrawn persisted intent. */
 describe("page-only theme intent", () => {
   it("keeps an explicit choice available for navigation without granting consent or persisting it", () => {
     writeCookieConsent({ functional: false });

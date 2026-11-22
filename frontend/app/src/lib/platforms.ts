@@ -7,11 +7,6 @@ const SUPPORTED_PLATFORMS = PLATFORM_IDS;
 
 export type SupportedPlatform = (typeof SUPPORTED_PLATFORMS)[number];
 
-/**
- * Contract connection states, kept separate from publication/Distribution
- * status. The exhaustive record means a new `ConnectionStatus` cannot be added
- * without extending the filter roster.
- */
 const CONNECTION_STATUS_ROSTER = {
   connected: true,
   expiring: true,
@@ -20,7 +15,6 @@ const CONNECTION_STATUS_ROSTER = {
   reconnect_required: true,
 } satisfies Record<ConnectionStatus, true>;
 
-/** Every contract connection state, for the Channels filter options. */
 export const CONNECTION_STATUSES = Object.keys(
   CONNECTION_STATUS_ROSTER,
 ) as readonly ConnectionStatus[];
@@ -41,48 +35,26 @@ const oauthOutcomes: Record<string, string> = {
     "{platform} connection expired or could not be verified. Start again when the provider is available.",
 };
 
-const displayNames: Record<string, string> = {
+const displayNames = {
   tiktok: "TikTok",
   youtube: "YouTube",
   instagram: "Instagram",
   facebook: "Facebook",
   threads: "Threads",
-};
+} satisfies Record<SupportedPlatform, string>;
 
-/**
- * Returns the human-readable brand display name for a platform (e.g. "TikTok", "YouTube").
- * Logs telemetry if the platform identifier is unrecognized and returns the raw string as fallback.
- *
- * @param platform Platform identifier string.
- * @returns Human-readable platform name.
- */
 export function platformDisplayName(platform: string): string {
-  const displayName = displayNames[platform];
-  if (displayName) return displayName;
+  if (Object.hasOwn(displayNames, platform)) {
+    return displayNames[platform as SupportedPlatform];
+  }
   reportUnknownContractValue("platform", platform);
   return platform;
 }
 
-/**
- * Computes the list of supported platforms that are not currently connected by the workspace.
- *
- * @param connected Array of platform identifiers currently linked to the workspace.
- * @returns Filtered array of available `SupportedPlatform` IDs.
- */
 export function getAvailablePlatforms(connected: string[]): SupportedPlatform[] {
   return SUPPORTED_PLATFORMS.filter((p) => !connected.includes(p));
 }
 
-/**
- * Evaluates whether an asset can be safely distributed to a target platform account.
- * Inspects connection health, publishing capability, accepted asset types, file size limits,
- * video duration limits, and MIME type restrictions based on provider capabilities.
- *
- * @param account Target platform account details including capability flags and limits.
- * @param asset Media or text asset proposed for publication.
- * @param language User interface language for localized error messages; defaults to "en".
- * @returns Localized failure reason if distribution is blocked, or `null` if the asset is compatible.
- */
 export function distributionTargetBlockReason(
   account: PlatformAccount,
   asset: Asset,
@@ -125,12 +97,6 @@ export function distributionTargetBlockReason(
   return null;
 }
 
-/**
- * Formats known OAuth outcomes, including non-Facebook destination-selection failures.
- * Interpolates the provider label in the chosen language; missing inputs and unknown/inherited
- * outcome keys return null. Pending account assignment is handled by the
- * dedicated assignment route, not a banner.
- */
 export function oauthOutcomeMessage(
   outcome: string | null,
   provider: string | null,

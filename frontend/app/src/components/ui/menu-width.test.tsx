@@ -15,16 +15,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 afterEach(cleanup);
 
 beforeAll(() => {
-  // jsdom does not implement scrollIntoView; Radix Select calls it when its
-  // popover content mounts and focuses the selected item.
   Element.prototype.scrollIntoView = vi.fn();
 });
 
-/**
- * Verifies the shared width contract consumed by `motion.css`: every list
- * surface opts into its trigger's measured width, so a wide field or toolbar
- * control never opens a narrower menu.
- */
 it("marks a dropdown surface as trigger-width anchored", async () => {
   render(
     <DropdownMenu>

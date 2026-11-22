@@ -27,20 +27,12 @@ import {
 
 const pickerHighlightId = "devbox-picker-highlight";
 
-/**
- * Removes every transient Helpers-tab DOM mutation: the element-picker outline,
- * token-audit marks, and axe outlines plus their stylesheets. Called when the
- * tab or dock unmounts so inspections never outlive their control surface.
- */
 export function clearHelpersDom(): void {
   document.getElementById(pickerHighlightId)?.remove();
   clearTokenHighlights();
   clearAxeHighlights();
 }
 
-/**
- * Ensures the floating element-picker highlight box exists; returns it.
- */
 function pickerHighlight(): HTMLDivElement {
   let el = document.getElementById(pickerHighlightId) as HTMLDivElement | null;
   if (!el) {
@@ -56,20 +48,6 @@ function pickerHighlight(): HTMLDivElement {
   return el;
 }
 
-/**
- * Helpers tab: design-system, accessibility, i18n, and chaos tools.
- *
- * - Token inspector: hover-pick an element to see which design tokens its
- *   computed colors resolve to; "Audit page" flags every element whose colors
- *   fall outside the declared token ramp (the runtime analogue of the
- *   `@shadcn/lint` `no-raw-colors` rule).
- * - Accessibility: one-click `axe-core` scan of the route container with
- *   per-violation element highlighting.
- * - Layout: 8px baseline grid and element boundary outline overlays.
- * - i18n: language switching plus the pseudo-localization expander.
- * - Chaos: auth-expired and offline runtime statuses plus a synthetic render
- *   error for the root error boundary.
- */
 export function HelpersTab(): React.ReactElement {
   const { language, setLanguage } = useI18n();
   const [picking, setPicking] = useState(false);
@@ -82,9 +60,6 @@ export function HelpersTab(): React.ReactElement {
   const [crash, setCrash] = useState(false);
   const mountedRef = useRef(true);
 
-  // Highlights and the picker outline are owned by this tab; clear them when
-  // it unmounts instead of leaving temporary marks on the page. Async scans
-  // check the ref so a late result neither updates state nor reapplies marks.
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -93,8 +68,6 @@ export function HelpersTab(): React.ReactElement {
     };
   }, []);
 
-  // Element picker: track the hovered element with a floating outline; a click
-  // freezes the selection and reports its token usage. Esc cancels.
   useEffect(() => {
     if (!picking) return;
     const highlight = pickerHighlight();
@@ -143,9 +116,6 @@ export function HelpersTab(): React.ReactElement {
       setAxeResult(result);
       highlightAxeViolations(result);
     } catch (error) {
-      // axe.run can reject and querySelector throws on malformed targets —
-      // surface the failure in the log instead of leaking an unhandled
-      // rejection.
       console.error("DevBox axe scan failed:", error);
       if (mountedRef.current) setAxeResult(null);
     } finally {
@@ -154,8 +124,6 @@ export function HelpersTab(): React.ReactElement {
   };
 
   if (crash) {
-    // Deliberate render error: exercises the root FrontendErrorBoundary and its
-    // "Reload workspace" recovery path.
     throw new Error("DevBox chaos: synthetic render error");
   }
 

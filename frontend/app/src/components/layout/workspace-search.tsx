@@ -12,12 +12,6 @@ import { WORKSPACE_NAV_ITEMS, type WorkspaceView } from "@/lib/navigation";
 import { useWorkspace } from "@/context/workspace.context";
 import { useI18n } from "@/lib/i18n";
 
-/**
- * Keyboard-accessible jump palette over real destinations and loaded Brand
- * Profiles. It never claims to search unloaded Posts: collection search remains
- * in each route's toolbar. Choosing a profile updates the existing scope owner.
- * Radix handles autofocus, Tab, Escape, and focus restoration on dismissal.
- */
 export function WorkspaceSearch({
   open,
   onOpenChange,
@@ -27,7 +21,6 @@ export function WorkspaceSearch({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onNavigate: (view: WorkspaceView, options?: { search?: string }) => void;
-  /** Focus target when search opens from the keyboard with no useful opener. */
   fallbackFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const { brandProfiles, setSelectedBrandProfileId } = useWorkspace();

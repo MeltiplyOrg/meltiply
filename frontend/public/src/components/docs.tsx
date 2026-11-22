@@ -16,16 +16,6 @@ import { Toaster } from "@meltiply/ui/sileo";
 import { DocsNavGlide, DocsPathnameContext, NavItem, NavSection } from "./docs-navigation";
 import { navigate } from "astro:transitions/client";
 
-/**
- * The shared Meltiply artwork and a single "Meltiply Docs" label identify the
- * sidebar and mobile page header consistently. One inline SVG inherits the
- * ink palette via `currentColor` (the accent diamond resolves through
- * `motion.css`'s `[data-brand-accent]` fill), so light and dark need no swapped
- * assets; `size-6` is the mobile-header size while the sidebar/drawer rules
- * widen `[data-brand-mark]` to the original 28px. Decorative artwork leaves
- * the label as the accessible link name and anchor props remain
- * Fumadocs-owned.
- */
 function DocsBrand({ className, ...props }: ComponentProps<"a">) {
   return (
     <a {...props} className={["docs-brand", className].filter(Boolean).join(" ")}>
@@ -35,13 +25,6 @@ function DocsBrand({ className, ...props }: ComponentProps<"a">) {
   );
 }
 
-/**
- * Compact site footer rendered inside the `DocsPage` footer slot (after the
- * previous/next pagination, within the centered article column). Keeps the
- * copyright and legal links together without reopening saved consent choices.
- * Plain-text notices bypass routing; the initial consent prompt belongs to the
- * persistent shell, not to this replaceable article footer.
- */
 function SiteFooter() {
   return (
     <footer className="docs-footer">
@@ -58,27 +41,6 @@ function SiteFooter() {
   );
 }
 
-/**
- * Persistent sidebar around replaceable, build-time article HTML. Astro swaps
- * pathname, metadata, TOC and content while navigation and preferences stay
- * mounted. Theme controls live in the sidebar; the single
- * shell-owned `CookieNotice` and app-style `Toaster` stay outside the keyed page
- * so route updates retain consent drafts, confirmation deadlines, and copy feedback.
- * Saved consent leaves no shell or article control for reopening preferences.
- * `DocsThemeProvider` projects the shared theme controller into the public
- * controls; the home link stays same-origin while `appUrl` targets the separate app.
- * Both TOC surfaces share the reading-progress rail;
- * the desktop controller animates it while Fumadocs retains anchor tracking,
- * reading layout, search, and pagination. The theme hotkey stays disabled; toolbar
- * activations anchor the reveal. Article text morphs into streaming line
- * placeholders while navigation loads; incoming heading sections fade upward
- * without delaying initial rendering.
- *
- * `content` is trusted build-time HTML: `check-content.mjs` gates the docs
- * collection to plain reviewed markdown with no code, components, or evaluated
- * values, so it renders identically on server and client with no sanitizer
- * divergence.
- */
 export function Docs({
   tree,
   content,

@@ -1,12 +1,5 @@
 import { useState } from "react";
 
-/**
- * Recursively normalizes an input payload by sorting all object keys lexicographically.
- * Ensures consistent JSON serialization for identical payloads regardless of property order.
- *
- * @param value Arbitrary input data structure to normalize.
- * @returns Key-sorted clone of the value or the primitive itself.
- */
 function normalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalize);
   if (value && typeof value === "object") {
@@ -19,16 +12,6 @@ function normalize(value: unknown): unknown {
   return value;
 }
 
-/**
- * Generates a RFC 4122 v4 UUID string for API idempotency headers.
- * Uses `crypto.randomUUID` when available, falling back to CSPRNG byte generation
- * via `crypto.getRandomValues` in environments where `randomUUID` is missing.
- *
- * @param randomUUID Optional function matching `crypto.randomUUID`.
- * @param getRandomValues Optional generator; receives an ArrayBuffer-backed 16-byte array
- * and must return the random bytes used for the UUID fallback.
- * @returns Canonical hyphenated UUID string (e.g. `123e4567-e89b-12d3-a456-426614174000`).
- */
 export function createMutationKey(
   randomUUID: (() => string) | null | undefined = crypto.randomUUID?.bind(crypto),
   getRandomValues: (bytes: Uint8Array<ArrayBuffer>) => Uint8Array = (bytes) =>
@@ -43,42 +26,16 @@ export function createMutationKey(
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-/**
- * Fingerprint of one mutation payload: the normalized payload serialized with
- * sorted keys, so structurally identical inputs share one fingerprint while any
- * content change produces a different one. Retries of one mutation reuse the
- * fingerprint; a cleared fingerprint lets a later attempt mint a fresh key.
- *
- * @param input Arbitrary mutation variables to fingerprint.
- * @returns Stable fingerprint string for the normalized payload.
- */
 export function mutationFingerprint(input: unknown): string {
   return JSON.stringify(normalize(input)) ?? "undefined";
 }
 
-/** Upper bound on remembered fingerprints; settled mutations clear their own entry. */
 const MAX_ACTIVE_FINGERPRINTS = 64;
 
-/**
- * Creates an in-memory idempotency key tracker that caches a generated UUID per payload fingerprint.
- * Concurrent mutations each keep their own key, so retries reuse the fingerprinted key
- * while altering the payload issues a fresh one. The map is bounded: the oldest
- * fingerprint is evicted once the cap is reached, so abandoned entries cannot grow without limit.
- *
- * @param createKey Optional UUID generator factory; defaults to `createMutationKey`.
- * @returns Tracker interface with `keyFor(input)` and `clear(fingerprint?)` methods.
- */
 export function createMutationKeyTracker(createKey: () => string = createMutationKey) {
   const active = new Map<string, string>();
 
   return {
-    /**
-     * Drops remembered keys: one fingerprint when supplied, every fingerprint
-     * when called without arguments. Per-fingerprint clearing keeps a concurrent
-     * mutation's retry key intact; clearing all is the session-reset escape hatch.
-     *
-     * @param fingerprint Fingerprint of the settled mutation's variables (`mutationFingerprint`), or undefined to clear all.
-     */
     clear(fingerprint?: string): void {
       if (fingerprint === undefined) {
         active.clear();
@@ -101,12 +58,6 @@ export function createMutationKeyTracker(createKey: () => string = createMutatio
   };
 }
 
-/**
- * React hook that instantiates a stable `MutationKeyTracker` across renders.
- * Used by TanStack mutation hooks to safely associate retry attempts with consistent idempotency keys.
- *
- * @returns Stable `MutationKeyTracker` instance.
- */
 export function useMutationKeyTracker() {
   const [tracker] = useState(() => createMutationKeyTracker());
   return tracker;

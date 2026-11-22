@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import {
   ApiClientService,
   runFrontendEffect,
+  runQueryEffect,
   type ApiClientError,
   type ApiClientServiceShape,
   type SessionScope,
@@ -22,7 +23,7 @@ import {
 } from "./effect";
 import { mutationFingerprint, useMutationKeyTracker } from "./mutation-idempotency";
 import { analyticsRangeWindow } from "./analytics-range";
-import { ApiError } from "./api";
+import { ApiError, getInvitationPreview } from "./api";
 import { pollingInterval, privateCacheRetentionMs, referenceFreshnessMs } from "./query-defaults";
 import type {
   AnalyticsRangePreset,
@@ -51,13 +52,6 @@ import type {
   WorkspaceRole,
 } from "@/types";
 
-/**
- * Normalizes query parameter objects by stripping undefined values and sorting keys lexicographically.
- * Ensures consistent TanStack Query cache key matching for structurally identical requests.
- *
- * @param params Query parameters record.
- * @returns Normalized record with sorted keys, or `undefined`.
- */
 function normalizeParams<T extends object>(params: T | undefined) {
   if (params === undefined) return undefined;
   return Object.fromEntries(
@@ -67,19 +61,6 @@ function normalizeParams<T extends object>(params: T | undefined) {
   );
 }
 
-/**
- * Merges the scope's Brand Profile selection into a query-param object.
- *
- * `scope.brandProfileId` is the canonical "active profile" selection; `null`
- * means the aggregate "All Brand Profiles" view, so the key is omitted and the
- * API returns workspace-wide data. An explicit `brand_profile_id` in `params`
- * wins over the scope so callers can pin a different profile when needed.
- *
- * @param scope Session scope carrying the active Brand Profile selection.
- * @param params Caller-supplied query params, if any.
- * @returns Params object with `brand_profile_id` applied, or `undefined` when
- *   neither source produced any key.
- */
 function withBrandProfile<T extends object>(
   scope: SessionScope,
   params?: T,
@@ -94,7 +75,6 @@ function withBrandProfile<T extends object>(
   return Object.values(merged).some((value) => value !== undefined) ? merged : undefined;
 }
 
-/** Cache identities for reads; assets() is only an invalidation prefix, not a library query. */
 export const queryKeys = {
   currentUser: () => ["current-user"] as const,
   publishingPreferences: () => ["publishing-preferences"] as const,
@@ -145,22 +125,6 @@ export const queryKeys = {
       : (["analytics", "posts", normalizeParams(params)] as const),
 };
 
-/**
- * Bridges a TanStack Query `queryFn`/`mutationFn` invocation to the frontend
- * Effect service layer.
- *
- * Resolves `ApiClientService` from the request-scoped layer (which carries the
- * Workspace selection via `WorkspaceService`) and executes the selected
- * operation through `runFrontendEffect`, the approved `Effect.run*` boundary.
- * Authentication rides the ambient same-origin session cookie, so no
- * credential is threaded here. The query's AbortSignal is forwarded so
- * cancellation interrupts the underlying network Effect.
- *
- * @param scope Session scope captured by the calling hook.
- * @param operation Selector invoking one `ApiClientService` method.
- * @param signal AbortSignal provided by TanStack Query for this invocation.
- * @returns Promise resolving to the operation result.
- */
 function runApiQuery<A>(
   scope: SessionScope,
   operation: (api: ApiClientServiceShape) => Effect.Effect<A, ApiClientError, WorkspaceService>,
@@ -173,12 +137,6 @@ function runApiQuery<A>(
   );
 }
 
-/**
- * Returns resource prefixes affected when a Brand Profile is deleted.
- *
- * Deletion hides owned content and cancels scheduled work, so cached Posts,
- * attachments, Channels, outcomes, calendars, Queues, and Analytics must refresh.
- */
 function brandProfileResourceInvalidations(): QueryKey[] {
   return [
     queryKeys.posts(),
@@ -191,15 +149,6 @@ function brandProfileResourceInvalidations(): QueryKey[] {
   ];
 }
 
-/**
- * Returns the caches one Post mutation can change. Post list and detail share
- * the `posts` prefix, so one prefix covers both; attaching or detaching media
- * changes Asset status and attachment ownership (`assets`), while scheduling
- * moves independent per-Channel outcomes (`distributions`) and their calendar
- * projection. Analytics must also drop a cohort when a Post is deleted or its
- * published caption/format changes. Refreshing these resources after a write
- * prevents a warm browser cache from retaining the previous composition.
- */
 function postResourceInvalidations(): QueryKey[] {
   return [
     queryKeys.posts(),
@@ -222,8 +171,13 @@ export const mutationInvalidations = {
     queryKeys.platforms(),
     queryKeys.platformPublishingRequirements(id),
     queryKeys.analytics(),
+    queryKeys.workspaceAudit(),
   ],
-  confirmOAuthSelection: () => [queryKeys.platforms(), queryKeys.analytics()],
+  confirmOAuthSelection: () => [
+    queryKeys.platforms(),
+    queryKeys.analytics(),
+    queryKeys.workspaceAudit(),
+  ],
   updateDistribution: () => [
     queryKeys.posts(),
     queryKeys.distributions(),
@@ -231,24 +185,24 @@ export const mutationInvalidations = {
     queryKeys.analytics(),
   ],
   retryDistribution: () => [queryKeys.posts(), queryKeys.distributions(), queryKeys.calendar()],
-  createBrandProfile: () => [queryKeys.brandProfiles()],
-  updateBrandProfile: () => [queryKeys.brandProfiles()],
-  deleteBrandProfile: () => [queryKeys.brandProfiles(), ...brandProfileResourceInvalidations()],
+  createBrandProfile: () => [queryKeys.brandProfiles(), queryKeys.workspaceAudit()],
+  updateBrandProfile: () => [queryKeys.brandProfiles(), queryKeys.workspaceAudit()],
+  deleteBrandProfile: () => [
+    queryKeys.brandProfiles(),
+    queryKeys.workspaceAudit(),
+    ...brandProfileResourceInvalidations(),
+  ],
   workspaceSettings: () => [
     queryKeys.installation(),
     queryKeys.workspaceMembers(),
     queryKeys.workspaceInvitations(),
     queryKeys.currentUser(),
+    queryKeys.workspaceAudit(),
   ],
+  reportingPreferences: () => [queryKeys.reportingPolicy(), queryKeys.workspaceAudit()],
+  reportingFeedback: () => [queryKeys.reportingFeedback(), queryKeys.workspaceAudit()],
 } satisfies Record<string, (...args: string[]) => QueryKey[]>;
 
-/**
- * Invalidates resource prefixes; Analytics advances its shared window before
- * dependent reads run, avoiding refetching both old and new cohorts.
- *
- * @param queryClient The active TanStack QueryClient.
- * @param keys Array of query keys to invalidate.
- */
 export async function invalidateQueryKeys(queryClient: QueryClient, keys: QueryKey[]) {
   await Promise.all(
     keys.map(async (queryKey) => {
@@ -262,28 +216,6 @@ export async function invalidateQueryKeys(queryClient: QueryClient, keys: QueryK
   );
 }
 
-/**
- * Shared lifecycle for the idempotent mutation hooks below: acquires the
- * QueryClient and a stable idempotency tracker, runs the API operation with a
- * key fingerprinted on the mutation variables, then clears that fingerprint
- * once the mutation succeeds.
- *
- * Every idempotent hook repeats this acquire/execute/invalidate/clear
- * sequence; centralizing it leaves each exported hook with only its genuinely
- * varying parts — the API call and the caches it invalidates. Fingerprinting
- * the key on the variables makes TanStack retries of the same payload reuse
- * one idempotency key while an edited payload issues a fresh one. Clearing is
- * scoped to the settled fingerprint so a concurrent mutation on the same hook
- * instance keeps its own retry key.
- *
- * @param scope Session scope forwarded to `runApiQuery`.
- * @param operation API call receiving the resolved idempotency key, which it
- *   must forward as `{ idempotencyKey }` so server-side retries deduplicate.
- * @param invalidate Maps mutation variables to the query keys invalidated
- *   after success. Omit when no cached resource depends on the mutation;
- *   the tracker still clears.
- * @returns TanStack mutation result for the operation's variables and data.
- */
 function useIdempotentMutation<TVariables, TData>(
   scope: SessionScope,
   operation: (
@@ -300,18 +232,12 @@ function useIdempotentMutation<TVariables, TData>(
     mutationFn: (variables: TVariables) =>
       runApiQuery(scope, (api) => operation(api, variables, idempotency.keyFor(variables))),
     onSuccess: async (_data, variables) => {
-      if (invalidate) await invalidateQueryKeys(queryClient, invalidate(variables));
       idempotency.clear(mutationFingerprint(variables));
+      if (invalidate) await invalidateQueryKeys(queryClient, invalidate(variables));
     },
   });
 }
 
-/**
- * TanStack query hook for the authenticated user's profile and active workspace organization.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Query result with UserProfile data.
- */
 export function useCurrentUser(scope: SessionScope) {
   return useQuery({
     queryKey: queryKeys.currentUser(),
@@ -320,18 +246,6 @@ export function useCurrentUser(scope: SessionScope) {
   });
 }
 
-/**
- * TanStack query hook listing the active Brand Profiles in the workspace.
- * Brand Profiles are workspace-scoped, not profile-scoped, so this query never
- * merges `brand_profile_id`.
- * Reuses successful data for five minutes and retains inactive reads for
- * thirty minutes in the identity/Workspace-scoped browser cache. Profile
- * mutations invalidate it immediately; other members' edits appear on refresh
- * or the next stale read.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Query result containing array of BrandProfile records.
- */
 export function useBrandProfiles(scope: SessionScope) {
   return useQuery({
     queryKey: queryKeys.brandProfiles(),
@@ -347,13 +261,6 @@ export function useBrandProfiles(scope: SessionScope) {
   });
 }
 
-/**
- * TanStack mutation hook to create a Brand Profile with idempotency tracking.
- * Invalidates the profile list; owned collections are empty for a new profile.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting CreateBrandProfileInput.
- */
 export function useCreateBrandProfile(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -363,12 +270,6 @@ export function useCreateBrandProfile(scope: SessionScope) {
   );
 }
 
-/**
- * TanStack mutation hook to rename or recolor a Brand Profile with idempotency tracking.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting `{ profileId, input }`.
- */
 export function useUpdateBrandProfile(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -378,15 +279,6 @@ export function useUpdateBrandProfile(scope: SessionScope) {
   );
 }
 
-/**
- * TanStack mutation hook to permanently delete a Brand Profile with idempotency tracking.
- * Deletion removes owned content and locally disconnects the profile's
- * channels, so every profile-owned collection is invalidated alongside the
- * profile list.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting the Brand Profile ID string.
- */
 export function useDeleteBrandProfile(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -396,14 +288,8 @@ export function useDeleteBrandProfile(scope: SessionScope) {
   );
 }
 
-/** Sixty fills complete rows in the three-, four-, and five-column Post grids. */
 export const POSTS_PAGE_SIZE = 60;
 
-/**
- * Flattens fetched pages without duplicating a Post if concurrent publication
- * or deletion shifted an offset boundary. The earlier page owns an overlapping
- * identity; refetching refreshes the entire cached page chain.
- */
 function selectPostPages(data: InfiniteData<PostListResponse, number>): Post[] {
   const posts = new Map<string, Post>();
   for (const page of data.pages) {
@@ -414,7 +300,17 @@ function selectPostPages(data: InfiniteData<PostListResponse, number>): Post[] {
   return [...posts.values()];
 }
 
-/** Advances eligibility for scheduled work without issuing network reads before its due instant. */
+function isDueScheduled(
+  item: { status: string; scheduled_at: string | null },
+  now: number,
+): boolean {
+  return (
+    item.status === "scheduled" &&
+    item.scheduled_at !== null &&
+    Date.parse(item.scheduled_at) <= now
+  );
+}
+
 function useDueWorkClock(hasScheduled: boolean): number {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
@@ -425,12 +321,6 @@ function useDueWorkClock(hasScheduled: boolean): number {
   return now;
 }
 
-/**
- * Reads independent progress details with four-request concurrency. Missing
- * identities are removed from loaded projections; other failures retain their
- * last known data and surface through the collection while the next poll retries.
- * Cancellation still propagates instead of producing a partial successful read.
- */
 function readProgressDetails<A>(
   ids: readonly string[],
   read: (id: string) => Effect.Effect<A, ApiClientError, WorkspaceService>,
@@ -453,12 +343,6 @@ function readProgressDetails<A>(
   });
 }
 
-/**
- * Keeps draft revisions and independent outcome/Asset timestamps monotonic when
- * an older progress read races a save or a newer detail read. Equal revisions
- * may still contain newer background work; a later poll reconciles the whole
- * server projection rather than inventing a partially merged Post.
- */
 function newestPost(previous: Post | undefined, received: Post): Post {
   if (!previous) return received;
   if (previous.revision !== received.revision)
@@ -485,16 +369,6 @@ function newestPost(previous: Post | undefined, received: Post): Post {
   return received;
 }
 
-/**
- * Refreshes loaded Posts with active work, choosing individual details or one
- * batched page refresh based on request count. When active identities outnumber
- * loaded pages, a single invalidation refreshes the authoritative page chain
- * instead of issuing more detail requests than list requests. Future scheduled
- * work becomes eligible at its due instant; settled rows never trigger polling.
- * Detail results preserve page order, remove missing rows, and surface partial
- * failures. Newer revisions win over delayed reads; publication transitions
- * invalidate Analytics and update loaded calendar projections.
- */
 function usePostProgress(scope: SessionScope, posts: readonly Post[], collectionKey: QueryKey) {
   const queryClient = useQueryClient();
   const pageCount =
@@ -508,12 +382,7 @@ function usePostProgress(scope: SessionScope, posts: readonly Post[], collection
     .filter(
       (post) =>
         pollingInterval(post) !== false ||
-        post.distributions.some(
-          (distribution) =>
-            distribution.status === "scheduled" &&
-            distribution.scheduled_at !== null &&
-            Date.parse(distribution.scheduled_at) <= now,
-        ),
+        post.distributions.some((distribution) => isDueScheduled(distribution, now)),
     )
     .map((post) => post.id)
     .sort();
@@ -523,7 +392,6 @@ function usePostProgress(scope: SessionScope, posts: readonly Post[], collection
       signal,
     }): Promise<{ values: Post[]; missing: Set<string>; error: Error | null }> => {
       if (ids.length > pageCount) {
-        // A progress tick must not cancel or replace a user's pending Load more.
         if (queryClient.getQueryState(collectionKey)?.fetchStatus === "fetching")
           return { values: [], missing: new Set<string>(), error: null };
         await queryClient.invalidateQueries(
@@ -537,7 +405,6 @@ function usePostProgress(scope: SessionScope, posts: readonly Post[], collection
           refreshed?.pages.flatMap((page) => page.posts).filter((post) => activeIds.has(post.id)) ??
           [];
         const receivedIds = new Set(values.map((post) => post.id));
-        // Absence from a filtered/offset page is not proof of deletion.
         const absent = ids.filter((id) => !receivedIds.has(id));
         const details =
           absent.length > 0
@@ -665,19 +532,6 @@ function usePostProgress(scope: SessionScope, posts: readonly Post[], collection
   return ids.length > 0 ? (progress.error ?? progress.data?.error ?? null) : null;
 }
 
-/**
- * Caches explicit 60-Post pages in the workspace's browser QueryClient.
- * Only the first page loads automatically; further reads require fetchNextPage.
- * Filters have independent caches, inactive pages survive route navigation for
- * 30 minutes. Stale reads and mutations refresh pages; active progress uses
- * details when sparse and one batched page refresh when denser than the cache.
- * The workspace/auth provider discards the cache when its identity changes;
- * Post content is not persisted to localStorage or IndexedDB.
- *
- * @param scope Signed-in gate and Workspace/Brand Profile authorization scope.
- * @param params Lifecycle and owning-profile filters; pagination is owned here.
- * @returns Infinite-query controls with deduplicated loaded Posts as data.
- */
 export function usePosts(scope: SessionScope, params?: Omit<PostQueryParams, "limit" | "offset">) {
   const scopedParams = withBrandProfile(scope, params);
   const collectionKey = [...queryKeys.posts(scopedParams), "pages", POSTS_PAGE_SIZE] as const;
@@ -693,7 +547,7 @@ export function usePosts(scope: SessionScope, params?: Omit<PostQueryParams, "li
     getNextPageParam: (last) =>
       last.has_more && last.posts.length > 0 ? last.offset + POSTS_PAGE_SIZE : undefined,
     select: selectPostPages,
-    gcTime: 30 * 60_000,
+    gcTime: privateCacheRetentionMs,
     staleTime: 60_000,
     enabled: scope.isSignedIn,
   });
@@ -701,16 +555,6 @@ export function usePosts(scope: SessionScope, params?: Omit<PostQueryParams, "li
   return { ...query, error: query.error ?? progressError };
 }
 
-/**
- * TanStack query hook hydrating one Post: its ordered attachments, saved
- * per-Channel target settings, and independent outcomes. This is the single
- * read a composer needs to reopen or edit a saved draft.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @param id Post identifier.
- * @param enabled Whether the query is active; defaults to true.
- * @returns Query result with the Post entity.
- */
 export function usePost(scope: SessionScope, id: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.post(id),
@@ -720,15 +564,6 @@ export function usePost(scope: SessionScope, id: string, enabled = true) {
   });
 }
 
-/**
- * TanStack mutation hook creating one nonempty authoritative draft Post.
- * Repeat saves of the same composition go through `useUpdatePost` on the
- * returned id; the idempotency key makes a retried create of one payload
- * return the same Post rather than a duplicate.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting CreatePostInput.
- */
 export function useCreatePost(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -737,14 +572,6 @@ export function useCreatePost(scope: SessionScope) {
   );
 }
 
-/**
- * TanStack mutation hook saving the same Post's draft surface — default text,
- * the whole ordered attachment set, and saved per-Channel targets — without
- * requiring any Channel selection.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting `{ id, input }`; the `id` keeps the Post identity stable.
- */
 export function useUpdatePost(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -754,18 +581,6 @@ export function useUpdatePost(scope: SessionScope) {
   );
 }
 
-/**
- * TanStack mutation hook soft-deleting a Post. Pending publications stop and
- * attachment references are released, while already-delivered Channel copies
- * remain immutable history. The owning Brand Profile travels in the variables
- * — never inferred from the active scope — so the aggregate "All Brand
- * Profiles" view can delete a Post it can see and a bulk deletion batch can
- * span profiles without a scope switch. Callers pass the Post's own
- * `brand_profile_id`; the API rejects a Post not owned by that profile.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting `{ id, brandProfileId }`.
- */
 export function useDeletePost(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -775,32 +590,23 @@ export function useDeletePost(scope: SessionScope) {
   );
 }
 
-/** One failed deletion in a bulk batch, kept so the caller can retry it. */
 interface BulkDeleteFailure {
   id: string;
   message: string;
 }
 
-/** Result of one confirmed bulk deletion: successful identities and retryable failures. */
 interface BulkDeleteOutcome {
   deletedIds: string[];
   failed: BulkDeleteFailure[];
 }
 
-/**
- * Upper bound on concurrent per-Post deletion requests. Four keeps the batch
- * responsive without turning a large selection into one unbounded burst; the
- * backend row lock already serializes any two requests for the same Post.
- */
 const BULK_DELETE_CONCURRENCY = 4;
 
-/** One Post deletion addressed by its owning Brand Profile. */
 export interface DeletePostTarget {
   id: string;
   brandProfileId: string;
 }
 
-/** Extracts a retry-facing message from a typed failure, defect, or interruption. */
 function deletionFailureMessage(cause: unknown): string {
   if (cause instanceof Error) return cause.message;
   if (
@@ -814,21 +620,6 @@ function deletionFailureMessage(cause: unknown): string {
   return String(cause);
 }
 
-/**
- * Deletes a batch of Posts with bounded concurrency and per-item isolation.
- *
- * Every request uses the batch idempotency key plus the target position, so a
- * retried batch reuses the same keys. `Effect.exit` captures both typed API
- * failures and transport defects: a rejected request becomes one failed item
- * instead of aborting the batch and discarding deletions that already
- * committed. The caller receives successful identities and retryable failures
- * as data.
- *
- * @param deleteOne Operation issuing one authenticated Post deletion.
- * @param targets Posts to delete, in selection order.
- * @param idempotencyKey Stable key for this batch.
- * @returns Effect resolving to successful ids and per-target failures.
- */
 export function runBulkDelete(
   deleteOne: (
     target: DeletePostTarget,
@@ -861,19 +652,6 @@ export function runBulkDelete(
   );
 }
 
-/**
- * TanStack mutation hook deleting a batch of Posts with bounded concurrency and
- * one cache invalidation after the batch settles.
- *
- * The per-Post endpoint is unchanged, so each request keeps its own
- * idempotency key derived from the batch key and target position; a retried
- * batch reuses those keys. Failures are returned as data instead of rejecting
- * the mutation so one unavailable Post cannot discard the successes or the
- * caller's retry list.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting `{ targets }` and resolving `BulkDeleteOutcome`.
- */
 export function useDeletePostsBatch(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -888,15 +666,6 @@ export function useDeletePostsBatch(scope: SessionScope) {
   );
 }
 
-/**
- * TanStack mutation hook scheduling one Post to its target Channels, or
- * publishing immediately when `scheduled_at` is null. Only still-editable
- * pending outcomes change, so a retry of the same intent never duplicates a
- * Distribution or republishes a settled one.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting `{ id, input }`; the `id` keeps the Post identity stable.
- */
 export function useSchedulePost(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -905,28 +674,29 @@ export function useSchedulePost(scope: SessionScope) {
     mutationInvalidations.schedulePost,
   );
 }
-/** Pages active Queues for one explicit owner. Additional pages are user-driven; disabled consumers perform no reads. */
 export function useQueues(scope: SessionScope, brandProfileId: string | null, enabled = true) {
   return useInfiniteQuery({
     queryKey: queryKeys.queues(brandProfileId ?? ""),
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam, signal }) =>
-      runApiQuery(
-        scope,
-        (api) =>
-          api.listQueues({
-            brand_profile_id: brandProfileId!,
-            limit: 50,
-            ...(pageParam ? { cursor: pageParam } : {}),
-          }),
-        signal,
-      ),
+    queryFn:
+      brandProfileId === null
+        ? skipToken
+        : ({ pageParam, signal }) =>
+            runApiQuery(
+              scope,
+              (api) =>
+                api.listQueues({
+                  brand_profile_id: brandProfileId,
+                  limit: 50,
+                  ...(pageParam ? { cursor: pageParam } : {}),
+                }),
+              signal,
+            ),
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
-    enabled: scope.isSignedIn && brandProfileId !== null && enabled,
+    enabled: scope.isSignedIn && enabled,
   });
 }
 
-/** Pages a Queue's bounded window; sparse progress uses details and dense progress refreshes its loaded pages once. */
 export function useQueueCalendarPosts(scope: SessionScope, params: PostQueryParams) {
   const collectionKey = [...queryKeys.posts(params), "queue-calendar"] as const;
   const query = useInfiniteQuery({
@@ -949,18 +719,6 @@ export function useQueueCalendarPosts(scope: SessionScope, params: PostQueryPara
   return { ...query, error: query.error ?? progressError };
 }
 
-/**
- * Reads the Workspace's persistent publishing preferences. The timezone and
- * signature list are shared by every member; the composer and scheduling
- * surfaces use the same read so their interpretation cannot drift. Successful
- * data is reused for five minutes, and the preference mutation invalidates it
- * immediately, so the dashboard provider does not refetch on every focus or
- * route mount.
- *
- * @param scope Session scope gating execution.
- * @param enabled Whether the query is active; defaults to true.
- * @returns Query result with the current preferences.
- */
 export function usePublishingPreferences(scope: SessionScope, enabled = true) {
   return useQuery({
     queryKey: queryKeys.publishingPreferences(),
@@ -970,7 +728,6 @@ export function usePublishingPreferences(scope: SessionScope, enabled = true) {
   });
 }
 
-/** Replaces the complete preference document and refreshes its single cache entry. */
 export function useUpdatePublishingPreferences(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -980,7 +737,6 @@ export function useUpdatePublishingPreferences(scope: SessionScope) {
   );
 }
 
-/** Creates a recurring plan with the shared stable-key mutation lifecycle. */
 export function useCreateQueue(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -989,7 +745,6 @@ export function useCreateQueue(scope: SessionScope) {
   );
 }
 
-/** Edits only future allocations and refreshes the authoritative configuration roster. */
 export function useUpdateQueue(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -999,7 +754,6 @@ export function useUpdateQueue(scope: SessionScope) {
   );
 }
 
-/** Retires an idle plan, surfacing unresolved membership as a recoverable conflict. */
 export function useDeleteQueue(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1009,7 +763,6 @@ export function useDeleteQueue(scope: SessionScope) {
   );
 }
 
-/** Releases one safely editable Queue reservation and refreshes Posts, outcomes and timeline together. */
 export function useRemovePostFromQueue(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1021,16 +774,6 @@ export function useRemovePostFromQueue(scope: SessionScope) {
   );
 }
 
-/**
- * TanStack query hook reading one Asset by durable identifier with
- * active-state polling, so composer attachment thumbnails and analytics
- * metadata follow upload and processing progress.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @param id Asset identifier.
- * @param enabled Whether the query is active; defaults to true.
- * @returns Query result with Asset data.
- */
 export function useAsset(scope: SessionScope, id: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.asset(id),
@@ -1040,15 +783,6 @@ export function useAsset(scope: SessionScope, id: string, enabled = true) {
   });
 }
 
-/**
- * TanStack query hook for acquiring an asset's presigned media preview URL.
- * Cached with a 10-minute stale time to prevent redundant presigned URL generations.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @param id Asset identifier.
- * @param enabled Whether the query is active; defaults to true.
- * @returns Query result with SignedUrlResponse.
- */
 export function useAssetPreviewUrl(scope: SessionScope, id: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.assetPreview(id),
@@ -1058,20 +792,6 @@ export function useAssetPreviewUrl(scope: SessionScope, id: string, enabled = tr
   });
 }
 
-/**
- * TanStack query hook for connected platform accounts.
- *
- * Profile filtering changes the query key. Retaining the prior account list
- * while the replacement streams prevents a selected filter from blanking the
- * Channels toolbar and main view; the normal loading skeleton is therefore
- * reserved for the first account fetch.
- * Successful reads remain fresh for five minutes and survive inactive route
- * navigation for thirty minutes; account mutations still invalidate them.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @param options `enabled` gates the query; `brandProfileId` overrides the scope selection.
- * @returns Query result containing array of PlatformAccount records.
- */
 export function usePlatforms(
   scope: SessionScope,
   options: { enabled?: boolean; brandProfileId?: string | null } = {},
@@ -1095,22 +815,6 @@ export function usePlatforms(
   });
 }
 
-/**
- * TanStack query hook for platform capabilities specifications across all providers.
- *
- * Deployment-defined capabilities are static for the lifetime of one
- * identity/Workspace-scoped QueryClient, so this single bounded query alone
- * keeps successful data fresh and retained indefinitely. Mount, focus,
- * reconnect, and time-based refetches therefore reuse the successful result
- * instead of calling the API again; replacing the scoped client (sign-out or
- * identity/Workspace switch) starts empty and loads fresh. Results stay in
- * browser memory only, and account mutations intentionally do not invalidate
- * them. General query defaults and dynamic publishing-requirement freshness
- * remain unchanged.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Query result containing array of PlatformCapability records.
- */
 export function usePlatformCapabilities(scope: SessionScope) {
   return useQuery({
     queryKey: queryKeys.platformCapabilities(),
@@ -1126,12 +830,6 @@ export function usePlatformCapabilities(scope: SessionScope) {
   });
 }
 
-/**
- * Supplies explicit broadcast actions without caching encoder credentials.
- * Only the end action enters the mutation cache, containing a boolean result.
- * The read result belongs to the mounted writer-only control and is discarded
- * when hidden/unmounted. Existing collection invalidation follows confirmed end.
- */
 export function useBroadcastControls(scope: SessionScope) {
   const end = useIdempotentMutation(
     scope,
@@ -1145,16 +843,6 @@ export function useBroadcastControls(scope: SessionScope) {
   };
 }
 
-/**
- * Dynamic creator requirements must refresh whenever the publishing surface
- * mounts, including an immediate draft reopen. Unlike deployment capabilities,
- * creator permissions are never treated as fresh across composition sessions.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @param id Platform account ID.
- * @param enabled Whether the query is active; defaults to true.
- * @returns Query result with PublishingRequirements.
- */
 export function usePlatformPublishingRequirements(scope: SessionScope, id: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.platformPublishingRequirements(id),
@@ -1165,12 +853,6 @@ export function usePlatformPublishingRequirements(scope: SessionScope, id: strin
   });
 }
 
-/**
- * TanStack mutation hook to disconnect a platform account and invalidate relevant caches.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting platform account ID.
- */
 export function useDisconnectPlatform(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1179,15 +861,6 @@ export function useDisconnectPlatform(scope: SessionScope) {
   );
 }
 
-/**
- * TanStack mutation hook that initiates the OAuth handshake for a social platform.
- * Resolves to the provider authorization URL the caller redirects to. The
- * `brandProfileId` is pinned into durable OAuth state so the connected channel
- * is owned by that Brand Profile.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting `{ platform }`.
- */
 export function useStartPlatformOAuth(scope: SessionScope) {
   return useMutation({
     mutationFn: (variables: { platform: Platform }) =>
@@ -1195,14 +868,6 @@ export function useStartPlatformOAuth(scope: SessionScope) {
   });
 }
 
-/**
- * TanStack query hook for inspecting candidate external accounts for an OAuth selection ticket.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @param selectionId Opaque routing selection nonce.
- * @param enabled Whether the query is active; defaults to true.
- * @returns Query result containing candidate accounts and selection ticket metadata.
- */
 export function useOAuthSelection(scope: SessionScope, selectionId: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.oauthSelection(selectionId),
@@ -1214,13 +879,6 @@ export function useOAuthSelection(scope: SessionScope, selectionId: string, enab
   });
 }
 
-/**
- * TanStack idempotent mutation confirming a candidate account selection.
- * Invalidates platform account caches upon successful connection.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting `{ selectionId, input: { account_id } }`.
- */
 export function useConfirmOAuthSelection(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1233,25 +891,12 @@ export function useConfirmOAuthSelection(scope: SessionScope) {
   );
 }
 
-/**
- * TanStack idempotent mutation cancelling and discarding an active OAuth selection ticket.
- * Cancellation discards the ticket without saving or invalidating platform connections.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting `selectionId`.
- */
 export function useCancelOAuthSelection(scope: SessionScope) {
   return useIdempotentMutation(scope, (api, selectionId: string, idempotencyKey) =>
     api.cancelOAuthSelection(selectionId, { idempotencyKey }),
   );
 }
 
-/**
- * TanStack mutation hook to retry a failed distribution with idempotency tracking.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting distribution ID string.
- */
 export function useRetryDistribution(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1260,12 +905,6 @@ export function useRetryDistribution(scope: SessionScope) {
   );
 }
 
-/**
- * TanStack mutation hook to reschedule or modify text overrides for a pending distribution.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting `{ id, input }`.
- */
 export function useUpdateScheduledDistribution(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1275,12 +914,6 @@ export function useUpdateScheduledDistribution(scope: SessionScope) {
   );
 }
 
-/**
- * TanStack mutation hook to cancel a scheduled or queued distribution.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting distribution ID string.
- */
 export function useCancelDistribution(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1289,13 +922,6 @@ export function useCancelDistribution(scope: SessionScope) {
   );
 }
 
-/**
- * Tracks active or due Distribution identities in a loaded Calendar range.
- * A single active outcome uses a detail read; multiple active outcomes refresh
- * the bounded range once rather than fan out one detail request per event.
- * Sparse detail results preserve range membership and settled rows; newer
- * timestamps win over delayed reads. Publication invalidates Analytics once.
- */
 function useCalendarProgress(
   scope: SessionScope,
   events: readonly CalendarEvent[],
@@ -1304,13 +930,7 @@ function useCalendarProgress(
   const queryClient = useQueryClient();
   const now = useDueWorkClock(events.some((event) => event.status === "scheduled"));
   const ids = events
-    .filter(
-      (event) =>
-        pollingInterval(event) !== false ||
-        (event.status === "scheduled" &&
-          event.scheduled_at !== null &&
-          Date.parse(event.scheduled_at) <= now),
-    )
+    .filter((event) => pollingInterval(event) !== false || isDueScheduled(event, now))
     .map((event) => event.id)
     .sort();
   const progress = useQuery({
@@ -1385,43 +1005,25 @@ function useCalendarProgress(
   return ids.length > 0 ? (progress.error ?? progress.data?.error ?? null) : null;
 }
 
-/**
- * TanStack query hook for Calendar events within a specified date window.
- * One active event uses a Distribution detail read; multiple active events
- * trigger one batched range refresh. Settled events never cause periodic reads.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace;
- *   its active Brand Profile is merged into params as `brand_profile_id`.
- * @param params Date range parameters ({ start, end }).
- * @returns Query result containing array of CalendarEvent objects.
- */
 export function useCalendar(scope: SessionScope, params?: CalendarQueryParams) {
   const scopedParams = params ? withBrandProfile(scope, params) : undefined;
   const collectionKey = queryKeys.calendar(scopedParams);
   const query = useQuery({
     queryKey: collectionKey,
-    queryFn: ({ signal }) => {
-      if (!scopedParams) return Promise.resolve([]);
-      return runApiQuery(
-        scope,
-        (api) => Effect.map(api.getCalendar(scopedParams), (res) => res.events),
-        signal,
-      );
-    },
-    enabled: scope.isSignedIn && Boolean(scopedParams),
+    queryFn: scopedParams
+      ? ({ signal }) =>
+          runApiQuery(
+            scope,
+            (api) => Effect.map(api.getCalendar(scopedParams), (res) => res.events),
+            signal,
+          )
+      : skipToken,
+    enabled: scope.isSignedIn,
   });
   const progressError = useCalendarProgress(scope, query.data ?? [], collectionKey);
   return { ...query, error: query.error ?? progressError };
 }
 
-/**
- * Reads installation Seat usage and the shared Workspace metadata.
- *
- * @param scope Session scope gating execution.
- * @param workspaceId Shared Workspace UUID from the current profile.
- * @param enabled Whether the query may run.
- * @returns Query result with installation settings.
- */
 export function useInstallation(scope: SessionScope, workspaceId: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.installation(),
@@ -1430,14 +1032,6 @@ export function useInstallation(scope: SessionScope, workspaceId: string, enable
   });
 }
 
-/**
- * Shares one exact rolling cohort across dashboard and ranked reads in the
- * current browser QueryClient. All mounted Analytics consumers observe this
- * snapshot, so changing a metric cannot silently advance only half the page.
- * Five-minute freshness controls navigation/focus reuse. Invalidation advances
- * every read together; a generation also distinguishes refreshes under a
- * frozen or coarse clock. Exact API instants are never rounded.
- */
 function useAnalyticsWindow(scope: SessionScope, range: AnalyticsRangePreset) {
   return useQuery({
     queryKey: ["analytics", "window", range],
@@ -1448,16 +1042,6 @@ function useAnalyticsWindow(scope: SessionScope, range: AnalyticsRangePreset) {
   });
 }
 
-/**
- * Reads the dashboard's daily series, best-time cells, format and platform
- * breakdowns, follower history, and engagement accumulation for one cohort.
- * Successful reads stay fresh for five minutes in browser memory; ranked
- * reads share the same exact window and explicit Refresh advances both.
- *
- * @param scope Session scope: signed-in gate, Workspace, and Brand Profile.
- * @param params Range preset plus optional Platform, account, and format filters.
- * @returns TanStack query carrying the dashboard aggregates.
- */
 export function useAnalyticsDashboard(scope: SessionScope, params: AnalyticsScopeParams) {
   const window = useAnalyticsWindow(scope, params.range).data;
   const scopedParams = withBrandProfile(scope, {
@@ -1488,12 +1072,6 @@ export function useAnalyticsDashboard(scope: SessionScope, params: AnalyticsScop
   });
 }
 
-/**
- * Loads the inspected Post's stored histories with at most four simultaneous
- * requests. The Post prefix shares mutation invalidation; Workspace and sorted
- * Distribution identities prevent data leaking between inspectors or tenants.
- * Any failed Channel rejects the whole read rather than presenting partial totals.
- */
 export function usePostAnalyticsHistory(scope: SessionScope, distributionIds: readonly string[]) {
   const ids = [...distributionIds].sort();
   return useQuery({
@@ -1509,14 +1087,6 @@ export function usePostAnalyticsHistory(scope: SessionScope, distributionIds: re
   });
 }
 
-/**
- * Lists Workspace members with role, status, and join date.
- *
- * @param scope Session scope gating execution.
- * @param workspaceId Shared Workspace UUID.
- * @param enabled Whether the query may run.
- * @returns Query result with the member list.
- */
 export function useWorkspaceMembers(scope: SessionScope, workspaceId: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.workspaceMembers(),
@@ -1526,19 +1096,6 @@ export function useWorkspaceMembers(scope: SessionScope, workspaceId: string, en
   });
 }
 
-/**
- * Reads the ranked per-Post analytics rows for the same cohort.
- *
- * Limit, metric, and offset participate in the cache key; dashboard and ranked
- * reads reuse one exact five-minute browser cohort. Keeping previous data
- * avoids collapsing the table while Load more or a metric switch fetches.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId`
- *   selects the Workspace, and `brandProfileId` selects the profile scope.
- * @param params Range preset, optional Platform filter, ranking metric, and
- *   the requested top-N window.
- * @returns Query result with the ranked Posts and pagination metadata.
- */
 export function useAnalyticsPosts(scope: SessionScope, params: AnalyticsPostScopeParams) {
   const window = useAnalyticsWindow(scope, params.range).data;
   const { range, ...filters } = params;
@@ -1575,14 +1132,6 @@ export function useAnalyticsPosts(scope: SessionScope, params: AnalyticsPostScop
   });
 }
 
-/**
- * Lists pending Workspace invitations.
- *
- * @param scope Session scope gating execution.
- * @param workspaceId Shared Workspace UUID.
- * @param enabled Whether the query may run.
- * @returns Query result with pending invitations.
- */
 export function useWorkspaceInvitations(scope: SessionScope, workspaceId: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.workspaceInvitations(),
@@ -1592,15 +1141,6 @@ export function useWorkspaceInvitations(scope: SessionScope, workspaceId: string
   });
 }
 
-/**
- * Reads the reverse-chronological Workspace Audit trail.
- *
- * @param scope Session scope gating execution.
- * @param workspaceId Shared Workspace UUID.
- * @param params Pagination window.
- * @param enabled Whether the query may run.
- * @returns Query result with audit entries.
- */
 export function useWorkspaceAudit(
   scope: SessionScope,
   workspaceId: string,
@@ -1615,12 +1155,6 @@ export function useWorkspaceAudit(
   });
 }
 
-/**
- * Invites an address with an assignable Workspace role.
- *
- * @param scope Session scope gating execution.
- * @returns Mutation accepting `{ workspaceId, email, role }`.
- */
 export function useCreateWorkspaceInvitation(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1634,12 +1168,6 @@ export function useCreateWorkspaceInvitation(scope: SessionScope) {
   );
 }
 
-/**
- * Rotates and resends an invitation.
- *
- * @param scope Session scope gating execution.
- * @returns Mutation accepting `{ workspaceId, invitationId }`.
- */
 export function useResendWorkspaceInvitation(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1651,12 +1179,6 @@ export function useResendWorkspaceInvitation(scope: SessionScope) {
   );
 }
 
-/**
- * Revokes a pending invitation and frees its Seat.
- *
- * @param scope Session scope gating execution.
- * @returns Mutation accepting `{ workspaceId, invitationId }`.
- */
 export function useRevokeWorkspaceInvitation(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1668,12 +1190,6 @@ export function useRevokeWorkspaceInvitation(scope: SessionScope) {
   );
 }
 
-/**
- * Changes a member's Workspace role.
- *
- * @param scope Session scope gating execution.
- * @returns Mutation accepting `{ workspaceId, memberId, role }`.
- */
 export function useUpdateWorkspaceMember(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1685,12 +1201,6 @@ export function useUpdateWorkspaceMember(scope: SessionScope) {
   );
 }
 
-/**
- * Removes a member's Workspace membership.
- *
- * @param scope Session scope gating execution.
- * @returns Mutation accepting `{ workspaceId, memberId }`.
- */
 export function useRemoveWorkspaceMember(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1702,12 +1212,6 @@ export function useRemoveWorkspaceMember(scope: SessionScope) {
   );
 }
 
-/**
- * Suspends a member account.
- *
- * @param scope Session scope gating execution.
- * @returns Mutation accepting `{ workspaceId, memberId, reason }`.
- */
 export function useSuspendInstallationMember(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1719,12 +1223,6 @@ export function useSuspendInstallationMember(scope: SessionScope) {
   );
 }
 
-/**
- * Reactivates a suspended member.
- *
- * @param scope Session scope gating execution.
- * @returns Mutation accepting `{ workspaceId, memberId }`.
- */
 export function useReactivateInstallationMember(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1736,12 +1234,6 @@ export function useReactivateInstallationMember(scope: SessionScope) {
   );
 }
 
-/**
- * Hard-deletes a member account after email confirmation.
- *
- * @param scope Session scope gating execution.
- * @returns Mutation accepting `{ workspaceId, memberId, confirmEmail }`.
- */
 export function useDeleteInstallationMember(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1756,12 +1248,6 @@ export function useDeleteInstallationMember(scope: SessionScope) {
   );
 }
 
-/**
- * Transfers installation ownership after password reauthentication.
- *
- * @param scope Session scope gating execution.
- * @returns Mutation accepting `{ workspaceId, targetUserId, password }`.
- */
 export function useTransferInstallationOwnership(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1776,12 +1262,6 @@ export function useTransferInstallationOwnership(scope: SessionScope) {
   );
 }
 
-/**
- * Renames the shared Workspace.
- *
- * @param scope Session scope gating execution.
- * @returns Mutation accepting `{ workspaceId, name }`.
- */
 export function useRenameWorkspace(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1797,14 +1277,6 @@ export function useRenameWorkspace(scope: SessionScope) {
   );
 }
 
-/**
- * Accepts an invitation for the authenticated account. The server verifies
- * that the token is pending and bound to the caller's email, then returns the
- * joined Workspace and member.
- *
- * @param scope Session scope gating execution.
- * @returns Mutation accepting the invitation token.
- */
 export function useAcceptWorkspaceInvitation(scope: SessionScope) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -1816,26 +1288,16 @@ export function useAcceptWorkspaceInvitation(scope: SessionScope) {
   });
 }
 
-/**
- * Inspects an invitation token before the visitor has an account.
- *
- * @param token Raw invitation token, or null while absent.
- * @returns Query result with the invitation preview.
- */
 export function useInvitationPreview(token: string | null) {
   return useQuery({
     queryKey: ["invitation-preview", token],
-    queryFn: ({ signal }) =>
-      runFrontendEffect(
-        { brandProfileId: null, isSignedIn: false, workspaceId: null },
-        Effect.flatMap(ApiClientService, (api) => api.getInvitationPreview(token ?? "")),
-        { signal },
-      ),
-    enabled: token !== null && token.length >= 16,
+    queryFn:
+      token !== null && token.length >= 16
+        ? ({ signal }) => runQueryEffect(getInvitationPreview(token), { signal })
+        : skipToken,
   });
 }
 
-/** Reads resumable progress only for a signed-in Installation Owner. */
 export function useOnboarding(scope: SessionScope, enabled = true) {
   return useQuery({
     queryKey: queryKeys.onboarding(),
@@ -1844,7 +1306,6 @@ export function useOnboarding(scope: SessionScope, enabled = true) {
   });
 }
 
-/** Persists the reached screen with an idempotency key and refreshes progress. */
 export function useSaveOnboarding(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1854,7 +1315,6 @@ export function useSaveOnboarding(scope: SessionScope) {
   );
 }
 
-/** Completes setup before navigation into the chosen Workspace flow. */
 export function useCompleteOnboarding(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
@@ -1864,14 +1324,6 @@ export function useCompleteOnboarding(scope: SessionScope) {
   );
 }
 
-/**
- * Reads the installation improvement-reporting policy. Every active member may
- * read it so the Owner's choice and its effective state stay visible.
- *
- * @param scope Session scope gating execution.
- * @param enabled Whether the query may run.
- * @returns Query result with the requested and effective policy.
- */
 export function useReportingPolicy(scope: SessionScope, enabled = true) {
   return useQuery({
     queryKey: queryKeys.reportingPolicy(),
@@ -1880,31 +1332,15 @@ export function useReportingPolicy(scope: SessionScope, enabled = true) {
   });
 }
 
-/**
- * Replaces both reporting choices for the current Installation Owner. The
- * response carries the effective state, so the surface can report a disabled
- * destination or operator override honestly.
- *
- * @param scope Session scope gating execution.
- * @returns Mutation accepting the independent usage and diagnostics choices.
- */
 export function useUpdateReportingPreferences(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
     (api, input: { diagnostics: boolean; usage: boolean }, idempotencyKey) =>
       api.updateReportingPreferences(input, { idempotencyKey }),
-    () => [queryKeys.reportingPolicy()],
+    mutationInvalidations.reportingPreferences,
   );
 }
 
-/**
- * Reads the one-time discovery-source answer and its delivery state. Owner
- * only, because the answer belongs to the installation.
- *
- * @param scope Session scope gating execution.
- * @param enabled Whether the query may run.
- * @returns Query result with the attribution state.
- */
 export function useReportingFeedback(scope: SessionScope, enabled = true) {
   return useQuery({
     queryKey: queryKeys.reportingFeedback(),
@@ -1913,18 +1349,11 @@ export function useReportingFeedback(scope: SessionScope, enabled = true) {
   });
 }
 
-/**
- * Shares the fixed-enum discovery-source answer as a separate explicit action.
- * It never changes either reporting switch.
- *
- * @param scope Session scope gating execution.
- * @returns Mutation accepting the fixed discovery-source value.
- */
 export function useSubmitReportingFeedback(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
     (api, input: { discoverySource: DiscoverySource }, idempotencyKey) =>
       api.submitReportingFeedback({ discovery_source: input.discoverySource }, { idempotencyKey }),
-    () => [queryKeys.reportingFeedback()],
+    mutationInvalidations.reportingFeedback,
   );
 }

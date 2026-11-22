@@ -23,11 +23,6 @@ const CARDS = [
   },
 ] as const;
 
-/**
- * Five exact totals for the published cohort. Values never come from an
- * inferred rate: the four stored counters and the published destination count
- * are the whole vocabulary. Each definition is reachable by hover or keyboard.
- */
 export function MetricCards({
   totals,
 }: {
@@ -40,8 +35,6 @@ export function MetricCards({
         {CARDS.map((card) => {
           const value = totals[card.key];
           const exact = formatAnalyticsInteger(value, language);
-          // Only totals wider than seven digits compact, and only on narrow
-          // screens. Desktop always carries the exact grouped integer.
           const compactOnPhone = value >= 10_000_000;
           const compact = formatAnalyticsCompact(value, language);
           return (

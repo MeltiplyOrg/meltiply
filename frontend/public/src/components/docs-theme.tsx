@@ -8,13 +8,6 @@ export const DocsThemeContext = createContext<{
   toggleTheme: () => void;
 } | null>(null);
 
-/**
- * Thin public-site adapter over the shared theme controller. Explicit
- * current-page intent survives hydration and is stored only with functional
- * consent. Changes commit synchronously without an ink clone or delayed mask;
- * unpinned pages follow live OS color-scheme changes. System intent remains
- * unpinned so the button always describes the next explicit choice.
- */
 export function DocsThemeProvider({ children }: { children: ReactNode }): ReactElement {
   const { controller, state } = useThemeController();
   const value = useMemo(

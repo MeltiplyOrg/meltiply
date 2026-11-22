@@ -11,7 +11,6 @@ import {
   writeFunctionalStorage,
 } from "@meltiply/ui/cookie-consent";
 
-/** Each case starts without a consent record or optional preferences; auth fixtures never enter this isolated store. */
 beforeEach(() => {
   document.cookie = `${consentCookieName}=; Path=/; Max-Age=0`;
   document.cookie = "meltiply-theme=; Path=/; Max-Age=0";
@@ -48,7 +47,6 @@ describe("optional cookie and storage consent", () => {
     expect(readCookieConsent()).toEqual({ functional: false });
   });
 
-  /** Consent written before the model narrowed to the one implemented purpose keeps its explicit decision. */
   it("keeps a saved decision that still carries retired category fields", () => {
     const record = {
       v: 1,

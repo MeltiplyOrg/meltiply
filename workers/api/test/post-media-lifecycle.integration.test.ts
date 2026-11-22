@@ -1717,8 +1717,8 @@ describeIntegration("post-owned media retention with PostgreSQL", () => {
       // A previous interrupted run must not leak into this one.
       await client.query("DELETE FROM organizations WHERE id = $1", [organizationId]);
       await client.query(
-        `INSERT INTO organizations (id, name, slug, plan, billing_status)
-         VALUES ($1, 'Lifecycle Studio', $2, 'creator', 'active')`,
+        `INSERT INTO organizations (id, name, slug)
+         VALUES ($1, 'Lifecycle Studio', $2)`,
         [organizationId, slug],
       );
       await client.query(
@@ -1735,8 +1735,8 @@ describeIntegration("post-owned media retention with PostgreSQL", () => {
       // here so the cross-tenant assertions have something real to be refused for.
       await client.query("DELETE FROM organizations WHERE id = $1", [foreignOrganizationId]);
       await client.query(
-        `INSERT INTO organizations (id, name, slug, plan, billing_status)
-         VALUES ($1, 'Foreign Studio', $2, 'creator', 'active')`,
+        `INSERT INTO organizations (id, name, slug)
+         VALUES ($1, 'Foreign Studio', $2)`,
         [foreignOrganizationId, foreignSlug],
       );
       await client.query(

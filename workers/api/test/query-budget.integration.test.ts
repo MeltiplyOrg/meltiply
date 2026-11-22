@@ -361,11 +361,10 @@ describeIntegration("core API PostgreSQL query budgets", () => {
           );
           yield* client.query(
             `INSERT INTO organizations
-               (id, name, slug, plan, billing_status)
+               (id, name, slug)
              VALUES (
                'b2000000-0000-4000-8000-000000000001',
-               'Query Budget Studio', 'query-budget-studio',
-               'agency', 'active'
+               'Query Budget Studio', 'query-budget-studio'
              )`,
           );
           yield* client.query(
@@ -1141,11 +1140,11 @@ describeIntegration("core API PostgreSQL query budgets", () => {
           );
           yield* client.query(
             `INSERT INTO organizations
-               (id, name, slug, plan, billing_status)
+               (id, name, slug)
              VALUES (
                'f2000000-0000-4000-8000-000000000001',
                'Analytics Range Studio',
-               'analytics-range-studio', 'agency', 'active'
+               'analytics-range-studio'
              )`,
           );
           yield* client.query(

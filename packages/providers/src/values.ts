@@ -1,7 +1,9 @@
-import type { Platform } from "@meltiply/domain";
+import { codePointLength, type Platform } from "@meltiply/domain";
 
 import { rejected } from "./failures";
 import type { ProviderPageInput } from "./types";
+
+export { codePointLength };
 
 const controlCharactersPattern = /[\u0000-\u001f\u007f]/;
 const providerIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$/;
@@ -9,19 +11,6 @@ const lineBreakPattern = /\r?\n/;
 const maxPageLimit = 100;
 const maxCursorChars = 2_048;
 const idempotencyKeyMaxChars = 255;
-
-export function codePointLength(text: string): number {
-  let count = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    const code = text.charCodeAt(index);
-    if (code >= 0xd800 && code <= 0xdbff && index + 1 < text.length) {
-      const next = text.charCodeAt(index + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) index += 1;
-    }
-    count += 1;
-  }
-  return count;
-}
 
 export function firstNonEmptyLine(text: string): string | undefined {
   for (const line of text.split(lineBreakPattern)) {

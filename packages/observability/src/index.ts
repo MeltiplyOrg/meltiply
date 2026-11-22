@@ -1,4 +1,15 @@
 export {
+  createFlowLedgerRecorder,
+  flowDatabaseAvailable,
+  flowExplorerEnabled,
+  flowNodeTypeFor,
+  type FlowLedgerClient,
+  type FlowLedgerEnvironment,
+  type FlowLedgerQueryResult,
+  type FlowLedgerRecorder,
+  type FlowLedgerTransactionRunner,
+} from "./flow-ledger";
+export {
   configureLogSampling,
   createRequestId,
   createTraceId,

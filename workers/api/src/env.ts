@@ -1,5 +1,6 @@
 import { objectStorageBindings } from "@meltiply/storage";
 import type { AccessClaims, JwtIdentity } from "@meltiply/auth";
+import type { WorkerEnvironment } from "@meltiply/domain";
 
 import type { ResolvedActor } from "./actor-resolution";
 import { mailSenderConfiguration } from "@meltiply/domain/mail-content";
@@ -40,7 +41,7 @@ export interface ApiWorkerEnv {
   DEPLOYMENT_CATEGORY?: string;
   DB_AUTHENTICATED?: Hyperdrive;
   DB_SYSTEM?: Hyperdrive;
-  ENVIRONMENT: "local" | "preview" | "production" | "selfhost" | "staging" | "test";
+  ENVIRONMENT: WorkerEnvironment;
   FACEBOOK_CLIENT_ID?: string;
   FACEBOOK_CLIENT_SECRET?: string;
   FACEBOOK_LIVE_ACCEPTED?: string;

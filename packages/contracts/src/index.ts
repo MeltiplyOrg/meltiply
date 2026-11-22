@@ -10,4 +10,15 @@ export type PlatformCapability = components["schemas"]["PlatformCapability"];
 /** A stable, typed explanation of one rejected publish constraint, derived from OpenAPI. */
 export type ValidationIssue = components["schemas"]["ValidationIssue"];
 
-export * from "./oauth-state";
+export type {
+  CancelSelectionResult,
+  ClaimSelectionResult,
+  OAuthSelectionAccount,
+  OAuthSelectionCandidate,
+  OAuthSelectionInit,
+  OAuthSelectionPublic,
+  OAuthSelectionRecord,
+  OAuthStateCoordinatorStub,
+  OAuthStateRecord,
+  Platform,
+} from "./oauth-state";

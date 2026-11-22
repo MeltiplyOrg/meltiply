@@ -435,8 +435,8 @@ beforeAll(async () => {
   // either, so they stay out of this fixture.
   await runSystemTransaction(env, async (client) => {
     await client.query(
-      `INSERT INTO organizations (id, name, slug, is_shared, plan, billing_status)
-       VALUES ($1, 'Usage Workspace', 'usage-workspace', TRUE, 'creator', 'active')`,
+      `INSERT INTO organizations (id, name, slug, is_shared)
+       VALUES ($1, 'Usage Workspace', 'usage-workspace', TRUE)`,
       [organizationId],
     );
   });

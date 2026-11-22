@@ -88,22 +88,13 @@ UPDATE users
 SET installation_owner = TRUE
 WHERE id = '10000000-0000-4000-8000-000000000001';
 
-INSERT INTO organizations (
-  id, name, slug, plan, billing_status,
-  billing_customer_id, renews_at, cancel_at, billing_event_at
-)
+INSERT INTO organizations (id, name, slug)
 VALUES
-  ('20000000-0000-4000-8000-000000000001', 'Alpha Studio', 'alpha-studio', 'creator', 'free', NULL, NULL, NULL, NULL),
-  ('20000000-0000-4000-8000-000000000002', 'Beta Studio', 'beta-studio', 'free', 'free', NULL, NULL, NULL, NULL)
+  ('20000000-0000-4000-8000-000000000001', 'Alpha Studio', 'alpha-studio'),
+  ('20000000-0000-4000-8000-000000000002', 'Beta Studio', 'beta-studio')
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     slug = EXCLUDED.slug,
-    plan = EXCLUDED.plan,
-    billing_status = EXCLUDED.billing_status,
-    billing_customer_id = EXCLUDED.billing_customer_id,
-    renews_at = EXCLUDED.renews_at,
-    cancel_at = EXCLUDED.cancel_at,
-    billing_event_at = EXCLUDED.billing_event_at,
     updated_at = now();
 
 UPDATE organizations
@@ -111,29 +102,23 @@ SET is_shared = FALSE
 WHERE is_shared
   AND id <> '20000000-0000-4000-8000-000000000005';
 
-INSERT INTO organizations (id, name, slug, plan, billing_status, is_shared)
+INSERT INTO organizations (id, name, slug, is_shared)
 VALUES
   (
     '20000000-0000-4000-8000-000000000005',
     'Alpha Creator''s workspace',
     'workspace-10000000000040008000000000000001',
-    'creator',
-    'free',
     TRUE
   ),
   (
     '20000000-0000-4000-8000-000000000006',
     'Beta Studio Archive',
     'workspace-10000000000040008000000000000002',
-    'free',
-    'free',
     FALSE
   )
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     slug = EXCLUDED.slug,
-    plan = EXCLUDED.plan,
-    billing_status = EXCLUDED.billing_status,
     updated_at = now();
 
 INSERT INTO usage_reconciliation_state (org_id)

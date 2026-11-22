@@ -608,9 +608,8 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
 
     await runSystemTransaction(env, async (client) => {
       await client.query(
-        `INSERT INTO organizations (id, name, slug, plan, billing_status)
-         VALUES ($1, 'Retention Purge Protected', 'retention-purge-protected',
-                 'creator', 'free')`,
+        `INSERT INTO organizations (id, name, slug)
+         VALUES ($1, 'Retention Purge Protected', 'retention-purge-protected')`,
         [protectedOrganizationId],
       );
       await client.query(

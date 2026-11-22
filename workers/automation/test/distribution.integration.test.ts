@@ -780,7 +780,7 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
     await runSystemTransaction(env, async (client) => {
       await client.query(
         `UPDATE organizations
-         SET plan = 'creator', billing_status = 'active', updated_at = now()
+         SET updated_at = now()
          WHERE id = $1`,
         [organizationId],
       );

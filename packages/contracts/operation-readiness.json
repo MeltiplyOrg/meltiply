@@ -4,43 +4,43 @@
   "operations": {
     "getBroadcast": {
       "state": "specified",
-      "evidenceAndGate": "PR #100 adds writer-only no-store encoder reads. Provider protocol tests cover Facebook and YouTube Live; tenant authorization and live-account acceptance remain separate gates."
+      "evidenceAndGate": "Writer-only no-store encoder read route implemented. Provider protocol tests cover Facebook and YouTube Live; tenant authorization and live-account acceptance remain separate gates."
     },
     "endBroadcast": {
       "state": "specified",
-      "evidenceAndGate": "PR #100 adds idempotent broadcast ending, distinguishing unstarted cancellation from a published recording. Tenant authorization and live-account acceptance remain separate gates."
+      "evidenceAndGate": "Idempotent broadcast ending route implemented, distinguishing unstarted cancellation from a published recording. Tenant authorization and live-account acceptance remain separate gates."
     },
     "getPublishingPreferences": {
       "state": "specified",
-      "evidenceAndGate": "Preference persistence and browser acceptance tracked in issues #6, #7, and #8; hosted mail delivery remains separate."
+      "evidenceAndGate": "Preference persistence and API routes implemented; hosted mail delivery and staging acceptance remain separate."
     },
     "updatePublishingPreferences": {
       "state": "specified",
-      "evidenceAndGate": "Preference persistence and browser acceptance tracked in issues #6, #7, and #8; hosted mail delivery remains separate."
+      "evidenceAndGate": "Preference persistence and API routes implemented; hosted mail delivery and staging acceptance remain separate."
     },
     "listQueues": {
       "state": "specified",
-      "evidenceAndGate": "Queue HTTP and browser acceptance tracked in issue #23; live Platform credentials remain separate."
+      "evidenceAndGate": "Queue persistence and HTTP routes implemented; staging smoke and live Platform credentials remain separate."
     },
     "createQueue": {
       "state": "specified",
-      "evidenceAndGate": "Queue HTTP and browser acceptance tracked in issue #23; live Platform credentials remain separate."
+      "evidenceAndGate": "Queue persistence and HTTP routes implemented; staging smoke and live Platform credentials remain separate."
     },
     "getQueue": {
       "state": "specified",
-      "evidenceAndGate": "Queue HTTP and browser acceptance tracked in issue #23; live Platform credentials remain separate."
+      "evidenceAndGate": "Queue persistence and HTTP routes implemented; staging smoke and live Platform credentials remain separate."
     },
     "updateQueue": {
       "state": "specified",
-      "evidenceAndGate": "Queue HTTP and browser acceptance tracked in issue #23; live Platform credentials remain separate."
+      "evidenceAndGate": "Queue persistence and HTTP routes implemented; staging smoke and live Platform credentials remain separate."
     },
     "deleteQueue": {
       "state": "specified",
-      "evidenceAndGate": "Queue HTTP and browser acceptance tracked in issue #23; live Platform credentials remain separate."
+      "evidenceAndGate": "Queue persistence and HTTP routes implemented; staging smoke and live Platform credentials remain separate."
     },
     "removePostFromQueue": {
       "state": "specified",
-      "evidenceAndGate": "Queue HTTP and browser acceptance tracked in issue #23; live Platform credentials remain separate."
+      "evidenceAndGate": "Queue persistence and HTTP routes implemented; staging smoke and live Platform credentials remain separate."
     },
     "getSetupStatus": {
       "state": "specified",

@@ -5384,10 +5384,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     try {
       await runSystemTransaction(env, async (client) => {
         await client.query(
-          `INSERT INTO organizations (id, name, slug, plan, billing_status)
-           VALUES (
-             $1, 'Usage Window Studio', 'usage-window-studio', 'agency', 'active'
-           )`,
+          `INSERT INTO organizations (id, name, slug)
+           VALUES ($1, 'Usage Window Studio', 'usage-window-studio')`,
           [orgId],
         );
         await client.query(

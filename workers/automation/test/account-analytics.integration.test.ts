@@ -38,8 +38,8 @@ describe("account analytics sweep with PostgreSQL", () => {
     await runSystemTransaction(env, async (client) => {
       await client.query("DELETE FROM organizations WHERE id = $1", [organizationId]);
       await client.query(
-        `INSERT INTO organizations (id, name, slug, plan, billing_status)
-         VALUES ($1, 'Account analytics fixture', 'account-analytics-fixture', 'creator', 'free')`,
+        `INSERT INTO organizations (id, name, slug)
+         VALUES ($1, 'Account analytics fixture', 'account-analytics-fixture')`,
         [organizationId],
       );
       await client.query(

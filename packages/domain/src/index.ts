@@ -8,9 +8,56 @@ export function errorMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message.length > 0 ? cause.message : fallback;
 }
 
-export * from "./due-work";
-export * from "./capabilities";
-export * from "./effect";
+/** Counts Unicode code points without allocating an intermediate character array. */
+export function codePointLength(text: string): number {
+  let count = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff && index + 1 < text.length) {
+      const next = text.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) index += 1;
+    }
+    count += 1;
+  }
+  return count;
+}
+
+/** Valid runtime environment labels shared by API and automation Workers. */
+export type WorkerEnvironment =
+  | "local"
+  | "preview"
+  | "production"
+  | "selfhost"
+  | "staging"
+  | "test";
+
+export {
+  analyticsTerminalAgeSeconds,
+  demandDrivenCommentsAgeSeconds,
+  maximumDelayedDeliverySeconds,
+  overdueRecoveryGraceSeconds,
+} from "./due-work";
+export {
+  can,
+  INSTALLATION_SEAT_LIMIT,
+  isWorkspaceRole,
+  WORKSPACE_ROLES,
+  type WorkspaceCapability,
+  type WorkspaceRole,
+} from "./capabilities";
+export {
+  ActiveOrganizationRequiredError,
+  AuthenticationRequiredError,
+  DatabaseError,
+  ForbiddenError,
+  InvalidRequestError,
+  MailSubmissionError,
+  NotFoundError,
+  RequestContext,
+  StorageUnavailableError,
+  type MailSubmissionClassification,
+  type RequestContextData,
+} from "./effect";
 
 export const rateLimitBudgetFreshSeconds = 2 * 60 * 60;
 

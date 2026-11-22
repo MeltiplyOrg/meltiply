@@ -13,7 +13,12 @@ import {
   activeBrandProfilePredicate,
   requireActiveBrandProfileEffect,
 } from "./brand-profile-guard";
-import { CoreApiError, type CoreServiceError, type IdempotentResult } from "./core-types";
+import {
+  CoreApiError,
+  toCoreApiErrorOrRethrow,
+  type CoreServiceError,
+  type IdempotentResult,
+} from "./core-types";
 import {
   activeOrganizationIdEffect,
   withTenantTransactionEffect,
@@ -749,7 +754,7 @@ export function createDistributionMethods() {
             const now = new Date();
             yield* Effect.try({
               try: () => validateTargetOverrides(patch),
-              catch: (cause) => cause as CoreApiError,
+              catch: toCoreApiErrorOrRethrow,
             });
             yield* requireActiveDistributionProfileEffect(client, organizationId, id);
             // A Queue owns the shared instant; serialize against enqueue/removal

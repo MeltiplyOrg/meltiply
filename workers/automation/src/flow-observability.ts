@@ -262,7 +262,6 @@ const FLOW_NODE_KINDS: Record<string, string> = {
   r2: "storage",
   cache: "storage",
   providers: "provider",
-  polar: "provider",
 };
 
 /**

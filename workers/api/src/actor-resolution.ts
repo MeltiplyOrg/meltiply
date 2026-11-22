@@ -6,6 +6,7 @@ import { isWorkspaceRole, type DatabaseError, type WorkspaceRole } from "@meltip
 import { auditActorFrom, recordWorkspaceAuditEffect } from "./audit";
 import { CoreApiError } from "./core-types";
 import { RFC4122_UUID_PATTERN } from "./crypto";
+import { lazyWithSystemTransactionEffect } from "./database-module";
 import type { ApiWorkerEnv } from "./env";
 import { requireSeatCapacityEffect } from "./seats";
 
@@ -481,10 +482,8 @@ export async function resolveActor(
     );
   }
 
-  // Exception: dynamic import avoids loading pg in workerd unit test isolates
-  const { withSystemTransactionEffect } = await import("./database");
   return Effect.runPromise(
-    withSystemTransactionEffect(env, (client) =>
+    lazyWithSystemTransactionEffect(env, (client) =>
       Effect.gen(function* () {
         const existing = yield* client.query<
           InternalUserRow & {

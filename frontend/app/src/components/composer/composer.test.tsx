@@ -445,6 +445,36 @@ describe("Composer and collection scope", () => {
   });
 
   /**
+   * Two attachments selected in the same millisecond must still get distinct
+   * React keys: the row key is a UUID, not a timestamp composite that collides
+   * for same-size files chosen together.
+   */
+  it("gives same-millisecond file selections distinct attachment keys", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { container } = renderComposer({ brandProfiles: composerProfiles });
+    await waitFor(() => expect(composerTextarea()).toBeEnabled());
+    await screen.findByRole("button", { name: "Alpha Brand" });
+
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    fireEvent.change(fileInput!, {
+      target: {
+        files: [
+          new File(["same"], "clip.mp4", { type: "video/mp4" }),
+          new File(["same"], "clip.mp4", { type: "video/mp4" }),
+        ],
+      },
+    });
+
+    expect(await screen.findAllByText(/clip\.mp4/)).toHaveLength(2);
+    const duplicateKeyWarnings = consoleError.mock.calls.filter((call) =>
+      String(call[0]).includes("same key"),
+    );
+    expect(duplicateKeyWarnings).toHaveLength(0);
+    consoleError.mockRestore();
+  });
+
+  /**
    * A collection switch is not a composition identity switch, so it must not
    * abandon the upload tasks the composer owns.
    */

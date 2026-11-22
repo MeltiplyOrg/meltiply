@@ -419,27 +419,49 @@ function deriveMessage(fields: LogFields): string {
 }
 /**
  * Recursively redacts sensitive keys and signed URLs from objects, arrays, and primitive values.
- * Masks fields matching password/token/secret patterns with `[REDACTED]` and removes query signatures from URLs.
+ * Bounded by depth and guarded against circular references so cyclic span attributes cannot overflow the stack.
  *
  * @param value - Arbitrary data payload to sanitize.
  * @param key - Field key name if called recursively on object properties.
  * @returns Sanitized value safe for structured logging or telemetry export.
  */
 export function redact(value: unknown, key = ""): unknown {
+  return redactBounded(value, key, new Set(), maxJsonDepth);
+}
+
+function redactBounded(value: unknown, key: string, seen: Set<unknown>, depth: number): unknown {
   if (sensitiveKey.test(key)) return "[REDACTED]";
   if (typeof value === "string" && signedUrl.test(value)) {
     return `${value.split("?")[0]}?[REDACTED]`;
   }
-  if (Array.isArray(value)) return value.map((item) => redact(item));
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([entryKey, entryValue]) => [
-        entryKey,
-        redact(entryValue, entryKey),
-      ]),
-    );
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "[Circular]";
+  if (depth <= 0) return "[Truncated]";
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      const items = value
+        .slice(0, maxJsonEntries)
+        .map((item) => redactBounded(item, "", seen, depth - 1));
+      if (value.length > maxJsonEntries) {
+        items.push(`[+${value.length - maxJsonEntries} items]`);
+      }
+      return items;
+    }
+    const output: Record<string, unknown> = {};
+    let index = 0;
+    for (const [entryKey, entryValue] of Object.entries(value)) {
+      if (index >= maxJsonEntries) {
+        output["…"] = "additional keys truncated";
+        break;
+      }
+      index += 1;
+      output[entryKey] = redactBounded(entryValue, entryKey, seen, depth - 1);
+    }
+    return output;
+  } finally {
+    seen.delete(value);
   }
-  return value;
 }
 
 /**
@@ -489,9 +511,7 @@ export function log(
 
   const line = JSON.stringify(payload);
   console[level](line);
-  // Local/test only: ship the same redacted line to Loki so Explore shows
-  // real Worker logs correlated by trace_id. Staging/production stay console-only.
-  if (context.environment === "local" || context.environment === "test") {
+  if (context.environment === "local") {
     void shipLogToLoki(level, payload, line);
   }
 }

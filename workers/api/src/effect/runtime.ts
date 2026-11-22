@@ -245,7 +245,7 @@ function requestScope(c: Context<ApiWorkerEnvironment>): RequestScope {
 
   const requestContextData: RequestContextData = makeRequestContext({
     requestId,
-    session: actor?.claims as unknown as Record<string, unknown> | undefined,
+    session: actor?.claims,
     tenantId,
     traceId,
   });

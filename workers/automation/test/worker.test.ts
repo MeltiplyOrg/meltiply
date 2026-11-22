@@ -1322,7 +1322,7 @@ describe("Distribution message processing", () => {
     // so a duplicate re-arm dedupes instead of claiming an independent
     // reconciliation budget slot (#256).
     expect(outboxInserts).toHaveLength(1);
-    expect(outboxInserts[0]?.params?.[2]).toBe(`distribution:${distributionId}:reconcile:5`);
+    expect(outboxInserts[0]?.params?.[4]).toBe(`distribution:${distributionId}:reconcile:5`);
   });
   it("publishes a due scheduled row exactly once from its delayed trigger", async () => {
     const now = new Date("2026-08-24T00:00:00Z");
@@ -1499,9 +1499,10 @@ describe("Distribution message processing", () => {
     expect(park?.[1]).toEqual([distributionId, 3_600]);
     expect(
       query.mock.calls.some(
-        ([sql]) =>
+        ([sql, params]) =>
           String(sql).includes("INSERT INTO outbox_events") &&
-          String(sql).includes("distribution.publish.requested"),
+          Array.isArray(params) &&
+          params[1] === "distribution.publish.requested",
       ),
     ).toBe(true);
     expect(

@@ -1,3 +1,8 @@
+import { isRetryableStatus } from "./retry.mjs";
+
+/** Default per-request timeout for one translation provider completion. */
+export const DEFAULT_TIMEOUT_MS = 120_000;
+
 /**
  * Provider failure with enough classification for retry, fallback, and
  * actionable terminal errors. Messages never include the prompt or credentials.
@@ -14,6 +19,46 @@ export class ProviderError extends Error {
     this.kind = kind;
     this.retryable = retryable;
   }
+}
+
+/**
+ * Maps an HTTP failure from a translation provider to a classified `ProviderError`
+ * with a bounded response body suffix (at most 500 characters). Provider-specific
+ * status overrides (such as 401/403 auth guidance or 404 model-pull guidance) may
+ * be supplied via `overrides`.
+ *
+ * @param {string} providerName - Human-readable provider label (e.g., `"Ollama"`, `"Workers AI"`).
+ * @param {number} status - HTTP status code.
+ * @param {string} body - Raw response body used for a bounded error suffix.
+ * @param {Record<number, {message: string, kind?: "auth" | "transient" | "malformed" | "provider", retryable?: boolean}>} [overrides] - Optional status-specific messages and classifications.
+ * @returns {ProviderError} Classified provider error.
+ */
+export function createStatusError(providerName, status, body, overrides = {}) {
+  const detail = body.trim().slice(0, 500);
+  const suffix = detail ? `: ${detail}` : "";
+  const specific = overrides[status];
+  if (specific) {
+    return new ProviderError(`${specific.message}${suffix}`, {
+      status,
+      kind: specific.kind ?? "provider",
+      retryable: specific.retryable ?? false,
+    });
+  }
+  if (isRetryableStatus(status)) {
+    return new ProviderError(
+      `${providerName} is temporarily unavailable (HTTP ${status}).${suffix}`,
+      {
+        status,
+        kind: "transient",
+        retryable: true,
+      },
+    );
+  }
+  return new ProviderError(`${providerName} request failed (HTTP ${status}).${suffix}`, {
+    status,
+    kind: "provider",
+    retryable: false,
+  });
 }
 
 /**

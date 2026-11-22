@@ -8,6 +8,7 @@ import {
   withTenantTransactionEffect,
 } from "./database";
 import type { ApiWorkerEnv } from "./env";
+import { RFC4122_UUID_PATTERN } from "./crypto";
 import { CoreApiError, type IdempotentResult } from "./core-types";
 import {
   completeIdempotencyEffect,
@@ -102,9 +103,7 @@ function normalizeSignatureTemplates(
   return templates.map((template, position) => {
     if (
       typeof template.id !== "string" ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        template.id,
-      ) ||
+      !RFC4122_UUID_PATTERN.test(template.id) ||
       ids.has(template.id)
     ) {
       throw new CoreApiError(

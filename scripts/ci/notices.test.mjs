@@ -15,7 +15,7 @@ test("notice bundle covers runtime dependencies and excludes development tools",
   const text = buildNoticeBundle("frontend/public");
   assert.match(text, /^Meltiply — Third-party notices/m);
   assert.match(text, /^License: GNU Affero General Public License v3\.0 or later$/m);
-  for (const dependency of ["react", "dompurify", "fumadocs-ui"]) {
+  for (const dependency of ["react", "astro", "fumadocs-ui"]) {
     assert.match(
       text,
       new RegExp(`^${dependency}@\\S+$`, "m"),

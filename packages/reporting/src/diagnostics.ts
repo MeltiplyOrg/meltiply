@@ -1,10 +1,11 @@
 import type { Platform } from "@meltiply/domain";
 
-import type {
-  DiagnosticCategory,
-  DiagnosticReportInput,
-  OperationCategory,
-  ProviderFailureClass,
+import {
+  isProviderFailureClass,
+  type DiagnosticCategory,
+  type DiagnosticReportInput,
+  type OperationCategory,
+  type ProviderFailureClass,
 } from "./contracts";
 
 /**
@@ -68,6 +69,23 @@ function errorShape(cause: unknown): { name: string; stack?: string } {
     name: typeof cause.name === "string" && cause.name.length > 0 ? cause.name : "Error",
     ...(stack ? { stack: stack.slice(0, maximumStackCharacters) } : {}),
   };
+}
+
+/**
+ * Extracts a canonical `ProviderFailureClass` from an unknown thrown provider
+ * error without touching vendor prose or depending directly on `@meltiply/providers`.
+ *
+ * @param cause - Thrown error or failure object at a Worker boundary.
+ * @returns Canonical failure class if `cause.failure.classification` is recognized, else undefined.
+ */
+export function extractProviderFailureClass(cause: unknown): ProviderFailureClass | undefined {
+  if (cause === null || typeof cause !== "object" || !("failure" in cause)) return undefined;
+  const failure = (cause as { failure?: unknown }).failure;
+  if (failure === null || typeof failure !== "object" || !("classification" in failure)) {
+    return undefined;
+  }
+  const classification = (failure as { classification?: unknown }).classification;
+  return isProviderFailureClass(classification) ? classification : undefined;
 }
 
 /**

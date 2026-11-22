@@ -1,10 +1,12 @@
-import { assertTranslationArray, expectedTranslationCount, ProviderError } from "./provider.mjs";
-import { isRetryableStatus } from "./retry.mjs";
+import {
+  assertTranslationArray,
+  createStatusError,
+  DEFAULT_TIMEOUT_MS,
+  expectedTranslationCount,
+  ProviderError,
+} from "./provider.mjs";
 
 const WORKERS_AI_ENDPOINT = "https://api.cloudflare.com/client/v4/accounts";
-
-/** Default request timeout for one Workers AI completion. */
-const DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
  * Maps an HTTP failure to an actionable provider error. Credential failures are
@@ -16,25 +18,14 @@ const DEFAULT_TIMEOUT_MS = 120_000;
  * @returns {ProviderError} Classified error.
  */
 function statusError(status, body) {
-  const detail = body.trim().slice(0, 500);
-  const suffix = detail ? `: ${detail}` : "";
-  if (status === 401 || status === 403) {
-    return new ProviderError(
-      `Workers AI rejected the credentials (HTTP ${status}). Check WORKERS_AI_API_TOKEN and its Workers AI permission.${suffix}`,
-      { status, kind: "auth", retryable: false },
-    );
-  }
-  if (isRetryableStatus(status)) {
-    return new ProviderError(`Workers AI is temporarily unavailable (HTTP ${status}).${suffix}`, {
-      status,
-      kind: "transient",
-      retryable: true,
-    });
-  }
-  return new ProviderError(`Workers AI request failed (HTTP ${status}).${suffix}`, {
-    status,
-    kind: "provider",
+  const authFailure = {
+    message: `Workers AI rejected the credentials (HTTP ${status}). Check WORKERS_AI_API_TOKEN and its Workers AI permission.`,
+    kind: "auth",
     retryable: false,
+  };
+  return createStatusError("Workers AI", status, body, {
+    401: authFailure,
+    403: authFailure,
   });
 }
 

@@ -1,7 +1,6 @@
 import type { components, operations } from "@meltiply/contracts/schema";
 export type BrandProfile = components["schemas"]["BrandProfile"];
 export type BrandProfileColor = components["schemas"]["BrandProfileColor"];
-export type BrandProfileListResponse = components["schemas"]["BrandProfileListResponse"];
 export type CreateBrandProfileInput = components["schemas"]["CreateBrandProfileRequest"];
 export type UpdateBrandProfileInput = components["schemas"]["UpdateBrandProfileRequest"];
 
@@ -137,14 +136,7 @@ export type DiscoverySource = components["schemas"]["DiscoverySource"];
 export type UserProfile = components["schemas"]["UserProfile"];
 export type WorkspaceRole = components["schemas"]["WorkspaceRole"];
 export type WorkspaceMember = components["schemas"]["WorkspaceMember"];
-export type WorkspaceMemberListResponse = components["schemas"]["WorkspaceMemberListResponse"];
-export type WorkspaceInvitation = components["schemas"]["WorkspaceInvitation"];
-export type WorkspaceInvitationListResponse =
-  components["schemas"]["WorkspaceInvitationListResponse"];
-export type InvitationPreview = components["schemas"]["InvitationPreview"];
-export type InstallationSummary = components["schemas"]["InstallationSummary"];
-export type AccountLifecycle = components["schemas"]["AccountLifecycle"];
-export type AuditListResponse = components["schemas"]["AuditListResponse"];
+type AuditListResponse = components["schemas"]["AuditListResponse"];
 export type AuditEntry = AuditListResponse["entries"][number];
 export type AuditQueryParams = NonNullable<operations["listWorkspaceAudit"]["parameters"]["query"]>;
 
@@ -207,7 +199,6 @@ export type CreatePostInput = components["schemas"]["CreatePostRequest"];
 export type UpdatePostInput = components["schemas"]["UpdatePostRequest"];
 export type SchedulePostInput = components["schemas"]["SchedulePostRequest"];
 export type PublishingQueue = components["schemas"]["PublishingQueue"];
-export type QueueListResponse = components["schemas"]["QueueListResponse"];
 export type CreateQueueInput = components["schemas"]["CreateQueueRequest"];
 export type UpdateQueueInput = components["schemas"]["UpdateQueueRequest"];
 export type QueueQueryParams = NonNullable<operations["listQueues"]["parameters"]["query"]>;
@@ -225,7 +216,6 @@ export type DistributionQueryParams = NonNullable<
 >;
 
 export type CalendarEvent = components["schemas"]["CalendarEvent"];
-export type CalendarResponse = components["schemas"]["CalendarResponse"];
 export type CalendarQueryParams = NonNullable<
   operations["listCalendarEvents"]["parameters"]["query"]
 >;
@@ -272,5 +262,3 @@ export interface AnalyticsPostScopeParams extends AnalyticsScopeParams {
   metric: AnalyticsMetric;
   offset?: number;
 }
-
-export type SignedUrlResponse = components["schemas"]["SignedUrlResponse"];

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { Effect } from "effect";
+import { Effect, Exit } from "effect";
+import type { EffectTransactionClient } from "@meltiply/database";
 import {
   ActiveOrganizationRequiredError,
   DatabaseError,
@@ -14,8 +15,9 @@ import {
 } from "@meltiply/domain";
 import { ProviderAdapterError } from "@meltiply/providers";
 
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError, toCoreApiErrorOrRethrow } from "../src/core-types";
 import { runWorkerEffect } from "../src/effect/runtime";
+import { reserveIdempotencyEffect, type IdempotencyRecord } from "../src/idempotency";
 
 /**
  * Constructs a minimal mock Hono context for testing the Worker Effect runtime boundary.
@@ -531,5 +533,139 @@ describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
         },
       });
     });
+  });
+});
+
+describe("reserveIdempotencyEffect", () => {
+  const organizationId = "org-1";
+  const operation = "update-post";
+  const idempotencyKey = "key-1";
+  const requestHash = "hash-1";
+
+  /**
+   * Builds a scripted EffectTransactionClient whose query answers depend on
+   * the SQL text: INSERT reports whether a row was reserved, SELECT reports
+   * the currently committed idempotency record (empty when a rolled-back
+   * leader left nothing visible).
+   */
+  function scriptedClient(script: {
+    readonly insertRowCounts: readonly number[];
+    readonly selectRows: readonly (readonly IdempotencyRecord[])[];
+  }): { client: EffectTransactionClient; queries: string[] } {
+    const queries: string[] = [];
+    let insertIndex = 0;
+    let selectIndex = 0;
+    const client: EffectTransactionClient = {
+      query: <Row extends Record<string, unknown> = Record<string, unknown>>(
+        text: string,
+        _values?: readonly unknown[],
+      ) => {
+        queries.push(text);
+        if (text.includes("INSERT INTO idempotency_keys")) {
+          const inserted = (script.insertRowCounts[insertIndex++] ?? 0) === 1;
+          return Effect.succeed({
+            command: "INSERT",
+            fields: [],
+            oid: 0,
+            rowCount: inserted ? 1 : 0,
+            rows: (inserted ? [{ idempotency_key: idempotencyKey }] : []) as unknown as Row[],
+          });
+        }
+        const rows = (script.selectRows[selectIndex++] ?? []) as unknown as Row[];
+        return Effect.succeed({
+          command: "SELECT",
+          fields: [],
+          oid: 0,
+          rowCount: rows.length,
+          rows,
+        });
+      },
+    };
+    return { client, queries };
+  }
+
+  it("reserves cleanly when a rolled-back leader leaves no committed row", async () => {
+    // Attempt 1 conflicts with the uncommitted leader and its FOR UPDATE
+    // select sees nothing (leader rolled back). Attempt 2's insert succeeds.
+    const { client, queries } = scriptedClient({
+      insertRowCounts: [0, 1],
+      selectRows: [[]],
+    });
+    const result = await Effect.runPromise(
+      reserveIdempotencyEffect(client, organizationId, operation, idempotencyKey, requestHash),
+    );
+    expect(result).toBeNull();
+    expect(queries.filter((text) => text.includes("INSERT INTO"))).toHaveLength(2);
+  });
+
+  it("fails with idempotency_in_progress after bounded retries find no row", async () => {
+    const { client, queries } = scriptedClient({
+      insertRowCounts: [0, 0, 0],
+      selectRows: [[], [], []],
+    });
+    const exit = await Effect.runPromiseExit(
+      reserveIdempotencyEffect(client, organizationId, operation, idempotencyKey, requestHash),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const failure = exit.cause;
+      expect(JSON.stringify(failure)).toContain("idempotency_in_progress");
+    }
+    expect(queries.filter((text) => text.includes("INSERT INTO"))).toHaveLength(3);
+  });
+
+  it("replays a completed record and rejects a hash conflict without retrying", async () => {
+    const completed: IdempotencyRecord = {
+      request_hash: requestHash,
+      response_body: { ok: true },
+      response_status: 200,
+    };
+    const replayed = scriptedClient({
+      insertRowCounts: [0],
+      selectRows: [[completed]],
+    });
+    await expect(
+      Effect.runPromise(
+        reserveIdempotencyEffect(
+          replayed.client,
+          organizationId,
+          operation,
+          idempotencyKey,
+          requestHash,
+        ),
+      ),
+    ).resolves.toEqual(completed);
+    expect(replayed.queries.filter((text) => text.includes("INSERT INTO"))).toHaveLength(1);
+
+    const conflicted = scriptedClient({
+      insertRowCounts: [0],
+      selectRows: [[{ ...completed, request_hash: "other-hash" }]],
+    });
+    const exit = await Effect.runPromiseExit(
+      reserveIdempotencyEffect(
+        conflicted.client,
+        organizationId,
+        operation,
+        idempotencyKey,
+        requestHash,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      expect(JSON.stringify(exit.cause)).toContain("idempotency_conflict");
+    }
+    expect(conflicted.queries.filter((text) => text.includes("INSERT INTO"))).toHaveLength(1);
+  });
+});
+
+describe("toCoreApiErrorOrRethrow", () => {
+  it("returns CoreApiError causes for typed failures", () => {
+    const error = new CoreApiError(422, "validation_error", "Invalid.");
+    expect(toCoreApiErrorOrRethrow(error)).toBe(error);
+  });
+
+  it("rethrows unexpected errors so they surface as defects", () => {
+    const defect = new TypeError("programming defect");
+    expect(() => toCoreApiErrorOrRethrow(defect)).toThrow(defect);
   });
 });

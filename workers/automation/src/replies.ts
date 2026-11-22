@@ -13,7 +13,8 @@ import {
 
 import { withSystemTransactionEffect } from "./database";
 import { classifyJobError, type AutomationJobError } from "./effect/index";
-import { maximumReconciliationAttempts, reconciliationDedupeKey } from "./due-work";
+import { maximumReconciliationAttempts } from "./due-work";
+import { armOutboxCommand, outboxDedupeKey } from "./outbox-commands";
 import {
   executeProviderLookupEffect,
   executeProviderReplyEffect,
@@ -23,6 +24,7 @@ import {
 import type { AutomationEnv } from "./env";
 import { isOutboxMessage, type OutboxMessage } from "./messages";
 import { decryptStoredToken } from "./provider-credentials";
+import { nextDelaySeconds, REPLY_RECONCILIATION_RETRY_POLICY } from "./retry-policy";
 
 type ReplyMessage = OutboxMessage;
 /**
@@ -97,22 +99,22 @@ function emitDelayedReconciliation(
   row: Pick<ReplyRow, "comment_id" | "org_id" | "reply_reconciliation_attempt_count">,
   delaySeconds: number,
 ): Effect.Effect<void, DatabaseError> {
-  return client
-    .query(
-      `INSERT INTO outbox_events
-       (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-     VALUES
-       ($1::uuid, 'comment.reply.requested', 'comment', $2::uuid,
-        ${reconciliationDedupeKey("$2::text", "$3::int")},
-        jsonb_build_object(
-          'comment_id', $2::uuid,
-          'reconciliation', true,
-          'delay_seconds', $4::int
-        ))
-     ON CONFLICT (org_id, topic, dedupe_key) DO NOTHING`,
-      [row.org_id, row.comment_id, row.reply_reconciliation_attempt_count, delaySeconds],
-    )
-    .pipe(Effect.asVoid);
+  return armOutboxCommand(client, {
+    aggregateId: row.comment_id,
+    aggregateType: "comment",
+    dedupeKey: outboxDedupeKey.commentReplyReconcile(
+      row.comment_id,
+      row.reply_reconciliation_attempt_count,
+    ),
+    onConflict: "nothing",
+    orgId: row.org_id,
+    payload: {
+      comment_id: row.comment_id,
+      delay_seconds: delaySeconds,
+      reconciliation: true,
+    },
+    topic: "comment.reply.requested",
+  }).pipe(Effect.asVoid);
 }
 
 /**
@@ -124,7 +126,10 @@ function emitDelayedReconciliation(
  * @returns Calculated delay interval in seconds.
  */
 export function replyReconciliationCadenceSeconds(attemptCount: number): number {
-  return Math.min(3_600, 60 * 2 ** Math.max(0, attemptCount - 1));
+  return (
+    nextDelaySeconds(REPLY_RECONCILIATION_RETRY_POLICY, attemptCount) ??
+    REPLY_RECONCILIATION_RETRY_POLICY.maxSeconds
+  );
 }
 
 /**

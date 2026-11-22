@@ -41,52 +41,61 @@ export function reserveIdempotencyEffect(
   requestHash: string,
 ): Effect.Effect<IdempotencyRecord | null, CoreApiError | DatabaseError> {
   return Effect.gen(function* () {
-    const inserted = yield* client.query(
-      `INSERT INTO idempotency_keys
-         (org_id, operation, idempotency_key, request_hash)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT DO NOTHING
-       RETURNING idempotency_key`,
-      [organizationId, operation, idempotencyKey, requestHash],
-    );
-    if (inserted.rowCount === 1) return null;
+    // A leader that rolls back after inserting leaves this contender's
+    // ON CONFLICT insert returning no row while its FOR UPDATE select also
+    // sees nothing. Re-inserting in a bounded loop lets the contender claim
+    // the freed key instead of reporting a permanent in-progress 409.
+    const maximumReserveAttempts = 3;
+    for (let attempt = 0; attempt < maximumReserveAttempts; attempt += 1) {
+      const inserted = yield* client.query(
+        `INSERT INTO idempotency_keys
+           (org_id, operation, idempotency_key, request_hash)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT DO NOTHING
+         RETURNING idempotency_key`,
+        [organizationId, operation, idempotencyKey, requestHash],
+      );
+      if (inserted.rowCount === 1) return null;
 
-    const existing = yield* client.query<IdempotencyRecord>(
-      `SELECT request_hash, response_status, response_body
-       FROM idempotency_keys
-       WHERE org_id = $1 AND operation = $2 AND idempotency_key = $3
-       FOR UPDATE`,
-      [organizationId, operation, idempotencyKey],
+      const existing = yield* client.query<IdempotencyRecord>(
+        `SELECT request_hash, response_status, response_body
+         FROM idempotency_keys
+         WHERE org_id = $1 AND operation = $2 AND idempotency_key = $3
+         FOR UPDATE`,
+        [organizationId, operation, idempotencyKey],
+      );
+      const record = existing.rows[0];
+      if (record) {
+        if (record.request_hash !== requestHash) {
+          return yield* Effect.fail(
+            new CoreApiError(
+              409,
+              "idempotency_conflict",
+              "The Idempotency-Key was already used with a different request.",
+            ),
+          );
+        }
+        if (record.response_status === null) {
+          return yield* Effect.fail(
+            new CoreApiError(
+              409,
+              "idempotency_in_progress",
+              "The idempotent operation is still in progress.",
+            ),
+          );
+        }
+        return record;
+      }
+      // No visible row means the conflicting leader rolled back; loop to
+      // retry the insert rather than failing the request permanently.
+    }
+    return yield* Effect.fail(
+      new CoreApiError(
+        409,
+        "idempotency_in_progress",
+        "The idempotent operation is still being recorded.",
+      ),
     );
-    const record = existing.rows[0];
-    if (!record) {
-      return yield* Effect.fail(
-        new CoreApiError(
-          409,
-          "idempotency_in_progress",
-          "The idempotent operation is still being recorded.",
-        ),
-      );
-    }
-    if (record.request_hash !== requestHash) {
-      return yield* Effect.fail(
-        new CoreApiError(
-          409,
-          "idempotency_conflict",
-          "The Idempotency-Key was already used with a different request.",
-        ),
-      );
-    }
-    if (record.response_status === null) {
-      return yield* Effect.fail(
-        new CoreApiError(
-          409,
-          "idempotency_in_progress",
-          "The idempotent operation is still in progress.",
-        ),
-      );
-    }
-    return record;
   });
 }
 

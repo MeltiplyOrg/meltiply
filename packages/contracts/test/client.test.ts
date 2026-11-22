@@ -38,6 +38,7 @@ describe("createMeltiplyClient", () => {
     "https://api.example.test/api",
     "https://api.example.test?tenant=one",
     "https://api.example.test#fragment",
+    "ftp://api.example.test/",
   ])("rejects a non-origin base URL: %s", (baseUrl) => {
     // Keeping the TypeError class *and* the guard's own message makes this a
     // per-branch control: a TypeError raised anywhere else in the factory (URL

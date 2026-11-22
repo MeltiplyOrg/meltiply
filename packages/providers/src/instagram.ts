@@ -1,56 +1,53 @@
 import type { PlatformCapability } from "@meltiply/domain";
-import { extractRateLimitBudget } from "./rate-limit";
 
-import {
-  addSeconds,
-  confirmedFailure,
-  isHttp404,
-  malformed,
-  requiredIdentifier,
-  unknownResult,
-} from "./adapter-helpers";
+import { confirmedFailure, isHttp404, malformed, requiredIdentifier } from "./adapter-helpers";
 import { classifyProviderFailure, ProviderAdapterError } from "./failures";
 import { ProviderHttpClient } from "./http";
+import { applyInstagramContent } from "./instagram-content";
+import { resolveInstagramOptions, type ResolvedInstagramOptions } from "./instagram-options";
+import {
+  IDEMPOTENCY_KEY_MAX_CHARS,
+  META_GRAPH_API_VERSION,
+  OAUTH_STATE_MAX_CHARS,
+  PROVIDER_LIMITS,
+} from "./limits";
 import {
   assertConfiguredRedirectUri,
   bearer,
-  boundedCursor,
   boundedString,
   boundedText,
+  codePointLength,
   containerOperationId,
   exactRedirectUri,
-  metaContainerFailureCode,
   metricValue,
+  normalizeContentType,
   parseContainerOperationId,
+  parseMetaCommentPage,
+  parseMetaInsightsMap,
   providerIdentifier,
   record,
   required,
   secureUrl,
-  timestamp,
   validatePageInput,
 } from "./meta-common";
-import type { MetaContainerOperation } from "./meta-common";
+import { lookupMetaContainer, type MetaContainerProtocolConfig } from "./meta-containers";
+import { exchangeAuthorizationCodeForm, parseMetaBearerToken } from "./oauth-helpers";
+import { extractRateLimitBudget } from "./rate-limit";
 import type {
   InstagramPostType,
   OAuthConnection,
   ProviderAdapter,
   ProviderCredentials,
   ProviderPublicationLookup,
-  ProviderPublicationStatus,
-  ProviderRequestContext,
   ProviderTokenSet,
   PublishInput,
 } from "./types";
-import { resolveInstagramOptions, type ResolvedInstagramOptions } from "./instagram-options";
-import { applyInstagramContent } from "./instagram-content";
 
 const apiOrigin = "https://graph.instagram.com";
 const exchangeOrigin = "https://api.instagram.com";
 const authorizationOrigin = "https://www.instagram.com";
-const apiVersion = "v25.0";
-const imageMaximumBytes = 8 * 1024 * 1024;
-const videoMaximumBytes = 500 * 1024 * 1024;
-const tokenLifetimeMaximumSeconds = 90 * 24 * 60 * 60;
+const apiVersion = META_GRAPH_API_VERSION;
+const limits = PROVIDER_LIMITS.instagram;
 
 const publishingScopes = [
   "instagram_business_basic",
@@ -61,11 +58,8 @@ const engagementScopes = [
   "instagram_business_manage_insights",
 ] as const;
 
-/** Instagram's documented carousel ceiling for one API-published post. */
-const maximumCarouselItems = 20;
-
 /** Instagram's caption ceiling remains known even before live publishing is configured. */
-export const INSTAGRAM_MAX_CAPTION_LENGTH = 2_200;
+export const INSTAGRAM_MAX_CAPTION_LENGTH = limits.maxCaptionCodePoints;
 
 const capability: PlatformCapability = {
   accepted_mime_types: ["image/jpeg", "video/mp4", "video/quicktime"],
@@ -74,9 +68,9 @@ const capability: PlatformCapability = {
   comments: true,
   connect_available: true,
   max_caption_length: INSTAGRAM_MAX_CAPTION_LENGTH,
-  max_file_size: videoMaximumBytes,
-  max_hashtags: 30,
-  max_media_count: maximumCarouselItems,
+  max_file_size: limits.maxVideoBytes,
+  max_hashtags: limits.maxHashtags,
+  max_media_count: limits.maxCarouselItems,
   max_video_duration_sec: null,
   min_media_count: 1,
   multi_asset_types: ["image", "video"],
@@ -128,7 +122,10 @@ function requiredPostId(lookup: ProviderPublicationLookup): string {
  */
 function caption(input: PublishInput): string {
   const value = input.caption.trim();
-  if ([...value].length > 2_200 || input.hashtags.length > 30) {
+  if (
+    codePointLength(value) > limits.maxCaptionCodePoints ||
+    input.hashtags.length > limits.maxHashtags
+  ) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
         code: "instagram_content_invalid",
@@ -150,12 +147,14 @@ interface InstagramAttachment {
  * ceiling and method-specific video bounds. Feed videos/carousel children use
  * the app's 500 MiB ceiling; only Reels use 300 MB and Stories use 100 MB.
  * @param input - Publish input whose `media[index]` is being validated.
- * @param index - Attachment position, quoted in the thrown failure context.
+ * @param media - Attachment at `index`.
  * @returns The attachment kind and its canonical HTTPS URL.
  * @throws ProviderAdapterError when the attachment cannot be published.
  */
-function attachment(input: PublishInput, index: number): InstagramAttachment {
-  const media = input.media[index]!;
+function attachment(
+  input: PublishInput,
+  media: PublishInput["media"][number],
+): InstagramAttachment {
   if (media.mode !== "remote_ingest") {
     throw new ProviderAdapterError(
       classifyProviderFailure({
@@ -165,18 +164,22 @@ function attachment(input: PublishInput, index: number): InstagramAttachment {
     );
   }
   const url = secureUrl(media.url)?.href;
-  const contentType = media.contentType.split(";", 1)[0]!.toLowerCase();
+  const contentType = normalizeContentType(media.contentType);
   const fileSize = media.fileSize;
   const postType =
     input.providerOptions?.instagram?.postType ??
     (input.media.length === 1 && contentType.startsWith("video/") ? "reel" : "feed");
   const maximumVideoBytes =
-    postType === "story" ? 100_000_000 : postType === "reel" ? 300_000_000 : videoMaximumBytes;
+    postType === "story"
+      ? limits.maxStoryBytes
+      : postType === "reel"
+        ? limits.maxReelBytes
+        : limits.maxVideoBytes;
   const valid =
     url !== undefined &&
     Number.isSafeInteger(fileSize) &&
     fileSize >= 1 &&
-    ((contentType === "image/jpeg" && fileSize <= imageMaximumBytes) ||
+    ((contentType === "image/jpeg" && fileSize <= limits.maxImageBytes) ||
       (["video/mp4", "video/quicktime"].includes(contentType) && fileSize <= maximumVideoBytes));
   if (!valid) {
     throw new ProviderAdapterError(
@@ -212,7 +215,7 @@ function carouselAttachments(input: PublishInput): {
       }),
     );
   }
-  if (input.media.length > maximumCarouselItems) {
+  if (input.media.length > limits.maxCarouselItems) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
         code: "instagram_carousel_too_large",
@@ -221,7 +224,7 @@ function carouselAttachments(input: PublishInput): {
     );
   }
   return {
-    attachments: input.media.map((_, index) => attachment(input, index)),
+    attachments: input.media.map((media) => attachment(input, media)),
     text: caption(input),
   };
 }
@@ -341,16 +344,35 @@ function singleParameters(
   return parameters;
 }
 
-/**
- * Extracts a numeric metric value from an Instagram Graph API insight payload.
- * Supports both periodic bucket arrays (e.g. `metric.values[0]`) and lifetime objects (`metric.total_value`).
- * Returns non-negative safe integer value, or undefined if absent or non-numeric.
- */
-function insightValue(metric: Record<string, unknown>): number | undefined {
-  const values = metric.values;
-  if (Array.isArray(values)) return metricValue(record(values[0])?.value);
-  return metricValue(record(metric.total_value)?.value);
-}
+/** Instagram's Meta container protocol parameters. */
+const containerProtocol: MetaContainerProtocolConfig = {
+  apiOrigin,
+  containerReadUrl(containerId) {
+    const url = new URL(`/${apiVersion}/${encodeURIComponent(containerId)}`, apiOrigin);
+    url.searchParams.set("fields", "id,status_code,status");
+    return url.toString();
+  },
+  extractWarnings(body) {
+    return body.config_issue === "CAPTION_NOT_ATTACHED" ||
+      body.config_issue === "USER_TAGGING_FAILURE" ||
+      body.caption_add_on_attachment_status === "POLL_CREATION_FAILURE" ||
+      body.caption_add_on_attachment_status === "PROMPT_CREATION_FAILURE"
+      ? ["instagram_publish_partial"]
+      : undefined;
+  },
+  failureDetailField: "status",
+  provider: "instagram",
+  publishUrl(credentials, containerId) {
+    const url = new URL(
+      `/${apiVersion}/${encodeURIComponent(accountId(credentials))}/media_publish`,
+      apiOrigin,
+    );
+    url.searchParams.set("creation_id", containerId);
+    return url.toString();
+  },
+  publishedOperationPhase: "submitted",
+  statusField: "status_code",
+};
 
 /**
  * Reads the single account in an Instagram Login response. Meta documents both
@@ -370,7 +392,7 @@ function loginRecord(value: unknown): Record<string, unknown> {
 /**
  * Instantiates a ProviderAdapter for Instagram Professional (Business/Creator) accounts.
  * Supports image and Reel publishing via container ingestion, analytics, comments, and replies.
- * Optionally strips engagement methods if options.engagementEnabled is false.
+ * Optionally omits engagement methods if options.engagementEnabled is false.
  * Returns configured ProviderAdapter conforming to Meltiply contracts.
  */
 export function createInstagramAdapter(options: InstagramAdapterOptions): ProviderAdapter {
@@ -386,158 +408,101 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
     allowedOrigins: [apiOrigin, exchangeOrigin],
     ...(options.fetch ? { fetch: options.fetch } : {}),
     now,
-    rateLimitBudget: (headers) => extractRateLimitBudget("instagram", headers),
+    platform: "instagram",
     ...(options.timeoutMilliseconds === undefined
       ? {}
       : { timeoutMilliseconds: options.timeoutMilliseconds }),
   });
 
-  /**
-   * Issues the single finalizing publish for a ready Instagram media container.
-   * Success and deterministic rejection retain the 'created' operation identity; an
-   * ambiguous outcome records 'submitted:<container>' so reconciliation can prove the
-   * publish was dispatched and must never be issued again. A retryable rejection keeps
-   * the container 'processing' so the next poll retries finalization.
-   * Documented caption, tag, or caption-add-on loss remains published with one
-   * sanitized warning; retrying a partial success would duplicate the Post.
-   * Returns the publication status produced by the publish attempt.
-   */
-  const publishContainer = async (
-    context: ProviderRequestContext,
-    credentials: ProviderCredentials,
-    containerId: string,
-  ): Promise<ProviderPublicationStatus> => {
-    const createdOperationId = containerOperationId("created", containerId);
-    const url = new URL(
-      `/${apiVersion}/${encodeURIComponent(accountId(credentials))}/media_publish`,
-      apiOrigin,
-    );
-    url.searchParams.set("creation_id", containerId);
-    try {
+  const engagementMethods: Pick<ProviderAdapter, "listAnalytics" | "listComments" | "reply"> = {
+    async listAnalytics(context, credentials, lookup, page) {
+      validatePageInput("instagram", page);
+      if (page.cursor) {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({
+            code: "instagram_analytics_not_paginated",
+            status: 400,
+          }),
+        );
+      }
+      const providerPostId = requiredPostId(lookup);
+      const url = new URL(
+        `/${apiVersion}/${encodeURIComponent(providerPostId)}/insights`,
+        apiOrigin,
+      );
+      url.searchParams.set("metric", "views,reach,likes,comments,shares");
       const response = await http.request<unknown>(context, {
-        headers: bearer(credentials.accessToken),
-        method: "POST",
-        sideEffectPossible: true,
-        url: url.toString(),
-      });
-      const body = record(response.body);
-      const providerPostId = providerIdentifier(body?.id);
-      if (!providerPostId) throw malformed(true);
-      return {
-        result: {
-          outcome: "confirmed_success",
-          providerOperationId: createdOperationId,
-          providerPostId,
-          ...(body?.config_issue === "CAPTION_NOT_ATTACHED" ||
-          body?.config_issue === "USER_TAGGING_FAILURE" ||
-          body?.caption_add_on_attachment_status === "POLL_CREATION_FAILURE" ||
-          body?.caption_add_on_attachment_status === "PROMPT_CREATION_FAILURE"
-            ? { warnings: ["instagram_publish_partial" as const] }
-            : {}),
-        },
-        state: "published",
-      };
-    } catch (cause) {
-      if (!(cause instanceof ProviderAdapterError)) throw cause;
-      if (cause.failure.classification === "ambiguous") {
-        return {
-          result: unknownResult(cause.failure, containerOperationId("submitted", containerId)),
-          state: "unknown",
-        };
-      }
-      if (cause.failure.retryable) {
-        return { providerOperationId: createdOperationId, state: "processing" };
-      }
-      return {
-        result: {
-          failure: cause.failure,
-          outcome: "confirmed_failure",
-          providerOperationId: createdOperationId,
-        },
-        state: "failed",
-      };
-    }
-  };
-
-  /**
-   * Reconciles a persisted Instagram container operation into a publication status.
-   * Requests the documented `status_code` plus the `status` detail field; a 'created'
-   * container that reports FINISHED is finalized exactly once through publishContainer,
-   * while a 'submitted' container is never republished. PUBLISHED proves completion
-   * even when a lost final response withheld the media ID. Container ERROR detail is
-   * normalized to a safe diagnostic category code so raw provider text never persists.
-   * Returns ProviderPublicationStatus for the operation, or not_found when the
-   * container no longer exists.
-   */
-  const lookupContainer = async (
-    context: ProviderRequestContext,
-    credentials: ProviderCredentials,
-    operation: MetaContainerOperation,
-  ): Promise<ProviderPublicationStatus> => {
-    const retainedOperationId = containerOperationId(operation.phase, operation.id);
-    const url = new URL(`/${apiVersion}/${encodeURIComponent(operation.id)}`, apiOrigin);
-    url.searchParams.set("fields", "id,status_code,status");
-    let response;
-    try {
-      response = await http.request<unknown>(context, {
         headers: bearer(credentials.accessToken),
         method: "GET",
         url: url.toString(),
       });
-    } catch (cause) {
-      if (isHttp404(cause)) return { state: "not_found" };
-      throw cause;
-    }
-    const body = record(response.body);
-    if (providerIdentifier(body?.id) !== operation.id) throw malformed();
-    switch (body?.status_code) {
-      case "IN_PROGRESS":
-        return {
-          providerOperationId: retainedOperationId,
-          state: "processing",
-        };
-      case "FINISHED":
-        if (operation.phase === "created") {
-          return publishContainer(context, credentials, operation.id);
-        }
-        return {
-          result: unknownResult(
-            classifyProviderFailure({
-              code: "instagram_publish_evidence_missing",
-              sideEffectPossible: true,
-            }),
-            retainedOperationId,
-          ),
-          state: "unknown",
-        };
-      case "PUBLISHED":
-        return {
-          result: {
-            outcome: "confirmed_success",
-            providerOperationId: containerOperationId("submitted", operation.id),
+      const metrics = parseMetaInsightsMap(response.body);
+      return {
+        items: [
+          {
+            comments: metrics.get("comments") ?? 0,
+            impressions: 0,
+            likes: metrics.get("likes") ?? 0,
+            providerPostId,
+            reach: metrics.get("reach") ?? 0,
+            recordedAt: now().toISOString(),
+            shares: metrics.get("shares") ?? 0,
+            views: metrics.get("views") ?? 0,
+            watchTimeSeconds: 0,
           },
-          state: "published",
-        };
-      case "ERROR":
-        return {
-          result: confirmedFailure(
-            metaContainerFailureCode("instagram", body.status),
-            422,
-            retainedOperationId,
-          ),
-          state: "failed",
-        };
-      case "EXPIRED":
-        return {
-          result: confirmedFailure("instagram_container_expired", 410, retainedOperationId),
-          state: "failed",
-        };
-      default:
-        throw malformed();
-    }
+        ],
+      };
+    },
+
+    async listComments(context, credentials, lookup, page) {
+      validatePageInput("instagram", page);
+      const providerPostId = requiredPostId(lookup);
+      const url = new URL(
+        `/${apiVersion}/${encodeURIComponent(providerPostId)}/comments`,
+        apiOrigin,
+      );
+      url.searchParams.set("fields", "id,text,timestamp,from{id,username}");
+      url.searchParams.set("limit", String(page.limit));
+      if (page.cursor) url.searchParams.set("after", page.cursor);
+      const response = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: url.toString(),
+      });
+      return parseMetaCommentPage(response.body, providerPostId, page.limit, {
+        nestedAuthorField: "from",
+        usernameField: "username",
+      });
+    },
+
+    async reply(context, credentials, input) {
+      required("idempotencyKey", input.idempotencyKey, IDEMPOTENCY_KEY_MAX_CHARS);
+      const providerCommentId = providerIdentifier(input.providerCommentId);
+      const text = boundedText(input.text.trim(), limits.maxCaptionCodePoints);
+      if (!providerCommentId || !text) {
+        return confirmedFailure("instagram_reply_invalid", 400);
+      }
+      const url = new URL(
+        `/${apiVersion}/${encodeURIComponent(providerCommentId)}/replies`,
+        apiOrigin,
+      );
+      const response = await http.request<unknown>(context, {
+        body: JSON.stringify({ message: text }),
+        headers: {
+          ...bearer(credentials.accessToken),
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+        sideEffectPossible: true,
+        url: url.toString(),
+      });
+      const replyId = providerIdentifier(record(response.body)?.id);
+      if (!replyId) throw malformed(true);
+      return { outcome: "confirmed_success", providerPostId: replyId };
+    },
   };
 
-  const adapter: ProviderAdapter = {
+  return {
     extractRateLimitBudget: (headers) => extractRateLimitBudget("instagram", headers),
     /**
      * Builds the Instagram OAuth authorize URL for the configured client, redirect URI,
@@ -552,7 +517,7 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
       url.searchParams.set("redirect_uri", configuredRedirectUri);
       url.searchParams.set("response_type", "code");
       url.searchParams.set("scope", configuredScopes.join(","));
-      url.searchParams.set("state", required("state", input.state, 1_024));
+      url.searchParams.set("state", required("state", input.state, OAUTH_STATE_MAX_CHARS));
       return url.toString();
     },
 
@@ -575,22 +540,17 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
      */
     async exchangeAuthorizationCode(context, input): Promise<OAuthConnection> {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
-      const shortForm = new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        code: required("authorizationCode", input.code),
-        grant_type: "authorization_code",
-        redirect_uri: configuredRedirectUri,
-      });
-      const shortResponse = await http.request<unknown>(context, {
-        body: shortForm,
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        method: "POST",
-        url: `${exchangeOrigin}/oauth/access_token`,
-      });
-      const shortBody = loginRecord(shortResponse.body);
-      const shortToken = boundedString(shortBody?.access_token, 16_384);
-      const exchangedAccountId = providerIdentifier(String(shortBody?.user_id ?? ""));
+      const shortBody = loginRecord(
+        await exchangeAuthorizationCodeForm(http, context, {
+          clientId,
+          clientSecret,
+          code: input.code,
+          redirectUri: configuredRedirectUri,
+          tokenUrl: `${exchangeOrigin}/oauth/access_token`,
+        }),
+      );
+      const shortToken = boundedString(shortBody.access_token, limits.tokenMaxChars);
+      const exchangedAccountId = providerIdentifier(String(shortBody.user_id ?? ""));
       if (!shortToken || !exchangedAccountId) throw malformed();
       if (shortBody.permissions !== undefined) {
         let permissions: (string | undefined)[] | undefined;
@@ -622,10 +582,11 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
         method: "GET",
         url: longUrl.toString(),
       });
-      const longBody = record(longResponse.body);
-      const accessToken = boundedString(longBody?.access_token, 16_384);
-      if (!accessToken || longBody?.token_type !== "bearer") throw malformed();
-      const expiresAt = addSeconds(now(), longBody.expires_in, tokenLifetimeMaximumSeconds);
+      const { accessToken, expiresAt } = parseMetaBearerToken(longResponse.body, {
+        maxLifetimeSeconds: limits.tokenLifetimeMaxSeconds,
+        maxTokenChars: limits.tokenMaxChars,
+        now: now(),
+      });
 
       const profileUrl = new URL(`/${apiVersion}/me`, apiOrigin);
       profileUrl.searchParams.set(
@@ -640,11 +601,11 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
       const profile = loginRecord(profileResponse.body);
       const profileScopedId = providerIdentifier(profile.id);
       const profileAccountId = providerIdentifier(profile.user_id);
-      const username = boundedString(profile?.username, 255);
-      const name = boundedText(profile?.name, 500);
+      const username = boundedString(profile.username, 255);
+      const name = boundedText(profile.name, 500);
       const displayName = name ?? (username ? boundedString(username, 500) : undefined);
       const avatarUrl =
-        profile?.profile_picture_url === undefined
+        profile.profile_picture_url === undefined
           ? undefined
           : secureUrl(profile.profile_picture_url)?.href;
       if (
@@ -652,8 +613,8 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
         !profileAccountId ||
         !username ||
         !displayName ||
-        !["BUSINESS", "MEDIA_CREATOR"].includes(String(profile?.account_type).toUpperCase()) ||
-        (profile?.profile_picture_url !== undefined && !avatarUrl)
+        !["BUSINESS", "MEDIA_CREATOR"].includes(String(profile.account_type).toUpperCase()) ||
+        (profile.profile_picture_url !== undefined && !avatarUrl)
       ) {
         throw malformed();
       }
@@ -698,117 +659,12 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
       };
     },
 
-    async listAnalytics(context, credentials, lookup, page) {
-      validatePageInput("instagram", page);
-      if (page.cursor) {
-        throw new ProviderAdapterError(
-          classifyProviderFailure({
-            code: "instagram_analytics_not_paginated",
-            status: 400,
-          }),
-        );
-      }
-      const providerPostId = requiredPostId(lookup);
-      const url = new URL(
-        `/${apiVersion}/${encodeURIComponent(providerPostId)}/insights`,
-        apiOrigin,
-      );
-      url.searchParams.set("metric", "views,reach,likes,comments,shares");
-      const response = await http.request<unknown>(context, {
-        headers: bearer(credentials.accessToken),
-        method: "GET",
-        url: url.toString(),
-      });
-      const data = record(response.body)?.data;
-      if (!Array.isArray(data) || data.length > 20) throw malformed();
-      const metrics = new Map<string, number>();
-      for (const value of data) {
-        const metric = record(value);
-        const name = boundedString(metric?.name, 64);
-        const result = metric ? insightValue(metric) : undefined;
-        if (!name || result === undefined || metrics.has(name)) {
-          throw malformed();
-        }
-        metrics.set(name, result);
-      }
-      return {
-        items: [
-          {
-            comments: metrics.get("comments") ?? 0,
-            impressions: 0,
-            likes: metrics.get("likes") ?? 0,
-            providerPostId,
-            reach: metrics.get("reach") ?? 0,
-            recordedAt: now().toISOString(),
-            shares: metrics.get("shares") ?? 0,
-            views: metrics.get("views") ?? 0,
-            watchTimeSeconds: 0,
-          },
-        ],
-      };
-    },
-
-    async listComments(context, credentials, lookup, page) {
-      validatePageInput("instagram", page);
-      const providerPostId = requiredPostId(lookup);
-      const url = new URL(
-        `/${apiVersion}/${encodeURIComponent(providerPostId)}/comments`,
-        apiOrigin,
-      );
-      url.searchParams.set("fields", "id,text,timestamp,from{id,username}");
-      url.searchParams.set("limit", String(page.limit));
-      if (page.cursor) url.searchParams.set("after", page.cursor);
-      const response = await http.request<unknown>(context, {
-        headers: bearer(credentials.accessToken),
-        method: "GET",
-        url: url.toString(),
-      });
-      const body = record(response.body);
-      if (!Array.isArray(body?.data) || body.data.length > page.limit) {
-        throw malformed();
-      }
-      const identifiers = new Set<string>();
-      const items = body.data.map((value) => {
-        const comment = record(value);
-        const author = record(comment?.from);
-        const providerCommentId = providerIdentifier(comment?.id);
-        const text = boundedText(comment?.text, 10_000, true);
-        const commentedAt = timestamp(comment?.timestamp);
-        const authorDisplayName =
-          author?.username === undefined ? undefined : boundedString(author.username, 500);
-        if (
-          !providerCommentId ||
-          identifiers.has(providerCommentId) ||
-          text === undefined ||
-          !commentedAt ||
-          (author?.username !== undefined && !authorDisplayName)
-        ) {
-          throw malformed();
-        }
-        identifiers.add(providerCommentId);
-        return {
-          ...(authorDisplayName ? { authorDisplayName } : {}),
-          body: text,
-          commentedAt,
-          providerCommentId,
-          providerPostId,
-        };
-      });
-      const paging = record(body.paging);
-      const cursors = record(paging?.cursors);
-      if ((body.paging !== undefined && !paging) || (paging?.cursors !== undefined && !cursors)) {
-        throw malformed();
-      }
-      const rawNextCursor = cursors?.after;
-      const nextCursor = rawNextCursor === undefined ? undefined : boundedCursor(rawNextCursor);
-      if (rawNextCursor !== undefined && !nextCursor) throw malformed();
-      return { items, ...(nextCursor ? { nextCursor } : {}) };
-    },
+    ...(engagementEnabled ? engagementMethods : {}),
 
     /**
      * Resolves publication status from either a confirmed media ID or a persisted
      * container operation identity. Media lookups confirm the permalink; container
-     * lookups delegate to lookupContainer, which polls readiness and finalizes a
+     * lookups delegate to lookupMetaContainer, which polls readiness and finalizes a
      * 'created' container exactly once without ever republishing a 'submitted' one.
      */
     async lookupPublication(context, credentials, lookup) {
@@ -846,7 +702,7 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
       const operation = parseContainerOperationId(lookup.providerOperationId);
       if (!operation) throw malformed();
       accountId(credentials);
-      return lookupContainer(context, credentials, operation);
+      return lookupMetaContainer(http, containerProtocol, context, credentials, operation);
     },
 
     /**
@@ -854,9 +710,9 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
      * returns the durable 'created:<parent>' operation identity without
      * publishing; lookupPublication polls the parent and finalizes it exactly
      * once. Multi-attachment posts first create one unpublished child container
-     * per attachment, then a CAROUSEL parent that binds those child ids in
-     * creator order, so nothing is published until every child is retrievable.
-     * A single attachment keeps the direct image/Reel container shape.
+     * per attachment in creator order, then a CAROUSEL parent that binds those
+     * child ids in creator order. A single attachment keeps the direct image/Reel
+     * container shape.
      * @param context - Request context carrying abort signal and rate telemetry.
      * @param credentials - Page access token and professional account id.
      * @param input - Composed caption plus the Post's ordered attachments.
@@ -864,7 +720,7 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
      * never a provider post id, so the caller reconciles through lookupPublication.
      */
     async publish(context, credentials, input) {
-      required("idempotencyKey", input.idempotencyKey, 255);
+      required("idempotencyKey", input.idempotencyKey, IDEMPOTENCY_KEY_MAX_CHARS);
       const { attachments, text } = carouselAttachments(input);
       const account = accountId(credentials);
       const metadata = input.providerOptions?.instagram;
@@ -897,23 +753,17 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
       };
 
       const [only] = attachments;
-      if (attachments.length === 1) {
+      if (attachments.length === 1 && only) {
         return {
           outcome: "confirmed_success",
           providerOperationId: containerOperationId(
             "created",
-            await createContainer(
-              singleParameters(only!, text, instagramOptions(input, attachments)),
-            ),
+            await createContainer(singleParameters(only, text, resolved)),
           ),
         };
       }
-      // Carousels are always feed posts; instagramOptions rejects a story or
-      // trial Reel choice here instead of silently publishing a different shape.
-      instagramOptions(input, attachments);
-      // Children are created one at a time in creator order so a rejected
-      // attachment stops the flow before later children exist, and the returned
-      // ids stay aligned with the published carousel order.
+      // Sequential child creation preserves creator order and short-circuits on
+      // the first invalid attachment before creating later remote containers.
       const children: string[] = [];
       for (const [index, item] of attachments.entries()) {
         children.push(await createContainer(carouselItemParameters(item), index));
@@ -936,41 +786,17 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
         method: "GET",
         url: url.toString(),
       });
-      const body = record(response.body);
-      const accessToken = boundedString(body?.access_token, 16_384);
-      if (!accessToken || body?.token_type !== "bearer") throw malformed();
+      const { accessToken, expiresAt } = parseMetaBearerToken(response.body, {
+        maxLifetimeSeconds: limits.tokenLifetimeMaxSeconds,
+        maxTokenChars: limits.tokenMaxChars,
+        now: now(),
+      });
       return {
         accessToken,
-        expiresAt: addSeconds(now(), body.expires_in, tokenLifetimeMaximumSeconds),
+        expiresAt,
         refreshToken: accessToken,
         scopes: [...configuredScopes],
       };
-    },
-
-    async reply(context, credentials, input) {
-      required("idempotencyKey", input.idempotencyKey, 255);
-      const providerCommentId = providerIdentifier(input.providerCommentId);
-      const text = boundedText(input.text.trim(), 2_200);
-      if (!providerCommentId || !text) {
-        return confirmedFailure("instagram_reply_invalid", 400);
-      }
-      const url = new URL(
-        `/${apiVersion}/${encodeURIComponent(providerCommentId)}/replies`,
-        apiOrigin,
-      );
-      const response = await http.request<unknown>(context, {
-        body: JSON.stringify({ message: text }),
-        headers: {
-          ...bearer(credentials.accessToken),
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-        sideEffectPossible: true,
-        url: url.toString(),
-      });
-      const replyId = providerIdentifier(record(response.body)?.id);
-      if (!replyId) throw malformed(true);
-      return { outcome: "confirmed_success", providerPostId: replyId };
     },
 
     retryPolicy: {
@@ -981,10 +807,4 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
 
     transferModes: ["remote_ingest"],
   };
-  if (!engagementEnabled) {
-    delete adapter.listAnalytics;
-    delete adapter.listComments;
-    delete adapter.reply;
-  }
-  return adapter;
 }

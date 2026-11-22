@@ -1,3 +1,4 @@
+import { assertValidByteRange, bytesToHex } from "./encoding";
 import { normalizeSegment } from "./keys";
 import { SigV4UrlSigner } from "./sigv4";
 import type { MultipartUpload, ObjectBody, ObjectMetadata, UploadedPart } from "./object-store";
@@ -65,22 +66,6 @@ interface R2MultipartUploadLike {
   ): Promise<UploadedPart>;
 }
 
-/**
- * Converts an ArrayBuffer to a lowercase hexadecimal string.
- *
- * @param value - Binary buffer to represent as hex.
- * @returns Lowercase hex string.
- */
-function hex(value: ArrayBuffer): string {
-  return [...new Uint8Array(value)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-/**
- * Maps an R2ObjectLike instance to a standardized ObjectMetadata descriptor.
- *
- * @param value - Raw R2 object metadata from Cloudflare storage.
- * @returns ObjectMetadata with normalized contentType, etag, size, uploadedAt, and the optional version/checksum/custom metadata R2 reported.
- */
 function metadata(value: R2ObjectLike): ObjectMetadata {
   const sha256 = value.checksums?.sha256;
   return {
@@ -88,7 +73,7 @@ function metadata(value: R2ObjectLike): ObjectMetadata {
     customMetadata: value.customMetadata ?? null,
     etag: value.etag,
     key: value.key,
-    sha256: sha256 ? hex(sha256) : null,
+    sha256: sha256 ? bytesToHex(sha256) : null,
     size: value.size,
     uploadedAt: new Date(value.uploaded),
     version: value.version ?? null,
@@ -204,17 +189,6 @@ export class R2ObjectStore extends EffectObjectStore {
   }
 
   /**
-   * Reads the first N bytes of an object, useful for MIME sniffing and magic-number validation.
-   *
-   * @param key - Storage object key.
-   * @param maximumBytes - Number of prefix bytes to read (up to 1 MiB).
-   * @returns Byte buffer if the object exists, or null.
-   */
-  async readPrefix(key: string, maximumBytes: number): Promise<Uint8Array | null> {
-    return this.readRange(key, 0, maximumBytes);
-  }
-
-  /**
    * Reads a bounded slice of an object by byte offset and maximum length.
    *
    * @param key - Storage object key.
@@ -224,12 +198,7 @@ export class R2ObjectStore extends EffectObjectStore {
    * @throws {RangeError} If offset or maximumBytes are outside safe bounds.
    */
   async readRange(key: string, offset: number, maximumBytes: number): Promise<Uint8Array | null> {
-    if (!Number.isSafeInteger(offset) || offset < 0) {
-      throw new RangeError("offset must be a non-negative safe integer");
-    }
-    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > 1024 * 1024) {
-      throw new RangeError("maximumBytes must be between 1 and 1048576");
-    }
+    assertValidByteRange(offset, maximumBytes);
     const object = await this.bucket.get(key, {
       range: { length: maximumBytes, offset },
     });

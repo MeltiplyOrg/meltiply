@@ -8,17 +8,18 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Miniflare, convertV4MiniflareOptions, Log, LogLevel } from "miniflare";
 import pg from "pg";
 import { TokenCipher } from "../../packages/secrets/src/index";
+import { LOCAL_ADMIN_URL, LOCAL_SYSTEM_URL, LOCAL_TEST_URL } from "../lib/integration-database";
 
 const selfhost = process.env.SELFHOST_DB_PASSWORD !== undefined;
 const adminUrl = selfhost
   ? `postgres://postgres:${encodeURIComponent(process.env.SELFHOST_DB_PASSWORD ?? "")}@postgres:5432/meltiply`
-  : "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
+  : LOCAL_ADMIN_URL;
 const authenticatedUrl = selfhost
   ? `postgres://meltiply_rls:${encodeURIComponent(process.env.SELFHOST_DB_AUTHENTICATED_PASSWORD ?? "")}@postgres:5432/meltiply`
-  : "postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable";
+  : LOCAL_TEST_URL;
 const systemUrl = selfhost
   ? `postgres://meltiply_system:${encodeURIComponent(process.env.SELFHOST_DB_SYSTEM_PASSWORD ?? "")}@postgres:5432/meltiply`
-  : "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
+  : LOCAL_SYSTEM_URL;
 const scriptPath = process.env.REQUIREMENTS_SMOKE_BUNDLE;
 if (!scriptPath) throw new Error("REQUIREMENTS_SMOKE_BUNDLE must name the built disposable Worker");
 const bundlePath = resolve(scriptPath);

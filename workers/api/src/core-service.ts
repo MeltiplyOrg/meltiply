@@ -6,6 +6,7 @@ import {
   AccessDenied,
   type DatabaseError,
   isoDateTime,
+  PLATFORM_IDS,
   rateLimitBudgetFreshSeconds,
 } from "@meltiply/domain";
 import { ProviderRegistry } from "@meltiply/providers";
@@ -230,7 +231,7 @@ interface ReplyTargetRow extends InboxRow {
   account_token_expires_at: Date | string | null;
 }
 
-const platforms: readonly Platform[] = ["tiktok", "youtube", "instagram", "facebook", "threads"];
+const platforms: readonly Platform[] = PLATFORM_IDS;
 
 /**
  * Converts a nullable database numeric or string column value into a JavaScript number.

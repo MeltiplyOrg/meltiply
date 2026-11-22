@@ -177,26 +177,68 @@ function putStorageEntriesEffect(
 }
 
 /**
+ * Arms the Durable Object alarm at the earliest pending deadline when the
+ * current alarm is unset or later than `expiresAt`.
+ *
+ * Every mutating path that persists an expiring record calls this inside its
+ * transaction so the sweep cannot be left unarmed by an interrupted write.
+ *
+ * @param storage - Durable Object storage for this coordinator instance.
+ * @param expiresAt - Expiry timestamp in epoch milliseconds.
+ * @returns Effect resolving once the alarm is armed, or unchanged when an
+ *   earlier alarm already covers the deadline.
+ */
+function armExpiryAlarmEffect(
+  storage: DurableObjectStorage,
+  expiresAt: number,
+): Effect.Effect<void, OAuthStateStorageError> {
+  return Effect.gen(function* () {
+    const currentAlarm = yield* storageEffect("Failed to read the OAuth state alarm.", () =>
+      storage.getAlarm(),
+    );
+    if (currentAlarm === null || expiresAt < currentAlarm) {
+      yield* storageEffect("Failed to arm the OAuth state alarm.", () =>
+        storage.setAlarm(expiresAt),
+      );
+    }
+  });
+}
+
+/**
  * Deletes every `selection-account:`/`selection-credential:` entry for a
  * selection in batches of 128. Listing the metadata prefix keeps large
  * ciphertext values out of memory while still covering entries orphaned by a
- * partially failed append.
+ * partially failed append. `storage.list()` is paginated with `startAfter` and
+ * `limit: STORAGE_DELETE_BATCH` until a page returns fewer than `limit` keys,
+ * so selections holding up to 1000 accounts (2000 keys) are completely swept.
  */
 function deleteSelectionCandidatesEffect(
   storage: DurableObjectStorage,
   selectionId: string,
 ): Effect.Effect<void, OAuthStateStorageError> {
   return Effect.gen(function* () {
-    const metadataEntries = yield* storageEffect(
-      "Failed to list candidate entries for cleanup.",
-      () => storage.list({ prefix: `selection-account:${selectionId}:` }),
-    );
-    const keys: string[] = [];
-    for (const metadataKey of metadataEntries.keys()) {
-      keys.push(metadataKey);
-      keys.push(`selection-credential:${metadataKey.slice("selection-account:".length)}`);
+    const prefix = `selection-account:${selectionId}:`;
+    let startAfter: string | undefined;
+    for (;;) {
+      const page = yield* storageEffect("Failed to list candidate entries for cleanup.", () =>
+        storage.list<unknown>({
+          limit: STORAGE_DELETE_BATCH,
+          prefix,
+          ...(startAfter !== undefined ? { startAfter } : {}),
+        }),
+      );
+      if (page.size === 0) break;
+      const keys: string[] = [];
+      let lastKey: string | undefined;
+      for (const metadataKey of page.keys()) {
+        lastKey = metadataKey;
+        keys.push(metadataKey);
+        keys.push(`selection-credential:${metadataKey.slice("selection-account:".length)}`);
+      }
+      yield* deleteStorageKeysEffect(storage, keys, "Failed to delete candidate entries.");
+      if (page.size < STORAGE_DELETE_BATCH || lastKey === undefined) break;
+      startAfter = lastKey;
     }
-    yield* deleteStorageKeysEffect(storage, keys, "Failed to delete candidate entries.");
   });
 }
 /**
@@ -248,31 +290,24 @@ export class OAuthStateCoordinator
       yield* storageEffect("Failed to persist OAuth state.", () =>
         storage.put(`oauth:${state}`, record),
       );
-      const currentAlarm = yield* storageEffect("Failed to read the OAuth state alarm.", () =>
-        storage.getAlarm(),
-      );
-      if (currentAlarm === null || record.expires_at < currentAlarm) {
-        yield* storageEffect("Failed to arm the OAuth state alarm.", () =>
-          storage.setAlarm(record.expires_at),
-        );
-      }
+      yield* armExpiryAlarmEffect(storage, record.expires_at);
     });
-    return runStateProgram(program);
+    return storage.transaction(() => runStateProgram(program));
   }
 
   /**
    * Atomically consumes and deletes an OAuth state record, enforcing consume-once replay protection.
    * Needed during OAuth callback verification so authorization codes cannot be replayed or shared across tenants.
-   * Runs the get/delete/expiry-check sequence as one Effect program via
-   * runStateProgram; deletes the stored key unconditionally and returns the
-   * record only if found and not yet expired.
+   * Runs the get/delete/expiry-check sequence inside `storage.transaction`,
+   * which holds the Durable Object's input gate across the awaited get so a
+   * concurrent callback replay cannot interleave between the read and the
+   * delete; deletes the stored key unconditionally and returns the record
+   * only if found and not yet expired.
    *
    * @param state - Opaque state string received in the provider authorization callback.
    * @returns The stored OAuthStateRecord if present and unexpired; null otherwise.
    */
   async consume(state: string): Promise<OAuthStateRecord | null> {
-    // SQLite-backed DO storage is atomic and the instance is single-threaded,
-    // so the get/delete pair needs no storage.transaction() wrapper (AUD-036).
     const storage = this.ctx.storage;
     const key = `oauth:${state}`;
     const program = Effect.gen(function* () {
@@ -283,7 +318,7 @@ export class OAuthStateCoordinator
       yield* storageEffect("Failed to delete OAuth state.", () => storage.delete(key));
       return record.expires_at > Date.now() ? record : null;
     });
-    return runStateProgram(program);
+    return storage.transaction(() => runStateProgram(program));
   }
 
   /**
@@ -312,16 +347,9 @@ export class OAuthStateCoordinator
       );
       // Arm expiry before any candidate credentials exist so an interrupted
       // append/finalize sequence cannot leave secrets unswept.
-      const currentAlarm = yield* storageEffect("Failed to read the OAuth state alarm.", () =>
-        storage.getAlarm(),
-      );
-      if (currentAlarm === null || record.expires_at < currentAlarm) {
-        yield* storageEffect("Failed to arm the OAuth state alarm.", () =>
-          storage.setAlarm(record.expires_at),
-        );
-      }
+      yield* armExpiryAlarmEffect(storage, record.expires_at);
     });
-    return runStateProgram(program);
+    return storage.transaction(() => runStateProgram(program));
   }
 
   /**
@@ -348,6 +376,7 @@ export class OAuthStateCoordinator
         );
       }
       const newAccountIds: string[] = [];
+      const seenAccountIds = new Set(record.account_ids);
       const entriesToPut: Record<string, unknown> = {};
       for (const candidate of candidates) {
         if (!candidate.account.id || candidate.account.id.length > 255) {
@@ -357,12 +386,32 @@ export class OAuthStateCoordinator
             }),
           );
         }
+        // Duplicates are rejected before any entry is written: a repeated
+        // account id would overwrite the same credential key and inflate
+        // account_ids, so the second copy is never a distinct candidate.
+        if (seenAccountIds.has(candidate.account.id)) {
+          return yield* Effect.fail(
+            new InvalidOAuthStateError({
+              message: "Account IDs must be unique within a selection.",
+            }),
+          );
+        }
+        seenAccountIds.add(candidate.account.id);
         newAccountIds.push(candidate.account.id);
         entriesToPut[`selection-account:${selectionId}:${candidate.account.id}`] =
           candidate.account;
         entriesToPut[`selection-credential:${selectionId}:${candidate.account.id}`] = {
           encrypted_connection: candidate.encryptedConnection,
         };
+      }
+      // The 1000-account cap is checked before any candidate entry is written
+      // so a rejected append leaves no orphaned credential keys behind.
+      if (record.account_ids.length + newAccountIds.length > 1000) {
+        return yield* Effect.fail(
+          new InvalidOAuthStateError({
+            message: "Accounts list must not exceed 1000 items",
+          }),
+        );
       }
       yield* putStorageEntriesEffect(
         storage,
@@ -373,13 +422,6 @@ export class OAuthStateCoordinator
         ...record,
         account_ids: [...record.account_ids, ...newAccountIds],
       };
-      if (updated.account_ids.length > 1000) {
-        return yield* Effect.fail(
-          new InvalidOAuthStateError({
-            message: "Accounts list must not exceed 1000 items",
-          }),
-        );
-      }
       yield* storageEffect("Failed to update OAuth selection account IDs.", () =>
         storage.put(key, updated),
       );
@@ -412,16 +454,9 @@ export class OAuthStateCoordinator
         ready: true,
       };
       yield* storageEffect("Failed to finalize OAuth selection.", () => storage.put(key, updated));
-      const currentAlarm = yield* storageEffect("Failed to read the OAuth state alarm.", () =>
-        storage.getAlarm(),
-      );
-      if (currentAlarm === null || record.expires_at < currentAlarm) {
-        yield* storageEffect("Failed to arm the OAuth state alarm.", () =>
-          storage.setAlarm(record.expires_at),
-        );
-      }
+      yield* armExpiryAlarmEffect(storage, record.expires_at);
     });
-    return runStateProgram(program);
+    return storage.transaction(() => runStateProgram(program));
   }
 
   /**
@@ -595,7 +630,7 @@ export class OAuthStateCoordinator
         userId: record.user_id,
       } as const;
     });
-    return runStateProgram(program);
+    return storage.transaction(() => runStateProgram(program));
   }
 
   /**
@@ -671,7 +706,7 @@ export class OAuthStateCoordinator
       );
       return true;
     });
-    return runStateProgram(program);
+    return storage.transaction(() => runStateProgram(program));
   }
 
   /**

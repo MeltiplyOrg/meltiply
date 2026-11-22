@@ -48,13 +48,16 @@ const contentTypes = new Map([
   [".webmanifest", "application/manifest+json"],
 ]);
 const compressible = new Set([".html", ".js", ".css", ".svg", ".json", ".txt", ".webmanifest"]);
+// Cache raw and encoded bytes per resolved asset path and mtime so Lighthouse
+// measures transfer time instead of repeated synchronous compression work.
+const assetCache = new Map();
 
 /**
  * Reads one request target from the asset root, falling back to the SPA shell.
  *
- * @param pathname - Decoded request pathname.
- * @returns The resolved file path and whether it is the SPA fallback.
- * @throws When the path escapes the asset root.
+ * @param {string} pathname - Decoded request pathname.
+ * @returns {Promise<{ fallback: boolean, mtimeMs: number, path: string }>} The resolved file path, mtime, and whether it is the SPA fallback.
+ * @throws {Error} When the path escapes the asset root.
  */
 async function resolveAsset(pathname) {
   const candidate = normalize(join(root, pathname));
@@ -63,35 +66,45 @@ async function resolveAsset(pathname) {
   }
   try {
     const info = await stat(candidate);
-    if (info.isFile()) return { fallback: false, path: candidate };
+    if (info.isFile()) return { fallback: false, mtimeMs: info.mtimeMs, path: candidate };
   } catch {
     // Missing files use the Worker's single-page-application fallback.
   }
-  return { fallback: true, path: join(root, "index.html") };
+  const fallbackPath = join(root, "index.html");
+  const fallbackInfo = await stat(fallbackPath);
+  return { fallback: true, mtimeMs: fallbackInfo.mtimeMs, path: fallbackPath };
 }
 
 /**
- * Encodes one text asset when the caller advertises brotli or gzip.
+ * Returns cached raw and encoded representations for a static asset keyed by
+ * path and mtime, compressing brotli/gzip lazily on first negotiated request.
  *
- * @param body - Uncompressed asset bytes.
- * @param extension - Lowercase file extension including the dot.
- * @param acceptEncoding - Request `Accept-Encoding` value.
- * @returns The response bytes and content encoding, or null for identity.
+ * @param {string} assetPath - Resolved file path under `root`.
+ * @param {number} mtimeMs - File modification timestamp in milliseconds.
+ * @param {string} extension - Lowercase file extension including the dot.
+ * @param {string} acceptEncoding - Request `Accept-Encoding` value.
+ * @returns {Promise<{ body: Buffer, encoding: string | null }>} Response bytes and content encoding (null for identity).
  */
-function encode(body, extension, acceptEncoding) {
-  if (!compressible.has(extension)) return null;
+async function loadEncodedAsset(assetPath, mtimeMs, extension, acceptEncoding) {
+  let entry = assetCache.get(assetPath);
+  if (!entry || entry.mtimeMs !== mtimeMs) {
+    entry = { body: await readFile(assetPath), br: undefined, gzip: undefined, mtimeMs };
+    assetCache.set(assetPath, entry);
+  }
+  if (!compressible.has(extension)) {
+    return { body: entry.body, encoding: null };
+  }
   if (acceptEncoding.includes("br")) {
-    return {
-      body: brotliCompressSync(body, {
-        params: { [constants.BROTLI_PARAM_QUALITY]: 5 },
-      }),
-      encoding: "br",
-    };
+    entry.br ??= brotliCompressSync(entry.body, {
+      params: { [constants.BROTLI_PARAM_QUALITY]: 5 },
+    });
+    return { body: entry.br, encoding: "br" };
   }
   if (acceptEncoding.includes("gzip")) {
-    return { body: gzipSync(body), encoding: "gzip" };
+    entry.gzip ??= gzipSync(entry.body);
+    return { body: entry.gzip, encoding: "gzip" };
   }
-  return null;
+  return { body: entry.body, encoding: null };
 }
 
 const server = createServer(async (req, res) => {
@@ -126,22 +139,22 @@ const server = createServer(async (req, res) => {
   try {
     const asset = await resolveAsset(decodeURIComponent(url.pathname));
     const extension = extname(asset.path).toLowerCase();
-    const body = await readFile(asset.path);
     const contentType = contentTypes.get(extension) ?? "application/octet-stream";
-    const encoded = encode(body, extension, req.headers["accept-encoding"] ?? "");
+    const { body, encoding } = await loadEncodedAsset(
+      asset.path,
+      asset.mtimeMs,
+      extension,
+      req.headers["accept-encoding"] ?? "",
+    );
     const headers = {
       "cache-control": asset.fallback ? "no-cache" : "public,max-age=31536000,immutable",
+      "content-length": String(body.byteLength),
       "content-type": contentType,
       vary: "accept-encoding",
     };
-    if (encoded) {
-      headers["content-encoding"] = encoded.encoding;
-      headers["content-length"] = String(encoded.body.byteLength);
-      res.writeHead(200, headers);
-      res.end(req.method === "HEAD" ? undefined : encoded.body);
-      return;
+    if (encoding) {
+      headers["content-encoding"] = encoding;
     }
-    headers["content-length"] = String(body.byteLength);
     res.writeHead(200, headers);
     res.end(req.method === "HEAD" ? undefined : body);
   } catch {

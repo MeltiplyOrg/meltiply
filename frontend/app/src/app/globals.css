@@ -166,12 +166,6 @@
 
 /* Shared motion and centered-dialog surface states live in @meltiply/ui/motion.css. */
 
-/* Centered modals rest at their measured center; shared keyframes own entry and exit translation. */
-.dialog-bottom-popup {
-  transform: none !important;
-  translate: var(--dialog-rest-x, -50%) var(--dialog-rest-y, -50%);
-}
-
 /* Keep bottom-right feedback above the portal-based selection action on mobile. */
 @media (width < 768px) {
   body:has([data-selection-dock]) [data-sileo-viewport][data-position="bottom-right"] {

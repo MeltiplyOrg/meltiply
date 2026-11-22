@@ -1,3 +1,4 @@
+import { assertValidByteRange, bytesToHex } from "./encoding";
 import type { MultipartUpload, ObjectBody, ObjectMetadata, UploadedPart } from "./object-store";
 import { EffectObjectStore } from "./object-store";
 import type { SigV4Signer } from "./sigv4";
@@ -106,9 +107,7 @@ async function toBytes(
 function checksumHex(value: string | null): string | null {
   if (!value) return null;
   try {
-    return [...Uint8Array.from(atob(value), (character) => character.charCodeAt(0))]
-      .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("");
+    return bytesToHex(Uint8Array.from(atob(value), (character) => character.charCodeAt(0)));
   } catch {
     return null;
   }
@@ -146,6 +145,7 @@ function contentLength(headers: Headers): number {
  */
 function metadataFromHeaders(key: string, headers: Headers): ObjectMetadata {
   const lastModified = headers.get("last-modified");
+  const parsedDate = lastModified ? new Date(lastModified) : null;
   return {
     contentType: headers.get("content-type"),
     customMetadata: null,
@@ -153,7 +153,7 @@ function metadataFromHeaders(key: string, headers: Headers): ObjectMetadata {
     key,
     sha256: checksumHex(headers.get("x-amz-checksum-sha256")),
     size: contentLength(headers),
-    uploadedAt: lastModified ? new Date(lastModified) : new Date(0),
+    uploadedAt: parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : new Date(0),
     version: headers.get("x-amz-version-id"),
   };
 }
@@ -347,17 +347,6 @@ export class S3ObjectStore extends EffectObjectStore {
   }
 
   /**
-   * Reads the first N bytes of an object, useful for MIME sniffing and magic-number validation.
-   *
-   * @param key - Storage object key.
-   * @param maximumBytes - Number of prefix bytes to read (up to 1 MiB).
-   * @returns Byte buffer if the object exists, or null.
-   */
-  async readPrefix(key: string, maximumBytes: number): Promise<Uint8Array | null> {
-    return this.readRange(key, 0, maximumBytes);
-  }
-
-  /**
    * Reads a bounded slice of an object by byte offset and maximum length.
    *
    * @param key - Storage object key.
@@ -367,12 +356,7 @@ export class S3ObjectStore extends EffectObjectStore {
    * @throws {RangeError} If offset or maximumBytes are outside safe bounds.
    */
   async readRange(key: string, offset: number, maximumBytes: number): Promise<Uint8Array | null> {
-    if (!Number.isSafeInteger(offset) || offset < 0) {
-      throw new RangeError("offset must be a non-negative safe integer");
-    }
-    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > 1024 * 1024) {
-      throw new RangeError("maximumBytes must be between 1 and 1048576");
-    }
+    assertValidByteRange(offset, maximumBytes);
     const response = await this.#send({
       headers: { range: `bytes=${offset}-${offset + maximumBytes - 1}` },
       key,

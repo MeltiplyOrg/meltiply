@@ -478,6 +478,25 @@ describe("createFacebookAdapter", () => {
     });
   });
 
+  it("recognizes a terminal ended_live operation without another provider read", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => {
+      throw new Error("ended_live lookup must not contact Facebook");
+    });
+    await expect(
+      adapter(fetcher).lookupPublication!(context, credentials, {
+        providerOperationId: "ended_live:live-1",
+      }),
+    ).resolves.toEqual({
+      state: "delivered",
+      result: {
+        outcome: "confirmed_success",
+        delivery: "broadcast",
+        providerOperationId: "ended_live:live-1",
+      },
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("measures followers without misreporting Page likes as following", async () => {
     const providerCalls = sequence((url) => {
       expect(url.searchParams.get("fields")).toBe("followers_count");

@@ -1,6 +1,6 @@
 import { copyFile, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 /**
  * Mirrors selected Worker config directories in a private temporary repo layout.
@@ -14,7 +14,7 @@ export async function createWorkerConfigSession(repoRoot, configPaths, envText) 
   const root = resolve(repoRoot);
   const configs = configPaths.map((path) => relative(root, resolve(path)));
   for (const path of configs) {
-    if (isAbsolute(path) || path === ".." || path.startsWith(`..${sep}`)) {
+    if (path === ".." || path.startsWith(`..${sep}`)) {
       throw new Error("Local Worker configs must be inside the checkout");
     }
   }

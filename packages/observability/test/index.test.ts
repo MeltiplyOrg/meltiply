@@ -377,6 +377,15 @@ describe("observability safety", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("handles circular references and deep nesting in redact without overflowing", () => {
+    const cyclic: Record<string, unknown> = { safe: "ok", token: "secret" };
+    cyclic.self = cyclic;
+    const redacted = redact(cyclic) as Record<string, unknown>;
+    expect(redacted.safe).toBe("ok");
+    expect(redacted.token).toBe("[REDACTED]");
+    expect(redacted.self).toBe("[Circular]");
+  });
+
   it("preserves valid 16-hex span IDs in exportOtlpSpan without re-hashing", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);

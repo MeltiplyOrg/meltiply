@@ -40,8 +40,14 @@ export function createEffectTracer(
       span.end = function (endTime: bigint, exit: Exit.Exit<unknown, unknown>) {
         originalEnd(endTime, exit);
 
-        // Respect Effect sampling decision: omit unsampled spans (e.g. via MinimumTraceLevel or sampled: false)
         if (span.sampled === false) {
+          return;
+        }
+        if (
+          exporter === exportOtlpSpan &&
+          context.environment !== "local" &&
+          context.environment !== "test"
+        ) {
           return;
         }
 

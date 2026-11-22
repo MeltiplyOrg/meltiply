@@ -1,8 +1,7 @@
 import { createRequestId, createTraceId, errorDiagnostic, log } from "@meltiply/observability";
-import { ProviderAdapterError } from "@meltiply/providers";
 import {
   diagnosticReportInput,
-  isProviderFailureClass,
+  extractProviderFailureClass,
   REPORTING_MAX_DELIVERY_BATCH,
   ReportingService,
   type DiagnosticReportInput,
@@ -59,16 +58,9 @@ function failureValue(cause: Cause.Cause<unknown>): unknown {
   return Option.isSome(typed) ? typed.value : Cause.squash(cause);
 }
 
-/** Canonical Provider class of an adapter failure, when the value carries one. */
-function providerFailureClass(cause: unknown): DiagnosticReportInput["failureClass"] {
-  if (!(cause instanceof ProviderAdapterError)) return undefined;
-  const classification = cause.failure?.classification;
-  return isProviderFailureClass(classification) ? classification : undefined;
-}
-
 /** Separates classified Provider conditions from defects without retaining runtime messages. */
 export function apiBoundaryReport(cause: unknown, path: string): DiagnosticReportInput {
-  const failureClass = providerFailureClass(cause);
+  const failureClass = extractProviderFailureClass(cause);
   return diagnosticReportInput(cause, {
     ...(failureClass ? { category: "provider_failure" as const, failureClass } : {}),
     operation: operationForPath(path),
@@ -118,7 +110,7 @@ export function scheduleInvocationFailureDiagnostic(
   if (!path.startsWith("/api/v1/")) return;
   const failure = failureValue(cause);
   if (failure === undefined) return;
-  const provider = providerFailureClass(failure) !== undefined;
+  const provider = extractProviderFailureClass(failure) !== undefined;
   if (status < 500 && !provider) return;
   try {
     scheduleDiagnostic(c, apiBoundaryReport(failure, path), {}, "diagnostic_invocation_failure");

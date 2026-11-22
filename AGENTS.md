@@ -72,10 +72,11 @@ only when the user requests it or an applicable skill explicitly requires it.
   and DLQ handling. Provider-specific behavior stays in `packages/providers`.
 - Prefer simple code without speculative abstractions, repeated work, avoidable
   copies/allocations, unbounded queries, N+1 access, or unhandled promises.
-- Document each new or changed function above its declaration: purpose, input/output
-  constraints and defaults, effects/errors, non-obvious invariants. Explain the
-  approach, not the statements. Keep comments proportional, cover callbacks in their
-  enclosing contract, and update comments when behavior changes.
+- Write no comments. Names, types, and tests carry intent; when code needs prose to be
+  understood, reshape it. Only these survive: license headers, tool directives, doc
+  comments on exported `packages/*` contracts, a non-obvious rule imposed by a
+  dependency, platform, vendor, or protocol we cannot change, and issue or RFC links
+  for a constraint code cannot express.
 
 ## Conditional guidance
 

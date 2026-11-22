@@ -44,26 +44,59 @@ export function createMutationKey(
 }
 
 /**
- * Creates an in-memory idempotency key tracker that caches a generated UUID for an input fingerprint.
- * Subsequent retries with the identical normalized payload reuse the same idempotency key,
- * while altering the payload issues a fresh key.
+ * Fingerprint of one mutation payload: the normalized payload serialized with
+ * sorted keys, so structurally identical inputs share one fingerprint while any
+ * content change produces a different one. Retries of one mutation reuse the
+ * fingerprint; a cleared fingerprint lets a later attempt mint a fresh key.
+ *
+ * @param input Arbitrary mutation variables to fingerprint.
+ * @returns Stable fingerprint string for the normalized payload.
+ */
+export function mutationFingerprint(input: unknown): string {
+  return JSON.stringify(normalize(input)) ?? "undefined";
+}
+
+/** Upper bound on remembered fingerprints; settled mutations clear their own entry. */
+const MAX_ACTIVE_FINGERPRINTS = 64;
+
+/**
+ * Creates an in-memory idempotency key tracker that caches a generated UUID per payload fingerprint.
+ * Concurrent mutations each keep their own key, so retries reuse the fingerprinted key
+ * while altering the payload issues a fresh one. The map is bounded: the oldest
+ * fingerprint is evicted once the cap is reached, so abandoned entries cannot grow without limit.
  *
  * @param createKey Optional UUID generator factory; defaults to `createMutationKey`.
- * @returns Tracker interface with `keyFor(input)` and `clear()` methods.
+ * @returns Tracker interface with `keyFor(input)` and `clear(fingerprint?)` methods.
  */
 export function createMutationKeyTracker(createKey: () => string = createMutationKey) {
-  let active: { fingerprint: string; key: string } | null = null;
+  const active = new Map<string, string>();
 
   return {
-    clear(): void {
-      active = null;
+    /**
+     * Drops remembered keys: one fingerprint when supplied, every fingerprint
+     * when called without arguments. Per-fingerprint clearing keeps a concurrent
+     * mutation's retry key intact; clearing all is the session-reset escape hatch.
+     *
+     * @param fingerprint Fingerprint of the settled mutation's variables (`mutationFingerprint`), or undefined to clear all.
+     */
+    clear(fingerprint?: string): void {
+      if (fingerprint === undefined) {
+        active.clear();
+        return;
+      }
+      active.delete(fingerprint);
     },
     keyFor(input: unknown): string {
-      const fingerprint = JSON.stringify(normalize(input)) ?? "undefined";
-      if (!active || active.fingerprint !== fingerprint) {
-        active = { fingerprint, key: createKey() };
+      const fingerprint = mutationFingerprint(input);
+      const existing = active.get(fingerprint);
+      if (existing !== undefined) return existing;
+      if (active.size >= MAX_ACTIVE_FINGERPRINTS) {
+        const oldest = active.keys().next().value;
+        if (oldest !== undefined) active.delete(oldest);
       }
-      return active.key;
+      const key = createKey();
+      active.set(fingerprint, key);
+      return key;
     },
   };
 }

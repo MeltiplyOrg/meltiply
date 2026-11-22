@@ -1,6 +1,18 @@
 import type { components } from "@meltiply/contracts/schema";
 
-const unsafeFilenamePattern = /(^\.{1,2}$)|[\\/\u0000-\u001f\u007f]/;
+/** Pattern rejecting empty, traversal (`.` / `..`), slash, and control characters in path segments. */
+export const UNSAFE_PATH_SEGMENT_PATTERN = /(^\.{1,2}$)|[\\/\u0000-\u001f\u007f]/;
+
+/**
+ * Extracts a usable message from an unknown thrown value, falling back to `fallback`.
+ *
+ * @param cause - Thrown or rejected value.
+ * @param fallback - Message returned when `cause` is not an `Error` with a non-empty message.
+ * @returns Non-empty error message string.
+ */
+export function errorMessage(cause: unknown, fallback: string): string {
+  return cause instanceof Error && cause.message.length > 0 ? cause.message : fallback;
+}
 
 export {
   analyticsTerminalAgeSeconds,
@@ -57,11 +69,6 @@ export class StorageUnavailable extends DomainError {
   }
 }
 
-/**
- * The canonical Platform roster — the single source of truth for which
- * Platforms Meltiply supports. Every consumer that needs the list (providers,
- * routes, automation, frontend) imports this rather than re-declaring it.
- */
 export const PLATFORM_IDS: readonly Platform[] = [
   "tiktok",
   "youtube",
@@ -69,6 +76,18 @@ export const PLATFORM_IDS: readonly Platform[] = [
   "facebook",
   "threads",
 ] as const;
+
+const PLATFORM_ID_SET: ReadonlySet<string> = new Set(PLATFORM_IDS);
+
+/**
+ * Narrows an untrusted value to a supported Meltiply Platform identifier.
+ *
+ * @param value - Untrusted candidate platform identifier.
+ * @returns True when `value` is a member of `PLATFORM_IDS`.
+ */
+export function isPlatform(value: unknown): value is Platform {
+  return typeof value === "string" && PLATFORM_ID_SET.has(value);
+}
 
 /**
  * Construct the OAuth callback path for a Platform. This is the canonical
@@ -140,9 +159,7 @@ export interface CommunityLimits {
 }
 
 /**
- * Community deployments impose no resource quotas: operators own capacity and
- * costs. Keep the nullable policy and enforcement machinery for bounded hosted
- * policies; `null` disables only the corresponding resource allowance.
+ * Community deployments impose no resource quotas; `null` leaves that resource unrestricted.
  */
 export const COMMUNITY_LIMITS: CommunityLimits = Object.freeze({
   max_distributions: null,
@@ -152,11 +169,19 @@ export const COMMUNITY_LIMITS: CommunityLimits = Object.freeze({
 });
 
 /**
- * Normalize database and runtime timestamps to the API's canonical ISO form.
+ * Normalizes a Date or date string to ISO-8601 UTC, returning null for nullish or invalid values.
  *
- * Database drivers may return either a Date instance or an ISO-compatible
- * string. Keeping this conversion in one shared helper prevents each Worker
- * service from drifting on timestamp serialization semantics.
+ * @param value - Date instance, date string, or null/undefined.
+ * @returns ISO-8601 UTC string, or null when missing or unparseable.
+ */
+export function isoDateTimeOrNull(value: Date | string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+/**
+ * Normalize database and runtime timestamps to the API's canonical ISO form.
  *
  * @param value - Date instance or ISO-compatible date string.
  * @returns Standardized ISO-8601 UTC timestamp string.
@@ -201,31 +226,38 @@ const mediaRules = {
 export type AcceptedMediaType = keyof typeof mediaRules;
 
 /**
+ * Narrows a MIME type string to an accepted media rule key using own-property lookup.
+ *
+ * @param contentType - Candidate MIME type string.
+ * @returns True when `contentType` is an accepted upload media type.
+ */
+export function isAcceptedMediaType(
+  contentType: string | null | undefined,
+): contentType is AcceptedMediaType {
+  return typeof contentType === "string" && Object.hasOwn(mediaRules, contentType);
+}
+
+/**
  * Returns the per-file upload ceiling in bytes for one accepted media MIME
- * type (25 MiB for images, 500 MiB for video), or null when the type is not an
- * accepted media rule. Processing reservations size against this ceiling —
- * never against the uploaded size — because normalization can legitimately
- * produce larger bytes (an opaque PNG becoming the required JPEG) and the
- * output must fit the same per-file quota the upload itself obeyed.
+ * type (25 MiB for images, 500 MiB for video), or null when unsupported.
  *
  * @param contentType - Declared media MIME type; unvalidated input returns null.
  * @returns The maximum byte ceiling, or null for an unknown media type.
  */
 export function mediaUploadMaximum(contentType: string | null | undefined): number | null {
-  if (!contentType || !Object.hasOwn(mediaRules, contentType)) return null;
-  // Own-key membership validates the MIME union without allocating an entries
-  // array for every upload/output reservation or accepting prototype members.
-  return mediaRules[contentType as AcceptedMediaType].maximum;
+  if (!isAcceptedMediaType(contentType)) return null;
+  return mediaRules[contentType].maximum;
 }
 
 /**
  * Resolves the canonical upload extension for an accepted media MIME type.
- * Used when restoring original bytes whose display title has no file suffix.
- * Exact own MIME keys only; unknown types return null rather than guessing.
+ *
+ * @param contentType - Declared media MIME type.
+ * @returns Canonical extension without leading dot, or null for an unknown type.
  */
 export function mediaUploadExtension(contentType: string): string | null {
-  if (!Object.hasOwn(mediaRules, contentType)) return null;
-  return mediaRules[contentType as AcceptedMediaType].extensions[0];
+  if (!isAcceptedMediaType(contentType)) return null;
+  return mediaRules[contentType].extensions[0];
 }
 
 export class AssetPolicyError extends Error {
@@ -276,7 +308,7 @@ export function validateUpload(input: {
   filename: string;
 }): ValidatedUpload {
   const filename = input.filename.trim();
-  if (!filename || filename.length > 255 || unsafeFilenamePattern.test(filename)) {
+  if (!filename || filename.length > 255 || UNSAFE_PATH_SEGMENT_PATTERN.test(filename)) {
     throw new AssetPolicyError(
       "invalid_filename",
       "filename must be a safe single path segment of at most 255 characters",
@@ -285,11 +317,12 @@ export function validateUpload(input: {
   if (!Number.isSafeInteger(input.fileSize) || input.fileSize < 1) {
     throw new AssetPolicyError("validation_error", "file_size must be a positive safe integer");
   }
-  const contentType = input.contentType.split(";", 1)[0]!.trim().toLowerCase() as AcceptedMediaType;
-  const rule = mediaRules[contentType];
-  if (!rule) {
+  const normalizedType = (input.contentType.split(";", 1)[0] ?? "").trim().toLowerCase();
+  if (!isAcceptedMediaType(normalizedType)) {
     throw new AssetPolicyError("unsupported_media_type", "content_type is not supported");
   }
+  const contentType = normalizedType;
+  const rule = mediaRules[contentType];
   if (input.assetType !== rule.assetType) {
     throw new AssetPolicyError("unsupported_media_type", "asset_type does not match content_type");
   }

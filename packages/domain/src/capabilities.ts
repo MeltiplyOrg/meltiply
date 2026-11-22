@@ -66,11 +66,23 @@ const EDITOR_CAPABILITIES: readonly WorkspaceCapability[] = [
 
 const VIEWER_CAPABILITIES: readonly WorkspaceCapability[] = ["channel:read", "content:read"];
 
-/**
- * Role capabilities. Workspace Admins deliberately cannot assign the Admin
- * role or modify another Admin; the Installation Owner supplies that extra
- * authority because ownership is installation-level, not a Workspace role.
- */
+const ADMIN_CAPABILITY_SET: ReadonlySet<WorkspaceCapability> = new Set(ADMIN_CAPABILITIES);
+const EDITOR_CAPABILITY_SET: ReadonlySet<WorkspaceCapability> = new Set(EDITOR_CAPABILITIES);
+const VIEWER_CAPABILITY_SET: ReadonlySet<WorkspaceCapability> = new Set(VIEWER_CAPABILITIES);
+const OWNER_CAPABILITY_SET: ReadonlySet<WorkspaceCapability> = new Set([
+  ...ADMIN_CAPABILITIES,
+  "installation:manage",
+  "member:assign-admin",
+]);
+
+const ROLE_CAPABILITY_SETS: Readonly<Record<WorkspaceRole, ReadonlySet<WorkspaceCapability>>> = {
+  admin: ADMIN_CAPABILITY_SET,
+  editor: EDITOR_CAPABILITY_SET,
+  viewer: VIEWER_CAPABILITY_SET,
+};
+
+const WORKSPACE_ROLE_SET: ReadonlySet<string> = new Set(WORKSPACE_ROLES);
+
 export const WORKSPACE_ROLE_CAPABILITIES: Readonly<
   Record<WorkspaceRole, readonly WorkspaceCapability[]>
 > = {
@@ -79,7 +91,6 @@ export const WORKSPACE_ROLE_CAPABILITIES: Readonly<
   viewer: VIEWER_CAPABILITIES,
 };
 
-/** Installation Owner capabilities layered on top of their Workspace Admin role. */
 export const INSTALLATION_OWNER_CAPABILITIES: readonly WorkspaceCapability[] = [
   ...ADMIN_CAPABILITIES,
   "installation:manage",
@@ -93,7 +104,7 @@ export const INSTALLATION_OWNER_CAPABILITIES: readonly WorkspaceCapability[] = [
  * @returns True when the value is one of the three Workspace roles.
  */
 export function isWorkspaceRole(value: unknown): value is WorkspaceRole {
-  return value === "admin" || value === "editor" || value === "viewer";
+  return typeof value === "string" && WORKSPACE_ROLE_SET.has(value);
 }
 
 /**
@@ -104,7 +115,7 @@ export function isWorkspaceRole(value: unknown): value is WorkspaceRole {
  * @returns True when the role's capability set contains the capability.
  */
 export function roleCan(role: WorkspaceRole, capability: WorkspaceCapability): boolean {
-  return WORKSPACE_ROLE_CAPABILITIES[role].includes(capability);
+  return ROLE_CAPABILITY_SETS[role].has(capability);
 }
 
 /**
@@ -122,7 +133,7 @@ export function can(
   capability: WorkspaceCapability,
 ): boolean {
   return (
-    (installationOwner && INSTALLATION_OWNER_CAPABILITIES.includes(capability)) ||
-    roleCan(role, capability)
+    (installationOwner && OWNER_CAPABILITY_SET.has(capability)) ||
+    ROLE_CAPABILITY_SETS[role].has(capability)
   );
 }

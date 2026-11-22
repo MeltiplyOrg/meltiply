@@ -1,3 +1,4 @@
+import { isoDateTimeOrNull } from "@meltiply/domain";
 import type { ReportingConfiguration } from "./configuration";
 import {
   REPORTING_DISCLOSURE_VERSION,
@@ -24,9 +25,7 @@ export interface PreferencesRow extends Record<string, unknown> {
 
 /** Converts a driver timestamp to an ISO string, preserving null. */
 export function isoOrNull(value: Date | string | null): string | null {
-  if (value === null || value === undefined) return null;
-  const date = value instanceof Date ? value : new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  return isoDateTimeOrNull(value);
 }
 
 /** Columns backing one category, so both categories read the same way. */
@@ -65,6 +64,26 @@ function categoryColumns(row: PreferencesRow, category: ReportingCategory) {
  * @param configuration - Deployment configuration for the current invocation.
  * @returns Requested status, effective status, reason and interval bounds.
  */
+function categoryReason(
+  row: PreferencesRow | null,
+  requested: boolean,
+  disclosureVersion: number | null,
+  configuration: ReportingConfiguration,
+): ReportingCategoryReason {
+  if (row && row.schema_version !== REPORTING_SCHEMA_VERSION) return "preference_unavailable";
+  if (
+    row &&
+    requested &&
+    (disclosureVersion === null || disclosureVersion !== REPORTING_DISCLOSURE_VERSION)
+  ) {
+    return "preference_unavailable";
+  }
+  if (!requested) return "not_requested";
+  if (configuration.forcedOff) return "operator_disabled";
+  if (!configuration.destination) return "destination_unavailable";
+  return "enabled";
+}
+
 export function categoryStatus(
   row: PreferencesRow | null,
   category: ReportingCategory,
@@ -78,23 +97,7 @@ export function categoryStatus(
     intervalStartedAt: stored ? isoOrNull(stored.intervalStartedAt) : null,
     requested,
   };
-  const reason: ReportingCategoryReason = ((): ReportingCategoryReason => {
-    if (row && row.schema_version !== REPORTING_SCHEMA_VERSION) return "preference_unavailable";
-    // A stored request without a supported disclosure decision is not consent:
-    // it is an unreadable choice, and sending under it would report activity no
-    // disclosure covered.
-    if (
-      row &&
-      requested &&
-      (base.disclosureVersion === null || base.disclosureVersion !== REPORTING_DISCLOSURE_VERSION)
-    ) {
-      return "preference_unavailable";
-    }
-    if (!requested) return "not_requested";
-    if (configuration.forcedOff) return "operator_disabled";
-    if (!configuration.destination) return "destination_unavailable";
-    return "enabled";
-  })();
+  const reason = categoryReason(row, requested, base.disclosureVersion, configuration);
   return { ...base, effective: reason === "enabled", reason };
 }
 

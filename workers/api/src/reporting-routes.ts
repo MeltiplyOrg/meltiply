@@ -28,7 +28,7 @@ import { idempotencyHeaders } from "./idempotent-response";
 import { jsonResponse } from "./responses";
 import { reportingLayer, type ReportingDependencies } from "./reporting-layer";
 import { idempotencyKey, jsonBody, onlyKeys } from "./validation";
-import { idempotentMutation } from "./workspace-lifecycle";
+import { idempotentInstallationMutation } from "./installation-mutation";
 
 // Members may read policy; only the live Installation Owner may mutate it.
 // Delivery status distinguishes local, queued, and capture-accepted feedback.
@@ -175,7 +175,7 @@ export function registerReportingRoutes(
         const requestHash = yield* hashIdempotencyRequestEffect(
           JSON.stringify({ diagnostics, usage }),
         );
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           actor.workspace.id,
           "installation.reporting.update",
@@ -260,7 +260,7 @@ export function registerReportingRoutes(
         const requestHash = yield* hashIdempotencyRequestEffect(
           JSON.stringify({ discovery_source: source }),
         );
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           actor.workspace.id,
           "installation.reporting.feedback",

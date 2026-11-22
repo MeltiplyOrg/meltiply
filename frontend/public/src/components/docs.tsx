@@ -73,9 +73,12 @@ function SiteFooter() {
  * activations anchor the reveal. Article text morphs into streaming line
  * placeholders while navigation loads; incoming heading sections fade upward
  * without delaying initial rendering.
+ *
+ * `content` is trusted build-time HTML: `check-content.mjs` gates the docs
+ * collection to plain reviewed markdown with no code, components, or evaluated
+ * values, so it renders identically on server and client with no sanitizer
+ * divergence.
  */
-import DOMPurify from "dompurify";
-
 export function Docs({
   tree,
   content,
@@ -135,12 +138,7 @@ export function Docs({
               slots={{ ...page?.slots, toc: docsRailTocSlots }}
               footer={{ children: <SiteFooter /> }}
             >
-              <div
-                className="contents"
-                dangerouslySetInnerHTML={{
-                  __html: typeof window === "undefined" ? content : DOMPurify.sanitize(content),
-                }}
-              />
+              <div className="contents" dangerouslySetInnerHTML={{ __html: content }} />
             </DocsPage>
           </DocsLayout>
           <div className="docs-feedback">

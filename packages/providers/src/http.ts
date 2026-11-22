@@ -1,16 +1,20 @@
 import type { Effect } from "effect";
+import type { Platform } from "@meltiply/domain";
 import {
   classifyProviderFailure,
   ProviderAdapterError,
   type ProviderAdapterErrorOptions,
 } from "./failures";
 import { providerCallEffect } from "./effect";
-import type { RateLimitBudget } from "./rate-limit";
+import { extractRateLimitBudget, type RateLimitBudget } from "./rate-limit";
 import type { ProviderRequestContext } from "./types";
 
 export type ProviderHttpMethod = "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
+export type ProviderHttpResponseType = "empty" | "json" | "json_or_empty";
 
-export interface ProviderHttpRequest {
+export interface ProviderHttpRequest<
+  R extends ProviderHttpResponseType = ProviderHttpResponseType,
+> {
   acceptedStatuses?: readonly number[];
   body?: BodyInit;
   /**
@@ -23,7 +27,7 @@ export interface ProviderHttpRequest {
   classifyErrorBody?: (status: number, body: unknown) => ProviderErrorDiagnosis | undefined;
   headers?: HeadersInit;
   method: ProviderHttpMethod;
-  responseType?: "empty" | "json" | "json_or_empty";
+  responseType?: R;
   /** Converts unsafe JSON integer literals to their exact decimal strings before precision can be lost. */
   preserveLargeIntegers?: boolean;
   sideEffectPossible?: boolean;
@@ -53,12 +57,16 @@ export interface ProviderHttpClientOptions {
   fetch?: typeof fetch;
   maximumResponseBytes?: number;
   now?: () => Date;
+  /** Platform whose canonical rate-limit header parser attaches to responses. */
+  platform?: Platform;
+  /** Explicit override for custom/test rate-limit extractors; takes precedence over `platform`. */
   rateLimitBudget?: (headers: Headers) => RateLimitBudget | null;
   timeoutMilliseconds?: number;
 }
 
 const defaultMaximumResponseBytes = 256 * 1024;
 const defaultTimeoutMilliseconds = 30_000;
+const utf8Decoder = new TextDecoder();
 
 /**
  * Asserts that a number is an integer within inclusive minimum and maximum bounds.
@@ -146,40 +154,80 @@ function retryAfterSeconds(value: string | null, now: Date): number | undefined 
 
 /**
  * Streams an HTTP response body into memory with strict byte limit enforcement.
- * Inspects Content-Length upfront and terminates stream reader early if bytes exceed maximumBytes,
- * protecting Worker isolates from heap exhaustion from large untrusted payloads.
+ * Inspects Content-Length upfront, avoids an extra full-body copy when the
+ * response arrives in a single chunk, and grows a single buffer on multi-chunk
+ * streams while terminating early if bytes exceed maximumBytes.
  * Returns Uint8Array of body bytes. Throws TypeError if size exceeds limit.
  */
 async function boundedBody(response: Response, maximumBytes: number): Promise<Uint8Array> {
-  const contentLength = Number(response.headers.get("Content-Length"));
+  const rawLength = response.headers.get("Content-Length");
+  const contentLength = rawLength === null ? Number.NaN : Number(rawLength);
   if (Number.isFinite(contentLength) && contentLength > maximumBytes) {
     throw new TypeError("provider response exceeds the maximum size");
   }
   if (!response.body) return new Uint8Array();
   const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
+  const initialCapacity = Number.isInteger(contentLength) && contentLength > 0 ? contentLength : 0;
+  let buffer: Uint8Array | undefined =
+    initialCapacity > 0 ? new Uint8Array(initialCapacity) : undefined;
+  let singleChunk: Uint8Array | undefined;
   let length = 0;
   try {
     while (true) {
       const chunk = await reader.read();
       if (chunk.done) break;
-      length += chunk.value.byteLength;
-      if (length > maximumBytes) {
+      const piece = chunk.value;
+      if (piece.byteLength === 0) continue;
+      const nextLength = length + piece.byteLength;
+      if (nextLength > maximumBytes) {
         await reader.cancel();
         throw new TypeError("provider response exceeds the maximum size");
       }
-      chunks.push(chunk.value);
+      if (!buffer) {
+        if (!singleChunk) {
+          singleChunk = piece;
+          length = nextLength;
+          continue;
+        }
+        const capacity = Math.min(maximumBytes, Math.max(nextLength, singleChunk.byteLength * 2));
+        buffer = new Uint8Array(capacity);
+        buffer.set(singleChunk, 0);
+        singleChunk = undefined;
+      } else if (nextLength > buffer.byteLength) {
+        const capacity = Math.min(maximumBytes, Math.max(nextLength, buffer.byteLength * 2));
+        const grown = new Uint8Array(capacity);
+        grown.set(buffer.subarray(0, length), 0);
+        buffer = grown;
+      }
+      buffer.set(piece, length);
+      length = nextLength;
     }
   } finally {
     reader.releaseLock();
   }
-  const body = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
+  if (singleChunk) return singleChunk;
+  if (!buffer) return new Uint8Array();
+  return length === buffer.byteLength ? buffer : buffer.subarray(0, length);
+}
+
+/**
+ * Decodes bounded UTF-8 bytes as JSON using the shared module-level decoder.
+ * Optionally preserves unsafe integer literals as their exact decimal strings.
+ */
+function parseJsonBytes(bytes: Uint8Array, preserveLargeIntegers = false): unknown {
+  return JSON.parse(
+    utf8Decoder.decode(bytes),
+    preserveLargeIntegers
+      ? (_key, value: unknown, source?: { source?: string }) =>
+          typeof value === "number" &&
+          Number.isInteger(value) &&
+          !Number.isSafeInteger(value) &&
+          source?.source &&
+          /^-?\d+$/.test(source.source)
+            ? source.source
+            : value
+      : undefined,
+  );
 }
 
 /**
@@ -250,7 +298,10 @@ export class ProviderHttpClient {
       120_000,
     );
     this.#now = options.now ?? (() => new Date());
-    this.#rateLimitBudget = options.rateLimitBudget;
+    const platform = options.platform;
+    this.#rateLimitBudget =
+      options.rateLimitBudget ??
+      (platform ? (headers) => extractRateLimitBudget(platform, headers) : undefined);
   }
 
   /**
@@ -266,10 +317,26 @@ export class ProviderHttpClient {
    * internal causes and origin/method/status facts are retained for sanitized logs.
    * JSON parse errors are summarized because native messages can contain response bytes.
    */
-  async request<T>(
+  request(
+    context: ProviderRequestContext,
+    request: ProviderHttpRequest<"empty">,
+  ): Promise<ProviderHttpResponse<undefined>>;
+  request<T = unknown>(
+    context: ProviderRequestContext,
+    request: ProviderHttpRequest<"json_or_empty">,
+  ): Promise<ProviderHttpResponse<T | undefined>>;
+  request<T = unknown>(
+    context: ProviderRequestContext,
+    request: ProviderHttpRequest<"json">,
+  ): Promise<ProviderHttpResponse<T>>;
+  request<T = unknown>(
     context: ProviderRequestContext,
     request: ProviderHttpRequest,
-  ): Promise<ProviderHttpResponse<T>> {
+  ): Promise<ProviderHttpResponse<T>>;
+  async request<T = unknown>(
+    context: ProviderRequestContext,
+    request: ProviderHttpRequest,
+  ): Promise<ProviderHttpResponse<T | undefined>> {
     const url = requestUrl(request.url, this.#allowedOrigins);
     const accepted = acceptedStatuses(request.acceptedStatuses);
     const sideEffectPossible = request.sideEffectPossible === true;
@@ -347,8 +414,7 @@ export class ProviderHttpClient {
           let parsed: unknown;
           try {
             const bytes = await boundedBody(response, this.#maximumResponseBytes);
-            parsed =
-              bytes.byteLength === 0 ? undefined : JSON.parse(new TextDecoder().decode(bytes));
+            parsed = bytes.byteLength === 0 ? undefined : parseJsonBytes(bytes);
           } catch {
             await cancelBody(response);
           }
@@ -383,7 +449,7 @@ export class ProviderHttpClient {
       if (responseType === "empty") {
         await cancelBody(response);
         return {
-          body: undefined as T,
+          body: undefined,
           headers: response.headers,
           status: response.status,
         };
@@ -392,7 +458,7 @@ export class ProviderHttpClient {
         const bytes = await boundedBody(response, this.#maximumResponseBytes);
         if (bytes.byteLength === 0 && responseType === "json_or_empty") {
           return {
-            body: undefined as T,
+            body: undefined,
             headers: response.headers,
             status: response.status,
           };
@@ -405,19 +471,7 @@ export class ProviderHttpClient {
           throw new TypeError("provider response is not JSON");
         }
         return {
-          body: JSON.parse(
-            new TextDecoder().decode(bytes),
-            request.preserveLargeIntegers
-              ? (_key, value: unknown, source?: { source?: string }) =>
-                  typeof value === "number" &&
-                  Number.isInteger(value) &&
-                  !Number.isSafeInteger(value) &&
-                  source?.source &&
-                  /^-?\d+$/.test(source.source)
-                    ? source.source
-                    : value
-              : undefined,
-          ) as T,
+          body: parseJsonBytes(bytes, request.preserveLargeIntegers) as T,
           headers: response.headers,
           status: response.status,
         };
@@ -461,10 +515,26 @@ export class ProviderHttpClient {
    * Returns Effect resolving to the typed ProviderHttpResponse. Example:
    * `client.requestEffect(ctx, { method: "GET", url })` → `Effect<ProviderHttpResponse<T>, ProviderAdapterError>`.
    */
-  requestEffect<T>(
+  requestEffect(
+    context: ProviderRequestContext,
+    request: ProviderHttpRequest<"empty">,
+  ): Effect.Effect<ProviderHttpResponse<undefined>, ProviderAdapterError>;
+  requestEffect<T = unknown>(
+    context: ProviderRequestContext,
+    request: ProviderHttpRequest<"json_or_empty">,
+  ): Effect.Effect<ProviderHttpResponse<T | undefined>, ProviderAdapterError>;
+  requestEffect<T = unknown>(
+    context: ProviderRequestContext,
+    request: ProviderHttpRequest<"json">,
+  ): Effect.Effect<ProviderHttpResponse<T>, ProviderAdapterError>;
+  requestEffect<T = unknown>(
     context: ProviderRequestContext,
     request: ProviderHttpRequest,
-  ): Effect.Effect<ProviderHttpResponse<T>, ProviderAdapterError> {
+  ): Effect.Effect<ProviderHttpResponse<T>, ProviderAdapterError>;
+  requestEffect<T = unknown>(
+    context: ProviderRequestContext,
+    request: ProviderHttpRequest,
+  ): Effect.Effect<ProviderHttpResponse<T | undefined>, ProviderAdapterError> {
     return providerCallEffect(context, (child) => this.request<T>(child, request));
   }
 }

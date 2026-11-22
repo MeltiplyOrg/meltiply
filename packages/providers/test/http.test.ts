@@ -428,6 +428,48 @@ describe("ProviderHttpClient", () => {
     expect(classifyErrorBody).toHaveBeenCalledOnce();
   });
 
+  it("streams multi-chunk JSON responses through bounded single-buffer growth", async () => {
+    const encoder = new TextEncoder();
+    const parts = ['{"items":[', '{"id":"1"},', '{"id":"2"},', '{"id":"3"}]}'];
+    const fetcher = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              for (const part of parts) controller.enqueue(encoder.encode(part));
+              controller.close();
+            },
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    const response = await client(fetcher).request<{ items: { id: string }[] }>(context, {
+      method: "GET",
+      url: "https://api.provider.example/chunked",
+    });
+    expect(response.body).toEqual({
+      items: [{ id: "1" }, { id: "2" }, { id: "3" }],
+    });
+  });
+
+  it("extracts rate-limit telemetry automatically when configured with platform", async () => {
+    const requestContext: ProviderRequestContext = { ...context };
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      json({ ok: true }, { headers: { "X-RateLimit-Remaining": "7", "X-RateLimit-Reset": "45" } }),
+    );
+    await client(fetcher, { platform: "tiktok" }).request(requestContext, {
+      method: "GET",
+      url: "https://api.provider.example/status",
+    });
+    expect(requestContext.metadata).toEqual({
+      rateLimitBudget: {
+        percentUsed: null,
+        remaining: 7,
+        resetsInSeconds: 45,
+      },
+    });
+  });
+
   it("keeps status classification when the error body is absent or unusable", async () => {
     const classifyErrorBody = vi.fn(() => undefined);
     await expect(

@@ -14,9 +14,11 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 
 import { loadMigrations } from "../release/release-migrate.mjs";
-import { integrationDatabaseUrl } from "../lib/integration-database.ts";
-
-const leadingSlashPattern = /^\//;
+import {
+  assertLocalTestDatabaseUrl,
+  integrationDatabaseUrl,
+  LOCAL_TEST_URL,
+} from "../lib/integration-database.ts";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const seedSqlPath = join(repositoryRoot, "scripts/cloudflare-local/postgres/seed.sql");
@@ -24,10 +26,7 @@ const seedSqlPath = join(repositoryRoot, "scripts/cloudflare-local/postgres/seed
 // Defaults match the PostgreSQL service provisioned by `bun run db:start`
 // (compose.dev.yml plus scripts/cloudflare-local/postgres);
 // the optional observability profile is not needed for integration tests.
-const defaultTestUrl =
-  "postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable";
-
-const testUrl = process.env.MELTIPLY_DATABASE_TEST_URL ?? defaultTestUrl;
+const testUrl = process.env.MELTIPLY_DATABASE_TEST_URL ?? LOCAL_TEST_URL;
 const adminUrl = integrationDatabaseUrl(
   testUrl,
   "admin",
@@ -60,32 +59,19 @@ function errorMessage(cause) {
 }
 
 /**
- * Validates that a database URL points strictly to loopback (127.0.0.1 or localhost) and the dedicated 'meltiply' database.
- * Safety guard to prevent resetting staging, production, or non-test databases.
+ * Validates that a database URL points strictly to the dedicated local 'meltiply'
+ * test database on loopback, exiting via `fail` if violated.
  *
  * @param {string} urlString - PostgreSQL connection string to inspect
  * @param {string} label - Environment variable or config name for error reporting
- * @throws {Error} If URL is not valid, not on loopback, or targets a database other than 'meltiply'
+ * @returns {void}
  */
 function assertLocalTestDatabase(urlString, label) {
-  let parsed;
   try {
-    parsed = new URL(urlString);
-  } catch {
-    fail(`${label} is not a valid URL: ${urlString}`);
-  }
-  const isLocalHost =
-    parsed.hostname === "127.0.0.1" ||
-    parsed.hostname === "localhost" ||
-    parsed.hostname === "::1" ||
-    parsed.hostname === "[::1]";
-  const dbName = parsed.pathname.replace(leadingSlashPattern, "");
-  const isDedicatedTestDb = dbName === "meltiply";
-  if (!isLocalHost || !isDedicatedTestDb) {
+    assertLocalTestDatabaseUrl(urlString, label);
+  } catch (cause) {
     fail(
-      `Safety guard: ${label} must target the local dedicated test database ` +
-        `'meltiply' on loopback (127.0.0.1 or localhost), got host '${parsed.hostname}' ` +
-        `and database '${dbName}'. Resetting non-local or ambiguous databases is forbidden.`,
+      `Safety guard: ${errorMessage(cause)}. Resetting non-local or ambiguous databases is forbidden.`,
     );
   }
 }

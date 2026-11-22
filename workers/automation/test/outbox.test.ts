@@ -204,6 +204,39 @@ describe("outbox relay publication", () => {
       10,
     ]);
   });
+
+  it("leaves accepted messages leased without marking them failed when markPublished fails", async () => {
+    const { queue, sendBatch } = recordedQueue();
+    const query = vi
+      .fn()
+      .mockReturnValueOnce(Effect.succeed({ rows: [row(eventId(9)), row(eventId(10))] }))
+      .mockReturnValueOnce(Effect.fail(new Error("database settlement timeout")));
+    withSystemTransactionEffect.mockImplementation(
+      (
+        _env: AutomationEnv,
+        operation: (client: EffectTransactionClient) => Effect.Effect<unknown>,
+      ) => operation({ query }),
+    );
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(runRelay(baseEnv(queue), 2)).resolves.toEqual({
+        claimed: 2,
+        dead: 0,
+        failed: 0,
+        published: 0,
+      });
+
+      expect(sendBatch).toHaveBeenCalledTimes(1);
+      // Only claimOutbox + failed markPublished ran; markFailed must NEVER run
+      // for rows the Queue already accepted.
+      expect(query).toHaveBeenCalledTimes(2);
+      expect(query.mock.calls[1]?.[0]).toContain("SET state = 'published'");
+      expect(errorLog).toHaveBeenCalledTimes(1);
+      expect(errorLog.mock.calls[0]?.[0]).toContain("outbox_settlement_failed");
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
 });
 
 describe("outbox relay delayed delivery", () => {

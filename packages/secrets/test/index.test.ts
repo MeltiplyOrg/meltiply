@@ -1,7 +1,12 @@
 import { Buffer } from "node:buffer";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { TokenCipher } from "../src";
+import {
+  createIsolateTokenCipherCache,
+  TokenCipher,
+  TokenCiphertextError,
+  TokenCipherUnavailableError,
+} from "../src";
 
 const currentKey = "0123456789abcdef0123456789abcdef";
 const oldKey = "abcdef0123456789abcdef0123456789";
@@ -200,5 +205,37 @@ describe("TokenCipher", () => {
     if (exit._tag === "Failure") {
       expect(exit.cause.toString()).toContain("StorageUnavailableError");
     }
+  });
+
+  it("classifies tampered AES-GCM ciphertexts with TokenCiphertextError", async () => {
+    const { Effect } = await import("effect");
+    const cipher = new TokenCipher({
+      currentKeyId: "current",
+      keys: [{ id: "current", material: currentKey }],
+      randomBytes: () => fixedNonce,
+    });
+    const encrypted = await cipher.encrypt("secret");
+    const lastChar = encrypted.endsWith("A") ? "B" : "A";
+    const tampered = encrypted.slice(0, -1) + lastChar;
+    await expect(cipher.decrypt(tampered)).rejects.toBeInstanceOf(TokenCiphertextError);
+    const exit = await Effect.runPromiseExit(cipher.decryptEffect(tampered));
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(exit.cause.toString()).toContain("InvalidRequestError");
+    }
+  });
+
+  it("caches isolate TokenCipher per key and rebuilds on rotation", async () => {
+    const resolve = createIsolateTokenCipherCache();
+    expect(() => resolve({})).toThrow(TokenCipherUnavailableError);
+    expect(() => resolve({ TOKEN_ENCRYPTION_KEY: "too-short" })).toThrow(
+      TokenCipherUnavailableError,
+    );
+    const first = resolve({ TOKEN_ENCRYPTION_KEY: currentKey });
+    expect(resolve({ TOKEN_ENCRYPTION_KEY: currentKey })).toBe(first);
+    const rotated = resolve({ TOKEN_ENCRYPTION_KEY: oldKey });
+    expect(rotated).not.toBe(first);
+    const encrypted = await rotated.encrypt("rotated-token");
+    await expect(rotated.decrypt(encrypted)).resolves.toBe("rotated-token");
   });
 });

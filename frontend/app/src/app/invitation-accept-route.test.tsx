@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -48,12 +48,19 @@ vi.mock("@/lib/queries", () => ({
 vi.mock("@/lib/auth-client", () => ({
   authClient: { signUpEmail: state.signUpEmail },
 }));
-vi.mock("@/lib/i18n", () => ({
-  useI18n: () => ({
-    t: (message: string, values?: Record<string, string>) =>
-      message.replace(/\{(\w+)\}/g, (_match, key: string) => values?.[key] ?? `{${key}}`),
-  }),
-}));
+vi.mock("@/lib/i18n", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/i18n")>();
+  return {
+    ...actual,
+    useI18n: () => ({
+      language: "en",
+      setLanguage: () => undefined,
+      t: (message: string, values?: Record<string, string>) =>
+        message.replace(/\{(\w+)\}/g, (_match, key: string) => values?.[key] ?? `{${key}}`),
+      tStatus: (status: string) => status,
+    }),
+  };
+});
 
 import InvitationAcceptRoute from "@/app/invitation-accept-route";
 
@@ -137,5 +144,73 @@ describe("invitation acceptance route", () => {
     expect(
       screen.getByText("This invitation is invalid, expired, or already used."),
     ).toBeInTheDocument();
+  });
+
+  /**
+   * An unverified invited account gets the verify-then-return guidance, keyed
+   * off the API's typed `email_verification_required` code rather than a
+   * substring match on the error message.
+   */
+  it("guides an unverified invitee to verify their email", async () => {
+    state.isSignedIn = true;
+    state.preview = {
+      data: {
+        email: "invitee@meltiply.local",
+        expires_at: "2026-01-08T00:00:00.000Z",
+        role: "editor",
+        status: "pending",
+        workspace_name: "Shared Studio",
+      },
+      error: null,
+      isPending: false,
+    };
+    renderRoute(`?token=${token}`);
+
+    await waitFor(() => expect(state.acceptMutate).toHaveBeenCalled());
+    const options = state.acceptMutate.mock.calls[0]?.[1] as {
+      onError: (cause: unknown) => void;
+    };
+    act(() => {
+      options.onError({
+        code: "email_verification_required",
+        message: "Verify your email before joining the workspace.",
+        status: 403,
+      });
+    });
+
+    expect(
+      await screen.findByText("Verify your email address, then return to this page to join."),
+    ).toBeInTheDocument();
+  });
+
+  /**
+   * Any other acceptance failure renders safe user-facing copy: the raw
+   * provider message never reaches the page.
+   */
+  it("shows safe copy for a non-verification acceptance failure", async () => {
+    state.isSignedIn = true;
+    state.preview = {
+      data: {
+        email: "invitee@meltiply.local",
+        expires_at: "2026-01-08T00:00:00.000Z",
+        role: "editor",
+        status: "pending",
+        workspace_name: "Shared Studio",
+      },
+      error: null,
+      isPending: false,
+    };
+    renderRoute(`?token=${token}`);
+
+    await waitFor(() => expect(state.acceptMutate).toHaveBeenCalled());
+    const options = state.acceptMutate.mock.calls[0]?.[1] as {
+      onError: (cause: unknown) => void;
+    };
+    act(() => {
+      options.onError(new Error("raw provider detail that must not leak"));
+    });
+
+    expect(await screen.findByText("An error has occurred.")).toBeInTheDocument();
+    expect(screen.queryByText(/raw provider detail/)).not.toBeInTheDocument();
   });
 });

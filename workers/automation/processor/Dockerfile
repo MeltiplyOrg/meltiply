@@ -28,7 +28,7 @@ ENV NODE_ENV=production \
     PROCESSOR_WORK_DIR=/tmp/meltiply-processor
 
 WORKDIR /engine
-COPY engine/server.mjs ./server.mjs
+COPY engine/server.mjs engine/engine-job.mjs ./
 
 # The engine writes only under its own work directory, so it needs no root
 # privileges; /tmp is writable by any user in the base image.

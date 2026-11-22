@@ -95,20 +95,6 @@
       "expected_content_type": "application/json"
     },
     {
-      "name": "billing plan requires authorization",
-      "method": "GET",
-      "path": "/api/v1/billing/plan",
-      "expected_status": 401,
-      "expected_content_type": "application/json"
-    },
-    {
-      "name": "billing usage requires authorization",
-      "method": "GET",
-      "path": "/api/v1/billing/usage",
-      "expected_status": 401,
-      "expected_content_type": "application/json"
-    },
-    {
       "name": "inbox requires authorization",
       "method": "GET",
       "path": "/api/v1/inbox",

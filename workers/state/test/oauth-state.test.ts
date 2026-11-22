@@ -929,6 +929,198 @@ describe("OAuthStateCoordinator", () => {
     });
     expect(publicLive).not.toBeNull();
   });
+
+  it("executes consume inside storage.transaction so read and delete cannot interleave", async () => {
+    const coordinator = env.OAUTH_STATE.getByName("org-consume-tx");
+    const record = {
+      expires_at: Date.now() + 60_000,
+      organization_id: "org-consume-tx",
+      provider: "tiktok",
+      redirect_path: "/channels",
+      user_id: "user-consume-tx",
+    };
+    await coordinator.create("state-tx", record);
+
+    await runInDurableObject(
+      coordinator,
+      async (instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
+        const txSpy = vi.spyOn(ctx.storage, "transaction");
+        try {
+          await expect(instance.consume("state-tx")).resolves.toEqual(record);
+          expect(txSpy).toHaveBeenCalledTimes(1);
+          await expect(instance.consume("state-tx")).resolves.toBeNull();
+          expect(txSpy).toHaveBeenCalledTimes(2);
+        } finally {
+          txSpy.mockRestore();
+        }
+      },
+    );
+  });
+
+  it("paginates candidate deletion via startAfter across >1000 keys", async () => {
+    const coordinator = env.OAUTH_STATE.getByName("org-paginated-delete");
+    const selectionId = "org-paginated-delete.nonce1234567890";
+    await coordinator.createSelection(selectionId, {
+      expires_at: Date.now() + 600_000,
+      id: selectionId,
+      organization_id: "org-paginated-delete",
+      platform: "facebook",
+      user_id: "user-paginated-delete",
+    });
+
+    // 600 candidates = 1200 keys (600 account + 600 credential) > 1000-key
+    // single-page list cap, exercising multiple `startAfter` pages of 128.
+    const totalCandidates = 600;
+    const batchSize = 100;
+    for (let start = 0; start < totalCandidates; start += batchSize) {
+      const batch: OAuthSelectionCandidate[] = [];
+      for (let i = start; i < start + batchSize; i++) {
+        const id = `acct-${String(i).padStart(4, "0")}`;
+        batch.push({
+          account: {
+            avatar_url: null,
+            display_name: `Account ${i}`,
+            id,
+            username: null,
+          },
+          encryptedConnection: `sealed-${i}`,
+        });
+      }
+      await coordinator.appendSelectionCandidates(selectionId, batch);
+    }
+    await coordinator.finalizeSelection(selectionId);
+
+    await runInDurableObject(
+      coordinator,
+      async (instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
+        const listSpy = vi.spyOn(ctx.storage, "list");
+        try {
+          const cancelled = await instance.cancelSelection(
+            selectionId,
+            { organizationId: "org-paginated-delete", userId: "user-paginated-delete" },
+            "idem-paginated-cancel",
+          );
+          expect(cancelled.status).toBe("cancelled");
+
+          const cleanupCalls = listSpy.mock.calls
+            .map(([options]) => options)
+            .filter((options) => options?.prefix === `selection-account:${selectionId}:`);
+          // 600 metadata entries at limit 128 => 5 pages (128, 128, 128, 128, 88).
+          expect(cleanupCalls).toHaveLength(5);
+          expect(cleanupCalls[0]?.limit).toBe(128);
+          expect(cleanupCalls[0]?.startAfter).toBeUndefined();
+          for (let page = 1; page < cleanupCalls.length; page++) {
+            expect(cleanupCalls[page]?.limit).toBe(128);
+            expect(cleanupCalls[page]?.startAfter).toMatch(
+              new RegExp(`^selection-account:${selectionId}:acct-\\d{4}$`),
+            );
+          }
+        } finally {
+          listSpy.mockRestore();
+        }
+
+        expect((await ctx.storage.list({ prefix: `selection-account:${selectionId}:` })).size).toBe(
+          0,
+        );
+        expect(
+          (await ctx.storage.list({ prefix: `selection-credential:${selectionId}:` })).size,
+        ).toBe(0);
+      },
+    );
+  });
+
+  it("rejects duplicate candidate account IDs and >1000-account appends before writing entries", async () => {
+    const coordinator = env.OAUTH_STATE.getByName("org-dedupe-candidates");
+    const selectionId = "org-dedupe-candidates.nonce1234567890";
+    await coordinator.createSelection(selectionId, {
+      expires_at: Date.now() + 600_000,
+      id: selectionId,
+      organization_id: "org-dedupe-candidates",
+      platform: "facebook",
+      user_id: "user-dedupe-candidates",
+    });
+
+    const candidate = (id: string, secret: string): OAuthSelectionCandidate => ({
+      account: {
+        avatar_url: null,
+        display_name: `Page ${id}`,
+        id,
+        username: null,
+      },
+      encryptedConnection: secret,
+    });
+
+    // Duplicates within a single append batch must reject without writing any entry.
+    await expect(
+      runInDurableObject(coordinator, (instance: OAuthStateCoordinator) =>
+        instance.appendSelectionCandidates(selectionId, [
+          candidate("dup-1", "secret-a"),
+          candidate("dup-1", "secret-b"),
+        ]),
+      ),
+    ).rejects.toThrow(TypeError);
+
+    await runInDurableObject(
+      coordinator,
+      async (_instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
+        expect((await ctx.storage.list({ prefix: `selection-account:${selectionId}:` })).size).toBe(
+          0,
+        );
+        expect(
+          (await ctx.storage.list({ prefix: `selection-credential:${selectionId}:` })).size,
+        ).toBe(0);
+      },
+    );
+
+    // Append one valid candidate, then reject a later batch repeating that ID without
+    // writing new siblings or overwriting the existing credential.
+    await coordinator.appendSelectionCandidates(selectionId, [candidate("page-1", "secret-1")]);
+    await expect(
+      runInDurableObject(coordinator, (instance: OAuthStateCoordinator) =>
+        instance.appendSelectionCandidates(selectionId, [
+          candidate("page-2", "secret-2"),
+          candidate("page-1", "secret-overwrite"),
+        ]),
+      ),
+    ).rejects.toThrow("unique");
+
+    await runInDurableObject(
+      coordinator,
+      async (_instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
+        const record = await ctx.storage.get<OAuthSelectionRecord>(`selection:${selectionId}`);
+        expect(record?.account_ids).toEqual(["page-1"]);
+        expect(await ctx.storage.get(`selection-credential:${selectionId}:page-1`)).toEqual({
+          encrypted_connection: "secret-1",
+        });
+        expect(await ctx.storage.get(`selection-account:${selectionId}:page-2`)).toBeUndefined();
+      },
+    );
+
+    // Rejecting an append that pushes past 1000 accounts must not write any of the batch.
+    const overflowingBatch: OAuthSelectionCandidate[] = [];
+    for (let i = 0; i < 1000; i++) {
+      overflowingBatch.push(candidate(`overflow-${i}`, `secret-overflow-${i}`));
+    }
+    await expect(
+      runInDurableObject(coordinator, (instance: OAuthStateCoordinator) =>
+        instance.appendSelectionCandidates(selectionId, overflowingBatch),
+      ),
+    ).rejects.toThrow("1000");
+
+    await runInDurableObject(
+      coordinator,
+      async (_instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
+        const record = await ctx.storage.get<OAuthSelectionRecord>(`selection:${selectionId}`);
+        expect(record?.account_ids).toEqual(["page-1"]);
+        expect((await ctx.storage.list({ prefix: `selection-account:${selectionId}:` })).size).toBe(
+          1,
+        );
+        expect(
+          (await ctx.storage.list({ prefix: `selection-credential:${selectionId}:` })).size,
+        ).toBe(1);
+      },
+    );
+  });
 });
 describe("OAuthState Effect programs", () => {
   it("validates creation input without touching storage", async () => {

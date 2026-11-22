@@ -4,6 +4,7 @@ import { DatabaseError, InvalidRequestError } from "@meltiply/domain";
 
 import {
   acquireClient,
+  createHyperdrivePoolCache,
   DatabaseService,
   createDatabaseServiceLive,
   createDatabaseServiceTest,
@@ -189,13 +190,14 @@ describe("Effect database transactions and DatabaseService", () => {
     expect(client.calls).toEqual([
       { text: "BEGIN", values: undefined },
       {
-        text: "SELECT set_config('request.jwt.claims', $1, true), set_config('statement_timeout', '10000', true)",
+        text: "SELECT set_config('request.jwt.claims', $1, true), set_config('statement_timeout', $2, true)",
         values: [
           JSON.stringify({
             org_id: "org-test",
             org_role: "admin",
             sub: "user-test",
           }),
+          "10000",
         ],
       },
       { text: "SELECT 1", values: undefined },
@@ -359,5 +361,57 @@ describe("Effect database transactions and DatabaseService", () => {
     if (customExit._tag === "Failure") {
       expect(customExit.cause.toString()).toContain("custom db error");
     }
+  });
+
+  it("caches Hyperdrive pools per connection string and isolates request-owned pools", async () => {
+    const resolvePool = createHyperdrivePoolCache("system");
+    expect(() => resolvePool(undefined, { ENVIRONMENT: "production" })).toThrow(
+      "system Hyperdrive binding is unavailable",
+    );
+
+    const primary = resolvePool(
+      { connectionString: "postgres://user:pass@127.0.0.1:5432/meltiply_a" },
+      { ENVIRONMENT: "production" },
+    );
+    const samePrimary = resolvePool(
+      { connectionString: "postgres://user:pass@127.0.0.1:5432/meltiply_a" },
+      { ENVIRONMENT: "production" },
+    );
+    expect(samePrimary).toBe(primary);
+
+    const requestOwned = resolvePool(
+      { connectionString: "postgres://user:pass@127.0.0.1:5432/meltiply_a" },
+      { ENVIRONMENT: "local" },
+    );
+    expect(requestOwned).not.toBe(primary);
+    expect(
+      resolvePool(
+        { connectionString: "postgres://user:pass@127.0.0.1:5432/meltiply_a" },
+        { ENVIRONMENT: "production" },
+      ),
+    ).toBe(primary);
+
+    const rotated = resolvePool(
+      { connectionString: "postgres://user:pass@127.0.0.1:5432/meltiply_b" },
+      { ENVIRONMENT: "production" },
+    );
+    expect(rotated).not.toBe(primary);
+
+    await Promise.all([primary.end(), requestOwned.end(), rotated.end()]);
+  });
+
+  it("rejects non-positive statementTimeoutMs in withAuthenticatedTransactionEffect", async () => {
+    const client = new FakeClient();
+    const error = await Effect.runPromise(
+      Effect.flip(
+        withAuthenticatedTransactionEffect(
+          { connect: async () => client },
+          { sub: "user-1" },
+          (tx) => tx.query("SELECT 1"),
+          { statementTimeoutMs: 0 },
+        ),
+      ),
+    );
+    expect(error).toBeInstanceOf(InvalidRequestError);
   });
 });

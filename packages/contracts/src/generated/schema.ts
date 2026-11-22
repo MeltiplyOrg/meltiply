@@ -3193,6 +3193,20 @@ export interface components {
              */
             brand_profile_id: string;
         };
+        DeleteQueueRequest: {
+            /**
+             * Format: uuid
+             * @description Selected Brand Profile; must own the addressed Queue.
+             */
+            brand_profile_id: string;
+        };
+        RemovePostFromQueueRequest: {
+            /**
+             * Format: uuid
+             * @description Selected Brand Profile; must own the addressed Queue and Post.
+             */
+            brand_profile_id: string;
+        };
         /**
          * @description Schedules or immediately publishes the Post to its target Channels.
          *     scheduled_at null means publish now; a timestamp schedules every
@@ -6411,7 +6425,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["DeletePostRequest"];
+                "application/json": components["schemas"]["DeleteQueueRequest"];
             };
         };
         responses: {
@@ -6494,7 +6508,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["DeletePostRequest"];
+                "application/json": components["schemas"]["RemovePostFromQueueRequest"];
             };
         };
         responses: {

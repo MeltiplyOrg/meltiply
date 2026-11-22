@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { integrationDatabaseUrl } from "../lib/integration-database.ts";
+import {
+  assertLocalTestDatabaseUrl,
+  integrationDatabaseUrl,
+  LOCAL_ADMIN_URL,
+  LOCAL_SYSTEM_URL,
+  LOCAL_TEST_URL,
+} from "../lib/integration-database.ts";
 
 test("privileged roles retain the authenticated test database destination and session options", () => {
   const selected = new URL(
@@ -39,5 +45,19 @@ test("explicit privileged credentials cannot redirect fixture writes to another 
         "postgres://custom:secret@127.0.0.1:5433/meltiply?sslmode=disable",
       ),
     TypeError,
+  );
+});
+
+test("assertLocalTestDatabaseUrl accepts exported local defaults and rejects malformed or remote URLs", () => {
+  for (const url of [LOCAL_TEST_URL, LOCAL_SYSTEM_URL, LOCAL_ADMIN_URL]) {
+    assert.equal(assertLocalTestDatabaseUrl(url).pathname, "/meltiply");
+  }
+  assert.throws(
+    () => assertLocalTestDatabaseUrl("not-a-url", "TEST_URL"),
+    /TEST_URL is not a valid URL/,
+  );
+  assert.throws(
+    () => assertLocalTestDatabaseUrl("postgres://user@db.example.com/meltiply", "TEST_URL"),
+    /TEST_URL: integration connections must target the local meltiply test database/,
   );
 });

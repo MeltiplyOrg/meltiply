@@ -1,4 +1,4 @@
-import { PLATFORM_IDS } from "@meltiply/domain";
+import { PLATFORM_IDS, isPlatform } from "@meltiply/domain";
 import type { Platform } from "@meltiply/domain";
 
 import {
@@ -45,7 +45,7 @@ const maximumFrames = 12;
  * carries `type`, `value`, `mechanism` and a `stacktrace` whose frames carry
  * `platform`, `lang`, `function` and optional location fields.
  */
-const allowedNestedKeys: Record<string, true> = {
+const allowedNestedKeys: Readonly<Record<string, true>> = Object.freeze({
   chunk_id: true,
   colno: true,
   exception_id: true,
@@ -65,20 +65,13 @@ const allowedNestedKeys: Record<string, true> = {
   synthetic: true,
   type: true,
   value: true,
-  // Per-Platform counter maps are keyed by the fixed Platform roster.
-  tiktok: true,
-  youtube: true,
-  instagram: true,
-  facebook: true,
-  threads: true,
-  // Per-gauge freshness and the coverage section's bounded shape.
+  ...Object.fromEntries(PLATFORM_IDS.map((platform) => [platform, true] as const)),
   as_of: true,
   truncated: true,
   unsupported_metrics: true,
-};
+});
 
-/** Property names permitted on any outbound payload. */
-const allowedPropertyNames: Record<string, true> = {
+const allowedPropertyNames: Readonly<Record<string, true>> = Object.freeze({
   $exception_level: true,
   $exception_list: true,
   $geoip_disable: true,
@@ -108,7 +101,12 @@ const allowedPropertyNames: Record<string, true> = {
   schema_version: true,
   shares: true,
   views: true,
-};
+});
+
+const allowedNestedPropertyNames: Readonly<Record<string, true>> = Object.freeze({
+  ...allowedPropertyNames,
+  ...allowedNestedKeys,
+});
 
 /**
  * Identity- and secret-bearing keys that must never appear anywhere in a
@@ -658,10 +656,7 @@ export function diagnosticProperties(
   ) {
     properties.provider_failure_class = input.failureClass;
   }
-  if (
-    typeof input.platform === "string" &&
-    (PLATFORM_IDS as readonly string[]).includes(input.platform)
-  ) {
+  if (isPlatform(input.platform)) {
     properties.platform = input.platform;
   }
   return properties;
@@ -711,11 +706,7 @@ function collectPayloadStrings(
     return undefined;
   }
   if (value === null || typeof value !== "object") return undefined;
-  // Below the property level both fixed key sets apply: aggregate sections reuse
-  // documented property names (`posts`, `views`, `measured`) and the exception
-  // list adds the documented frame and mechanism keys.
-  const allowed =
-    depth === 0 ? allowedPropertyNames : { ...allowedPropertyNames, ...allowedNestedKeys };
+  const allowed = depth === 0 ? allowedPropertyNames : allowedNestedPropertyNames;
   for (const [key, item] of Object.entries(value)) {
     if (!(key in allowed)) {
       return depth === 0 ? `unexpected_property:${key}` : `unexpected_nested_key:${key}`;

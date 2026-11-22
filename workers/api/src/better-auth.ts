@@ -11,6 +11,7 @@ import { allowedOriginsFor } from "./verifier-cache";
 import { mailSenderConfiguration } from "@meltiply/domain/mail-content";
 import { createCloudflareMailSender } from "./mail";
 import { authPolicyHandler } from "./auth-policy";
+import { lazySystemPoolFor } from "./database-module";
 
 let betterAuthCached:
   | {
@@ -108,9 +109,7 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
   }
 
   const trustedOrigins = Array.from(allowedOriginsFor(env));
-  // Exception: dynamic import avoids loading pg in workerd unit test isolates.
-  const { systemPoolFor } = await import("./database");
-  const database = systemPoolFor(env);
+  const database = await lazySystemPoolFor(env);
   const auth = authPolicyHandler(
     env,
     await createBetterAuth({
@@ -233,9 +232,8 @@ async function authRateLimitHit(
   subject: string,
   rule: AuthRateLimitRule,
 ): Promise<number | null> {
-  // Exception: dynamic import avoids loading pg in workerd unit test isolates
-  const { systemPoolFor } = await import("./database");
-  const client = await systemPoolFor(env).connect();
+  const pool = await lazySystemPoolFor(env);
+  const client = await pool.connect();
   try {
     const result = await client.query<RateLimitHitRow>(
       `SELECT public.auth_rate_limit_hit($1, $2, $3, $4) AS retry_after`,

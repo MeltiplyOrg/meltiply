@@ -15,7 +15,13 @@ export const apiVersionPath = "/api/v1";
  */
 export function createMeltiplyClient(baseUrl: string, fetchImpl: typeof fetch = fetch) {
   const origin = new URL(baseUrl);
-  if (origin.pathname !== "/" || origin.search || origin.hash) {
+  if (
+    (origin.protocol !== "https:" && origin.protocol !== "http:") ||
+    origin.origin === "null" ||
+    origin.pathname !== "/" ||
+    origin.search ||
+    origin.hash
+  ) {
     throw new TypeError("Meltiply API base URL must be an origin without a path, query, or hash");
   }
 

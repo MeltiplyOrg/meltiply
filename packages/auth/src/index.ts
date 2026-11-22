@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import { AuthenticationRequiredError, ForbiddenError } from "@meltiply/domain";
+import { AuthenticationRequiredError, errorMessage, ForbiddenError } from "@meltiply/domain";
 import { escapeMailHtml } from "@meltiply/domain/mail-content";
 import type { GenericEndpointContext } from "better-auth";
 import type { TimeString } from "better-auth/plugins";
@@ -257,7 +257,7 @@ export function verifyJwtTokenEffect(
   return Effect.tryPromise({
     catch: (cause) =>
       new AuthenticationRequiredError({
-        message: cause instanceof Error ? cause.message : "Authentication required",
+        message: errorMessage(cause, "Authentication required"),
       }),
     try: async () => verifier(token),
   });
@@ -278,7 +278,7 @@ export function verifyAccessTokenEffect(
   return Effect.tryPromise({
     catch: (cause) =>
       new ForbiddenError({
-        message: cause instanceof Error ? cause.message : "Forbidden",
+        message: errorMessage(cause, "Forbidden"),
       }),
     try: async () => verifier(token),
   });
@@ -394,11 +394,21 @@ export interface BetterAuthShape {
 
 export type BetterAuthInstance = BetterAuthShape;
 
+interface SessionProvenance {
+  readonly clientChannel: "web" | "cli" | "unknown";
+  readonly userId: string;
+}
+
 /**
- * Retains hidden provenance in the authenticated request context before a
- * password or account-security update can revoke its session through database
- * triggers. Runs after bearer/session middleware, unlike global pre-hooks.
- * Missing sessions leave no attribution; storage failures abort the update.
+ * Keyed by Better Auth's per-request context object so session provenance never
+ * mutates untyped properties onto third-party framework internals and releases
+ * automatically once the request context is collected.
+ */
+const sessionProvenanceByContext = new WeakMap<object, SessionProvenance>();
+
+/**
+ * Retains session provenance in `sessionProvenanceByContext` before a password
+ * or account-security update revokes the active session via database triggers.
  */
 async function retainSessionProvenance(context: GenericEndpointContext | null): Promise<void> {
   const current = context?.context.session;
@@ -411,9 +421,9 @@ async function retainSessionProvenance(context: GenericEndpointContext | null): 
     where: [{ field: "id", value: current.session.id }],
   });
   if (!stored || stored.userId !== current.user.id) return;
-  Object.assign(context.context, {
-    sessionClientChannel: stored.clientChannel,
-    sessionClientUserId: stored.userId,
+  sessionProvenanceByContext.set(context.context, {
+    clientChannel: stored.clientChannel,
+    userId: stored.userId,
   });
 }
 
@@ -499,23 +509,14 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
             if (config.isAccountActive && !(await config.isAccountActive(session.userId))) {
               return false;
             }
-            const requestContext = context?.context;
-            const previousChannel =
-              requestContext && "sessionClientChannel" in requestContext
-                ? requestContext.sessionClientChannel
-                : undefined;
-            const previousUserId =
-              requestContext && "sessionClientUserId" in requestContext
-                ? requestContext.sessionClientUserId
-                : undefined;
+            const provenance = context?.context
+              ? sessionProvenanceByContext.get(context.context)
+              : undefined;
             const clientChannel =
               context?.path === "/device/token"
                 ? "cli"
-                : previousUserId === session.userId &&
-                    (previousChannel === "web" ||
-                      previousChannel === "cli" ||
-                      previousChannel === "unknown")
-                  ? previousChannel
+                : provenance && provenance.userId === session.userId
+                  ? provenance.clientChannel
                   : context?.path === "/sign-in/email" ||
                       context?.path === "/sign-up/email" ||
                       context?.path === "/verify-email" ||
@@ -677,7 +678,7 @@ export function createAuthServiceLive(
       try {
         jwtVerifier = createRemoteJwtVerifier(options.jwt, options.jwt.jwksUrl);
       } catch (cause) {
-        jwtInitError = cause instanceof Error ? cause.message : "Failed to initialize JWT verifier";
+        jwtInitError = errorMessage(cause, "Failed to initialize JWT verifier");
       }
     }
   }
@@ -690,8 +691,7 @@ export function createAuthServiceLive(
       try {
         accessVerifier = createCloudflareAccessTokenVerifier(options.access);
       } catch (cause) {
-        accessInitError =
-          cause instanceof Error ? cause.message : "Failed to initialize Access verifier";
+        accessInitError = errorMessage(cause, "Failed to initialize Access verifier");
       }
     }
   }

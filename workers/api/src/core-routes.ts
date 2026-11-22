@@ -1,7 +1,7 @@
 import type { components } from "@meltiply/contracts/schema";
 import type { OAuthSelectionCandidate } from "@meltiply/contracts";
 import type { SessionClaims } from "@meltiply/auth";
-import { DatabaseError, oauthCallbackPath, type Platform } from "@meltiply/domain";
+import { DatabaseError, oauthCallbackPath, PLATFORM_IDS, type Platform } from "@meltiply/domain";
 import { Cause, Effect, type Layer } from "effect";
 import {
   createProviderRegistryFromEnvironment,
@@ -24,7 +24,12 @@ import {
   type YouTubePrivacyStatus,
 } from "@meltiply/providers";
 import { errorDiagnostic, log } from "@meltiply/observability";
-import { createObjectStoreFromEnv, type ConfiguredObjectStore } from "@meltiply/storage";
+import {
+  createObjectStoreFromEnv,
+  PROVIDER_MEDIA_ROUTE_PREFIX,
+  verifyProviderMediaSignature,
+  type ConfiguredObjectStore,
+} from "@meltiply/storage";
 import type { Context, Hono } from "hono";
 import { CoreApiError, type CoreApiService } from "./core-types";
 import {
@@ -92,7 +97,6 @@ import type { OAuthConnectionOwner } from "./oauth-connection";
 
 const weakEtagPrefixPattern = /^W\//;
 const base64PaddingPattern = /=+$/;
-const base64UrlPattern = /^[A-Za-z0-9_-]+$/;
 const unsafeMediaKeyPattern = /[/\\\p{Cc}]/u;
 const expiryPattern = /^\d{1,15}$/;
 const deterministicDatabaseErrorPattern = /^(22|23)[0-9A-Z]{3}$/;
@@ -285,7 +289,7 @@ function providerOptionsField(body: Record<string, unknown>): PostProviderOption
     throw new CoreApiError(400, "validation_error", "provider_options must be an object.");
   }
   const options = value as Record<string, unknown>;
-  onlyKeys(options, ["facebook", "tiktok", "youtube", "instagram", "threads"]);
+  onlyKeys(options, PLATFORM_IDS);
   const threads =
     options.threads === undefined ? undefined : parseThreadsPostOptions(options.threads);
   if (threads === null)
@@ -962,92 +966,8 @@ async function pkceChallenge(verifier: string): Promise<string> {
   return base64Url(new Uint8Array(digest));
 }
 
-/**
- * Route prefix serving verified-domain provider media.
- * Exported so `app.ts` mounts its authentication and flow-ledger exemptions on the
- * exact same prefix instead of duplicating the literal; the Automation Worker keeps
- * its own byte-identical copy in `workers/automation/src/provider-media.ts` because
- * separate worker bundles cannot share source modules. The Automation Worker signs
- * `<APP_URL>/api/v1/provider-media/<key>?expires=<unix>&signature=<b64url>` URLs;
- * this route verifies the HMAC before streaming the private R2 object. The provider
- * registry derives TikTok's media prefix from this route on APP_URL by default;
- * any explicit TIKTOK_MEDIA_URL_PREFIX must still cover emitted URLs.
- */
-export const providerMediaRoutePrefix = "/api/v1/provider-media/";
-
-/**
- * Canonical signing payload bound into every provider-media URL signature.
- * The versioned domain-separation prefix keeps these HMACs distinct from any other
- * `TOKEN_ENCRYPTION_KEY`-derived MAC; expiry and object key are the only signed fields,
- * so a valid signature proves the Automation Worker authorized read access to exactly
- * that key until exactly that second.
- *
- * @param expiresAtSeconds - Unix seconds after which the URL stops verifying.
- * @param key - R2 object key the bearer may read.
- * @returns Canonical `v1\n<expires>\n<key>` payload string.
- */
-function providerMediaPayload(expiresAtSeconds: number, key: string): string {
-  return `meltiply-provider-media-v1\n${expiresAtSeconds}\n${key}`;
-}
-
-/**
- * Decodes an unpadded Base64url string into bytes.
- *
- * @param value - Base64url text from the `signature` query parameter.
- * @returns Decoded bytes, or undefined when the text is not well-formed Base64url.
- */
-function base64UrlDecode(value: string): Uint8Array | undefined {
-  if (!base64UrlPattern.test(value)) return undefined;
-  const base64 = value.replaceAll("-", "+").replaceAll("_", "/");
-  try {
-    const binary = atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4));
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) {
-      bytes[index] = binary.charCodeAt(index);
-    }
-    return bytes;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Verifies a provider-media bearer signature in constant time via WebCrypto.
- * Returns true only when `signature` is the HMAC-SHA256 of the canonical payload under
- * `TOKEN_ENCRYPTION_KEY`. Missing key material or malformed input returns false rather
- * than throwing so the route can deny every failure mode with one response.
- *
- * @param env - Worker environment containing TOKEN_ENCRYPTION_KEY.
- * @param expiresAtSeconds - Signed expiry claim from the URL.
- * @param key - Signed object key claim from the URL path.
- * @param signature - Base64url HMAC-SHA256 digest from the `signature` query parameter.
- * @returns Whether the signature authenticates the expiry and key claims.
- */
-async function verifyProviderMediaSignature(
-  env: ApiWorkerEnv,
-  expiresAtSeconds: number,
-  key: string,
-  signature: string,
-): Promise<boolean> {
-  const secret = env.TOKEN_ENCRYPTION_KEY;
-  const digest = base64UrlDecode(signature);
-  if (!secret || !digest || digest.length !== 32) return false;
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { hash: "SHA-256", name: "HMAC" },
-    false,
-    ["verify"],
-  );
-  return crypto.subtle.verify(
-    "HMAC",
-    cryptoKey,
-    // `digest` is typed over `ArrayBufferLike`, but BufferSource requires an
-    // `ArrayBuffer`-backed view; slice() copies the exact decoded bytes into one.
-    digest.slice(),
-    new TextEncoder().encode(providerMediaPayload(expiresAtSeconds, key)),
-  );
-}
+/** Route prefix serving verified-domain provider media. */
+export const providerMediaRoutePrefix = PROVIDER_MEDIA_ROUTE_PREFIX;
 
 /**
  * Decodes and validates the object key embedded after the provider-media route prefix.
@@ -1530,7 +1450,12 @@ export function registerCoreRoutes(
       !key ||
       !signature ||
       !Number.isSafeInteger(expiresAt) ||
-      !(await verifyProviderMediaSignature(c.env, expiresAt, key, signature)) ||
+      !(await verifyProviderMediaSignature(
+        c.env.TOKEN_ENCRYPTION_KEY,
+        expiresAt,
+        key,
+        signature,
+      )) ||
       expiresAt <= Math.floor(Date.now() / 1000)
     ) {
       return errorResponse(

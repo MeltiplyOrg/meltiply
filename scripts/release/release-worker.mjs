@@ -4,13 +4,13 @@ import path from "node:path";
 import { readJsonFile, sha256, writeEvidence } from "./release-guard.mjs";
 import { releaseInternals } from "./release-lib.mjs";
 import { buildFrontend } from "./release-frontend.mjs";
+import { plainObject } from "./validation.mjs";
 
 const ansiEscapePattern = /\u001b\[[0-9;]*m/g;
 const createdVersionPattern = /Success! Created version ([0-9a-f-]{36}) with ([0-9]+) secrets\./g;
 const currentVersionPattern = /Current Version ID:\s*([0-9a-f-]{36})(?:\s|$)/g;
 const secretLineBreakPattern = /[\u0000\r\n]/;
-const workerSubjectPattern = /worker|script/i;
-const missingWorkerPattern = /not found|does not exist|no deployments/i;
+const workerNotFoundApiCodePattern = /\[code:\s*10007\]/;
 const gitShaPattern = /^[0-9a-f]{40}$/;
 const jsonExtensionPattern = /\.json$/;
 
@@ -92,15 +92,13 @@ function parseJson(source, name) {
  * @throws {TypeError} If value is not an object, has unknown keys, or is missing required keys
  */
 function exactObject(value, keys, name) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${name} must be an object`);
-  }
-  const actual = Object.keys(value);
+  const object = plainObject(value, name);
+  const actual = Object.keys(object);
   const unknown = actual.filter((key) => !keys.has(key));
-  const missing = [...keys].filter((key) => !(key in value));
+  const missing = [...keys].filter((key) => !(key in object));
   if (unknown.length > 0) throw new TypeError(`${name} has unknown keys: ${unknown.join(", ")}`);
   if (missing.length > 0) throw new TypeError(`${name} is missing keys: ${missing.join(", ")}`);
-  return value;
+  return object;
 }
 
 /**
@@ -336,7 +334,7 @@ export function validateSecretBundle(source, spec, worker) {
  * Resolves the filesystem path to a rendered Wrangler configuration file.
  *
  * @param {string} outDir - Base release output directory
- * @param {string} worker - Worker service name ("api", "automation", or "state")
+ * @param {"api"|"automation"|"state"|"frontend"} worker - Worker service name
  * @returns {string} Absolute path to the rendered wrangler JSON configuration
  */
 export function workerConfigPath(outDir, worker) {
@@ -347,7 +345,7 @@ export function workerConfigPath(outDir, worker) {
  * Resolves the filesystem path to a Worker candidate evidence file.
  *
  * @param {string} outDir - Base release output directory
- * @param {string} worker - Worker service name ("api", "automation", or "state")
+ * @param {"api"|"automation"|"state"|"frontend"} worker - Worker service name
  * @returns {string} Absolute path to the worker candidate evidence JSON
  */
 export function candidatePath(outDir, worker) {
@@ -424,15 +422,17 @@ function releaseTag(spec, worker, kind) {
 /**
  * Detects whether a Wrangler command failure was caused by a non-existent Worker.
  *
- * Used during bootstrap mode to distinguish between an unprovisioned Worker service
- * and real control-plane or network failures.
+ * Branches on Cloudflare API error code 10007 (`workers.api.error.script_not_found`),
+ * which Wrangler surfaces as `[code: 10007]`; prose wording is not a contract.
+ * Used during bootstrap mode to distinguish an unprovisioned Worker service from
+ * real control-plane or network failures.
  *
  * @param {unknown} error - Error thrown by Wrangler invocation
- * @returns {boolean} True if error indicates the Worker or deployment does not exist
+ * @returns {boolean} True only when the failure carries the Worker-not-found API code
  */
-function isMissingWorker(error) {
-  const message = error instanceof Error ? error.message : String(error);
-  return workerSubjectPattern.test(message) && missingWorkerPattern.test(message);
+export function isMissingWorker(error) {
+  const text = error instanceof Error ? error.message : String(error);
+  return workerNotFoundApiCodePattern.test(text);
 }
 
 /**
@@ -620,19 +620,24 @@ export async function workerVersionBindingSha({ configPath, environment, id, run
 /**
  * Asserts that active Worker traffic matches expected version routing percentages.
  *
- * Sorts both actual and expected traffic arrays by version ID before comparing,
- * ensuring deterministic verification.
+ * Sorts expected traffic entries by version ID before comparing against observed
+ * control-plane traffic, ensuring deterministic verification.
  *
  * @param {Array<{ percentage: number, version_id: string }>} traffic - Actual traffic distribution
  * @param {Array<{ percentage: number, version_id: string }>} expected - Expected traffic distribution
+ * @param {string} [message="deployed Worker traffic does not match the requested release state"] - Diagnostic message on mismatch
  * @throws {TypeError} If traffic allocations differ
  */
-function assertWorkerTraffic(traffic, expected) {
+export function assertWorkerTraffic(
+  traffic,
+  expected,
+  message = "deployed Worker traffic does not match the requested release state",
+) {
   const normalized = [...expected].sort((left, right) =>
     left.version_id.localeCompare(right.version_id),
   );
   if (JSON.stringify(traffic) !== JSON.stringify(normalized)) {
-    throw new TypeError("deployed Worker traffic does not match the requested release state");
+    throw new TypeError(message);
   }
 }
 

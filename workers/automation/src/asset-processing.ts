@@ -197,24 +197,30 @@ interface ProcessingSource {
   objectId: string;
 }
 
-/** Durable per-profile bookkeeping committed before any external write. */
+/**
+ * Durable per-profile bookkeeping committed before any external write.
+ *
+ * Fields are readonly: a re-armed reservation (clearStagingForRetry) returns a
+ * new object rather than mutating this one in place, so a caller can never
+ * disagree with the reservation the engine capability was minted against.
+ */
 interface ProfileReservation {
   /** Bytes currently charged against the workspace Entitlement. */
-  charged: number;
-  objectId: string;
-  profile: string;
+  readonly charged: number;
+  readonly objectId: string;
+  readonly profile: string;
   /** Protected destination the rendition occupies once promoted. */
-  readyKey: string;
-  renditionId: string;
+  readonly readyKey: string;
+  readonly renditionId: string;
   /** Inventoried staging key the engine writes; never publish-ready. */
-  stagingKey: string;
+  readonly stagingKey: string;
   /**
    * Persisted deadline until which a writer could still recreate this row's
    * bytes, as recorded by the same transaction that created the reservation.
    * The output capability is minted to expire no later than this instant, so a
    * grant can never outlive the hold that keeps the bytes accounted for.
    */
-  writeHoldUntil: number;
+  readonly writeHoldUntil: number;
 }
 
 /**
@@ -1361,13 +1367,21 @@ function reserveOutputs(
  * @param objectStore - Object store holding the staging key.
  * @param reservation - Reserved inventory for this profile.
  * @returns The recoverable verified output, or null when it must be recomputed.
+ *   A recompute carries a freshly re-armed reservation (`charged` and
+ *   `writeHoldUntil` updated to what the retry transaction actually wrote), so
+ *   the caller mints the engine capability against the reservation that is
+ *   really held rather than the one read before the retry.
  */
 function adoptInterruptedOutput(
   env: AutomationEnv,
   objectStore: ObjectStore,
   asset: AssetProcessingRow,
   reservation: ProfileReservation,
-): Effect.Effect<ProcessedOutput | null, Error> {
+): Effect.Effect<
+  | { readonly output: ProcessedOutput; readonly reservation: ProfileReservation }
+  | { readonly output: null; readonly reservation: ProfileReservation },
+  Error
+> {
   return Effect.gen(function* () {
     const row = yield* withSystemTransactionEffect(env, (client) =>
       client
@@ -1383,12 +1397,14 @@ function adoptInterruptedOutput(
     const bytes = bytesOf(row?.bytes);
     if (!row || row.status !== "writing" || bytes === 0 || !row.content_type) {
       const rearmed = yield* clearStagingForRetry(env, objectStore, asset, reservation);
-      // The re-arm is applied to the shared reservation so the capability the
-      // engine receives (`maximum_output_bytes`, `writeHoldUntil`) is the one
-      // actually re-armed, not the stale reservation read before this retry.
-      reservation.charged = rearmed.reservedBytes;
-      reservation.writeHoldUntil = rearmed.writeHoldUntil;
-      return null;
+      return {
+        output: null,
+        reservation: {
+          ...reservation,
+          charged: rearmed.reservedBytes,
+          writeHoldUntil: rearmed.writeHoldUntil,
+        },
+      };
     }
     const recorded: ProcessedOutput = {
       bytes,
@@ -1411,11 +1427,16 @@ function adoptInterruptedOutput(
       (recorded.etag !== null && live.etag !== recorded.etag)
     ) {
       const rearmed = yield* clearStagingForRetry(env, objectStore, asset, reservation);
-      reservation.charged = rearmed.reservedBytes;
-      reservation.writeHoldUntil = rearmed.writeHoldUntil;
-      return null;
+      return {
+        output: null,
+        reservation: {
+          ...reservation,
+          charged: rearmed.reservedBytes,
+          writeHoldUntil: rearmed.writeHoldUntil,
+        },
+      };
     }
-    return recorded;
+    return { output: recorded, reservation };
   });
 }
 
@@ -1600,11 +1621,17 @@ function produceRendition(
   objectStore: ObjectStore,
   asset: AssetProcessingRow,
   source: ProcessingSource,
-  reservation: ProfileReservation,
+  initialReservation: ProfileReservation,
   profile: NativeProcessorProfile,
 ): Effect.Effect<void, Error> {
   return Effect.gen(function* () {
-    let output = yield* adoptInterruptedOutput(env, objectStore, asset, reservation);
+    // Adoption may return a re-armed reservation (clearStagingForRetry); every
+    // capability and charge decision below uses that returned value, never a
+    // mutated copy of the caller's object.
+    let reservation = initialReservation;
+    const adopted = yield* adoptInterruptedOutput(env, objectStore, asset, reservation);
+    reservation = adopted.reservation;
+    let output = adopted.output;
 
     if (!output) {
       // URL minting and container invocation live in the native-processor

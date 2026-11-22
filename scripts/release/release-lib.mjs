@@ -6,6 +6,7 @@ import { isMailSenderAddress, isMailSenderName } from "../../packages/domain/src
 import { assertDatabaseRoles } from "../lib/database-roles.mjs";
 import { parseJsonc } from "../lib/jsonc.mjs";
 import { releaseEnvironments } from "../lib/release-environments.mjs";
+import { exactKeys, plainObject } from "./validation.mjs";
 
 const controlCharactersPattern = /[\u0000-\u001f\u007f]/;
 const configurationTokenPattern = /^[A-Za-z0-9._:-]+$/;
@@ -123,38 +124,6 @@ const exactRuntimeKeys = new Set([
   "tiktok_media_url_prefix",
   "youtube_shorts_client_id",
 ]);
-
-/**
- * Asserts that a value is a non-null, non-array object record.
- *
- * @param {unknown} value - Value to validate
- * @param {string} name - Contextual label for error reporting
- * @returns {object} The validated object
- * @throws {TypeError} If value is null, array, or not an object
- */
-function assertPlainObject(value, name) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${name} must be an object`);
-  }
-  return value;
-}
-
-/**
- * Asserts that an object contains only keys in the expected set, rejecting unknown properties.
- *
- * @param {object} value - Object to inspect
- * @param {Set<string>} expected - Set of permitted key names
- * @param {string} name - Contextual label for error reporting
- * @returns {void}
- * @throws {TypeError} If any unrecognized key is present
- */
-function assertExactKeys(value, expected, name) {
-  const keys = Object.keys(value);
-  const unknown = keys.filter((key) => !expected.has(key));
-  if (unknown.length > 0) {
-    throw new TypeError(`${name} contains unknown fields: ${unknown.join(", ")}`);
-  }
-}
 
 /**
  * Validates that a value is a trimmed, non-empty string adhering to length, control-character,
@@ -366,12 +335,12 @@ function reportingRuntime(runtime) {
  * @throws {TypeError} If validation fails or forbidden secrets are present
  */
 export function validateReleaseSpec(input) {
-  const spec = assertPlainObject(input, "release input");
+  const spec = plainObject(input, "release input");
   const serialized = JSON.stringify(spec);
   if (containsCredentialMaterial(serialized)) {
     throw new TypeError("release input must not contain credentials or database URLs");
   }
-  assertExactKeys(spec, exactSpecKeys, "release input");
+  exactKeys(spec, exactSpecKeys, "release input", { allowMissing: true });
   if (spec.schema_version !== 1) throw new TypeError("schema_version must be 1");
   if (!releaseEnvironments.includes(spec.environment)) {
     throw new TypeError(`environment must be one of ${releaseEnvironments.join(", ")}`);
@@ -409,8 +378,8 @@ export function validateReleaseSpec(input) {
     ]),
   ].sort();
 
-  const acceptance = assertPlainObject(spec.provider_acceptance, "provider_acceptance");
-  assertExactKeys(acceptance, exactAcceptanceKeys, "provider_acceptance");
+  const acceptance = plainObject(spec.provider_acceptance, "provider_acceptance");
+  exactKeys(acceptance, exactAcceptanceKeys, "provider_acceptance", { allowMissing: true });
   for (const key of exactAcceptanceKeys) boolean(acceptance[key], `provider_acceptance.${key}`);
   if (acceptance.instagram_engagement && !acceptance.instagram) {
     throw new TypeError("Instagram engagement acceptance requires Instagram acceptance");
@@ -419,8 +388,8 @@ export function validateReleaseSpec(input) {
     throw new TypeError("Threads engagement acceptance requires Threads acceptance");
   }
 
-  const runtime = assertPlainObject(spec.runtime, "runtime");
-  assertExactKeys(runtime, exactRuntimeKeys, "runtime");
+  const runtime = plainObject(spec.runtime, "runtime");
+  exactKeys(runtime, exactRuntimeKeys, "runtime", { allowMissing: true });
   const mailFromAddress = requiredString(runtime.mail_from_address, "runtime.mail_from_address");
   if (!isMailSenderAddress(mailFromAddress, true)) {
     throw new TypeError("runtime.mail_from_address is invalid");
@@ -480,8 +449,10 @@ export function validateReleaseSpec(input) {
     }
   }
 
-  const automationGuard = assertPlainObject(spec.automation_guard, "automation_guard");
-  assertExactKeys(automationGuard, new Set(["consumers_paused", "cron_safe"]), "automation_guard");
+  const automationGuard = plainObject(spec.automation_guard, "automation_guard");
+  exactKeys(automationGuard, new Set(["consumers_paused", "cron_safe"]), "automation_guard", {
+    allowMissing: true,
+  });
   if (
     !boolean(automationGuard.consumers_paused, "automation_guard.consumers_paused") ||
     !boolean(automationGuard.cron_safe, "automation_guard.cron_safe")
@@ -538,12 +509,9 @@ export function validateReleaseSpec(input) {
  * @throws {TypeError} If outputs are malformed, inconsistent with the release spec, or contain unexpected values
  */
 export function validateIacOutputs(input, spec) {
-  const outputs = assertPlainObject(input, "IaC outputs");
-  const resources = assertPlainObject(
-    outputValue(outputs, "release_resources"),
-    "release_resources",
-  );
-  const bindings = assertPlainObject(outputValue(outputs, "worker_bindings"), "worker_bindings");
+  const outputs = plainObject(input, "IaC outputs");
+  const resources = plainObject(outputValue(outputs, "release_resources"), "release_resources");
+  const bindings = plainObject(outputValue(outputs, "worker_bindings"), "worker_bindings");
   if (resources.environment !== spec.environment) {
     throw new TypeError("IaC release resources environment must match the release input");
   }
@@ -567,8 +535,10 @@ export function validateIacOutputs(input, spec) {
   if (!frontendWorkerName.endsWith(`-${spec.environment}`)) {
     throw new TypeError("the IaC frontend Worker name must carry the release environment suffix");
   }
-  const workerNames = assertPlainObject(resources.worker_names, "release_resources.worker_names");
-  assertExactKeys(workerNames, new Set(["api", "automation", "state", "frontend"]), "worker_names");
+  const workerNames = plainObject(resources.worker_names, "release_resources.worker_names");
+  exactKeys(workerNames, new Set(["api", "automation", "state", "frontend"]), "worker_names", {
+    allowMissing: true,
+  });
   for (const worker of ["api", "automation", "state", "frontend"]) {
     const name = requiredString(
       workerNames[worker],
@@ -606,8 +576,10 @@ export function validateIacOutputs(input, spec) {
     throw new TypeError("Hyperdrive output IDs must be distinct and consistent");
   }
 
-  const queues = assertPlainObject(bindings.queues, "worker_bindings.queues");
-  assertExactKeys(queues, new Set(Object.keys(queueBindings)), "worker_bindings.queues");
+  const queues = plainObject(bindings.queues, "worker_bindings.queues");
+  exactKeys(queues, new Set(Object.keys(queueBindings)), "worker_bindings.queues", {
+    allowMissing: true,
+  });
   for (const workload of Object.keys(queueBindings)) {
     if (queues[workload] !== `meltiply-${workload}-${spec.environment}`) {
       throw new TypeError(`queue ${workload} is not the expected ${spec.environment} queue`);
@@ -616,11 +588,10 @@ export function validateIacOutputs(input, spec) {
   if (JSON.stringify(stableValue(queues)) !== JSON.stringify(stableValue(resources.queue_names))) {
     throw new TypeError("queue names differ between IaC outputs");
   }
-  const deadLetters = assertPlainObject(
-    resources.dead_letter_queue_names,
-    "dead_letter_queue_names",
-  );
-  assertExactKeys(deadLetters, new Set(Object.keys(queueBindings)), "dead_letter_queue_names");
+  const deadLetters = plainObject(resources.dead_letter_queue_names, "dead_letter_queue_names");
+  exactKeys(deadLetters, new Set(Object.keys(queueBindings)), "dead_letter_queue_names", {
+    allowMissing: true,
+  });
   for (const workload of Object.keys(queueBindings)) {
     if (deadLetters[workload] !== `meltiply-${workload}-${spec.environment}-dlq`) {
       throw new TypeError(
@@ -791,11 +762,14 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
     ...providerVars(spec),
   };
 
+  const isS3 = spec.runtime.object_storage_provider === "s3";
   automation.vars = commonVars;
-  automation.r2_buckets = replaceBinding(automation.r2_buckets, "ASSETS", {
-    binding: "ASSETS",
-    bucket_name: iac.assets_bucket,
-  });
+  automation.r2_buckets = isS3
+    ? (automation.r2_buckets ?? []).filter((entry) => entry.binding !== "ASSETS")
+    : replaceBinding(automation.r2_buckets, "ASSETS", {
+        binding: "ASSETS",
+        bucket_name: iac.assets_bucket,
+      });
   automation.hyperdrive = replaceBinding(automation.hyperdrive, "DB_SYSTEM", {
     binding: "DB_SYSTEM",
     id: iac.system_hyperdrive_id,
@@ -830,14 +804,12 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
       "name",
     );
   }
-  api.r2_buckets = replaceBinding(api.r2_buckets, "ASSETS", {
-    binding: "ASSETS",
-    bucket_name: iac.assets_bucket,
-  });
-  if (spec.runtime.object_storage_provider === "s3") {
-    api.r2_buckets = api.r2_buckets.filter((entry) => entry.binding !== "ASSETS");
-    automation.r2_buckets = automation.r2_buckets.filter((entry) => entry.binding !== "ASSETS");
-  }
+  api.r2_buckets = isS3
+    ? (api.r2_buckets ?? []).filter((entry) => entry.binding !== "ASSETS")
+    : replaceBinding(api.r2_buckets, "ASSETS", {
+        binding: "ASSETS",
+        bucket_name: iac.assets_bucket,
+      });
   api.hyperdrive = [
     { binding: "DB_AUTHENTICATED", id: iac.authenticated_hyperdrive_id },
     { binding: "DB_SYSTEM", id: iac.system_hyperdrive_id },

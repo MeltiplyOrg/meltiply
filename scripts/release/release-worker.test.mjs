@@ -8,6 +8,7 @@ import {
   deployWorkerStep,
   findUniqueTaggedVersion,
   injectWorkerSecrets,
+  isMissingWorker,
   parseDeploymentStatus,
   parseRollbackVersionOutput,
   parseSecretVersionOutput,
@@ -21,6 +22,26 @@ import {
 const version = "11111111-1111-1111-1111-111111111111";
 const otherVersion = "22222222-2222-2222-2222-222222222222";
 const secretVersion = "33333333-3333-3333-3333-333333333333";
+
+test("bootstrap treats only the Worker-not-found API code as an unprovisioned Worker", () => {
+  assert.equal(
+    isMissingWorker(
+      new Error(
+        "A request to the Cloudflare API (/accounts/x/workers/scripts/api/versions) failed.\n  This Worker does not exist on your account. [code: 10007]",
+      ),
+    ),
+    true,
+  );
+  assert.equal(isMissingWorker("workers.api.error.script_not_found [code: 10007]"), true);
+  // Prose that mentions a missing script, or a different API code, is a real
+  // failure: bootstrap must not proceed past a permission or network error.
+  assert.equal(isMissingWorker(new Error("Worker script not found in cache")), false);
+  assert.equal(
+    isMissingWorker(new Error("Authentication error: worker does not exist [code: 10000]")),
+    false,
+  );
+  assert.equal(isMissingWorker(new Error("fetch failed")), false);
+});
 
 test("Wrangler machine output yields one exact Worker version ID", () => {
   const source = [

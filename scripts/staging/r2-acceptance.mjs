@@ -13,7 +13,7 @@ import {
   writeEvidence,
 } from "../release/release-guard.mjs";
 import { readBoundedJsonResponse } from "../release/release-http.mjs";
-import { loadReleaseInputs, redactError } from "../release/release-lib.mjs";
+import { loadReleaseInputs, redactError, releaseInternals } from "../release/release-lib.mjs";
 
 const lineBreakPattern = /[\r\n]/;
 const uuidPattern = /[0-9a-f-]{36}/gi;
@@ -191,13 +191,13 @@ export function prepareR2AcceptanceOptions(parsed, { iac, spec }, repoRoot = REP
     browserOrigin: spec.app_url,
     bucketName: iac.assets_bucket,
     gitSha: spec.git_sha,
-    iacOutputsSha256: sha256(JSON.stringify(iac)),
+    iacOutputsSha256: sha256(releaseInternals.json(iac)),
     multipartBytes: parsed.multipartBytes,
     outputPath: parsed.outputPath,
     pollTimeoutMs: parsed.pollTimeoutMs,
     r2Origin: `https://${spec.runtime.r2_account_id}.r2.cloudflarestorage.com`,
     releaseId: spec.release_id,
-    releaseInputSha256: sha256(JSON.stringify(spec)),
+    releaseInputSha256: sha256(releaseInternals.json(spec)),
     releaseSpec: spec,
     repoRoot,
   });
@@ -604,20 +604,20 @@ function makeApiClient(options, dependencies, evidenceRequestIds, operations) {
   };
 }
 
+// Valid 67-byte 1x1 8-bit grayscale PNG (signature + IHDR + IDAT + IEND with valid CRCs).
+const VALID_1X1_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==";
+
 /**
- * Generates a minimal valid 24-byte 1x1 pixel PNG binary image buffer.
+ * Generates a valid 67-byte 1x1 pixel PNG binary image buffer (signature, IHDR,
+ * deflated IDAT scanline, and IEND with valid CRCs).
  *
- * Used as test payload for single PUT upload and CORS acceptance tests.
+ * Used as test payload for single PUT upload, asset processing, and CORS acceptance tests.
  *
  * @returns {Uint8Array} Binary PNG file buffer
  */
 function pngFixture() {
-  const bytes = new Uint8Array(24);
-  bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
-  const view = new DataView(bytes.buffer);
-  view.setUint32(16, 1);
-  view.setUint32(20, 1);
-  return bytes;
+  return new Uint8Array(Buffer.from(VALID_1X1_PNG_BASE64, "base64"));
 }
 
 /**

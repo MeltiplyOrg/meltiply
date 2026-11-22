@@ -10,6 +10,7 @@ import { useInvitationPreview } from "@/lib/queries";
 import { useAcceptWorkspaceInvitation } from "@/lib/queries";
 import { authClient } from "@/lib/auth-client";
 import { useI18n } from "@/lib/i18n";
+import { apiErrorCode, userFacingErrorMessage } from "@/lib/frontend-errors";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
 import { Alert } from "@meltiply/ui/alert";
@@ -42,7 +43,7 @@ export default function InvitationAcceptRoute(): React.ReactElement {
  * @returns React element rendering preview, sign-up, or success states.
  */
 function InvitationAcceptance(): React.ReactElement {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const token = params.get("token");
@@ -68,12 +69,13 @@ function InvitationAcceptance(): React.ReactElement {
     acceptInvitation(token, {
       onError: (cause) => {
         acceptStarted.current = false;
-        const message =
-          cause instanceof Error ? cause.message : t("The invitation could not be accepted.");
-        if (message.toLowerCase().includes("verify")) {
+        // The API returns `email_verification_required` (403) when the invited
+        // account has not verified its address; every other failure renders the
+        // safe user-facing copy rather than raw provider messages.
+        if (apiErrorCode(cause) === "email_verification_required") {
           setNotice(t("Verify your email address, then return to this page to join."));
         } else {
-          setError(message);
+          setError(userFacingErrorMessage(cause, language));
         }
       },
       onSuccess: async () => {
@@ -81,7 +83,7 @@ function InvitationAcceptance(): React.ReactElement {
         await refreshSession();
       },
     });
-  }, [acceptInvitation, isSignedIn, pending, refreshSession, t, token]);
+  }, [acceptInvitation, isSignedIn, language, pending, refreshSession, t, token]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();

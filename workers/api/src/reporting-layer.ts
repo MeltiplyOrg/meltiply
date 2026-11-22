@@ -1,4 +1,4 @@
-import { Effect, type Layer } from "effect";
+import type { Layer } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
 import {
   createPostHogTransport,
@@ -7,6 +7,7 @@ import {
   reportingConfiguration,
   type ReportingTransactionRunner,
 } from "@meltiply/reporting";
+import { lazyWithSystemTransactionEffect } from "./database-module";
 import type { ApiWorkerEnv } from "./env";
 
 /** Invocation-scoped test/transport override; transactional consent writes stay live. */
@@ -30,11 +31,7 @@ export function reportingLayer(
   const transaction: ReportingTransactionRunner = client
     ? (operation) => operation(client)
     : (operation) =>
-        Effect.flatMap(
-          Effect.promise(() => import("./database")),
-          (module) =>
-            module.withSystemTransactionEffect(env, (systemClient) => operation(systemClient)),
-        );
+        lazyWithSystemTransactionEffect(env, (systemClient) => operation(systemClient));
   return createReportingServiceLive({
     appVersion: env.VERSION,
     configuration,

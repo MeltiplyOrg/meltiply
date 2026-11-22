@@ -13,7 +13,7 @@ import { hashIdempotencyRequestEffect } from "./idempotency";
 import { idempotencyHeaders } from "./idempotent-response";
 import { jsonResponse } from "./responses";
 import { idempotencyKey, jsonBody, onlyKeys } from "./validation";
-import { idempotentMutation } from "./workspace-lifecycle";
+import { idempotentInstallationMutation } from "./installation-mutation";
 
 /**
  * First-run onboarding progress for the current Installation Owner.
@@ -270,7 +270,7 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
         });
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ step }));
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           actor.workspace.id,
           "installation.onboarding.save",
@@ -298,7 +298,7 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
         yield* requireCurrentOwner(actor);
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({}));
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           actor.workspace.id,
           "installation.onboarding.complete",

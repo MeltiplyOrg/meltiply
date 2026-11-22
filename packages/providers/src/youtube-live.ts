@@ -1,7 +1,14 @@
 import { malformed, unknownResult } from "./adapter-helpers";
 import { ProviderAdapterError, classifyProviderFailure } from "./failures";
 import type { ProviderHttpRequest, ProviderHttpResponse } from "./http";
-import { bearer, boundedString, providerIdentifier, record, required } from "./meta-common";
+import {
+  bearer,
+  boundedString,
+  firstNonEmptyLine,
+  providerIdentifier,
+  record,
+  required,
+} from "./meta-common";
 import type {
   ProviderBroadcastInfo,
   ProviderCredentials,
@@ -10,18 +17,43 @@ import type {
   ProviderRequestContext,
   PublishInput,
 } from "./types";
+import { YOUTUBE_API_ORIGIN, YOUTUBE_LIMITS, YOUTUBE_VIDEO_ORIGIN } from "./youtube/types";
 
-type GoogleRequest = <T>(
+type GoogleRequest = <T = unknown>(
   context: ProviderRequestContext,
   request: Omit<ProviderHttpRequest, "classifyErrorBody">,
 ) => Promise<ProviderHttpResponse<T>>;
-const origin = "https://www.googleapis.com";
+const origin = YOUTUBE_API_ORIGIN;
+const broadcastOperationPattern = /^(live|ended_live):(.+)$/;
+
+/**
+ * One parsed broadcast operation identity. `live:` names an open broadcast
+ * still owned by an encoder session; `ended_live:` is the terminal identity
+ * `end` retains after the broadcast stopped or was deleted, so reconciliation
+ * can adopt it without another provider read.
+ */
+interface BroadcastOperation {
+  ended: boolean;
+  id: string;
+}
+
+/**
+ * Parses a `live:` or `ended_live:` broadcast operation identifier. Returns
+ * undefined for absent, foreign-phase, or malformed identities so callers
+ * reject them instead of guessing at a broadcast.
+ */
+function parseBroadcastOperation(value: unknown): BroadcastOperation | undefined {
+  const normalized = typeof value === "string" ? value.trim() : undefined;
+  const match = normalized?.match(broadcastOperationPattern);
+  const id = providerIdentifier(match?.[2]);
+  return match && id ? { ended: match[1] === "ended_live", id } : undefined;
+}
 
 /** Reads the broadcast identity without exposing stream/upload credentials in operation IDs. */
 function broadcastId(lookup: ProviderPublicationLookup): string {
-  const id = providerIdentifier(lookup.providerOperationId?.replace(/^live:/, ""));
-  if (!lookup.providerOperationId?.startsWith("live:") || !id) throw malformed();
-  return id;
+  const operation = parseBroadcastOperation(lookup.providerOperationId);
+  if (!operation || operation.ended) throw malformed();
+  return operation.id;
 }
 
 /** Requires exactly the requested resource from a Google list response; never adopts another channel's row. */
@@ -41,6 +73,8 @@ function resource(value: unknown, id: string): Record<string, unknown> {
  */
 export function youtubeLive(request: GoogleRequest, now: () => Date) {
   return {
+    /** Parses `live:`/`ended_live:` broadcast operation identities for reconciliation. */
+    operation: parseBroadcastOperation,
     /**
      * Creates and binds an ingest resource; returns only a non-secret terminal
      * handoff. Google's required start time is one minute ahead to remain in the
@@ -63,7 +97,11 @@ export function youtubeLive(request: GoogleRequest, now: () => Date) {
         );
       }
       const description = input.caption.trim();
-      const title = required("title", description.split(/\r?\n/, 1)[0] ?? "", 100);
+      const title = required(
+        "title",
+        firstNonEmptyLine(description) ?? "",
+        YOUTUBE_LIMITS.maxTitleCodePoints,
+      );
       const headers = { ...bearer(credentials.accessToken), "Content-Type": "application/json" };
       const created = await request<unknown>(context, {
         body: JSON.stringify({
@@ -170,7 +208,10 @@ export function youtubeLive(request: GoogleRequest, now: () => Date) {
         return {
           state,
           ...(lifecycle === "complete"
-            ? { providerPostId: id, providerUrl: `https://youtu.be/${encodeURIComponent(id)}` }
+            ? {
+                providerPostId: id,
+                providerUrl: `${YOUTUBE_VIDEO_ORIGIN}/${encodeURIComponent(id)}`,
+              }
             : {}),
         };
       const streamId = providerIdentifier(record(broadcast.contentDetails)?.boundStreamId);
@@ -196,7 +237,7 @@ export function youtubeLive(request: GoogleRequest, now: () => Date) {
         ingestUrl,
         streamKey,
         ...(state === "live" ? { providerPostId: id } : {}),
-        providerUrl: `https://youtu.be/${encodeURIComponent(id)}`,
+        providerUrl: `${YOUTUBE_VIDEO_ORIGIN}/${encodeURIComponent(id)}`,
       };
     },
     /** Completes the known broadcast once; Google must confirm the same broadcast ID. */
@@ -246,7 +287,7 @@ export function youtubeLive(request: GoogleRequest, now: () => Date) {
           outcome: "confirmed_success",
           providerOperationId: `ended_live:${id}`,
           providerPostId: id,
-          providerUrl: `https://youtu.be/${encodeURIComponent(id)}`,
+          providerUrl: `${YOUTUBE_VIDEO_ORIGIN}/${encodeURIComponent(id)}`,
         };
       const response = await request<unknown>(context, {
         headers: bearer(credentials.accessToken),
@@ -259,7 +300,7 @@ export function youtubeLive(request: GoogleRequest, now: () => Date) {
         outcome: "confirmed_success",
         providerOperationId: `ended_live:${id}`,
         providerPostId: id,
-        providerUrl: `https://youtu.be/${encodeURIComponent(id)}`,
+        providerUrl: `${YOUTUBE_VIDEO_ORIGIN}/${encodeURIComponent(id)}`,
       };
     },
   };

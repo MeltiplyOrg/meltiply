@@ -1,28 +1,36 @@
 import type { PlatformCapability } from "@meltiply/domain";
-import { extractRateLimitBudget } from "./rate-limit";
 
-import { addSeconds, malformed, requiredIdentifier, unknownResult } from "./adapter-helpers";
-import { classifyProviderFailure, ProviderAdapterError } from "./failures";
+import {
+  addSeconds,
+  confirmedFailure,
+  malformed,
+  requiredIdentifier,
+  unknownResult,
+} from "./adapter-helpers";
+import { classifyProviderFailure, isUncertainFailure, ProviderAdapterError } from "./failures";
 import { ProviderHttpClient } from "./http";
+import { IDEMPOTENCY_KEY_MAX_CHARS, OAUTH_STATE_MAX_CHARS, PROVIDER_LIMITS } from "./limits";
 import {
   assertConfiguredRedirectUri,
   bearer,
   boundedString,
   boundedText,
   exactRedirectUri,
+  firstNonEmptyLine,
   metricValue,
+  normalizeContentType,
   record,
   required,
   secureUrl,
   validatePageInput,
 } from "./meta-common";
+import { exchangeAuthorizationCodeForm } from "./oauth-helpers";
+import { extractRateLimitBudget } from "./rate-limit";
 import type {
   OAuthConnection,
   ProviderAdapter,
   ProviderCredentials,
-  ProviderFailure,
   ProviderMedia,
-  ProviderOperationResult,
   ProviderRemoteMedia,
   ProviderRequestContext,
   ProviderTokenSet,
@@ -36,14 +44,11 @@ const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:~-]{0,254}$/;
 const opaqueIdentifierPattern = /^[A-Za-z0-9_-][A-Za-z0-9._:~-]{0,254}$/;
 const errorCodePattern = /^[a-z0-9][a-z0-9._-]{0,79}$/;
 const scopePattern = /^[a-z][a-z0-9._-]{0,99}$/;
-const publishOperationPattern = /^(?:publish|inbox):(.+)$/;
-const lineBreakPattern = /\r?\n/;
+const publishOperationPattern = /^(publish|inbox):(.+)$/;
 
 const apiOrigin = "https://open.tiktokapis.com";
 const authorizationOrigin = "https://www.tiktok.com";
-const imageMaximumBytes = 20 * 1024 * 1024;
-const videoMaximumBytes = 500 * 1024 * 1024;
-const tokenLifetimeMaximumSeconds = 2 * 24 * 60 * 60;
+const limits = PROVIDER_LIMITS.tiktok;
 /** Identity is required; either direct-publish or native-inbox consent enables publishing. */
 const requiredScopes = ["user.info.basic"] as const;
 /** Profile metadata and analytics consent are optional and never block publishing. */
@@ -55,15 +60,20 @@ const optionalScopes = [
   "video.list",
 ] as const;
 const requestedScopes = [...requiredScopes, ...optionalScopes] as const;
-const privacyLevels = new Set<TikTokPrivacyLevel>([
+const privacyLevels: ReadonlySet<string> = new Set<TikTokPrivacyLevel>([
   "PUBLIC_TO_EVERYONE",
   "MUTUAL_FOLLOW_FRIENDS",
   "FOLLOWER_OF_CREATOR",
   "SELF_ONLY",
 ]);
 
+/** Type guard refining an arbitrary value to a valid TikTok privacy level. */
+function isTikTokPrivacyLevel(value: unknown): value is TikTokPrivacyLevel {
+  return typeof value === "string" && privacyLevels.has(value);
+}
+
 /** TikTok's caption ceiling remains known even before live publishing is configured. */
-export const TIKTOK_MAX_CAPTION_LENGTH = 4_000;
+export const TIKTOK_MAX_CAPTION_LENGTH = limits.maxCaptionCodePoints;
 
 const capability: PlatformCapability = {
   accepted_mime_types: ["image/jpeg", "image/webp", "video/mp4", "video/quicktime"],
@@ -72,10 +82,10 @@ const capability: PlatformCapability = {
   comments: false,
   connect_available: true,
   max_caption_length: TIKTOK_MAX_CAPTION_LENGTH,
-  max_file_size: videoMaximumBytes,
-  max_hashtags: 30,
-  max_media_count: 35,
-  max_video_duration_sec: 600,
+  max_file_size: limits.maxVideoBytes,
+  max_hashtags: limits.maxHashtags,
+  max_media_count: limits.maxPhotoImages,
+  max_video_duration_sec: limits.maxVideoDurationSeconds,
   min_media_count: 1,
   multi_asset_types: ["image"],
   notes: [
@@ -93,9 +103,6 @@ const capability: PlatformCapability = {
   publish: true,
   reply: false,
 };
-
-/** TikTok's documented ceiling of images in one photo post. */
-const maximumPhotoImages = 35;
 
 export interface TikTokAdapterOptions {
   clientKey: string;
@@ -244,8 +251,8 @@ function tokenBody(value: unknown, now: Date, requireGrantedScopes: boolean): Ti
   const body = record(value);
   const providerError = boundedString(body?.error, 80);
   if (providerError) throw apiError(providerError);
-  const accessToken = boundedString(body?.access_token, 16_000);
-  const refreshToken = boundedString(body?.refresh_token, 16_000);
+  const accessToken = boundedString(body?.access_token, limits.tokenMaxChars);
+  const refreshToken = boundedString(body?.refresh_token, limits.tokenMaxChars);
   const openId = tiktokOpaqueIdentifier(body?.open_id);
   const tokenType = boundedString(body?.token_type, 32)?.toLowerCase();
   if (
@@ -261,9 +268,9 @@ function tokenBody(value: unknown, now: Date, requireGrantedScopes: boolean): Ti
       }),
     );
   }
+  const grantedScopes = scopeSet(body?.scope);
   if (requireGrantedScopes) {
-    const scopes = scopeSet(body?.scope);
-    if (body?.scope !== undefined && !scopes) {
+    if (body?.scope !== undefined && !grantedScopes) {
       throw new ProviderAdapterError(
         classifyProviderFailure({
           code: "tiktok_token_response_invalid",
@@ -271,8 +278,8 @@ function tokenBody(value: unknown, now: Date, requireGrantedScopes: boolean): Ti
         }),
       );
     }
-    const missingScopes: string[] = requiredScopes.filter((scope) => !scopes?.has(scope));
-    if (!scopes?.has("video.publish") && !scopes?.has("video.upload"))
+    const missingScopes: string[] = requiredScopes.filter((scope) => !grantedScopes?.has(scope));
+    if (!grantedScopes?.has("video.publish") && !grantedScopes?.has("video.upload"))
       missingScopes.push("video.publish");
     if (missingScopes.length > 0) {
       throw new ProviderAdapterError(
@@ -281,10 +288,9 @@ function tokenBody(value: unknown, now: Date, requireGrantedScopes: boolean): Ti
       );
     }
   }
-  const grantedScopes = scopeSet(body?.scope);
   return {
     accessToken,
-    expiresAt: addSeconds(now, body?.expires_in, tokenLifetimeMaximumSeconds),
+    expiresAt: addSeconds(now, body?.expires_in, limits.tokenLifetimeMaxSeconds),
     openId,
     refreshToken,
     ...(grantedScopes ? { scopes: [...grantedScopes] } : {}),
@@ -354,7 +360,7 @@ function pullMedia(media: ProviderMedia, mediaPrefix: URL): ProviderRemoteMedia 
  * @throws ProviderAdapterError when the content type is not image or video.
  */
 function attachmentKind(media: ProviderMedia): "image" | "video" {
-  const contentType = media.contentType.split(";", 1)[0]!.toLowerCase();
+  const contentType = normalizeContentType(media.contentType);
   if (contentType.startsWith("video/")) return "video";
   if (contentType.startsWith("image/")) return "image";
   throw new ProviderAdapterError(
@@ -374,8 +380,7 @@ function publishOptions(input: PublishInput): TikTokPublishOptions {
   if (
     !value ||
     value.musicUsageConfirmed !== true ||
-    (value.postMode !== "inbox" &&
-      (!value.privacyLevel || !privacyLevels.has(value.privacyLevel))) ||
+    (value.postMode !== "inbox" && !isTikTokPrivacyLevel(value.privacyLevel)) ||
     (value.postMode !== undefined && !["direct", "inbox"].includes(value.postMode)) ||
     [
       value.allowComment,
@@ -403,7 +408,7 @@ function publishOptions(input: PublishInput): TikTokPublishOptions {
  * Throws ProviderAdapterError if hashtags.length > 30.
  */
 function validateHashtags(input: PublishInput): void {
-  if (input.hashtags.length > 30) {
+  if (input.hashtags.length > limits.maxHashtags) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
         code: "tiktok_hashtags_invalid",
@@ -434,17 +439,20 @@ function creatorRequirements(value: unknown): TikTokPublicationRequirements {
     rawPrivacyLevels.length < 1 ||
     rawPrivacyLevels.length > privacyLevels.size ||
     new Set(rawPrivacyLevels).size !== rawPrivacyLevels.length ||
-    rawPrivacyLevels.some(
-      (level) => typeof level !== "string" || !privacyLevels.has(level as TikTokPrivacyLevel),
-    ) ||
     typeof data.comment_disabled !== "boolean" ||
     typeof data.duet_disabled !== "boolean" ||
     typeof data.stitch_disabled !== "boolean" ||
+    typeof maxVideoDurationSeconds !== "number" ||
     !Number.isInteger(maxVideoDurationSeconds) ||
-    (maxVideoDurationSeconds as number) < 1 ||
-    (maxVideoDurationSeconds as number) > 600
+    maxVideoDurationSeconds < 1 ||
+    maxVideoDurationSeconds > limits.maxVideoDurationSeconds
   ) {
     throw malformed();
+  }
+  const parsedPrivacyLevels: TikTokPrivacyLevel[] = [];
+  for (const level of rawPrivacyLevels) {
+    if (!isTikTokPrivacyLevel(level)) throw malformed();
+    parsedPrivacyLevels.push(level);
   }
   return {
     commentAllowed: !data.comment_disabled,
@@ -452,9 +460,9 @@ function creatorRequirements(value: unknown): TikTokPublicationRequirements {
     creatorDisplayName,
     creatorUsername,
     duetAllowed: !data.duet_disabled,
-    maxVideoDurationSeconds: maxVideoDurationSeconds as number,
+    maxVideoDurationSeconds,
     platform: "tiktok",
-    privacyLevels: [...rawPrivacyLevels] as TikTokPrivacyLevel[],
+    privacyLevels: parsedPrivacyLevels,
     stitchAllowed: !data.stitch_disabled,
   };
 }
@@ -468,38 +476,28 @@ function operationId(publishId: string, inbox = false): string {
 }
 
 /**
- * Extracts and validates the raw TikTok publish ID from an operation identifier string.
- * Strips the 'publish:' prefix.
- * Returns raw publish identifier string, or undefined if invalid.
+ * One parsed TikTok operation identity: the raw publish ID plus whether the
+ * operation was submitted through the creator's native inbox. The inbox flag
+ * must round-trip verbatim — rewriting it to `publish:` would misclassify an
+ * inbox delivery as a Direct Post on later reconciliation.
  */
-function publishId(value: unknown): string | undefined {
+interface TikTokOperation {
+  inbox: boolean;
+  publishId: string;
+}
+
+/**
+ * Parses a canonical `publish:` or `inbox:` operation identifier into its
+ * publish ID and delivery channel. Returns undefined when the identifier is
+ * absent, uses another phase, or carries a malformed publish ID.
+ */
+function parseOperationId(value: unknown): TikTokOperation | undefined {
   const normalized = tiktokIdentifier(value);
   if (!normalized) return undefined;
   const match = normalized.match(publishOperationPattern);
-  return tiktokIdentifier(match?.[1]);
-}
-
-/**
- * Constructs a confirmed failure operation result for TikTok with optional retained operation ID.
- * Returns ProviderOperationResult object with outcome 'confirmed_failure'.
- */
-function confirmedFailure(
-  failure: ProviderFailure,
-  retainedOperationId?: string,
-): Extract<ProviderOperationResult, { outcome: "confirmed_failure" }> {
-  return {
-    failure,
-    outcome: "confirmed_failure",
-    ...(retainedOperationId ? { providerOperationId: retainedOperationId } : {}),
-  };
-}
-
-/**
- * Determines whether a failure during TikTok publishing could represent an ambiguous remote side effect.
- * Returns true if failure classification is 'ambiguous', 'timeout', or 'transient', false otherwise.
- */
-function canBeAmbiguous(failure: ProviderFailure): boolean {
-  return ["ambiguous", "timeout", "transient"].includes(failure.classification);
+  const phase = match?.[1];
+  const publishId = tiktokIdentifier(match?.[2]);
+  return phase && publishId ? { inbox: phase === "inbox", publishId } : undefined;
 }
 
 /**
@@ -517,7 +515,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
     allowedOrigins: [apiOrigin],
     ...(options.fetch ? { fetch: options.fetch } : {}),
     now,
-    rateLimitBudget: (headers) => extractRateLimitBudget("tiktok", headers),
+    platform: "tiktok",
     ...(options.timeoutMilliseconds === undefined
       ? {}
       : { timeoutMilliseconds: options.timeoutMilliseconds }),
@@ -552,15 +550,14 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       url.searchParams.set("redirect_uri", configuredRedirectUri);
       url.searchParams.set("response_type", "code");
       url.searchParams.set("scope", requestedScopes.join(","));
-      url.searchParams.set("state", required("state", input.state, 1_024));
+      url.searchParams.set("state", required("state", input.state, OAUTH_STATE_MAX_CHARS));
       return url.toString();
     },
 
     async cancelPublication(context, credentials, lookup) {
       accountId(credentials);
-      const retainedOperationId = operationId(publishId(lookup.providerOperationId) ?? "");
-      const retainedPublishId = publishId(retainedOperationId);
-      if (!retainedPublishId) {
+      const operation = parseOperationId(lookup.providerOperationId);
+      if (!operation) {
         throw new ProviderAdapterError(
           classifyProviderFailure({
             code: "tiktok_publish_id_required",
@@ -568,9 +565,10 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
           }),
         );
       }
+      const retainedOperationId = operationId(operation.publishId, operation.inbox);
       try {
         const response = await http.request<unknown>(context, {
-          body: JSON.stringify({ publish_id: retainedPublishId }),
+          body: JSON.stringify({ publish_id: operation.publishId }),
           headers: {
             ...bearer(credentials.accessToken),
             "Content-Type": "application/json; charset=UTF-8",
@@ -586,7 +584,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         };
       } catch (cause) {
         if (!(cause instanceof ProviderAdapterError)) throw cause;
-        return canBeAmbiguous(cause.failure)
+        return isUncertainFailure(cause.failure)
           ? unknownResult(cause.failure, retainedOperationId)
           : confirmedFailure(cause.failure, retainedOperationId);
       }
@@ -603,20 +601,15 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
      */
     async exchangeAuthorizationCode(context, input): Promise<OAuthConnection> {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
-      const form = new URLSearchParams({
-        client_key: clientKey,
-        client_secret: clientSecret,
-        code: required("authorizationCode", input.code),
-        grant_type: "authorization_code",
-        redirect_uri: configuredRedirectUri,
+      const tokenPayload = await exchangeAuthorizationCodeForm(http, context, {
+        clientId: clientKey,
+        clientIdField: "client_key",
+        clientSecret,
+        code: input.code,
+        redirectUri: configuredRedirectUri,
+        tokenUrl: `${apiOrigin}/v2/oauth/token/`,
       });
-      const tokenResponse = await http.request<unknown>(context, {
-        body: form,
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        method: "POST",
-        url: `${apiOrigin}/v2/oauth/token/`,
-      });
-      const tokens = tokenBody(tokenResponse.body, now(), true);
+      const tokens = tokenBody(tokenPayload, now(), true);
       const userUrl = new URL("/v2/user/info/", apiOrigin);
       // Profile fields must match the actual grant; profile consent is optional.
       userUrl.searchParams.set(
@@ -659,20 +652,6 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
 
     getPublicationRequirements: getRequirements,
 
-    /**
-     * Reads the creator's current view, like, comment, and share counters for
-     * one published TikTok video. The query endpoint belongs to the Display API
-     * and requires the `video.list` scope; an empty result means TikTok no
-     * longer reports the video, so no snapshot is written.
-     *
-     * @param context - Provider request context carrying cancellation.
-     * @param credentials - Connected creator token and account identity.
-     * @param lookup - Publication whose providerPostId names the TikTok video.
-     * @param page - Single-page query input; TikTok returns one video.
-     * @returns One analytics record, or an empty page when TikTok omits the video.
-     * @throws {ProviderAdapterError} On a rejected scope, malformed payload, or
-     *   missing counter, so a sync failure is recorded instead of a false zero.
-     */
     /** Reads the creator's lifetime follower, following, and video counters. */
     async getAccountAnalytics(context, credentials) {
       const url = new URL("/v2/user/info/", apiOrigin);
@@ -695,6 +674,20 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       };
     },
 
+    /**
+     * Reads the creator's current view, like, comment, and share counters for
+     * one published TikTok video. The query endpoint belongs to the Display API
+     * and requires the `video.list` scope; an empty result means TikTok no
+     * longer reports the video, so no snapshot is written.
+     *
+     * @param context - Provider request context carrying cancellation.
+     * @param credentials - Connected creator token and account identity.
+     * @param lookup - Publication whose providerPostId names the TikTok video.
+     * @param page - Single-page query input; TikTok returns one video.
+     * @returns One analytics record, or an empty page when TikTok omits the video.
+     * @throws {ProviderAdapterError} On a rejected scope, malformed payload, or
+     *   missing counter, so a sync failure is recorded instead of a false zero.
+     */
     async listAnalytics(context, credentials, lookup, page) {
       validatePageInput("tiktok", page);
       if (page.cursor) {
@@ -763,7 +756,8 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
      */
     async lookupPublication(context, credentials, lookup) {
       accountId(credentials);
-      const retainedPublishId = publishId(lookup.providerOperationId);
+      const operation = parseOperationId(lookup.providerOperationId);
+      const retainedPublishId = operation?.publishId;
       if (!retainedPublishId) {
         throw new ProviderAdapterError(
           classifyProviderFailure({
@@ -772,7 +766,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
           }),
         );
       }
-      const inbox = lookup.providerOperationId?.startsWith("inbox:") === true;
+      const inbox = operation.inbox;
       const retainedOperationId = operationId(retainedPublishId, inbox);
       const response = await http.request<unknown>(context, {
         body: JSON.stringify({ publish_id: retainedPublishId }),
@@ -878,7 +872,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
      */
     async publish(context, credentials, input) {
       accountId(credentials);
-      required("idempotencyKey", input.idempotencyKey, 255);
+      required("idempotencyKey", input.idempotencyKey, IDEMPOTENCY_KEY_MAX_CHARS);
       validateHashtags(input);
       if (input.media.length === 0) {
         throw new ProviderAdapterError(
@@ -891,9 +885,18 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       // Order is the creator's attachment order, so it must survive validation
       // unchanged: the published video and photo_images order both mirror it.
       const media = input.media.map((attachment) => pullMedia(attachment, mediaPrefix));
+      const [first] = media;
+      if (!first) {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({
+            code: "tiktok_pull_media_required",
+            status: 400,
+          }),
+        );
+      }
       // Videos and photo posts use different endpoints, so one publication must
       // be single-kind; a mixed set fails closed instead of dropping an attachment.
-      const firstKind = attachmentKind(media[0]!);
+      const firstKind = attachmentKind(first);
       const isVideo = firstKind === "video";
       if (media.some((attachment) => attachmentKind(attachment) !== firstKind)) {
         throw new ProviderAdapterError(
@@ -903,7 +906,6 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
           }),
         );
       }
-      const [first] = media;
       const choices = publishOptions(input);
       if (isVideo && choices.autoAddMusic === true) {
         throw new ProviderAdapterError(
@@ -932,30 +934,34 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       }
 
       const caption = input.caption.trim();
-      // `first` is the only attachment on a video publication, so its verified
-      // facts are the whole publication's facts.
-      const contentType = first!.contentType.split(";", 1)[0]!.toLowerCase();
+      const contentType = normalizeContentType(first.contentType);
       let endpoint: string;
       let body: Record<string, unknown>;
       if (isVideo) {
-        const metadata = first!.metadata;
+        const metadata = first.metadata;
+        const duration = metadata?.durationSeconds;
+        const width = metadata?.width;
+        const height = metadata?.height;
+        const maxDuration = requirements?.maxVideoDurationSeconds ?? limits.maxVideoDurationSeconds;
         if (
           media.length !== 1 ||
-          (!inbox && caption.length > 2_200) ||
+          (!inbox && caption.length > limits.maxVideoCaptionCodePoints) ||
           !["video/mp4", "video/quicktime", "video/webm"].includes(contentType) ||
-          !Number.isSafeInteger(first!.fileSize) ||
-          first!.fileSize < 1 ||
-          first!.fileSize > videoMaximumBytes ||
-          !metadata ||
-          !Number.isFinite(metadata.durationSeconds) ||
-          metadata.durationSeconds! <= 0 ||
-          metadata.durationSeconds! > (requirements?.maxVideoDurationSeconds ?? 600) ||
-          !Number.isInteger(metadata.width) ||
-          metadata.width! < 360 ||
-          metadata.width! > 4_096 ||
-          !Number.isInteger(metadata.height) ||
-          metadata.height! < 360 ||
-          metadata.height! > 4_096
+          !Number.isSafeInteger(first.fileSize) ||
+          first.fileSize < 1 ||
+          first.fileSize > limits.maxVideoBytes ||
+          duration === undefined ||
+          !Number.isFinite(duration) ||
+          duration <= 0 ||
+          duration > maxDuration ||
+          width === undefined ||
+          !Number.isInteger(width) ||
+          width < limits.minVideoDimensionPx ||
+          width > limits.maxVideoDimensionPx ||
+          height === undefined ||
+          !Number.isInteger(height) ||
+          height < limits.minVideoDimensionPx ||
+          height > limits.maxVideoDimensionPx
         ) {
           throw new ProviderAdapterError(
             classifyProviderFailure({
@@ -965,50 +971,56 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
           );
         }
         endpoint = `${apiOrigin}/v2/post/publish/${inbox ? "inbox/video" : "video"}/init/`;
-        body = {
-          post_info: {
-            brand_content_toggle: choices.brandContent,
-            brand_organic_toggle: choices.brandOrganic,
-            disable_comment: !choices.allowComment,
-            disable_duet: !choices.allowDuet,
-            disable_stitch: !choices.allowStitch,
-            is_aigc: choices.isAiGenerated,
-            privacy_level: choices.privacyLevel,
-            title: caption,
-          },
-          source_info: {
-            source: "PULL_FROM_URL",
-            video_url: first!.url,
-          },
-        };
+        body = inbox
+          ? {
+              source_info: {
+                source: "PULL_FROM_URL",
+                video_url: first.url,
+              },
+            }
+          : {
+              post_info: {
+                brand_content_toggle: choices.brandContent,
+                brand_organic_toggle: choices.brandOrganic,
+                disable_comment: !choices.allowComment,
+                disable_duet: !choices.allowDuet,
+                disable_stitch: !choices.allowStitch,
+                is_aigc: choices.isAiGenerated,
+                privacy_level: choices.privacyLevel,
+                title: caption,
+              },
+              source_info: {
+                source: "PULL_FROM_URL",
+                video_url: first.url,
+              },
+            };
       } else {
-        const title = caption
-          .split(lineBreakPattern)
-          .map((line) => line.trim())
-          .find(Boolean);
+        const title = firstNonEmptyLine(caption);
         const imagesInvalid =
-          media.length > maximumPhotoImages ||
+          media.length > limits.maxPhotoImages ||
           media.some((attachment) => {
-            const metadata = attachment.metadata;
+            const width = attachment.metadata?.width;
+            const height = attachment.metadata?.height;
             return (
               !["image/jpeg", "image/webp"].includes(
-                attachment.contentType.split(";", 1)[0]!.toLowerCase(),
+                normalizeContentType(attachment.contentType),
               ) ||
               !Number.isSafeInteger(attachment.fileSize) ||
               attachment.fileSize < 1 ||
-              attachment.fileSize > imageMaximumBytes ||
-              !metadata ||
-              !Number.isInteger(metadata.width) ||
-              metadata.width! < 1 ||
-              !Number.isInteger(metadata.height) ||
-              metadata.height! < 1 ||
-              Math.min(metadata.width!, metadata.height!) > 1_080
+              attachment.fileSize > limits.maxImageBytes ||
+              width === undefined ||
+              !Number.isInteger(width) ||
+              width < 1 ||
+              height === undefined ||
+              !Number.isInteger(height) ||
+              height < 1 ||
+              Math.min(width, height) > limits.maxPhotoShortSidePx
             );
           });
         if (
           !title ||
-          title.length > 90 ||
-          caption.length > 4_000 ||
+          title.length > limits.maxPhotoTitleChars ||
+          caption.length > limits.maxCaptionCodePoints ||
           (!inbox && (choices.allowDuet || choices.allowStitch)) ||
           imagesInvalid
         ) {
@@ -1023,15 +1035,20 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         body = {
           media_type: "PHOTO",
           is_aigc: choices.isAiGenerated,
-          post_info: {
-            auto_add_music: choices.autoAddMusic === true,
-            brand_content_toggle: choices.brandContent,
-            brand_organic_toggle: choices.brandOrganic,
-            description: caption,
-            disable_comment: !choices.allowComment,
-            privacy_level: choices.privacyLevel,
-            title,
-          },
+          post_info: inbox
+            ? {
+                title,
+                description: caption,
+              }
+            : {
+                auto_add_music: choices.autoAddMusic === true,
+                brand_content_toggle: choices.brandContent,
+                brand_organic_toggle: choices.brandOrganic,
+                description: caption,
+                disable_comment: !choices.allowComment,
+                privacy_level: choices.privacyLevel,
+                title,
+              },
           post_mode: inbox ? "MEDIA_UPLOAD" : "DIRECT_POST",
           source_info: {
             photo_cover_index: 0,
@@ -1039,16 +1056,6 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
             source: "PULL_FROM_URL",
           },
         };
-      }
-      if (inbox) {
-        if (isVideo) {
-          body = { source_info: { source: "PULL_FROM_URL", video_url: first!.url } };
-        } else {
-          body.post_info = {
-            title: caption.split(/\r?\n/, 1)[0] ?? "",
-            description: caption,
-          };
-        }
       }
 
       try {
@@ -1070,7 +1077,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         };
       } catch (cause) {
         if (!(cause instanceof ProviderAdapterError)) throw cause;
-        return canBeAmbiguous(cause.failure)
+        return isUncertainFailure(cause.failure)
           ? unknownResult(cause.failure)
           : confirmedFailure(cause.failure);
       }
@@ -1082,7 +1089,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         client_key: clientKey,
         client_secret: clientSecret,
         grant_type: "refresh_token",
-        refresh_token: required("refreshToken", refreshToken, 16_000),
+        refresh_token: required("refreshToken", refreshToken, limits.tokenMaxChars),
       });
       const response = await http.request<unknown>(context, {
         body: form,
@@ -1097,7 +1104,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         accessToken: tokens.accessToken,
         expiresAt: tokens.expiresAt,
         refreshToken: tokens.refreshToken,
-        // The existing refresh consumer treats [] as preserve-the-stored-grant.
+        // Empty scopes preserve the previously stored grant in downstream token rotation.
         scopes: tokens.scopes ?? [],
       };
     },
@@ -1113,19 +1120,16 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       const form = new URLSearchParams({
         client_key: clientKey,
         client_secret: clientSecret,
-        token: required("accessToken", accessToken, 16_000),
+        token: required("accessToken", accessToken, limits.tokenMaxChars),
       });
-      await http.request<undefined>(
-        context ?? { operationId: "oauth-revoke", requestId: "oauth-revoke" },
-        {
-          body: form,
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          method: "POST",
-          responseType: "empty",
-          sideEffectPossible: true,
-          url: `${apiOrigin}/v2/oauth/revoke/`,
-        },
-      );
+      await http.request(context ?? { operationId: "oauth-revoke", requestId: "oauth-revoke" }, {
+        body: form,
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        method: "POST",
+        responseType: "empty",
+        sideEffectPossible: true,
+        url: `${apiOrigin}/v2/oauth/revoke/`,
+      });
     },
 
     transferModes: ["remote_ingest"],

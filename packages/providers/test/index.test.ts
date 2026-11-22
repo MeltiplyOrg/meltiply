@@ -86,6 +86,16 @@ describe("ProviderRegistry", () => {
     expect(invalidated.get("threads")).toBeUndefined();
   });
 
+  it("returns deeply frozen capability descriptors without cloning per call", () => {
+    const registry = new ProviderRegistry();
+    const first = registry.capabilities();
+    const second = registry.capabilities();
+    expect(first[0]).toBe(second[0]);
+    expect(Object.isFrozen(first[0])).toBe(true);
+    expect(Object.isFrozen(first[0]!.accepted_mime_types)).toBe(true);
+    expect(Object.isFrozen(first[0]!.notes)).toBe(true);
+  });
+
   it("fails closed for every unconfigured provider", () => {
     const capabilities = new ProviderRegistry().capabilities();
     expect(capabilities).toHaveLength(5);

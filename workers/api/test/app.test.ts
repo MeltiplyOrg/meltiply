@@ -5,7 +5,7 @@ import { createExecutionContext } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { createApiApp } from "../src/app";
+import { createApiApp, responseErrorCode } from "../src/app";
 import type { ResolvedActor } from "../src/actor-resolution";
 import { CoreApiError } from "../src/core-types";
 import worker from "../src/index";
@@ -1145,6 +1145,45 @@ describe("API Worker foundation", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "workspace_forbidden" },
     });
+  });
+
+  it("extracts error codes from small JSON error bodies", async () => {
+    await expect(
+      responseErrorCode(
+        Response.json({ error: { code: "quota_exceeded", message: "slow down" } }, { status: 429 }),
+      ),
+    ).resolves.toBe("quota_exceeded");
+  });
+
+  it("reads at most the 8 KiB probe cap when Content-Length is absent", async () => {
+    // A JSON error body larger than the probe cap must not be buffered whole:
+    // the stream read stops at errorBodyProbeBytes, so the truncated payload
+    // yields no code where an unbounded clone().json() would have found one.
+    const oversized = Response.json(
+      {
+        error: { code: "internal_error", message: "x".repeat(16 * 1024) },
+      },
+      { status: 500 },
+    );
+    expect(oversized.headers.get("Content-Length")).toBeNull();
+    await expect(responseErrorCode(oversized)).resolves.toBeUndefined();
+
+    const small = Response.json({ error: { code: "internal_error" } }, { status: 500 });
+    await expect(responseErrorCode(small)).resolves.toBe("internal_error");
+  });
+
+  it("ignores non-error and non-JSON responses", async () => {
+    await expect(
+      responseErrorCode(Response.json({ ok: true }, { status: 200 })),
+    ).resolves.toBeUndefined();
+    await expect(
+      responseErrorCode(
+        new Response("plain failure", {
+          headers: { "Content-Type": "text/plain" },
+          status: 500,
+        }),
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("routes /api/auth/* to the Better Auth handler", async () => {

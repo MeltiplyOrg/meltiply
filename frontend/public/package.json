@@ -20,7 +20,6 @@
     "@astrojs/sitemap": "^3.7.4",
     "@meltiply/ui": "workspace:*",
     "astro": "^7.3.6",
-    "dompurify": "^3.4.17",
     "fumadocs-core": "^16.16.2",
     "fumadocs-ui": "^16.16.2",
     "lenis": "1.3.26",

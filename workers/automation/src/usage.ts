@@ -4,6 +4,7 @@ import type { DatabaseError } from "@meltiply/domain";
 
 import { withSystemTransactionEffect } from "./database";
 import type { AutomationEnv } from "./env";
+import { nextDelaySeconds, USAGE_RECONCILIATION_RETRY_POLICY } from "./retry-policy";
 
 /**
  * Runs one system-transaction Effect at this module's Promise boundary.
@@ -330,10 +331,9 @@ async function releaseAfterFailure(
   now: Date,
 ): Promise<void> {
   const completedFailures = organization.consecutive_failures + 1;
-  const retrySeconds = Math.min(
-    reconciliationIntervalSeconds,
-    5 * 60 * 2 ** Math.min(completedFailures - 1, 6),
-  );
+  const retrySeconds =
+    nextDelaySeconds(USAGE_RECONCILIATION_RETRY_POLICY, completedFailures) ??
+    reconciliationIntervalSeconds;
   await runWithSystemTransaction(env, (client) =>
     client.query(
       `UPDATE usage_reconciliation_state

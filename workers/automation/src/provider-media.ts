@@ -1,6 +1,7 @@
 import {
   createObjectStoreFromEnv,
   createObjectUrlSignerFromEnv,
+  signProviderMediaUrl,
   type ConfiguredObjectStore,
   type ObjectUrlSigner,
 } from "@meltiply/storage";
@@ -9,38 +10,14 @@ import type { DistributionProviderDependencies } from "./distribution-provider";
 import type { AutomationEnv } from "./env";
 
 const contentTypePattern = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
-const base64PaddingPattern = /=+$/;
 const unsafeObjectKeyPattern = /[\u0000-\u001f\u007f\\]/;
 
 /**
- * Remote-ingest URL lifetime covering the asynchronous platform retrieval window.
- * Providers such as TikTok (PULL_FROM_URL) and Meta fetch the object minutes to hours after
- * publication is accepted, so the URL must outlive scheduling, queueing, and provider-side
- * processing; 24 hours covers that window while staying inside the 7-day SigV4 presign bound
- * that constrains the fallback signer.
- * Tradeoff: the URL is a bearer credential — anyone holding it can read the object until it
- * expires — so the longer lifetime widens the exposure window if the URL leaks through logs
- * or provider-side retention. Access control is preserved by keeping the object private and
- * serving it only through the signed/authenticated delivery route, never a public bucket.
- *
- * The same window bounds the media hold a publication attempt records, so the objects a
- * frozen attempt can still be retrieving stay protected for exactly as long as any URL
- * handed to a Provider stays valid.
+ * Remote-ingest URL lifetime covering the asynchronous platform retrieval window (24 hours).
+ * Also bounds the media hold a publication attempt records so frozen media stays protected
+ * for as long as any URL handed to a Provider remains valid.
  */
 export const providerMediaRetrievalLeaseSeconds = 24 * 60 * 60;
-
-/**
- * API route prefix serving verified-domain provider media.
- * The Automation Worker signs URLs under this path on the `APP_URL` origin; the API
- * Worker verifies the signature and streams the private R2 object. The literal is duplicated
- * in `workers/api/src/core-routes.ts` because worker bundles cannot share source modules —
- * both sides must stay byte-identical. The provider registry derives TikTok's
- * media prefix from this route on APP_URL; any explicit
- * TIKTOK_MEDIA_URL_PREFIX must still cover emitted URLs.
- */
-const providerMediaRoutePrefix = "/api/v1/provider-media/";
-
-const textEncoder = new TextEncoder();
 
 /**
  * Normalizes and validates a MIME content type string.
@@ -55,95 +32,21 @@ function normalizedContentType(value: string | undefined): string | null {
 }
 
 /**
- * Canonical signing payload bound into every provider-media URL signature.
- * The versioned domain-separation prefix keeps these HMACs distinct from any other
- * `TOKEN_ENCRYPTION_KEY`-derived MAC; expiry and object key are the only signed fields,
- * so a valid signature proves the API issued read access to exactly that key until
- * exactly that second.
- *
- * @param expiresAtSeconds - Unix seconds after which the URL stops verifying.
- * @param key - Object key the bearer may read.
- * @returns Canonical `v1\n<expires>\n<key>` payload string.
- */
-function providerMediaPayload(expiresAtSeconds: number, key: string): string {
-  return `meltiply-provider-media-v1\n${expiresAtSeconds}\n${key}`;
-}
-
-/**
- * Encodes bytes as unpadded URL-safe Base64 for signature transport in query parameters.
- *
- * @param bytes - Raw signature bytes.
- * @returns Base64url string without padding.
- */
-function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(base64PaddingPattern, "");
-}
-
-/**
- * Computes the HMAC-SHA256 bearer signature over the canonical media payload.
- * `TOKEN_ENCRYPTION_KEY` doubles as signing material: it is already provisioned on both
- * workers, so verified delivery needs no additional secret distribution.
- *
- * @param secret - `TOKEN_ENCRYPTION_KEY` raw key material.
- * @param expiresAtSeconds - Unix seconds after which the URL stops verifying.
- * @param key - Object key the bearer may read.
- * @returns Base64url-encoded HMAC-SHA256 digest.
- */
-async function providerMediaSignature(
-  secret: string,
-  expiresAtSeconds: number,
-  key: string,
-): Promise<string> {
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    textEncoder.encode(secret),
-    { hash: "SHA-256", name: "HMAC" },
-    false,
-    ["sign"],
-  );
-  const digest = await crypto.subtle.sign(
-    "HMAC",
-    cryptoKey,
-    textEncoder.encode(providerMediaPayload(expiresAtSeconds, key)),
-  );
-  return base64UrlEncode(new Uint8Array(digest));
-}
-
-/**
  * Builds the verified-domain remote-ingest URL for an asset object, or undefined when
  * verified delivery is not configured (missing `TOKEN_ENCRYPTION_KEY`, or `APP_URL`
- * absent/not credential-free HTTPS — e.g. local `http://` development).
- * The object key travels in the path so `TIKTOK_MEDIA_URL_PREFIX` pathname-prefix validation
- * applies; `expires` and `signature` ride in the query string. The result is a bearer URL
- * valid for `providerMediaRetrievalLeaseSeconds`.
+ * absent/not credential-free HTTPS).
  *
  * @param env - Automation worker environment with APP_URL and TOKEN_ENCRYPTION_KEY.
  * @param key - Validated object key to authorize.
  * @returns Signed verified-domain URL, or undefined when unavailable.
  */
-async function verifiedRemoteIngestUrl(
-  env: AutomationEnv,
-  key: string,
-): Promise<string | undefined> {
-  const base = env.APP_URL?.trim();
-  const secret = env.TOKEN_ENCRYPTION_KEY;
-  if (!base || !secret) return undefined;
-  let origin: URL;
-  try {
-    origin = new URL(base);
-  } catch {
-    return undefined;
-  }
-  if (origin.protocol !== "https:" || origin.username || origin.password) {
-    return undefined;
-  }
-  const expiresAt = Math.floor(Date.now() / 1000) + providerMediaRetrievalLeaseSeconds;
-  const signature = await providerMediaSignature(secret, expiresAt, key);
-  const path = key.split("/").map(encodeURIComponent).join("/");
-  const query = new URLSearchParams({ expires: String(expiresAt), signature });
-  return `${origin.origin}${providerMediaRoutePrefix}${path}?${query}`;
+function verifiedRemoteIngestUrl(env: AutomationEnv, key: string): Promise<string | undefined> {
+  return signProviderMediaUrl({
+    appUrl: env.APP_URL,
+    expiresAtSeconds: Math.floor(Date.now() / 1000) + providerMediaRetrievalLeaseSeconds,
+    key,
+    secret: env.TOKEN_ENCRYPTION_KEY,
+  });
 }
 
 /**

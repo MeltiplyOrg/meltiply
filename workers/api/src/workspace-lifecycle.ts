@@ -12,11 +12,8 @@ import { withSystemTransactionEffect } from "./database";
 import { fromPromise } from "./effect/route";
 import { runRouteEffect } from "./effect/runtime";
 import type { ApiWorkerEnv, ApiWorkerEnvironment } from "./env";
-import {
-  completeIdempotencyEffect,
-  hashIdempotencyRequestEffect,
-  reserveIdempotencyEffect,
-} from "./idempotency";
+import { hashIdempotencyRequestEffect } from "./idempotency";
+import { withIdempotentMutationStatus } from "./idempotent-mutation";
 import { idempotencyHeaders } from "./idempotent-response";
 import {
   createCloudflareMailSender,
@@ -370,11 +367,11 @@ function forbidAdminPeerMutation(
 }
 
 /**
- * Runs an idempotent lifecycle mutation inside one system transaction.
+ * Runs one idempotent lifecycle mutation inside one system transaction.
  *
- * Reserves the (org_id, operation, key) slot, replays the stored response on a
- * matching request hash, and records the produced status/body before commit so
- * a retried request returns the original outcome.
+ * Wraps `withIdempotentMutationStatus` with the system pool: installation
+ * lifecycle mutations do not carry tenant claims, and the organization id from
+ * the route path is re-checked inside the transaction.
  *
  * @param env - Worker environment bindings.
  * @param organizationId - Workspace UUID scoping the idempotency key.
@@ -384,7 +381,7 @@ function forbidAdminPeerMutation(
  * @param run - Transactional program producing the response status and body.
  * @returns Effect resolving to the fresh or replayed response.
  */
-export function idempotentMutation(
+function idempotentMutation(
   env: ApiWorkerEnv,
   organizationId: string,
   operation: string,
@@ -395,32 +392,7 @@ export function idempotentMutation(
   ) => Effect.Effect<IdempotentResponse, CoreApiError | DatabaseError>,
 ): Effect.Effect<IdempotentResponse, CoreApiError | DatabaseError> {
   return withSystemTransactionEffect(env, (client) =>
-    Effect.gen(function* () {
-      const prior = yield* reserveIdempotencyEffect(
-        client,
-        organizationId,
-        operation,
-        key,
-        requestHash,
-      );
-      if (prior) {
-        return {
-          body: prior.response_body,
-          replayed: true,
-          status: prior.response_status ?? 200,
-        };
-      }
-      const produced = yield* run(client);
-      yield* completeIdempotencyEffect(
-        client,
-        organizationId,
-        operation,
-        key,
-        produced.status,
-        produced.body,
-      );
-      return { ...produced, replayed: false };
-    }),
+    withIdempotentMutationStatus(client, organizationId, operation, key, requestHash, run),
   );
 }
 

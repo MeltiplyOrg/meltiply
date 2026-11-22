@@ -1,6 +1,7 @@
 import { Cause, Effect, Exit } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
 import type { DatabaseError, Platform } from "@meltiply/domain";
+import { errorDiagnostic, log } from "@meltiply/observability";
 
 import { maximumDelayedDeliverySeconds } from "@meltiply/domain";
 import { withSystemTransactionEffect } from "./database";
@@ -13,6 +14,7 @@ import {
 import type { AutomationEnv } from "./env";
 import { safeErrorMessage } from "./errors";
 import type { OutboxMessage } from "./messages";
+import { nextDelaySeconds, QUEUE_RETRY_POLICY } from "./retry-policy";
 
 interface OutboxRow extends Record<string, unknown> {
   aggregate_id: string;
@@ -290,7 +292,10 @@ function markFailed(
 ): Effect.Effect<number, DatabaseError> {
   if (messages.length === 0) return Effect.succeed(0);
   const eventIds = messages.map(({ row }) => row.id);
-  const delays = messages.map(({ row }) => Math.min(3_600, 2 ** row.attempt_count * 15));
+  const delays = messages.map(
+    ({ row }) =>
+      nextDelaySeconds(QUEUE_RETRY_POLICY, row.attempt_count) ?? QUEUE_RETRY_POLICY.maxSeconds,
+  );
   const errors = messages.map(({ cause }) => safeErrorMessage(cause, "unknown relay error"));
   return withSystemTransactionEffect(env, (client) =>
     Effect.map(
@@ -513,11 +518,28 @@ export function relayOutbox(
         ).pipe(Effect.mapError(classifyJobError)),
       );
       if (Exit.isFailure(marked)) {
-        failed.push(
-          ...published.map(({ row }) => ({
-            cause: Cause.squash(marked.cause),
-            row,
-          })),
+        // The Queue already accepted these messages, so marking them failed
+        // would re-arm rows whose delivery already happened and duplicate the
+        // send on redelivery. They stay 'leased': the lease expires and the
+        // next claim republishes them (Queue consumers dedupe on event_id),
+        // and the settlement failure itself is recorded for an Operator.
+        log(
+          "error",
+          {
+            environment: env.ENVIRONMENT,
+            service: "automation",
+            trace_id: "outbox-relay",
+            version: env.VERSION,
+          },
+          {
+            ...errorDiagnostic(Cause.squash(marked.cause)),
+            error_code: "outbox_settlement_failed",
+            event: "outbox_settlement_failed",
+            job: "outbox_relay",
+            outcome: published.length,
+            retry_class: "queue_backoff",
+            unsettled_events: published.length,
+          },
         );
       } else {
         result.published = published.length;

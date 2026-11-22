@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { crc32, inflateSync } from "node:zlib";
 
 import {
   parseR2AcceptanceArguments,
@@ -951,4 +952,40 @@ it("replaces stale success with unresolved-resource failure evidence", async () 
 it("gives a 500 MiB transfer a bounded size-aware deadline", () => {
   assert.equal(r2AcceptanceInternals.transferTimeoutForBytes(1), 60_000);
   assert.equal(r2AcceptanceInternals.transferTimeoutForBytes(500 * 1024 * 1024), 530_000);
+});
+
+it("emits a valid 67-byte 1x1 PNG fixture with valid chunk CRCs and canonical input digests", () => {
+  const bytes = Buffer.from(r2AcceptanceInternals.pngFixture());
+  assert.equal(bytes.byteLength, 67);
+  assert.deepEqual([...bytes.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+
+  const chunks = [];
+  let offset = 8;
+  while (offset < bytes.byteLength) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.subarray(offset + 4, offset + 8).toString("ascii");
+    const data = bytes.subarray(offset + 8, offset + 8 + length);
+    const recordedCrc = bytes.readUInt32BE(offset + 8 + length);
+    const computedCrc = crc32(bytes.subarray(offset + 4, offset + 8 + length)) >>> 0;
+    assert.equal(recordedCrc, computedCrc, `${type} CRC mismatch`);
+    chunks.push({ data, type });
+    offset += 12 + length;
+  }
+  assert.equal(offset, bytes.byteLength);
+  assert.deepEqual(
+    chunks.map((entry) => entry.type),
+    ["IHDR", "IDAT", "IEND"],
+  );
+  assert.equal(chunks[0].data.readUInt32BE(0), 1);
+  assert.equal(chunks[0].data.readUInt32BE(4), 1);
+  assert.deepEqual([...inflateSync(chunks[1].data)], [0, 0]);
+
+  const parsed = parsedArguments();
+  const baseInputs = releaseInputs();
+  const reorderedSpec = Object.fromEntries(Object.entries(baseInputs.spec).reverse());
+  const reorderedIac = Object.fromEntries(Object.entries(baseInputs.iac).reverse());
+  const first = prepareR2AcceptanceOptions(parsed, baseInputs);
+  const second = prepareR2AcceptanceOptions(parsed, { iac: reorderedIac, spec: reorderedSpec });
+  assert.equal(first.releaseInputSha256, second.releaseInputSha256);
+  assert.equal(first.iacOutputsSha256, second.iacOutputsSha256);
 });

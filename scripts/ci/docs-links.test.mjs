@@ -70,3 +70,38 @@ test("skips tracked Markdown deleted from the current worktree", () => {
 
   assert.deepEqual(existingMarkdownFiles(root, ["kept.md", "deleted.md"]), ["kept.md"]);
 });
+
+test("ignores links after a nested info-string fence and scans after a longer closing fence", () => {
+  const root = fixture({
+    "nested.md": [
+      "````md",
+      "```js",
+      "[Inside nested block](missing-inside.md)",
+      "```",
+      "````",
+      "```",
+      "[Inside block closed by longer fence](also-inside.md)",
+      "`````",
+      "[Outside broken link](missing-outside.md)",
+    ].join("\n"),
+  });
+
+  assert.deepEqual(collectLinkFailures(root, ["nested.md"]), {
+    failures: ["nested.md:9: missing-outside.md does not exist"],
+    localLinks: 1,
+  });
+});
+
+test("handles multi-backtick inline code spans containing single backticks", () => {
+  const root = fixture({
+    "inline.md": [
+      "``a `b` [not a link](missing-inline.md) c``",
+      "[Real broken link](missing-real.md)",
+    ].join("\n"),
+  });
+
+  assert.deepEqual(collectLinkFailures(root, ["inline.md"]), {
+    failures: ["inline.md:2: missing-real.md does not exist"],
+    localLinks: 1,
+  });
+});

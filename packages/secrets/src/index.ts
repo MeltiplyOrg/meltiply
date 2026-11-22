@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import { InvalidRequestError, StorageUnavailableError } from "@meltiply/domain";
+import { errorMessage, InvalidRequestError, StorageUnavailableError } from "@meltiply/domain";
 
 const base64PaddingPattern = /=+$/;
 const mockEncryptedPrefixPattern = /^mock_encrypted:/;
@@ -8,6 +8,28 @@ const legacyPrefix = "meltiply:v1:";
 const currentPrefix = "meltiply:v2:";
 const nonceLength = 12;
 type Bytes = Uint8Array<ArrayBuffer>;
+
+/**
+ * Thrown when a stored token ciphertext has invalid format, references an
+ * unknown key ID, or fails AES-GCM authentication.
+ */
+export class TokenCiphertextError extends TypeError {
+  constructor(message: string) {
+    super(message);
+    this.name = "TokenCiphertextError";
+  }
+}
+
+/**
+ * Thrown when `TOKEN_ENCRYPTION_KEY` is missing or invalid when resolving an
+ * isolate-cached cipher.
+ */
+export class TokenCipherUnavailableError extends Error {
+  constructor(message = "Token encryption is unavailable.") {
+    super(message);
+    this.name = "TokenCipherUnavailableError";
+  }
+}
 
 export interface TokenKey {
   id: string;
@@ -100,14 +122,21 @@ async function importKey(value: Bytes): Promise<CryptoKey> {
 async function decryptPayload(key: Promise<CryptoKey>, encoded: string): Promise<string> {
   const payload = decodeBase64(encoded);
   if (!payload || payload.byteLength <= nonceLength) {
-    throw new TypeError("token ciphertext is invalid");
+    throw new TokenCiphertextError("token ciphertext is invalid");
   }
-  const plaintext = await crypto.subtle.decrypt(
-    { iv: payload.slice(0, nonceLength), name: "AES-GCM" },
-    await key,
-    payload.slice(nonceLength),
-  );
-  return new TextDecoder().decode(plaintext);
+  try {
+    const plaintext = await crypto.subtle.decrypt(
+      { iv: payload.slice(0, nonceLength), name: "AES-GCM" },
+      await key,
+      payload.slice(nonceLength),
+    );
+    return new TextDecoder().decode(plaintext);
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === "OperationError") {
+      throw new TokenCiphertextError("token ciphertext is invalid");
+    }
+    throw cause;
+  }
 }
 
 export class TokenCipher {
@@ -145,7 +174,9 @@ export class TokenCipher {
   #key(keyId: string): Promise<CryptoKey> {
     let key = this.#importedKeys.get(keyId);
     if (!key) {
-      key = importKey(this.#keys.get(keyId)!);
+      const material = this.#keys.get(keyId);
+      if (!material) throw new TokenCiphertextError("token ciphertext references an unknown key");
+      key = importKey(material);
       this.#importedKeys.set(keyId, key);
     }
     return key;
@@ -190,7 +221,7 @@ export class TokenCipher {
     if (value.startsWith(currentPrefix)) {
       const [keyId, encoded, ...extra] = value.slice(currentPrefix.length).split(":");
       if (!keyId || !this.#keys.has(keyId) || !encoded || extra.length > 0) {
-        throw new TypeError("token ciphertext references an unknown key");
+        throw new TokenCiphertextError("token ciphertext references an unknown key");
       }
       return decryptPayload(this.#key(keyId), encoded);
     }
@@ -203,14 +234,13 @@ export class TokenCipher {
           // Version 1 did not persist a key ID, so rotation requires a bounded key scan.
         }
       }
-      throw new TypeError("legacy token ciphertext cannot be decrypted");
+      throw new TokenCiphertextError("legacy token ciphertext cannot be decrypted");
     }
     return value;
   }
 
   /**
    * Encrypts plaintext using AES-256-GCM as a typed Effect.
-   * Wraps low-level WebCrypto cryptographic operations and maps errors to typed domain errors.
    *
    * @param plaintext - UTF-8 string to encrypt (e.g., OAuth access or refresh token).
    * @returns Effect resolving to versioned, prefixed ciphertext string safe for database storage.
@@ -221,7 +251,7 @@ export class TokenCipher {
     return Effect.tryPromise({
       catch: (cause) =>
         new StorageUnavailableError({
-          message: cause instanceof Error ? cause.message : "Failed to encrypt token",
+          message: errorMessage(cause, "Failed to encrypt token"),
         }),
       try: () => this.encrypt(plaintext),
     });
@@ -229,7 +259,8 @@ export class TokenCipher {
 
   /**
    * Decrypts ciphertext using the configured key ring as a typed Effect.
-   * Distinguishes invalid ciphertext format (InvalidRequestError) from service unavailability.
+   * Classifies ciphertext format/authentication failures via `TokenCiphertextError`
+   * rather than substring matching on error messages.
    *
    * @param value - Encrypted token string or unencrypted legacy plaintext.
    * @returns Effect resolving to decrypted UTF-8 plaintext string.
@@ -239,13 +270,8 @@ export class TokenCipher {
   ): Effect.Effect<string, StorageUnavailableError | InvalidRequestError> {
     return Effect.tryPromise({
       catch: (cause) => {
-        const message =
-          cause instanceof Error ? cause.message : "Failed to decrypt token ciphertext";
-        if (
-          message.includes("invalid") ||
-          message.includes("unknown key") ||
-          message.includes("cannot be decrypted")
-        ) {
+        const message = errorMessage(cause, "Failed to decrypt token ciphertext");
+        if (cause instanceof TokenCiphertextError) {
           return new InvalidRequestError({ message });
         }
         return new StorageUnavailableError({ message });
@@ -253,6 +279,41 @@ export class TokenCipher {
       try: () => this.decrypt(value),
     });
   }
+}
+
+/**
+ * Creates an isolate-scoped TokenCipher cache keyed by `TOKEN_ENCRYPTION_KEY`.
+ * Rebuilds the cipher when the key rotates and throws `TokenCipherUnavailableError`
+ * when the binding is absent or malformed.
+ *
+ * @returns Resolver function returning the cached `TokenCipher` for a Worker environment.
+ */
+export function createIsolateTokenCipherCache(): (env: {
+  readonly TOKEN_ENCRYPTION_KEY?: string;
+}) => TokenCipher {
+  let cachedCipher: TokenCipher | undefined;
+  let cachedKey: string | undefined;
+
+  return (env) => {
+    const key = env.TOKEN_ENCRYPTION_KEY;
+    if (!key) {
+      throw new TokenCipherUnavailableError("Token encryption is unavailable.");
+    }
+    if (!cachedCipher || cachedKey !== key) {
+      try {
+        cachedCipher = new TokenCipher({
+          currentKeyId: "primary",
+          keys: [{ id: "primary", material: key }],
+        });
+      } catch (cause) {
+        throw new TokenCipherUnavailableError(
+          errorMessage(cause, "Token encryption is unavailable."),
+        );
+      }
+      cachedKey = key;
+    }
+    return cachedCipher;
+  };
 }
 
 /**

@@ -344,6 +344,24 @@ describe("frontend Worker diagnostic relay", () => {
     expect(api.fetch).not.toHaveBeenCalled();
   });
 
+  it("forwards nothing for a client exception tagged as an API error", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const api = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })) };
+
+    // A `frontend-error` whose field is `api-error` is the API boundary's own
+    // failure mislabeled as a client crash; the relay must still refuse it.
+    const response = await worker.fetch(
+      telemetryRequest(
+        { field: "api-error", kind: "frontend-error", valueType: "ApiError" },
+        { Authorization: "Bearer session-jwt" },
+      ),
+      { ...environment, API: api },
+    );
+
+    expect(response.status).toBe(204);
+    expect(api.fetch).not.toHaveBeenCalled();
+  });
+
   it("never lets a relay failure change the local telemetry outcome", async () => {
     const logger = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(console, "debug").mockImplementation(() => undefined);

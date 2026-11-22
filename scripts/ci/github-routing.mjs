@@ -10,7 +10,7 @@ function git(...args) {
 
 // Compile the configured patterns once at module initialization; malformed
 // lane configuration fails before any changed-path routing occurs.
-const mapping = JSON.parse(readFileSync("scripts/ci/github-paths.json", "utf8"));
+const mapping = JSON.parse(readFileSync(new URL("./github-paths.json", import.meta.url), "utf8"));
 if (
   !mapping ||
   typeof mapping !== "object" ||

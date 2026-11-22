@@ -3,9 +3,10 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { readJsonFile, sha256, writeEvidence } from "./release-guard.mjs";
+import { assertReleaseBound, readJsonFile, sha256, writeEvidence } from "./release-guard.mjs";
 import { readBoundedResponseBody } from "./release-http.mjs";
 import { releaseInternals } from "./release-lib.mjs";
+import { exactKeys, plainObject } from "./validation.mjs";
 
 const controlCharactersPattern = /[\u0000-\u001f\u007f]/;
 const unsafeApiTokenPattern = /[\u0000-\u0020\u007f]/;
@@ -13,37 +14,6 @@ const unsafeApiTokenPattern = /[\u0000-\u0020\u007f]/;
 const phaseNames = new Set(["cron-activate", "cron-pause"]);
 const maximumResponseBytes = 64 * 1024;
 const rfc3339Pattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
-
-/**
- * Asserts that a value is a plain non-null, non-array object record.
- *
- * @param {unknown} value - Value to validate
- * @param {string} name - Contextual label for error messages
- * @returns {object} Validated plain object
- * @throws {TypeError} If value is null, an array, or not an object
- */
-function plainObject(value, name) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${name} must be an object`);
-  }
-  return value;
-}
-
-/**
- * Asserts that an object contains only keys belonging to an allowed set.
- *
- * @param {object} value - Object to inspect
- * @param {Set<string>} allowed - Set of recognized key names
- * @param {string} name - Contextual label for error messages
- * @returns {void}
- * @throws {TypeError} If any unknown key is present
- */
-function knownKeys(value, allowed, name) {
-  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
-  if (unknown.length > 0) {
-    throw new TypeError(`${name} has unknown keys: ${unknown.join(", ")}`);
-  }
-}
 
 /**
  * Validates, normalizes, and sorts an array of cron schedule pattern strings.
@@ -103,13 +73,16 @@ export function parseScheduleResponse(source) {
     throw new TypeError("Cloudflare schedules response must be valid JSON");
   }
   plainObject(response, "Cloudflare schedules response");
-  knownKeys(
+  exactKeys(
     response,
     new Set(["errors", "messages", "result", "success"]),
     "Cloudflare schedules response",
+    { allowMissing: true },
   );
   const result = plainObject(response.result, "Cloudflare schedules response result");
-  knownKeys(result, new Set(["schedules"]), "Cloudflare schedules response result");
+  exactKeys(result, new Set(["schedules"]), "Cloudflare schedules response result", {
+    allowMissing: true,
+  });
   if (response.success !== true || !Array.isArray(result.schedules)) {
     throw new TypeError("Cloudflare schedules response is unsuccessful");
   }
@@ -119,10 +92,11 @@ export function parseScheduleResponse(source) {
         entry,
         `Cloudflare schedules response result.schedules[${index}]`,
       );
-      knownKeys(
+      exactKeys(
         schedule,
         new Set(["created_on", "cron", "modified_on"]),
         `Cloudflare schedules response result.schedules[${index}]`,
+        { allowMissing: true },
       );
       for (const field of ["created_on", "modified_on"]) {
         if (
@@ -274,26 +248,6 @@ export async function pollScheduleSet({
 }
 
 /**
- * Asserts that an evidence record matches the current release ID, Git SHA, and schema version.
- *
- * @param {object} evidence - Parsed evidence record
- * @param {string} name - Evidence description for error reporting
- * @param {object} spec - Release specification object
- * @returns {object} Validated evidence record
- * @throws {TypeError} If schema version, release ID, or Git SHA do not match
- */
-function assertReleaseEvidence(evidence, name, spec) {
-  if (
-    evidence?.schema_version !== 1 ||
-    evidence?.release_id !== spec.release_id ||
-    evidence?.git_sha !== spec.git_sha
-  ) {
-    throw new TypeError(`${name} does not match the release`);
-  }
-  return evidence;
-}
-
-/**
  * Extracts and validates the canonical cron triggers defined in the rendered Automation Worker config.
  *
  * @param {object} config - Parsed rendered Wrangler configuration for Automation Worker
@@ -326,7 +280,7 @@ function canonicalSchedules(config, spec) {
  * @throws {TypeError} If deployment or smoke evidence is missing, mismatched, or failed
  */
 async function assertActivationEvidence(outDir, spec) {
-  assertReleaseEvidence(
+  assertReleaseBound(
     await readJsonFile(
       path.join(outDir, "worker-automation-deployment.json"),
       "Automation deployment evidence",
@@ -336,7 +290,7 @@ async function assertActivationEvidence(outDir, spec) {
   );
   const smokeName =
     spec.deployment_mode === "bootstrap" ? "smoke-live.json" : "smoke-live-100.json";
-  const smoke = assertReleaseEvidence(
+  const smoke = assertReleaseBound(
     await readJsonFile(path.join(outDir, smokeName), "live smoke evidence"),
     "live smoke evidence",
     spec,

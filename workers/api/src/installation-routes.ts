@@ -26,7 +26,7 @@ import {
   textParam,
   uuidParam,
 } from "./validation";
-import { idempotentMutation } from "./workspace-lifecycle";
+import { idempotentInstallationMutation } from "./installation-mutation";
 
 /** Lifecycle state returned after suspend/reactivate/hard-delete administration. */
 interface AccountLifecycleBody {
@@ -415,7 +415,7 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
         const requestHash = yield* hashIdempotencyRequestEffect(
           JSON.stringify({ memberId, reason }),
         );
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           actor.workspace.id,
           "installation.member.suspend",
@@ -486,7 +486,7 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
         const memberId = yield* fromPromise(() => uuidParam(c.req.param("memberId"), "member_id"));
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ memberId }));
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           actor.workspace.id,
           "installation.member.reactivate",
@@ -555,7 +555,7 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
         const requestHash = yield* hashIdempotencyRequestEffect(
           JSON.stringify({ confirmEmail, memberId }),
         );
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           actor.workspace.id,
           "installation.member.delete",
@@ -637,7 +637,7 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
         yield* reauthenticateEffect(c.env, actor, password);
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ targetUserId }));
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           actor.workspace.id,
           "installation.ownership.transfer",

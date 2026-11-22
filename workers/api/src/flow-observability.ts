@@ -5,6 +5,7 @@ import { errorDiagnostic, exportOtlpSpan, log } from "@meltiply/observability";
 
 export { exportOtlpSpan };
 
+import { lazyWithSystemTransactionEffect } from "./database-module";
 import type { ApiWorkerEnvironment, ApiWorkerEnv } from "./env";
 import { errorResponse, jsonResponse } from "./responses";
 
@@ -23,8 +24,7 @@ async function runWithSystemTransaction<T, E>(
   env: ApiWorkerEnv,
   operation: (client: EffectTransactionClient) => Effect.Effect<T, E>,
 ): Promise<T> {
-  const { withSystemTransactionEffect } = await import("./database");
-  return Effect.runPromise(withSystemTransactionEffect(env, operation));
+  return Effect.runPromise(lazyWithSystemTransactionEffect(env, operation));
 }
 
 /**
@@ -403,6 +403,8 @@ const recorderCache = new WeakMap<ApiWorkerEnv, FlowRecorder>();
 
 interface PendingSpan {
   attributes: Record<string, unknown>;
+  /** Absolute expiry for TTL pruning; spans abandoned by aborted flows must not accumulate. */
+  expiresAt: number;
   name: string;
   parentSpanId?: string;
   service: string;
@@ -410,7 +412,50 @@ interface PendingSpan {
   traceId: string;
 }
 
-const pendingSpans = new Map<string, PendingSpan>();
+/**
+ * Spans recorded between `startRun`/`recordStep` and their matching finish
+ * call. Exported for tests; production code only adds and deletes entries.
+ * Entries older than the TTL or beyond the capacity are pruned on insert so
+ * aborted flows cannot leak memory for the isolate's lifetime.
+ */
+export const pendingSpans = new Map<string, PendingSpan>();
+
+const pendingSpanTimeToLiveMilliseconds = 10 * 60 * 1_000;
+const pendingSpanMaximumEntries = 256;
+
+/**
+ * Drops expired pending spans and, when the ledger still exceeds its entry
+ * cap, evicts the oldest insertions first (Map iteration is insertion order).
+ * Called before every insert so the map stays bounded even when finish calls
+ * never arrive.
+ */
+function prunePendingSpans(now: number): void {
+  for (const [key, span] of pendingSpans) {
+    if (span.expiresAt <= now) pendingSpans.delete(key);
+  }
+  while (pendingSpans.size >= pendingSpanMaximumEntries) {
+    const oldest = pendingSpans.keys().next();
+    if (oldest.done) break;
+    pendingSpans.delete(oldest.value);
+  }
+}
+
+/**
+ * Registers one pending span under a run or step id, first pruning expired
+ * and excess entries so aborted flows cannot grow the map without bound.
+ * Exported for tests; production callers go through `flowRecorderFor`.
+ *
+ * @param id - Flow run or step identifier the span finishes under.
+ * @param span - Span payload minus its expiry timestamp.
+ */
+export function trackPendingSpan(id: string, span: Omit<PendingSpan, "expiresAt">): void {
+  const now = Date.now();
+  prunePendingSpans(now);
+  pendingSpans.set(id, {
+    ...span,
+    expiresAt: now + pendingSpanTimeToLiveMilliseconds,
+  });
+}
 
 /**
  * Factory returning a cached, best-effort `FlowRecorder` instance for the worker environment.
@@ -539,7 +584,7 @@ export function flowRecorderFor(env: ApiWorkerEnv): FlowRecorder {
           .pipe(Effect.map((result) => result.rows[0]?.id ?? null)),
       );
       if (id) {
-        pendingSpans.set(id, {
+        trackPendingSpan(id, {
           attributes: {
             job_id: input.jobId ?? "",
             node_key: input.nodeKey,
@@ -589,7 +634,7 @@ export function flowRecorderFor(env: ApiWorkerEnv): FlowRecorder {
           .pipe(Effect.map((result) => result.rows[0]?.id ?? null)),
       );
       if (id) {
-        pendingSpans.set(id, {
+        trackPendingSpan(id, {
           attributes: {
             entrypoint: input.entrypoint,
             request_id: input.requestId,

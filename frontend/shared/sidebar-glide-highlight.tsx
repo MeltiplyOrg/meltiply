@@ -16,6 +16,7 @@ import {
   type MotionValue,
 } from "motion/react";
 import { useLatchedValue } from "./use-latched-value";
+import { useReducedMotionPreference } from "./src/components/primitives/use-reduced-motion";
 
 /** Avoids React's server-render warning; commit-time FLIP needs a layout effect on the client. */
 const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
@@ -104,7 +105,8 @@ const OBSERVED_ATTRIBUTES = ["data-active", "aria-current", "aria-selected", "cl
 /**
  * Drives one motion value through a velocity-preserving spring: retargeting
  * mid-flight seeds the animation with the captured velocity, so rapid pointer
- * hops chain momentum instead of restarting at rest.
+ * hops chain momentum instead of restarting at rest. Reduced motion never
+ * reaches this: the commit effect parks the pill at its target instead.
  */
 function springTo(mv: MotionValue<number>, to: number, velocity: number): void {
   animate(mv, to, { ...SPRING, velocity });
@@ -371,6 +373,7 @@ function useGlideTracking({
  */
 export function SidebarGlideHighlight(props: SidebarGlideHighlightProps) {
   const { className, viewportSelector } = props;
+  const prefersReducedMotion = useReducedMotionPreference();
 
   const { target, clip, scrollOffsetX, scrollOffsetY } = useGlideTracking(props);
   /**
@@ -401,8 +404,10 @@ export function SidebarGlideHighlight(props: SidebarGlideHighlightProps) {
       animate(opacity, 0, FADE);
       return;
     }
-    if (!prev) {
-      // First paint or re-entry: park at the target, then fade in — no travel.
+    if (!prev || prefersReducedMotion) {
+      // First paint, re-entry, or reduced motion: park at the target, then fade
+      // in — no travel. Reduced motion still keeps the fade so the pill's
+      // appearance is marked without any glide.
       x.jump(0);
       y.jump(0);
       scaleX.jump(1);
@@ -429,7 +434,7 @@ export function SidebarGlideHighlight(props: SidebarGlideHighlightProps) {
     springTo(scaleX, 1, velocitySX);
     springTo(scaleY, 1, velocitySY);
     animate(opacity, 1, FADE);
-  }, [target, x, y, scaleX, scaleY, opacity]);
+  }, [target, prefersReducedMotion, x, y, scaleX, scaleY, opacity]);
 
   /**
    * Static paint and layer roles come from shared data hooks in

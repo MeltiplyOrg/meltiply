@@ -1,5 +1,5 @@
 import type { components } from "@meltiply/contracts/schema";
-import { secureUrl } from "./meta-common";
+import { codePointLength, secureUrl } from "./meta-common";
 
 /** Provider-native container options share the public contract rather than duplicating a large wire model. */
 export type ThreadsPublishOptions = components["schemas"]["ThreadsPublishOptions"];
@@ -46,7 +46,7 @@ function text(value: unknown, maximum: number, allowEmpty = false): value is str
   return (
     typeof value === "string" &&
     (allowEmpty || value.trim().length > 0) &&
-    [...value].length <= maximum
+    codePointLength(value) <= maximum
   );
 }
 
@@ -181,42 +181,76 @@ export function parseThreadsOptions(value: unknown): ThreadsPublishOptions | nul
       return null;
   }
   const poll = options.poll_attachment;
-  if (
-    poll &&
-    (!text(poll.option_a, 25) ||
+  let refinedPoll: ThreadsPublishOptions["poll_attachment"];
+  if (poll) {
+    if (
+      !text(poll.option_a, 25) ||
       !text(poll.option_b, 25) ||
       Object.values(poll).some((option) => !text(option, 25)) ||
-      (poll.option_d !== undefined && poll.option_c === undefined))
-  )
-    return null;
-  if (options.gif_attachment && !text(options.gif_attachment.gif_id, 200)) return null;
+      (poll.option_d !== undefined && poll.option_c === undefined)
+    ) {
+      return null;
+    }
+    refinedPoll = {
+      option_a: poll.option_a,
+      option_b: poll.option_b,
+      ...(poll.option_c !== undefined ? { option_c: poll.option_c } : {}),
+      ...(poll.option_d !== undefined ? { option_d: poll.option_d } : {}),
+    };
+  }
+  let refinedGif: ThreadsPublishOptions["gif_attachment"];
+  if (options.gif_attachment) {
+    if (!text(options.gif_attachment.gif_id, 200)) return null;
+    refinedGif = {
+      gif_id: options.gif_attachment.gif_id,
+      provider: options.gif_attachment.provider,
+    };
+  }
   const attachment = options.text_attachment;
-  if (
-    attachment &&
-    (!text(attachment.plaintext, 10000) ||
+  let refinedTextAttachment: ThreadsPublishOptions["text_attachment"];
+  if (attachment) {
+    const plaintext = attachment.plaintext;
+    if (
+      !text(plaintext, 10000) ||
       (attachment.link_attachment_url !== undefined &&
         !secureUrl(attachment.link_attachment_url)) ||
-      attachment.text_with_styling_info?.some(
-        (span) => !range(span, attachment.plaintext?.length ?? 0),
-      ))
-  )
-    return null;
-  const spans = attachment?.text_with_styling_info;
-  if (spans) {
-    for (let index = 0; index < spans.length; index += 1) {
-      const current = spans[index]!;
-      for (let next = index + 1; next < spans.length; next += 1) {
-        const other = spans[next]!;
-        if (
-          current.offset < other.offset + other.length &&
-          other.offset < current.offset + current.length
-        )
-          return null;
+      attachment.text_with_styling_info?.some((span) => !range(span, plaintext.length))
+    ) {
+      return null;
+    }
+    const spans = attachment.text_with_styling_info;
+    if (spans) {
+      for (let index = 0; index < spans.length; index += 1) {
+        const current = spans[index];
+        if (!current) continue;
+        for (let next = index + 1; next < spans.length; next += 1) {
+          const other = spans[next];
+          if (!other) continue;
+          if (
+            current.offset < other.offset + other.length &&
+            other.offset < current.offset + current.length
+          )
+            return null;
+        }
       }
     }
+    refinedTextAttachment = {
+      plaintext,
+      ...(attachment.link_attachment_url !== undefined
+        ? { link_attachment_url: attachment.link_attachment_url }
+        : {}),
+      ...(attachment.text_with_styling_info !== undefined
+        ? { text_with_styling_info: attachment.text_with_styling_info }
+        : {}),
+    };
   }
-  // Required nested fields have now been refined, in addition to draft structure.
-  return options as ThreadsPublishOptions;
+  const { poll_attachment: _poll, gif_attachment: _gif, text_attachment: _text, ...rest } = options;
+  return {
+    ...rest,
+    ...(refinedPoll ? { poll_attachment: refinedPoll } : {}),
+    ...(refinedGif ? { gif_attachment: refinedGif } : {}),
+    ...(refinedTextAttachment ? { text_attachment: refinedTextAttachment } : {}),
+  };
 }
 
 /** Returns a user-visible incompatibility before creating any remote container or repost. */

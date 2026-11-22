@@ -128,6 +128,8 @@ export function SlidingHighlight({
 }: SlidingHighlightProps) {
   const prefersReducedMotion = useReducedMotionPreference();
   const travelTransition = prefersReducedMotion ? NO_TRAVEL : TRAVEL_SPRING;
+  /** Set false on effect cleanup so the async font-readiness callback cannot re-measure after unmount. */
+  const mountedRef = useRef(true);
   const [box, setBox] = useState<ItemBox | null>(null);
   const [travel, setTravel] = useState<Travel>(SETTLED);
   const [isTravelling, setIsTravelling] = useState(false);
@@ -245,6 +247,9 @@ export function SlidingHighlight({
   }, [axis, commitGeometry]);
 
   useMeasureEffect(() => {
+    // Re-armed on every effect run so a dependency change does not leave the
+    // flag false for the lifetime of the component.
+    mountedRef.current = true;
     const container = resolveContainer();
     if (!container) return;
 
@@ -312,7 +317,14 @@ export function SlidingHighlight({
 
     container.addEventListener("scroll", remeasure, { passive: true });
     window.addEventListener("resize", remeasure);
-    document.fonts?.ready.then(remeasure, () => {});
+    // `document.fonts.ready` resolves asynchronously; the mounted guard keeps a
+    // late resolution from committing state after the effect's cleanup ran.
+    document.fonts?.ready.then(
+      () => {
+        if (mountedRef.current) remeasure();
+      },
+      () => {},
+    );
 
     if (deferUntilInteraction) {
       container.addEventListener("pointermove", handlePointerMove);
@@ -323,6 +335,7 @@ export function SlidingHighlight({
     }
 
     return () => {
+      mountedRef.current = false;
       observer.disconnect();
       resizeObserverRef.current?.disconnect();
       resizeObserverRef.current = null;

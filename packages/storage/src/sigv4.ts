@@ -1,6 +1,7 @@
-import { InvalidRequestError } from "@meltiply/domain";
+import { errorMessage, InvalidRequestError } from "@meltiply/domain";
 import { Effect } from "effect";
 
+import { bytesToHex } from "./encoding";
 import { normalizeSegment } from "./keys";
 import type {
   ObjectUrlSigner,
@@ -99,34 +100,12 @@ function canonicalKey(key: string): string {
   return `/${key.split("/").map(encode).join("/")}`;
 }
 
-/**
- * Converts an ArrayBuffer to a lowercase hexadecimal string.
- *
- * @param value - Binary buffer to represent as hex.
- * @returns Lowercase hex string.
- */
-function hex(value: ArrayBuffer): string {
-  return [...new Uint8Array(value)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-/**
- * Computes the SHA-256 hex digest of raw, non-shared bytes using WebCrypto.
- *
- * @param value - Buffer or bounded byte view to hash without copying its payload.
- * @returns 64-character lowercase hex digest.
- */
 async function sha256Bytes(value: ArrayBuffer | Uint8Array<ArrayBuffer>): Promise<string> {
-  return hex(await crypto.subtle.digest("SHA-256", value));
+  return bytesToHex(await crypto.subtle.digest("SHA-256", value));
 }
 
-/**
- * Computes the SHA-256 hex digest of a UTF-8 string using WebCrypto digest.
- *
- * @param value - Input string to hash.
- * @returns Promise resolving to a 64-character lowercase hex digest.
- */
 async function sha256(value: string): Promise<string> {
-  return hex(await crypto.subtle.digest("SHA-256", encoder.encode(value)));
+  return bytesToHex(await crypto.subtle.digest("SHA-256", encoder.encode(value)));
 }
 
 /**
@@ -498,11 +477,11 @@ export class SigV4Signer {
     headers.set("host", url.host);
     headers.set("x-amz-content-sha256", payloadHash);
     headers.set("x-amz-date", now.value);
-    const canonicalHeaders = [...headers]
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([name, value]) => `${name}:${value}\n`)
-      .join("");
-    const signedHeaders = [...headers.keys()].sort().join(";");
+    const sortedEntries = [...headers].sort(([left], [right]) =>
+      left < right ? -1 : left > right ? 1 : 0,
+    );
+    const canonicalHeaders = sortedEntries.map(([name, value]) => `${name}:${value}\n`).join("");
+    const signedHeaders = sortedEntries.map(([name]) => name).join(";");
     const canonicalRequest = [
       input.method,
       url.pathname,
@@ -511,7 +490,7 @@ export class SigV4Signer {
       signedHeaders,
       payloadHash,
     ].join("\n");
-    const signature = hex(
+    const signature = bytesToHex(
       await signHmac(
         await this.#signingKeyFor(now.date),
         [
@@ -576,7 +555,11 @@ export class SigV4Signer {
     }
     const scope = `${now.date}/${this.#region}/s3/aws4_request`;
     const headers = normalizedHeaders(this.#target.host, request, requiredHeaders);
-    const signedHeaders = [...headers.keys()].sort().join(";");
+    const sortedHeaders = [...headers].sort(([left], [right]) =>
+      left < right ? -1 : left > right ? 1 : 0,
+    );
+    const signedHeaders = sortedHeaders.map(([name]) => name).join(";");
+    const canonicalHeaders = sortedHeaders.map(([name, value]) => `${name}:${value}\n`).join("");
     const parameters = new Map(operationParameters);
     if (request.downloadFilename !== undefined) {
       parameters.set("response-content-disposition", downloadDisposition(request.downloadFilename));
@@ -588,10 +571,6 @@ export class SigV4Signer {
     parameters.set("X-Amz-Expires", String(expiresInSeconds));
     parameters.set("X-Amz-SignedHeaders", signedHeaders);
 
-    const canonicalHeaders = [...headers]
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([name, value]) => `${name}:${value}\n`)
-      .join("");
     const path = this.#canonicalUri(key);
     const query = canonicalQuery(parameters);
     const canonicalRequest = [
@@ -608,7 +587,7 @@ export class SigV4Signer {
       scope,
       await sha256(canonicalRequest),
     ].join("\n");
-    const signature = hex(await signHmac(await this.#signingKeyFor(now.date), stringToSign));
+    const signature = bytesToHex(await signHmac(await this.#signingKeyFor(now.date), stringToSign));
     parameters.set("X-Amz-Signature", signature);
     return `${this.#target.origin}${path}?${canonicalQuery(parameters)}`;
   }
@@ -794,7 +773,7 @@ export abstract class SigV4UrlSigner implements ObjectUrlSigner {
     return Effect.tryPromise({
       catch: (cause) =>
         new InvalidRequestError({
-          message: cause instanceof Error ? cause.message : "Failed to sign upload URL",
+          message: errorMessage(cause, "Failed to sign upload URL"),
         }),
       try: () => this.signUpload(request),
     });
@@ -812,7 +791,7 @@ export abstract class SigV4UrlSigner implements ObjectUrlSigner {
     return Effect.tryPromise({
       catch: (cause) =>
         new InvalidRequestError({
-          message: cause instanceof Error ? cause.message : "Failed to sign multipart part URL",
+          message: errorMessage(cause, "Failed to sign multipart part URL"),
         }),
       try: () => this.signMultipartPart(request),
     });
@@ -828,7 +807,7 @@ export abstract class SigV4UrlSigner implements ObjectUrlSigner {
     return Effect.tryPromise({
       catch: (cause) =>
         new InvalidRequestError({
-          message: cause instanceof Error ? cause.message : "Failed to sign download URL",
+          message: errorMessage(cause, "Failed to sign download URL"),
         }),
       try: () => this.signDownload(request),
     });

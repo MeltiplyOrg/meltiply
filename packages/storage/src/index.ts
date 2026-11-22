@@ -51,6 +51,13 @@ export {
   type ObjectStorageProvider,
 } from "./provider";
 export {
+  PROVIDER_MEDIA_ROUTE_PREFIX,
+  providerMediaPayload,
+  signProviderMediaSignature,
+  signProviderMediaUrl,
+  verifyProviderMediaSignature,
+} from "./provider-media";
+export {
   createStorageServiceLive,
   createStorageServiceTest,
   type CreateStorageServiceLiveOptions,

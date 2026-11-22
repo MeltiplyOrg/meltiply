@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { buildSystemPrompt, GlossaryError, loadGlossary } from "./glossary.mjs";
 import { generateNamespace, PlaceholderDriftError, writeCatalogAtomic } from "./generation.mjs";
 import { createOllamaProvider, DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL } from "./ollama.mjs";
+import { DEFAULT_TIMEOUT_MS } from "./provider.mjs";
 import { withRetry } from "./retry.mjs";
 import { createWorkersAiProvider, withFallback } from "./workers-ai.mjs";
 
@@ -18,7 +19,6 @@ const DEFAULT_FALLBACK_MODEL = "@cf/google/gemma-4-26b-a4b-it";
 // billed as output and discarded; translation needs the JSON answer only.
 const DISABLE_REASONING = { chat_template_kwargs: { enable_thinking: false } };
 const DEFAULT_SEED = 20261019;
-const DEFAULT_TIMEOUT_MS = 120_000;
 const PROVIDER_MODES = new Set(["auto", "workers-ai", "ollama"]);
 
 /**

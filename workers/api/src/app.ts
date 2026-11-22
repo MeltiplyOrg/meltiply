@@ -29,6 +29,7 @@ import {
   type CoreRouteDependencies,
 } from "./core-routes";
 import { CoreApiError } from "./core-types";
+import { lazyAuthenticatedPoolFor, lazySystemPoolFor } from "./database-module";
 import {
   bindingStatuses,
   type ApiWorkerEnv,
@@ -105,12 +106,13 @@ function observabilityRoute(c: Parameters<typeof matchedRoutes>[0]): string {
  * Safely extracts machine-readable error codes from JSON error responses without buffering large payloads.
  *
  * Probes responses with status >= 400 and Content-Type JSON, capping inspection to 8KB
- * to avoid excessive memory allocation on error paths.
+ * to avoid excessive memory allocation on error paths. When Content-Length is absent
+ * or understates the body, the stream is still read only up to the probe cap.
  *
  * @param response - Candidate outgoing HTTP response object.
  * @returns Parsed `error.code` string, or `undefined` if absent, unparsable, or too large.
  */
-async function responseErrorCode(response: Response): Promise<string | undefined> {
+export async function responseErrorCode(response: Response): Promise<string | undefined> {
   if (
     response.status < 400 ||
     !response.headers.get("Content-Type")?.includes("application/json")
@@ -118,7 +120,9 @@ async function responseErrorCode(response: Response): Promise<string | undefined
     return undefined;
   }
   // Only probe bodies small enough to read without buffering the whole
-  // response on the error path (AUD-041).
+  // response on the error path (AUD-041). An absent or understated
+  // Content-Length cannot bypass the cap: the clone's stream is read at most
+  // errorBodyProbeBytes before JSON parsing.
   const declaredLength = Number(response.headers.get("Content-Length"));
   if (
     Number.isSafeInteger(declaredLength) &&
@@ -127,7 +131,38 @@ async function responseErrorCode(response: Response): Promise<string | undefined
     return undefined;
   }
   try {
-    const body: unknown = await response.clone().json();
+    const stream = response.clone().body;
+    if (!stream) return undefined;
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    let buffered = 0;
+    let oversized = false;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        buffered += value.byteLength;
+        if (buffered > errorBodyProbeBytes) {
+          oversized = true;
+          break;
+        }
+        chunks.push(value);
+      }
+    } finally {
+      // Cancelling releases the clone's unread remainder so a large error body
+      // is never fully buffered; releaseLock alone would keep it open.
+      await reader.cancel().catch(() => undefined);
+      reader.releaseLock();
+    }
+    if (oversized) return undefined;
+    const bytes = new Uint8Array(buffered);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const body: unknown = JSON.parse(new TextDecoder().decode(bytes));
     if (!body || typeof body !== "object" || !("error" in body)) {
       return undefined;
     }
@@ -156,9 +191,8 @@ async function probeHyperdrive(
   env: ApiWorkerEnv,
   component: "DB_SYSTEM" | "DB_AUTHENTICATED",
 ): Promise<void> {
-  const database = await import("./database");
   const pool =
-    component === "DB_SYSTEM" ? database.systemPoolFor(env) : database.authenticatedPoolFor(env);
+    component === "DB_SYSTEM" ? await lazySystemPoolFor(env) : await lazyAuthenticatedPoolFor(env);
 
   const client = await pool.connect();
   try {
@@ -325,13 +359,14 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     c.set("traceId", traceId);
     await next();
     c.header("X-Request-ID", requestId);
+    const route = observabilityRoute(c);
     const errorCode = await responseErrorCode(c.res);
     log(
       "info",
       {
         environment: c.env.ENVIRONMENT,
         request_id: requestId,
-        route: observabilityRoute(c),
+        route,
         service: "api",
         trace_id: traceId,
         version: c.env.VERSION,
@@ -343,7 +378,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         latency_ms: elapsedMilliseconds(startedAt),
         method: c.req.method,
         outcome: c.res.status,
-        ...(observabilityRoute(c) === "/unmatched" ? { path: c.req.path } : {}),
+        ...(route === "/unmatched" ? { path: c.req.path } : {}),
         retry_class: c.res.status === 429 || c.res.status >= 500 ? "client_retry" : "none",
       },
     );
@@ -354,13 +389,13 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
       {
         attributes: {
           "http.method": c.req.method,
-          "http.route": observabilityRoute(c),
+          "http.route": route,
           "http.status_code": c.res.status,
           ...(errorCode ? { error_code: errorCode } : {}),
           request_id: requestId,
         },
         endTimeMs: Date.now(),
-        name: `${c.req.method} ${observabilityRoute(c)}`,
+        name: `${c.req.method} ${route}`,
         service: "api",
         spanId: requestId,
         startTimeMs: Date.now() - Math.max(0, elapsedMilliseconds(startedAt)),

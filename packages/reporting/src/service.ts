@@ -239,20 +239,29 @@ function payloadRecord(value: unknown): Record<string, unknown> {
  * @param lock - Whether to take the row lock (mutations only).
  * @returns Effect resolving the row, or null when no choice was ever saved.
  */
+const LOAD_PREFERENCES_SQL = `SELECT diagnostics_decided_at, diagnostics_disclosure_version,
+              diagnostics_interval_started_at, diagnostics_requested,
+              installation_reporting_id, schema_version, usage_decided_at,
+              usage_disclosure_version, usage_interval_started_at, usage_requested
+       FROM reporting_preferences
+       WHERE id`;
+
+const LOAD_PREFERENCES_FOR_UPDATE_SQL = `${LOAD_PREFERENCES_SQL}
+       FOR UPDATE`;
+
+const LOAD_FEEDBACK_SQL = `SELECT discovery_source, response_id, shared, submitted_at
+       FROM reporting_attribution_responses
+       WHERE id`;
+
+const LOAD_FEEDBACK_FOR_UPDATE_SQL = `${LOAD_FEEDBACK_SQL}
+       FOR UPDATE`;
+
 export function loadPreferences(
   client: ReportingClient,
   lock: boolean,
 ): Effect.Effect<PreferencesRow | null, DatabaseError> {
   return Effect.map(
-    client.query<PreferencesRow>(
-      `SELECT diagnostics_decided_at, diagnostics_disclosure_version,
-              diagnostics_interval_started_at, diagnostics_requested,
-              installation_reporting_id, schema_version, usage_decided_at,
-              usage_disclosure_version, usage_interval_started_at, usage_requested
-       FROM reporting_preferences
-       WHERE id
-       ${lock ? "FOR UPDATE" : ""}`,
-    ),
+    client.query<PreferencesRow>(lock ? LOAD_PREFERENCES_FOR_UPDATE_SQL : LOAD_PREFERENCES_SQL),
     (result) => result.rows[0] ?? null,
   );
 }
@@ -263,12 +272,7 @@ function loadFeedback(
   lock: boolean,
 ): Effect.Effect<FeedbackRow | null, DatabaseError> {
   return Effect.map(
-    client.query<FeedbackRow>(
-      `SELECT discovery_source, response_id, shared, submitted_at
-       FROM reporting_attribution_responses
-       WHERE id
-       ${lock ? "FOR UPDATE" : ""}`,
-    ),
+    client.query<FeedbackRow>(lock ? LOAD_FEEDBACK_FOR_UPDATE_SQL : LOAD_FEEDBACK_SQL),
     (result) => result.rows[0] ?? null,
   );
 }
@@ -945,22 +949,39 @@ function insertPending(
   client: ReportingClient,
   input: PendingInsert,
 ): Effect.Effect<boolean, DatabaseError> {
-  return Effect.gen(function* () {
-    const receipt = yield* client.query(
-      `SELECT 1 FROM reporting_delivery_receipts WHERE category = $1 AND logical_id = $2`,
-      [input.category, input.logicalId],
-    );
-    if (receipt.rows.length > 0) return false;
-    const backlog = yield* client.query<{ count: string }>(
-      `SELECT count(*)::text AS count FROM reporting_pending_reports
-       WHERE state IN ('pending', 'leased')`,
-    );
-    if (Number(backlog.rows[0]?.count ?? "0") >= REPORTING_MAX_PENDING_ROWS) return false;
-    // Validated again here: this is the last point before the payload is stored,
-    // so a producer cannot persist bytes the allowlist would reject at send time.
-    if (payloadViolation(input.payload)) return false;
-    return yield* enqueuePending(client, input);
-  });
+  if (payloadViolation(input.payload)) return Effect.succeed(false);
+  return Effect.map(
+    client.query(
+      `INSERT INTO reporting_pending_reports (
+         category, logical_id, event_name, schema_version, event_uuid, event_timestamp,
+         distinct_id, payload, interval_started_at, expires_at
+       )
+       SELECT $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9,
+              now() + ($10 * INTERVAL '1 day')
+       WHERE NOT EXISTS (
+         SELECT 1 FROM reporting_delivery_receipts WHERE category = $1 AND logical_id = $2
+       )
+         AND (
+           SELECT count(*) FROM reporting_pending_reports WHERE state IN ('pending', 'leased')
+         ) < $11
+       ON CONFLICT (category, logical_id) DO NOTHING
+       RETURNING id`,
+      [
+        input.category,
+        input.logicalId,
+        input.eventName,
+        REPORTING_SCHEMA_VERSION,
+        crypto.randomUUID(),
+        input.eventTimestamp,
+        input.distinctId,
+        JSON.stringify(input.payload),
+        input.intervalStartedAt,
+        REPORTING_MAX_PENDING_AGE_DAYS,
+        REPORTING_MAX_PENDING_ROWS,
+      ],
+    ),
+    (result) => (result.rowCount ?? result.rows.length) > 0,
+  );
 }
 
 /**

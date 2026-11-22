@@ -34,17 +34,13 @@ CREATE INDEX idx_reporting_pending_reports_lease
 
 -- The engagement cohort reads the newest published Distributions under a bound,
 -- and `published_at` is nullable. The cohort query asks for `DESC NULLS LAST`, so
--- the index must match that order to supply it: the migration-029 index defaults
--- to `NULLS FIRST`, which cannot satisfy the requested ordering and would force a
--- full sort of every published Distribution on each daily pass.
+-- the index must match that order to supply it: the migration-035 index
+-- (`idx_distributions_usage_published_cohort`) defaults to `NULLS FIRST`, which
+-- cannot satisfy the requested ordering and would force a full sort of every
+-- published Distribution on each daily pass.
 CREATE INDEX idx_distributions_usage_published_cohort_order
     ON distributions (published_at DESC NULLS LAST, id DESC)
     WHERE status = 'published';
-
--- The daily producer bounds the Post marks by a raw timestamp window before it
--- groups by UTC date. This index serves that window directly; the plain
--- `first_confirmed_at` index from migration 035 already covers it, so the
--- expression/`GROUP BY` form has no reason to scan an unbounded interval.
 
 -- Minimal durable delivery facts. They outlive the payload and keep logical
 -- identity from being replayed after the queue row is pruned.

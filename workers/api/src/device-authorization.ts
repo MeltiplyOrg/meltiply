@@ -1,5 +1,6 @@
 import type { BetterAuthInstance } from "@meltiply/auth";
 
+import { lazySystemPoolFor } from "./database-module";
 import { applicationOrigin, requiresEmailVerification, type ApiWorkerEnv } from "./env";
 
 const nonAlphanumericPattern = /[^a-zA-Z0-9]/g;
@@ -217,9 +218,8 @@ export async function deviceVerificationRequest(
     // A non-JSON success is not a reviewable verification response.
   }
   if (!reviewable) return noStore(response);
-  // Exception: pg cannot be loaded in workerd unit-test isolates.
-  const { systemPoolFor } = await import("./database");
-  await systemPoolFor(env).query(
+  const pool = await lazySystemPoolFor(env);
+  await pool.query(
     `UPDATE "deviceCode"
      SET "claimSessionId" = $1
      WHERE "userCode" = $2
@@ -264,9 +264,8 @@ export async function deviceDecisionRequest(
     const body = await requestJsonRecord(request);
     const userCode = body?.userCode;
     if (typeof userCode === "string" && userCode.trim()) {
-      // Exception: pg cannot be loaded in workerd unit-test isolates.
-      const { systemPoolFor } = await import("./database");
-      const result = await systemPoolFor(env).query<DeviceClaimRow>(
+      const pool = await lazySystemPoolFor(env);
+      const result = await pool.query<DeviceClaimRow>(
         `SELECT "userId" AS user_id,
                 "claimSessionId" AS claim_session_id,
                 status
@@ -319,9 +318,7 @@ export async function deviceTokenRequest(
   const deviceCode = body?.device_code;
   let claimSession: { id: string; userId: string } | undefined;
   if (body?.client_id === DEVICE_CLIENT_ID && typeof deviceCode === "string" && deviceCode) {
-    // Exception: pg cannot be loaded in workerd unit-test isolates.
-    const { systemPoolFor } = await import("./database");
-    const pool = systemPoolFor(env);
+    const pool = await lazySystemPoolFor(env);
     const result = await pool.query<DeviceRedemptionClaimRow>(
       `SELECT dc.status,
               dc."claimSessionId" AS claim_session_id,
@@ -407,9 +404,8 @@ export async function deviceTokenRequest(
   // sign-out after it is independent and must not revoke the CLI session.
   let claimStillLive: boolean;
   try {
-    // Exception: pg cannot be loaded in workerd unit-test isolates.
-    const { systemPoolFor } = await import("./database");
-    const live = await systemPoolFor(env).query(
+    const pool = await lazySystemPoolFor(env);
+    const live = await pool.query(
       `SELECT 1 FROM "session"
        WHERE id = $1 AND "userId" = $2 AND "expiresAt" > now()`,
       [claimSession.id, claimSession.userId],
@@ -442,9 +438,8 @@ async function deviceSessionEligibility(
   env: ApiWorkerEnv,
   sessionToken: string,
 ): Promise<DeviceSessionEligibility> {
-  // Exception: pg cannot be loaded in workerd unit-test isolates.
-  const { systemPoolFor } = await import("./database");
-  const result = await systemPoolFor(env).query<DeviceSessionRow>(
+  const pool = await lazySystemPoolFor(env);
+  const result = await pool.query<DeviceSessionRow>(
     `SELECT u."emailVerified" AS email_verified,
             iu.id AS member_id,
             iu.suspended_at,
@@ -485,7 +480,6 @@ async function deviceSessionEligibility(
  * @param sessionToken - Raw session credential.
  */
 async function revokeSessionByToken(env: ApiWorkerEnv, sessionToken: string): Promise<void> {
-  // Exception: pg cannot be loaded in workerd unit-test isolates.
-  const { systemPoolFor } = await import("./database");
-  await systemPoolFor(env).query(`DELETE FROM "session" WHERE token = $1`, [sessionToken]);
+  const pool = await lazySystemPoolFor(env);
+  await pool.query(`DELETE FROM "session" WHERE token = $1`, [sessionToken]);
 }

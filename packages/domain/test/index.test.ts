@@ -4,6 +4,11 @@ import {
   AccessDenied,
   analyticsTerminalAgeSeconds,
   DomainError,
+  errorMessage,
+  isAcceptedMediaType,
+  isPlatform,
+  isoDateTime,
+  isoDateTimeOrNull,
   maximumDelayedDeliverySeconds,
   oauthCallbackPath,
   overdueRecoveryGraceSeconds,
@@ -82,5 +87,27 @@ describe("domain errors", () => {
 
   it("provides a sensible default when no message is given", () => {
     expect(new AccessDenied().message).toBe("Access denied.");
+  });
+});
+
+describe("domain primitives and guards", () => {
+  it("narrows platforms and accepted media types safely", () => {
+    expect(isPlatform("tiktok")).toBe(true);
+    expect(isPlatform("unknown")).toBe(false);
+    expect(isPlatform(null)).toBe(false);
+    expect(isAcceptedMediaType("image/png")).toBe(true);
+    expect(isAcceptedMediaType("toString")).toBe(false);
+    expect(isAcceptedMediaType(undefined)).toBe(false);
+  });
+
+  it("extracts messages with fallback and normalizes ISO timestamps", () => {
+    expect(errorMessage(new Error("boom"), "fallback")).toBe("boom");
+    expect(errorMessage(new Error(""), "fallback")).toBe("fallback");
+    expect(errorMessage("raw", "fallback")).toBe("fallback");
+    expect(isoDateTime(new Date("2026-01-02T03:04:05.000Z"))).toBe("2026-01-02T03:04:05.000Z");
+    expect(isoDateTime("2026-01-02T03:04:05Z")).toBe("2026-01-02T03:04:05.000Z");
+    expect(isoDateTimeOrNull(null)).toBeNull();
+    expect(isoDateTimeOrNull("not-a-date")).toBeNull();
+    expect(isoDateTimeOrNull("2026-01-02T03:04:05Z")).toBe("2026-01-02T03:04:05.000Z");
   });
 });

@@ -1,7 +1,6 @@
 import type { Effect } from "effect";
 import {
-  createHyperdrivePool,
-  destroyClientsOnRelease,
+  createHyperdrivePoolCache,
   withTransactionEffect,
   type EffectTransactionClient,
   type Pool,
@@ -10,10 +9,7 @@ import type { DatabaseError } from "@meltiply/domain";
 
 import type { AutomationEnv } from "./env";
 
-// Module-global pools per managed isolate (AUD-044). Standalone workerd opts
-// into request-owned pools so sockets and queued checkouts cannot cross invocations.
-let systemPool: Pool | undefined;
-let systemConnectionString: string | undefined;
+const resolveSystemPool = createHyperdrivePoolCache("system");
 
 /**
  * Selects a managed-isolate or request-owned PostgreSQL pool for the system Hyperdrive binding.
@@ -26,17 +22,7 @@ let systemConnectionString: string | undefined;
  * @throws {Error} When the DB_SYSTEM Hyperdrive binding is missing.
  */
 export function systemPoolFor(env: AutomationEnv): Pool {
-  if (!env.DB_SYSTEM) {
-    throw new Error("system Hyperdrive binding is unavailable");
-  }
-  if (env.ENVIRONMENT === "local" || env.DATABASE_POOL_MODE === "request") {
-    return destroyClientsOnRelease(createHyperdrivePool(env.DB_SYSTEM));
-  }
-  if (!systemPool || systemConnectionString !== env.DB_SYSTEM.connectionString) {
-    systemPool = createHyperdrivePool(env.DB_SYSTEM);
-    systemConnectionString = env.DB_SYSTEM.connectionString;
-  }
-  return systemPool;
+  return resolveSystemPool(env.DB_SYSTEM, env);
 }
 
 /**

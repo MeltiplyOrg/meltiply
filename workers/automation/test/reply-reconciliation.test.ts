@@ -237,10 +237,14 @@ describe("reply reconciliation delayed triggers", () => {
       ),
     ).rejects.toThrow(RetryableJobError);
 
-    const entry = reconciliationEntry(statements);
-    expect(entry?.sql).toContain("comment.reply.requested");
-    expect(entry?.sql).toContain("comment-reply-reconcile:");
-    expect(entry?.params).toEqual([orgId, commentId, 0, 60]);
+    expect(reconciliationEntry(statements)?.params).toEqual([
+      orgId,
+      "comment.reply.requested",
+      "comment",
+      commentId,
+      `comment-reply-reconcile:${commentId}:1`,
+      JSON.stringify({ comment_id: commentId, delay_seconds: 60, reconciliation: true }),
+    ]);
   });
 
   it("advances the cadence on each reconciliation lookup that must retry", async () => {
@@ -278,9 +282,15 @@ describe("reply reconciliation delayed triggers", () => {
     // Attempt count advanced to 2 while claiming, so the next attempt is 3.
     expect(reconciliationEntry(statements)?.params).toEqual([
       orgId,
+      "comment.reply.requested",
+      "comment",
       commentId,
-      2,
-      replyReconciliationCadenceSeconds(3),
+      `comment-reply-reconcile:${commentId}:3`,
+      JSON.stringify({
+        comment_id: commentId,
+        delay_seconds: replyReconciliationCadenceSeconds(3),
+        reconciliation: true,
+      }),
     ]);
   });
 
@@ -318,9 +328,15 @@ describe("reply reconciliation delayed triggers", () => {
     // Durable due work is armed at the first cadence delay.
     expect(reconciliationEntry(statements)?.params).toEqual([
       orgId,
+      "comment.reply.requested",
+      "comment",
       commentId,
-      0,
-      replyReconciliationCadenceSeconds(1),
+      `comment-reply-reconcile:${commentId}:1`,
+      JSON.stringify({
+        comment_id: commentId,
+        delay_seconds: replyReconciliationCadenceSeconds(1),
+        reconciliation: true,
+      }),
     ]);
   });
 

@@ -65,6 +65,8 @@ tags:
       publication keeps the same Post identity.
   - name: Queues
     description: Brand Profile-owned recurring publishing plans, distinct from transport queues.
+  - name: Publishing
+    description: Workspace publishing preferences, timezones, and default templates.
   - name: Distributions
     description: |
       Per-Channel publication outcomes for a Post. Distributions are created
@@ -2216,7 +2218,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/DeletePostRequest" }
+            schema: { $ref: "#/components/schemas/DeleteQueueRequest" }
       responses:
         "204": { description: Queue retired; historical membership remains readable on Posts. }
         "400": { $ref: "#/components/responses/BadRequest" }
@@ -2246,7 +2248,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/DeletePostRequest" }
+            schema: { $ref: "#/components/schemas/RemovePostFromQueueRequest" }
       responses:
         "200":
           description: Post with cancelled pending outcomes and no active Queue membership.
@@ -5585,6 +5587,24 @@ components:
           type: string
           format: uuid
           description: Selected Brand Profile; must own the addressed Post.
+    DeleteQueueRequest:
+      type: object
+      additionalProperties: false
+      required: [brand_profile_id]
+      properties:
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: Selected Brand Profile; must own the addressed Queue.
+    RemovePostFromQueueRequest:
+      type: object
+      additionalProperties: false
+      required: [brand_profile_id]
+      properties:
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: Selected Brand Profile; must own the addressed Queue and Post.
     SchedulePostRequest:
       type: object
       additionalProperties: false

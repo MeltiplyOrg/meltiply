@@ -1,6 +1,7 @@
 import { Cause, Effect, Exit, Option } from "effect";
 import { configureLogSampling, errorDiagnostic, log } from "@meltiply/observability";
 import type { AutomationEnv } from "../env";
+import { nextDelaySeconds, QUEUE_RETRY_POLICY } from "../retry-policy";
 import type { JobScope } from "./scope";
 import {
   AmbiguousJobError,
@@ -142,7 +143,9 @@ export function recoverJobErrorCause(cause: Cause.Cause<unknown>): unknown {
  * @returns Delay in seconds bounded to [15, 3600].
  */
 export function queueBackoffDelaySeconds(attempts: number): number {
-  return Math.min(3_600, 15 * 2 ** Math.max(0, attempts));
+  return (
+    nextDelaySeconds(QUEUE_RETRY_POLICY, Math.max(0, attempts)) ?? QUEUE_RETRY_POLICY.maxSeconds
+  );
 }
 
 /**

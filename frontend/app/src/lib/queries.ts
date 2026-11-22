@@ -20,7 +20,7 @@ import {
   type SessionScope,
   type WorkspaceService,
 } from "./effect";
-import { useMutationKeyTracker } from "./mutation-idempotency";
+import { mutationFingerprint, useMutationKeyTracker } from "./mutation-idempotency";
 import { analyticsRangeWindow } from "./analytics-range";
 import { ApiError } from "./api";
 import { pollingInterval, privateCacheRetentionMs, referenceFreshnessMs } from "./query-defaults";
@@ -265,14 +265,16 @@ export async function invalidateQueryKeys(queryClient: QueryClient, keys: QueryK
 /**
  * Shared lifecycle for the idempotent mutation hooks below: acquires the
  * QueryClient and a stable idempotency tracker, runs the API operation with a
- * key fingerprinted on the mutation variables, then clears the tracker once
- * the mutation succeeds.
+ * key fingerprinted on the mutation variables, then clears that fingerprint
+ * once the mutation succeeds.
  *
  * Every idempotent hook repeats this acquire/execute/invalidate/clear
  * sequence; centralizing it leaves each exported hook with only its genuinely
  * varying parts — the API call and the caches it invalidates. Fingerprinting
  * the key on the variables makes TanStack retries of the same payload reuse
- * one idempotency key while an edited payload issues a fresh one.
+ * one idempotency key while an edited payload issues a fresh one. Clearing is
+ * scoped to the settled fingerprint so a concurrent mutation on the same hook
+ * instance keeps its own retry key.
  *
  * @param scope Session scope forwarded to `runApiQuery`.
  * @param operation API call receiving the resolved idempotency key, which it
@@ -299,7 +301,7 @@ function useIdempotentMutation<TVariables, TData>(
       runApiQuery(scope, (api) => operation(api, variables, idempotency.keyFor(variables))),
     onSuccess: async (_data, variables) => {
       if (invalidate) await invalidateQueryKeys(queryClient, invalidate(variables));
-      idempotency.clear();
+      idempotency.clear(mutationFingerprint(variables));
     },
   });
 }

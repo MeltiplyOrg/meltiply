@@ -16,7 +16,11 @@ import {
   jobLeaseOutcome,
   JobInProgressError,
 } from "./job-lease";
-import { assetOrphanGraceSeconds, type DatabaseError } from "@meltiply/domain";
+import {
+  assetOrphanGraceSeconds,
+  maximumDelayedDeliverySeconds,
+  type DatabaseError,
+} from "@meltiply/domain";
 import { createObjectStoreFromEnv, type ObjectStore } from "@meltiply/storage";
 import { errorDiagnostic, log } from "@meltiply/observability";
 
@@ -26,6 +30,7 @@ import { classifyJobError, TerminalJobError, type AutomationJobError } from "./e
 import type { AutomationEnv } from "./env";
 import { claimDueOutboxWork } from "./due-work";
 import { type OutboxMessage } from "./messages";
+import { outboxConflictClause, outboxDedupeKeySql } from "./outbox-commands";
 import { reconcileDueUsage } from "./usage";
 import { processAssetMedia, releaseStaleProcessingStaging } from "./asset-processing";
 
@@ -1371,6 +1376,12 @@ export function createAssetJobProcessor(
    * promotion or a deletion interrupted mid-flight) gets a fresh event while a
    * healthy long-running processor is never disturbed. The dedupe key includes
    * the stuck status so re-processing and re-deletion never share an identity.
+   * A dedupe conflict against an event that can no longer deliver — 'dead'
+   * after exhausting relay attempts, or 'published' past the delayed-delivery
+   * horizon — revives the row as 'pending' with a fresh attempt budget
+   * (matching `due-work.ts` reviveLostOutboxEvent), so one dead recovery event
+   * cannot permanently block re-arming that stuck Asset. Conflicts with live
+   * events still emit nothing, preserving exactly-once arming.
    *
    * @returns Effect resolving to the number of recovery events armed.
    */
@@ -1388,14 +1399,14 @@ export function createAssetJobProcessor(
              END,
              'asset',
              asset.id,
-             concat('asset:', asset.id, ':lifecycle-recovery:', asset.status),
+             ${outboxDedupeKeySql.assetLifecycleRecovery("asset.id", "asset.status")},
              jsonb_build_object('asset_id', asset.id, 'lifecycle_recovery', true)
            FROM assets AS asset
            WHERE asset.status IN ('processing', 'deleting')
            AND asset.updated_at <= now() - ($1 * INTERVAL '1 second')
-           ON CONFLICT (org_id, topic, dedupe_key) DO NOTHING
+           ${outboxConflictClause("revive", "$2")}
            RETURNING id`,
-          [stuckAssetGraceSeconds],
+          [stuckAssetGraceSeconds, maximumDelayedDeliverySeconds],
         )
         .pipe(
           Effect.map((result) => result.rowCount ?? 0),

@@ -1,8 +1,48 @@
 import { classifyProviderFailure, ProviderAdapterError } from "./failures";
+import type { ProviderCommentRecord, ProviderPage } from "./types";
 
 const controlCharactersPattern = /[\u0000-\u001f\u007f]/;
 const providerIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$/;
 const containerOperationPattern = /^(created|submitted):(.+)$/;
+const lineBreakPattern = /\r?\n/;
+
+/**
+ * Counts Unicode codepoints in a string without allocating an intermediate
+ * character array. Treats surrogate pairs as one codepoint each.
+ */
+export function codePointLength(text: string): number {
+  let count = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff && index + 1 < text.length) {
+      const next = text.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) index += 1;
+    }
+    count += 1;
+  }
+  return count;
+}
+
+/**
+ * Returns the first trimmed non-empty line of a multiline text payload, or
+ * undefined when the text contains only whitespace or line breaks.
+ */
+export function firstNonEmptyLine(text: string): string | undefined {
+  for (const line of text.split(lineBreakPattern)) {
+    const trimmed = line.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
+}
+
+/**
+ * Normalizes a MIME `Content-Type` string by stripping parameters and
+ * lowercasing the media type (e.g. `"Video/MP4; codecs=avc1"` -> `"video/mp4"`).
+ */
+export function normalizeContentType(contentType: string): string {
+  const semi = contentType.indexOf(";");
+  return (semi === -1 ? contentType : contentType.slice(0, semi)).trim().toLowerCase();
+}
 
 /**
  * Asserts that a string parameter is non-empty, within maximum length, and free of control characters.
@@ -40,7 +80,7 @@ export function assertConfiguredRedirectUri(attempted: string, configured: strin
 }
 
 /**
- * Validate a public URL as HTTPS or an exact loopback HTTP URL (AUD-026).
+ * Validate a public URL as HTTPS or an exact loopback HTTP URL.
  * Rejects embedded userinfo credentials and fragments to enforce URL shape constraints.
  * Does **not** verify the destination host — arbitrary HTTPS URLs including private and
  * internal addresses are accepted. This is a scheme and credential guard, not SSRF protection.
@@ -133,7 +173,7 @@ export function validatePageInput(
  * Binds input length to 64 characters and verifies valid finite date parsing.
  * Returns ISO timestamp string (e.g. '2026-09-12T07:00:00.000Z'), or undefined if invalid.
  */
-export function timestamp(value: unknown): string | undefined {
+function timestamp(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length > 64) return undefined;
   const parsed = new Date(value);
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : undefined;
@@ -212,8 +252,131 @@ export interface MetaContainerOperation {
 export function parseContainerOperationId(value: unknown): MetaContainerOperation | undefined {
   const normalized = providerIdentifier(value);
   const match = normalized?.match(containerOperationPattern);
+  const phase = match?.[1];
   const id = providerIdentifier(match?.[2]);
-  return match && id ? { id, phase: match[1] as "created" | "submitted" } : undefined;
+  if (!id || (phase !== "created" && phase !== "submitted")) return undefined;
+  return { id, phase };
+}
+
+/**
+ * Extracts a numeric metric value from a Meta Graph API insight payload.
+ * Supports both periodic bucket arrays (`metric.values[0]`) and lifetime objects
+ * (`metric.total_value`). Returns a non-negative safe integer, or undefined if absent/invalid.
+ */
+export function insightValue(metric: Record<string, unknown>): number | undefined {
+  const values = metric.values;
+  if (Array.isArray(values)) return metricValue(record(values[0])?.value);
+  return metricValue(record(metric.total_value)?.value);
+}
+
+/**
+ * Parses a Meta Graph API insights `data` array into a deduplicated metric map.
+ * Rejects non-array payloads, oversized arrays (>20 entries), duplicate metric
+ * names, or invalid/missing metric values. When `strictSingleValue` is true
+ * (Facebook Video Insights), requires a single-element `values` array; otherwise
+ * accepts either `values[0]` or `total_value` via `insightValue`.
+ */
+export function parseMetaInsightsMap(
+  body: unknown,
+  options: { strictSingleValue?: boolean; valuesOnly?: boolean } = {},
+): Map<string, number> {
+  const data = record(body)?.data;
+  if (!Array.isArray(data) || data.length > 20) {
+    throw new ProviderAdapterError(classifyProviderFailure({ malformedResponse: true }));
+  }
+  const metrics = new Map<string, number>();
+  for (const entry of data) {
+    const metric = record(entry);
+    const name = boundedString(metric?.name, 64);
+    let value: number | undefined;
+    if (options.strictSingleValue) {
+      const values = metric?.values;
+      if (!Array.isArray(values) || values.length !== 1) {
+        throw new ProviderAdapterError(classifyProviderFailure({ malformedResponse: true }));
+      }
+      value = metricValue(record(values[0])?.value);
+    } else if (options.valuesOnly) {
+      const values = metric?.values;
+      value = Array.isArray(values) ? metricValue(record(values[0])?.value) : undefined;
+    } else {
+      value = metric ? insightValue(metric) : undefined;
+    }
+    if (!name || value === undefined || metrics.has(name)) {
+      throw new ProviderAdapterError(classifyProviderFailure({ malformedResponse: true }));
+    }
+    metrics.set(name, value);
+  }
+  return metrics;
+}
+
+/** Field mapping describing how a Meta comment edge exposes author info. */
+export interface MetaCommentAuthorMapping {
+  avatarField?: string;
+  nestedAuthorField?: string;
+  usernameField: string;
+}
+
+/**
+ * Parses a paginated Meta Graph API comment/conversation response into a
+ * normalized `ProviderPage<ProviderCommentRecord>`. Validates page bounds,
+ * deduplicates comment IDs, checks timestamp/text/author constraints, and
+ * validates optional `paging.cursors.after` cursor tokens.
+ */
+export function parseMetaCommentPage(
+  bodyValue: unknown,
+  providerPostId: string,
+  limit: number,
+  authorMapping: MetaCommentAuthorMapping,
+): ProviderPage<ProviderCommentRecord> {
+  const malformedError = () =>
+    new ProviderAdapterError(classifyProviderFailure({ malformedResponse: true }));
+  const body = record(bodyValue);
+  if (!Array.isArray(body?.data) || body.data.length > limit) {
+    throw malformedError();
+  }
+  const identifiers = new Set<string>();
+  const items = body.data.map((value) => {
+    const comment = record(value);
+    const author = authorMapping.nestedAuthorField
+      ? record(comment?.[authorMapping.nestedAuthorField])
+      : comment;
+    const providerCommentId = providerIdentifier(comment?.id);
+    const bodyText = boundedText(comment?.text, 10_000, true);
+    const commentedAt = timestamp(comment?.timestamp);
+    const rawUsername = author?.[authorMapping.usernameField];
+    const authorDisplayName =
+      rawUsername === undefined ? undefined : boundedString(rawUsername, 500);
+    const rawAvatar = authorMapping.avatarField ? comment?.[authorMapping.avatarField] : undefined;
+    const authorAvatarUrl = rawAvatar === undefined ? undefined : secureUrl(rawAvatar)?.href;
+    if (
+      !providerCommentId ||
+      identifiers.has(providerCommentId) ||
+      bodyText === undefined ||
+      !commentedAt ||
+      (rawUsername !== undefined && !authorDisplayName) ||
+      (rawAvatar !== undefined && !authorAvatarUrl)
+    ) {
+      throw malformedError();
+    }
+    identifiers.add(providerCommentId);
+    return {
+      ...(authorAvatarUrl ? { authorAvatarUrl } : {}),
+      ...(authorDisplayName ? { authorDisplayName } : {}),
+      body: bodyText,
+      commentedAt,
+      providerCommentId,
+      providerPostId,
+    };
+  });
+  const paging = record(body.paging);
+  const cursors = record(paging?.cursors);
+  if ((body.paging !== undefined && !paging) || (paging?.cursors !== undefined && !cursors)) {
+    throw malformedError();
+  }
+  const rawNextCursor = cursors?.after;
+  const nextCursor = rawNextCursor === undefined ? undefined : boundedCursor(rawNextCursor);
+  if (rawNextCursor !== undefined && !nextCursor) throw malformedError();
+  return { items, ...(nextCursor ? { nextCursor } : {}) };
 }
 
 /**

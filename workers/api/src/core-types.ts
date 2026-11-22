@@ -46,6 +46,23 @@ export class CoreApiError extends Error {
   }
 }
 
+/**
+ * Narrows one `Effect.try` catch to expected API errors without misclassifying
+ * programming defects as client failures.
+ *
+ * Returns `cause` only when it is already a `CoreApiError`; any other thrown
+ * value is rethrown so Effect records it as a defect and the request boundary
+ * answers 500 `internal_error` instead of a 4xx envelope.
+ *
+ * @param cause - Unknown value thrown by the wrapped operation.
+ * @returns The cause when it is a CoreApiError.
+ * @throws The original cause when it is not a CoreApiError.
+ */
+export function toCoreApiErrorOrRethrow(cause: unknown): CoreApiError {
+  if (cause instanceof CoreApiError) return cause;
+  throw cause;
+}
+
 interface InboxFilters {
   brandProfileId?: string;
   distributionId?: string;

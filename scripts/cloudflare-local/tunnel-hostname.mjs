@@ -14,18 +14,18 @@
 // branch. A wildcard only works with a single shared tunnel, which
 // `MELTIPLY_TUNNEL_SHARED=1` opts into.
 //
-// Two hostname layouts are supported:
+// Two hostname layouts are supported (shown with the default blank dev label):
 //
-//   wildcard (default)  <branch>.dev.meltiply.com
-//                       <branch>-public.dev.meltiply.com
-//     Keeps the shared `dev` as its own DNS label, so one Cloudflare Access
-//     application on `*.dev.meltiply.com` covers every branch even though each
-//     has its own tunnel.
+//   wildcard (default)  <branch>.meltiply.com
+//                       <branch>-public.meltiply.com
+//     Places every branch one label under the zone so Cloudflare's default
+//     Universal SSL certificate (`*.<zone>`) covers it. Setting `--dev-label L`
+//     places hostnames under `<branch>.<L>.<domain>` instead.
 //
-//   flat                <branch>-dev.meltiply.com
-//                       <branch>-public-dev.meltiply.com
-//     The literal `<branch>-dev.<domain>` form. Access would then need a
-//     `*.meltiply.com` wildcard, which is broader.
+//   flat                <branch>-app.meltiply.com
+//                       <branch>-public.meltiply.com
+//     Folds the service name (and any `--dev-label`) into the first DNS label,
+//     e.g. `<branch>-app-dev.<domain>` when `--dev-label dev` is set.
 //
 // Usage: tunnel-hostname.mjs [--domain D] [--kind app|public] [--branch B]
 //                             [--style wildcard|flat] [--dev-label L]
@@ -118,8 +118,8 @@ export function assertValidHostname(hostname) {
  * @param {string} options.domain Registrable domain, e.g. `meltiply.com`.
  * @param {"app"|"public"} options.kind Which service the hostname fronts.
  * @param {"wildcard"|"flat"} [options.style] Hostname layout.
- * @param {string} [options.devLabel] Label the dev hostnames hang under.
- * @returns {string} A validated hostname, e.g. `dev-tunnel.dev.meltiply.com`.
+ * @param {string} [options.devLabel] Optional label the dev hostnames hang under (blank by default).
+ * @returns {string} A validated hostname, e.g. `dev-tunnel.meltiply.com`.
  */
 export function hostnameFor({
   branch,
@@ -159,18 +159,30 @@ export function hostnameFor({
  * record created would capture every other branch. In shared-tunnel mode a
  * single wildcard is correct and is also what one Access application matches.
  *
- * @param {object} options Same shape as {@link hostnameFor}, plus `shared`.
+ * Validates `style` and optional `kind` before short-circuiting into the shared
+ * wildcard branch so invalid flags never silently emit a wildcard.
+ *
+ * @param {object} options Same shape as {@link hostnameFor}, plus `shared` and optional `kind`.
  * @returns {string[]} One wildcard in shared mode, else the concrete hostnames.
  */
 export function coverageHostnames({
   branch,
   domain,
+  kind,
   style = "wildcard",
   devLabel = defaultDevLabel,
   shared = false,
 }) {
+  if (!styles.has(style)) {
+    throw new Error(`style must be one of ${[...styles].join(", ")}, got ${style}`);
+  }
+  if (kind !== undefined && !kinds.has(kind)) {
+    throw new Error(`kind must be one of ${[...kinds].join(", ")}, got ${kind}`);
+  }
   const concrete = () =>
-    ["app", "public"].map((kind) => hostnameFor({ branch, domain, kind, style, devLabel }));
+    ["app", "public"].map((serviceKind) =>
+      hostnameFor({ branch, domain, kind: serviceKind, style, devLabel }),
+    );
   if (shared && style === "wildcard") {
     // A blank dev label collapses the wildcard onto the zone itself, which is
     // the only depth Cloudflare's default Universal SSL certificate covers.

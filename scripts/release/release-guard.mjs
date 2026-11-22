@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { releaseInternals } from "./release-lib.mjs";
+import { exactKeys, matchedString, plainObject } from "./validation.mjs";
 
 const approvalActorPattern = /^[A-Za-z0-9][A-Za-z0-9@._+ -]{0,127}$/;
 const approvalEnvironmentPattern = /^[a-z]+-[a-z0-9-]+-approval$/;
@@ -22,55 +23,25 @@ const approvalKeys = new Set([
 const approvalJobKeys = new Set(["approved_by", "id", "name", "status"]);
 
 /**
- * Validates that a value is a non-null, non-array object record.
+ * Asserts that an evidence record is a plain object bound to the current release
+ * schema version (1), release ID, and Git commit SHA.
  *
- * @param {unknown} value - Value to test
+ * @param {unknown} evidence - Parsed evidence record
  * @param {string} name - Contextual label for error reporting
- * @returns {object} The validated object
- * @throws {TypeError} If value is null, array, or not an object
+ * @param {object} spec - Validated release specification
+ * @returns {Record<string, any>} The validated release-bound evidence object
+ * @throws {TypeError} If evidence is not an object or its release identity mismatches
  */
-function plainObject(value, name) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${name} must be an object`);
+export function assertReleaseBound(evidence, name, spec) {
+  const record = plainObject(evidence, name);
+  if (
+    record.schema_version !== 1 ||
+    record.release_id !== spec.release_id ||
+    record.git_sha !== spec.git_sha
+  ) {
+    throw new TypeError(`${name} does not match the release`);
   }
-  return value;
-}
-
-/**
- * Asserts that an object contains exactly the expected set of keys, with no extra or missing keys.
- *
- * @param {object} value - Object to inspect
- * @param {Set<string>} expected - Set of required key names
- * @param {string} name - Contextual label for error reporting
- * @returns {void}
- * @throws {TypeError} If any unknown or missing keys are detected
- */
-function exactKeys(value, expected, name) {
-  const actual = Object.keys(value);
-  const unknown = actual.filter((key) => !expected.has(key));
-  const missing = [...expected].filter((key) => !(key in value));
-  if (unknown.length > 0) {
-    throw new TypeError(`${name} contains unknown fields: ${unknown.join(", ")}`);
-  }
-  if (missing.length > 0) {
-    throw new TypeError(`${name} is missing fields: ${missing.join(", ")}`);
-  }
-}
-
-/**
- * Validates that a value is a string satisfying a specified regular expression pattern.
- *
- * @param {unknown} value - Value to validate
- * @param {RegExp} pattern - Regular expression to match
- * @param {string} name - Contextual label for error reporting
- * @returns {string} The validated string value
- * @throws {TypeError} If value is not a string or fails regex match
- */
-function matchedString(value, pattern, name) {
-  if (typeof value !== "string" || !pattern.test(value)) {
-    throw new TypeError(`${name} is invalid`);
-  }
-  return value;
+  return record;
 }
 
 /**

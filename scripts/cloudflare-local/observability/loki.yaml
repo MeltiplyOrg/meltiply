@@ -37,8 +37,5 @@ limits_config:
   allow_structured_metadata: true
   volume_enabled: true
 
-ruler:
-  alertmanager_url: http://127.0.0.1:9093
-
 analytics:
   reporting_enabled: false

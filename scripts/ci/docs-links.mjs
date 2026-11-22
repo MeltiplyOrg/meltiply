@@ -1,10 +1,9 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const codeFencePattern = /^\s{0,3}(`{3,}|~{3,})/u;
-const inlineCodePattern = /(`+).*?\1/gu;
+import { markdownLines, maskInlineCode, trackedMarkdownFiles } from "./markdown-source.mjs";
+
 const imageLinkPattern = /!\[([^\]]*)\]\([^)]*\)/gu;
 const markdownLinkPattern = /\[([^\]]+)\]\([^)]*\)/gu;
 const htmlTagPattern = /<[^>]+>/gu;
@@ -18,40 +17,6 @@ const leadingSlashesPattern = /^\/+/;
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const markdownLink = /\]\(\s*(<[^>\n]+>|[^)\s\n]+)(?:\s+["'][^"'\n]*["'])?\s*\)/g;
 const externalTarget = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
-
-/**
- * Masks out contents of fenced code blocks with empty strings to prevent code examples from being parsed as links.
- *
- * @param {string} content - Full Markdown file content
- * @returns {Array<string>} Array of lines with fenced block contents blanked out
- */
-function markdownLines(content) {
-  const lines = content.split("\n");
-  let fence;
-  return lines.map((line) => {
-    const marker = line.match(codeFencePattern)?.[1];
-    if (marker) {
-      if (!fence) {
-        fence = { character: marker[0], length: marker.length };
-      } else if (marker[0] === fence.character && marker.length >= fence.length) {
-        fence = undefined;
-      }
-      return "";
-    }
-    if (fence) return "";
-    return line;
-  });
-}
-
-/**
- * Replaces backtick-delimited inline code segments with spaces of equal length to prevent false link matches.
- *
- * @param {string} line - Single Markdown line
- * @returns {string} Line with inline code replaced by spaces
- */
-function withoutInlineCode(line) {
-  return line.replace(inlineCodePattern, (code) => " ".repeat(code.length));
-}
 
 /**
  * Converts heading text to a GitHub-compatible URL anchor slug.
@@ -82,7 +47,8 @@ function headingSlug(value) {
 function headingAnchors(content) {
   const anchors = new Set();
   const duplicates = new Map();
-  for (const line of markdownLines(content)) {
+  const visibleLines = markdownLines(content);
+  for (const line of visibleLines) {
     const heading = line.match(headingPattern)?.[1];
     if (!heading) continue;
     const base = headingSlug(heading);
@@ -91,7 +57,7 @@ function headingAnchors(content) {
     anchors.add(duplicate === 0 ? base : `${base}-${duplicate}`);
     duplicates.set(base, duplicate + 1);
   }
-  const visibleContent = markdownLines(content).join("\n");
+  const visibleContent = visibleLines.join("\n");
   for (const match of visibleContent.matchAll(htmlAnchorPattern)) {
     anchors.add(match[1].toLowerCase());
   }
@@ -145,7 +111,7 @@ export function collectLinkFailures(root, markdownFiles) {
     const content = readFileSync(absoluteFile, "utf8");
     const lines = markdownLines(content);
     for (const [index, line] of lines.entries()) {
-      for (const match of withoutInlineCode(line).matchAll(markdownLink)) {
+      for (const match of maskInlineCode(line).matchAll(markdownLink)) {
         const destination = normalizedDestination(match[1]);
         if (externalTarget.test(destination)) continue;
         localLinks += 1;
@@ -188,21 +154,6 @@ export function collectLinkFailures(root, markdownFiles) {
 }
 
 /**
- * Returns all currently existing Git-tracked Markdown files in the repository.
- *
- * @returns {Array<string>} List of existing tracked relative Markdown paths
- */
-function trackedMarkdownFiles() {
-  const tracked = execFileSync("git", ["ls-files", "-z", "--", ":(glob)**/*.md"], {
-    cwd: repositoryRoot,
-    encoding: "utf8",
-  })
-    .split("\0")
-    .filter(Boolean);
-  return existingMarkdownFiles(repositoryRoot, tracked);
-}
-
-/**
  * Filters a list of file paths to those that exist on disk relative to root.
  *
  * @param {string} root - Base directory path
@@ -221,7 +172,7 @@ export function existingMarkdownFiles(root, files) {
  * @throws {Error} If any link failure or missing anchor is detected
  */
 export function runDocumentationLinkGate() {
-  const files = trackedMarkdownFiles();
+  const files = trackedMarkdownFiles(repositoryRoot);
   const result = collectLinkFailures(repositoryRoot, files);
   if (result.failures.length > 0) {
     throw new Error(`Documentation link check failed:\n${result.failures.join("\n")}`);

@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useAnimation } from "motion/react";
 
+import { useReducedMotionPreference } from "../src/components/primitives/use-reduced-motion";
+
 /**
  * Manages looping motion animation sequences for interactive SVG icons.
  *
@@ -16,6 +18,9 @@ import { useAnimation } from "motion/react";
  *    via ref-tracked mount state. A generation stamp invalidates in-flight `controls.start()` promise chains whenever
  *    the owner unmounts, so stale resolutions cannot restart an old loop.
  *    Teardown resets idle flags so StrictMode's effect replay can restart an initially active icon.
+ * 5. **Reduced Motion**: When the OS asks for reduced motion — including a change made while the
+ *    page is open — no cycle ever starts; controls settle on `normal` so hover still produces
+ *    no motion.
  *
  * @param active - Boolean indicating whether hover/active state is engaged (either internally or via external props).
  * @param restMs - Rest duration in milliseconds spent at rest between successive animation cycles while hovered (default: 2000ms).
@@ -29,6 +34,7 @@ import { useAnimation } from "motion/react";
  */
 export function useIconLoop(active: boolean, restMs: number = 2000) {
   const controls = useAnimation();
+  const prefersReducedMotion = useReducedMotionPreference();
 
   const activeRef = useRef(active);
   const runningRef = useRef(false);
@@ -52,6 +58,18 @@ export function useIconLoop(active: boolean, restMs: number = 2000) {
 
   useEffect(() => {
     activeRef.current = active;
+
+    // Reduced motion disables the loop entirely: hover changes nothing, and any
+    // in-flight cycle settles back on `normal` instead of replaying.
+    if (prefersReducedMotion) {
+      runningRef.current = false;
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      controls.start("normal").catch(() => {});
+      return;
+    }
 
     // If hover ends while resting, cancel rest timer immediately
     if (!active && timerRef.current !== null) {
@@ -104,7 +122,7 @@ export function useIconLoop(active: boolean, restMs: number = 2000) {
 
       runCycle();
     }
-  }, [active, controls, restMs]);
+  }, [active, controls, prefersReducedMotion, restMs]);
 
   return controls;
 }

@@ -37,14 +37,39 @@ export function addSeconds(now: Date, value: unknown, maxSeconds: number): strin
   return new Date(now.getTime() + value * 1_000).toISOString();
 }
 
-/** Build a confirmed-failure result from a provider HTTP code and status. */
+/**
+ * Build a confirmed-failure result from either an already-classified
+ * `ProviderFailure` or a provider HTTP code and status.
+ */
+export function confirmedFailure(
+  failure: ProviderFailure,
+  providerOperationId?: string,
+): Extract<ProviderOperationResult, { outcome: "confirmed_failure" }>;
 export function confirmedFailure(
   code: string,
   status: number,
   providerOperationId?: string,
+): Extract<ProviderOperationResult, { outcome: "confirmed_failure" }>;
+export function confirmedFailure(
+  failureOrCode: ProviderFailure | string,
+  statusOrOperationId?: number | string,
+  maybeOperationId?: string,
 ): Extract<ProviderOperationResult, { outcome: "confirmed_failure" }> {
+  const failure =
+    typeof failureOrCode === "string"
+      ? classifyProviderFailure({
+          code: failureOrCode,
+          status: typeof statusOrOperationId === "number" ? statusOrOperationId : 400,
+        })
+      : failureOrCode;
+  const providerOperationId =
+    typeof failureOrCode === "string"
+      ? maybeOperationId
+      : typeof statusOrOperationId === "string"
+        ? statusOrOperationId
+        : undefined;
   return {
-    failure: classifyProviderFailure({ code, status }),
+    failure,
     outcome: "confirmed_failure",
     ...(providerOperationId ? { providerOperationId } : {}),
   };

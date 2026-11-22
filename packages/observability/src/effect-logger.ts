@@ -39,15 +39,10 @@ export function createEffectLogger(context: LogContext): Logger.Logger<unknown, 
     }
 
     const inspectItem = (item: unknown) => {
-      if (item instanceof Error) {
+      if (item instanceof Error || (item !== null && typeof item === "object" && "_tag" in item)) {
         Object.assign(extraFields, errorDiagnostic(item));
         if ("code" in item && typeof item.code === "string") {
           extraFields.error_code = item.code;
-        }
-      } else if (item && typeof item === "object" && "_tag" in item) {
-        Object.assign(extraFields, errorDiagnostic(item));
-        if ("code" in item && typeof (item as { code?: unknown }).code === "string") {
-          extraFields.error_code = (item as { code: string }).code;
         }
       }
     };

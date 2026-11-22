@@ -862,6 +862,24 @@ describe("createTikTokAdapter", () => {
     });
   });
 
+  it("preserves the inbox phase when cancelling an inbox operation", async () => {
+    const providerCalls = sequence((url, init) => {
+      expect(url.pathname).toBe("/v2/post/publish/cancel/");
+      expect(JSON.parse(String(init.body))).toEqual({
+        publish_id: "inbox-draft-1",
+      });
+      return success({});
+    });
+    await expect(
+      adapter(providerCalls.fetcher).cancelPublication!(context, credentials, {
+        providerOperationId: "inbox:inbox-draft-1",
+      }),
+    ).resolves.toEqual({
+      outcome: "confirmed_success",
+      providerOperationId: "inbox:inbox-draft-1",
+    });
+  });
+
   it("refreshes credentials without renegotiating the granted scope list", async () => {
     const providerCalls = sequence(() =>
       json({

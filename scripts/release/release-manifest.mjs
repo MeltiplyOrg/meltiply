@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  assertReleaseBound,
   iacPhaseStates,
   loadApprovalMetadata,
   sha256,
@@ -15,6 +16,7 @@ import {
 } from "./release-lib.mjs";
 import { validateWorkerVersionId } from "./release-worker.mjs";
 import { assertFrontendReleaseEvidence } from "./release-frontend.mjs";
+import { matchedString, plainObject } from "./validation.mjs";
 
 const httpsUrlPattern = /^https:\/\/[^\s]+$/;
 const rolloutEvidencePattern = /^api-rollout-(?:5|25|50|100)\.json$/;
@@ -124,58 +126,6 @@ const evidenceByMode = Object.freeze({
 
 // Each review binds one transition digest in the selected installation.
 const approvalScopes = Object.freeze(["foundation", "traffic", "queue-resume"]);
-
-/**
- * Asserts a value is a non-null, non-array object.
- *
- * @param {unknown} value - Candidate value
- * @param {string} name - Contextual label for error reporting
- * @returns {object} The validated object
- * @throws {TypeError} If the value is not a plain object
- */
-function plainObject(value, name) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${name} must be an object`);
-  }
-  return value;
-}
-
-/**
- * Asserts a string matches a fixed pattern.
- *
- * @param {unknown} value - Candidate string
- * @param {RegExp} pattern - Required pattern
- * @param {string} name - Contextual label for error reporting
- * @returns {string} The validated string
- * @throws {TypeError} If the value is missing or malformed
- */
-function matchedString(value, pattern, name) {
-  if (typeof value !== "string" || !pattern.test(value)) {
-    throw new TypeError(`${name} is invalid`);
-  }
-  return value;
-}
-
-/**
- * Asserts that an evidence record binds the current release identity.
- *
- * @param {object} evidence - Parsed evidence record
- * @param {string} name - Evidence description for error reporting
- * @param {object} spec - Validated release specification
- * @returns {object} The validated record
- * @throws {TypeError} If schema, release ID, or Git SHA do not match the spec
- */
-function assertReleaseBound(evidence, name, spec) {
-  plainObject(evidence, name);
-  if (
-    evidence.schema_version !== 1 ||
-    evidence.release_id !== spec.release_id ||
-    evidence.git_sha !== spec.git_sha
-  ) {
-    throw new TypeError(`${name} does not match the release`);
-  }
-  return evidence;
-}
 
 /**
  * Asserts an evidence record's approvals equal one loaded approval hold.

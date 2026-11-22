@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, type Scope } from "effect";
-import { DatabaseError, InvalidRequestError } from "@meltiply/domain";
+import { DatabaseError, errorMessage, InvalidRequestError } from "@meltiply/domain";
 import { Pool, type PoolClient, type PoolConfig, type QueryResult } from "pg";
 
 export interface AuthenticatedClaims {
@@ -111,6 +111,39 @@ export function createHyperdrivePool(
 }
 
 /**
+ * Creates a Worker pool resolver that reuses one Hyperdrive pool per isolate in
+ * deployed environments and returns fresh, request-owned pools (destroying clients
+ * on release) in local or explicit `DATABASE_POOL_MODE=request` runs without
+ * overwriting the isolate cache.
+ *
+ * @param label - Descriptive binding label for missing-binding errors (`"authenticated"` | `"system"`).
+ * @returns Resolver function producing an active `Pool` for the current Worker environment.
+ */
+export function createHyperdrivePoolCache(
+  label: string,
+): (
+  binding: HyperdriveBinding | undefined,
+  env: { readonly DATABASE_POOL_MODE?: string; readonly ENVIRONMENT?: string },
+) => Pool {
+  let cachedPool: Pool | undefined;
+  let cachedConnectionString: string | undefined;
+
+  return (binding, env) => {
+    if (!binding) {
+      throw new Error(`${label} Hyperdrive binding is unavailable`);
+    }
+    if (env.ENVIRONMENT === "local" || env.DATABASE_POOL_MODE === "request") {
+      return destroyClientsOnRelease(createHyperdrivePool(binding));
+    }
+    if (!cachedPool || cachedConnectionString !== binding.connectionString) {
+      cachedPool = createHyperdrivePool(binding);
+      cachedConnectionString = binding.connectionString;
+    }
+    return cachedPool;
+  };
+}
+
+/**
  * Serializes authenticated user and tenant claims to a JSON string for PostgreSQL RLS.
  * Formats subject (`sub`), optional organization ID (`org_id`), and optional role (`org_role`)
  * for use in `set_config('request.jwt.claims', ..., true)`.
@@ -160,7 +193,7 @@ export function wrapTransactionClient(client: TransactionClient): EffectTransact
         catch: (cause) =>
           new DatabaseError({
             cause,
-            message: cause instanceof Error ? cause.message : "Database query failed",
+            message: errorMessage(cause, "Database query failed"),
           }),
         try: async () => client.query<Row>(text, values),
       }),
@@ -182,7 +215,7 @@ export function acquireClient(
       catch: (cause) =>
         new DatabaseError({
           cause,
-          message: cause instanceof Error ? cause.message : "Failed to acquire database connection",
+          message: errorMessage(cause, "Failed to acquire database connection"),
         }),
       try: async () => pool.connect(),
     }),
@@ -210,7 +243,7 @@ export function withTransactionEffect<A, E, R>(
       catch: (cause) =>
         new DatabaseError({
           cause,
-          message: cause instanceof Error ? cause.message : "Failed to acquire database connection",
+          message: errorMessage(cause, "Failed to acquire database connection"),
         }),
       try: async () => pool.connect(),
     });
@@ -223,8 +256,7 @@ export function withTransactionEffect<A, E, R>(
         catch: (cause) =>
           new DatabaseError({
             cause,
-            message:
-              cause instanceof Error ? cause.message : "Failed to begin database transaction",
+            message: errorMessage(cause, "Failed to begin database transaction"),
           }),
         try: async () => client.query("BEGIN"),
       });
@@ -247,8 +279,7 @@ export function withTransactionEffect<A, E, R>(
             catch: (cause) =>
               new DatabaseError({
                 cause,
-                message:
-                  cause instanceof Error ? cause.message : "Failed to commit database transaction",
+                message: errorMessage(cause, "Failed to commit database transaction"),
               }),
             try: async () => client.query("COMMIT"),
           }),
@@ -286,12 +317,14 @@ export function withTransactionEffect<A, E, R>(
  * @param pool - Database transaction pool.
  * @param claims - Tenant identity claims for RLS enforcement.
  * @param operation - Function returning an Effect given the EffectTransactionClient.
+ * @param options - Optional statement timeout override in milliseconds (defaults to 10000).
  * @returns Effect resolving to operation result or failing with DatabaseError or operation error.
  */
 export function withAuthenticatedTransactionEffect<A, E, R>(
   pool: TransactionPool,
   claims: AuthenticatedClaims,
   operation: (client: EffectTransactionClient) => Effect.Effect<A, E, R>,
+  options?: { readonly statementTimeoutMs?: number },
 ): Effect.Effect<A, E | DatabaseError | InvalidRequestError, R> {
   let serializedClaims: string;
   try {
@@ -299,16 +332,22 @@ export function withAuthenticatedTransactionEffect<A, E, R>(
   } catch (cause) {
     return Effect.fail(
       new InvalidRequestError({
-        message: cause instanceof Error ? cause.message : "Invalid claims for tenant",
+        message: errorMessage(cause, "Invalid claims for tenant"),
       }),
+    );
+  }
+  const timeoutMs = options?.statementTimeoutMs ?? 10_000;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
+    return Effect.fail(
+      new InvalidRequestError({ message: "statementTimeoutMs must be a positive safe integer" }),
     );
   }
 
   return withTransactionEffect(pool, (client) =>
     client
       .query(
-        "SELECT set_config('request.jwt.claims', $1, true), set_config('statement_timeout', '10000', true)",
-        [serializedClaims],
+        "SELECT set_config('request.jwt.claims', $1, true), set_config('statement_timeout', $2, true)",
+        [serializedClaims, String(timeoutMs)],
       )
       .pipe(Effect.flatMap(() => operation(client))),
   );
@@ -372,7 +411,7 @@ export function createDatabaseServiceLive(
     try {
       pool = createHyperdrivePool(poolOrBinding, options);
     } catch (cause) {
-      initError = cause instanceof Error ? cause.message : "Failed to initialize database pool";
+      initError = errorMessage(cause, "Failed to initialize database pool");
     }
   } else {
     initError = "Invalid Hyperdrive configuration binding";

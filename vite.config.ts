@@ -276,11 +276,9 @@ export default defineConfig({
         },
       },
       {
-        // Frontend TS relaxations from the old config's global block:
-        // `any` is permitted and unused-vars keeps the underscore convention.
+        // Unused-vars keeps the underscore-prefix convention for frontend TS.
         files: ["frontend/app/**/*.{ts,tsx,mts,cts}", "frontend/shared/**/*.{ts,tsx,mts,cts}"],
         rules: {
-          "typescript/no-explicit-any": "off",
           "no-unused-vars": [
             "error",
             {
@@ -477,14 +475,6 @@ export default defineConfig({
             },
           ],
           "shadcn/require-static-classes": "off",
-        },
-      },
-      {
-        // plugs-view predates the shared component contract; only the animated
-        // progress width is allowed inline.
-        files: ["frontend/app/src/components/plugs/plugs-view.tsx"],
-        rules: {
-          "shadcn/no-inline-styles": ["error", { allow: ["animation", "width"] }],
         },
       },
       {

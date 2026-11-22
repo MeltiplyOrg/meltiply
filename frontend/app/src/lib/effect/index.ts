@@ -1,6 +1,4 @@
-export * from "./api-client";
-export * from "./session-scope";
-export * from "./config";
-export * from "./runtime";
-export * from "./services";
-export * from "./telemetry";
+export { ApiClientService, type ApiClientError, type ApiClientServiceShape } from "./api-client";
+export { runQueryEffect } from "./runtime";
+export { runFrontendEffect } from "./services";
+export { WorkspaceService, type SessionScope } from "./session-scope";

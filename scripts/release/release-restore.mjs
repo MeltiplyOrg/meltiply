@@ -18,7 +18,7 @@ const sevenDaysMs = 7 * 24 * 60 * 60 * 1_000;
 const thirtyDaysMs = 30 * 24 * 60 * 60 * 1_000;
 
 /**
- * Validates that an identifier string matches the allowed alphanumeric slug pattern (`^[a-z0-9_-]+$`).
+ * Validates that an identifier string matches the allowed lowercase slug pattern (`^[a-z0-9-]{1,60}$`).
  *
  * @param {unknown} value - Identifier to test
  * @param {string} name - Contextual label for error reporting
@@ -588,7 +588,7 @@ export async function createRestorePoint({
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
   }
-  let snapshot = await listNamedSnapshot({
+  const existingSnapshot = await listNamedSnapshot({
     branchId: neon.branchId,
     environment: neon,
     expiresAt: spec.restore_point_expires_at,
@@ -596,49 +596,47 @@ export async function createRestorePoint({
     name,
     projectId: neon.projectId,
   });
-  if (snapshot) {
+  if (existingSnapshot) {
     throw new Error("Neon release snapshot exists without completed local evidence");
   }
-  if (!snapshot) {
-    const snapshotEndpoint = new URL(
-      `${apiBase}/projects/${encodeURIComponent(neon.projectId)}/branches/${encodeURIComponent(neon.branchId)}/snapshot`,
-    );
-    snapshotEndpoint.searchParams.set("name", name);
-    snapshotEndpoint.searchParams.set("expires_at", spec.restore_point_expires_at);
-    const response = await fetchImpl(snapshotEndpoint, {
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${neon.token}`,
-      },
-      method: "POST",
-      redirect: "error",
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!response.ok) {
-      throw new Error(`Neon snapshot creation failed with status ${response.status}`);
-    }
-    const created = await readBoundedJsonResponse(
-      response,
-      maximumResponseBytes,
-      "Neon snapshot response",
-    );
-    const parsed = parseCreateSnapshotResponse(created, {
-      branchId: neon.branchId,
-      name,
-      projectId: neon.projectId,
-    });
-    snapshot = parsed.snapshot;
-    if (Date.parse(snapshot.expires_at) !== Date.parse(spec.restore_point_expires_at)) {
-      throw new TypeError("Neon snapshot expiry does not match the release");
-    }
-    await waitForOperations({
-      environment: neon,
-      fetchImpl,
-      operations: parsed.operations,
-      pause,
-      projectId: neon.projectId,
-    });
+  const snapshotEndpoint = new URL(
+    `${apiBase}/projects/${encodeURIComponent(neon.projectId)}/branches/${encodeURIComponent(neon.branchId)}/snapshot`,
+  );
+  snapshotEndpoint.searchParams.set("name", name);
+  snapshotEndpoint.searchParams.set("expires_at", spec.restore_point_expires_at);
+  const response = await fetchImpl(snapshotEndpoint, {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${neon.token}`,
+    },
+    method: "POST",
+    redirect: "error",
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    throw new Error(`Neon snapshot creation failed with status ${response.status}`);
   }
+  const created = await readBoundedJsonResponse(
+    response,
+    maximumResponseBytes,
+    "Neon snapshot response",
+  );
+  const parsed = parseCreateSnapshotResponse(created, {
+    branchId: neon.branchId,
+    name,
+    projectId: neon.projectId,
+  });
+  const snapshot = parsed.snapshot;
+  if (Date.parse(snapshot.expires_at) !== Date.parse(spec.restore_point_expires_at)) {
+    throw new TypeError("Neon snapshot expiry does not match the release");
+  }
+  await waitForOperations({
+    environment: neon,
+    fetchImpl,
+    operations: parsed.operations,
+    pause,
+    projectId: neon.projectId,
+  });
 
   const evidence = {
     approvals,

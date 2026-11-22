@@ -1,5 +1,6 @@
 import { ArrowRight, Check, CircleAlert, Info, LoaderCircle, X } from "lucide-react";
 import { LazyMotion, domAnimation, m } from "motion/react";
+import { useReducedMotionPreference } from "../primitives/use-reduced-motion";
 import {
   type AriaRole,
   type CSSProperties,
@@ -94,6 +95,9 @@ const SPRING = {
   bounce: 0.25,
   duration: DURATION_S,
 };
+
+/** Reduced-motion travel: geometry commits instantly; only opacity fades remain. */
+const INSTANT = { duration: 0 } as const;
 
 const STATE_ICON: Record<SileoState, ReactNode> = {
   success: <Check className="size-3.5" aria-hidden="true" />,
@@ -219,6 +223,7 @@ export const Sileo = memo(function Sileo({
   // Rendered toast box width: seeded from the caller width so SSR and
   // hydration geometry match, then synced to the CSS-clamped element below.
   const [boxWidth, setBoxWidth] = useState(width);
+  const prefersReducedMotion = useReducedMotionPreference();
 
   const hasDesc = Boolean(view.description) || Boolean(view.button);
   const isLoading = view.state === "loading";
@@ -680,7 +685,7 @@ export const Sileo = memo(function Sileo({
                   width: resolvedPillWidth,
                   height: open ? pillHeight : HEIGHT,
                 }}
-                transition={ready ? SPRING : { duration: 0 }}
+                transition={ready && !prefersReducedMotion ? SPRING : INSTANT}
               />
               <m.rect
                 data-sileo-body
@@ -694,7 +699,9 @@ export const Sileo = memo(function Sileo({
                   height: open ? expandedContent : 0,
                   opacity: open ? 1 : 0,
                 }}
-                transition={open ? SPRING : { ...SPRING, bounce: 0 }}
+                transition={
+                  !prefersReducedMotion ? (open ? SPRING : { ...SPRING, bounce: 0 }) : INSTANT
+                }
               />
             </LazyMotion>
           </g>

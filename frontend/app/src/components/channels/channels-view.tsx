@@ -715,7 +715,9 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
             />
             <TopToolbarFilters
               activeCount={
-                Number(selectedPlatforms.length > 0) + Number(selectedBrandProfileId !== null)
+                Number(selectedPlatforms.length > 0) +
+                Number(selectedBrandProfileId !== null) +
+                Number(statusFilter !== "all")
               }
               onClearAll={() => {
                 setSelectedPlatforms([]);

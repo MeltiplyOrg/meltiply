@@ -1,5 +1,10 @@
 import { Effect } from "effect";
-import { InvalidRequestError, NotFoundError, StorageUnavailableError } from "@meltiply/domain";
+import {
+  errorMessage,
+  InvalidRequestError,
+  NotFoundError,
+  StorageUnavailableError,
+} from "@meltiply/domain";
 
 export interface ObjectMetadata {
   contentType: string | null;
@@ -182,11 +187,11 @@ export interface SignedObjectWriteRequest {
  * are invalid requests; every other failure is infrastructure and stays
  * retryable as `StorageUnavailableError`.
  */
-function toStorageError(
+export function toStorageError(
   cause: unknown,
   fallback: string,
 ): InvalidRequestError | StorageUnavailableError {
-  const message = cause instanceof Error ? cause.message : fallback;
+  const message = errorMessage(cause, fallback);
   if (cause instanceof TypeError || cause instanceof RangeError) {
     return new InvalidRequestError({ message });
   }
@@ -205,7 +210,7 @@ function wrapMultipartUpload(upload: MultipartUpload): EffectMultipartUpload {
       Effect.tryPromise({
         catch: (cause) =>
           new StorageUnavailableError({
-            message: cause instanceof Error ? cause.message : "Failed to abort multipart upload",
+            message: errorMessage(cause, "Failed to abort multipart upload"),
           }),
         try: async () => upload.abort(),
       }),
@@ -213,7 +218,7 @@ function wrapMultipartUpload(upload: MultipartUpload): EffectMultipartUpload {
       Effect.tryPromise({
         catch: (cause) =>
           new StorageUnavailableError({
-            message: cause instanceof Error ? cause.message : "Failed to complete multipart upload",
+            message: errorMessage(cause, "Failed to complete multipart upload"),
           }),
         try: async () => upload.complete(parts),
       }),
@@ -249,8 +254,18 @@ export abstract class EffectObjectStore implements ObjectStore {
   abstract head(key: string): Promise<ObjectMetadata | null>;
   abstract read(key: string): Promise<ObjectBody | null>;
   abstract readRange(key: string, offset: number, maximumBytes: number): Promise<Uint8Array | null>;
-  abstract readPrefix(key: string, maximumBytes: number): Promise<Uint8Array | null>;
   abstract resumeMultipartUpload(key: string, uploadId: string): MultipartUpload;
+
+  /**
+   * Reads the first N bytes of an object by delegating to `readRange(key, 0, maximumBytes)`.
+   *
+   * @param key - Storage object key.
+   * @param maximumBytes - Number of prefix bytes to read (up to 1 MiB).
+   * @returns Byte buffer if the object exists, or null.
+   */
+  readPrefix(key: string, maximumBytes: number): Promise<Uint8Array | null> {
+    return this.readRange(key, 0, maximumBytes);
+  }
 
   /**
    * Retrieves metadata for an object as a typed Effect, returning null if missing.

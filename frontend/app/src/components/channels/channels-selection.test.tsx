@@ -472,6 +472,24 @@ describe("Channels selection", () => {
   });
 
   /**
+   * The Filter disclosure badge counts every active filter field, including
+   * the connection-status segmented control that is not one of the dropdown
+   * fields — a status-only selection must still read as one active filter.
+   */
+  it("counts the status filter in the Filter badge", async () => {
+    queryResults.platforms.data = [connectedAccount];
+    renderChannels();
+
+    const statusGroup = screen.getByRole("radiogroup", { name: "Connection status" });
+    const filterSummary = screen.getByText("Filter").closest("summary");
+    expect(filterSummary).not.toBeNull();
+    expect(filterSummary).not.toHaveTextContent("1");
+
+    fireEvent.click(within(statusGroup).getByRole("radio", { name: "connected" }));
+    await waitFor(() => expect(filterSummary).toHaveTextContent("1"));
+  });
+
+  /**
    * Deselect empties the selection and removes the pill without disconnecting
    * anything.
    */

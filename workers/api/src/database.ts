@@ -1,8 +1,7 @@
 import { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
 import {
-  createHyperdrivePool,
-  destroyClientsOnRelease,
+  createHyperdrivePoolCache,
   withAuthenticatedTransactionEffect,
   withTransactionEffect,
   type EffectTransactionClient,
@@ -13,91 +12,32 @@ import { AccessDenied, DatabaseError } from "@meltiply/domain";
 
 import type { ApiWorkerEnv } from "./env";
 
-// Deployed isolates retain pools per Hyperdrive connection string (AUD-044).
-// Standalone workerd opts into request-owned pools so no socket or queued checkout
-// crosses invocations.
-let authenticatedPool: Pool | undefined;
-let authenticatedConnectionString: string | undefined;
-let systemPool: Pool | undefined;
-let systemConnectionString: string | undefined;
-
-/**
- * Manages caching and instantiation of Hyperdrive connection pools for an isolate.
- *
- * Deployed isolates reuse a pool while the connection string is unchanged.
- * Local and explicitly request-owned invocations create independent pools whose
- * clients close on release, so standalone workerd never carries sockets or queued
- * checkouts into a later invocation.
- *
- * @param binding - Cloudflare Hyperdrive binding instance.
- * @param currentPool - Previously cached Pool instance in this isolate, if any.
- * @param currentConnectionString - Previously cached connection string.
- * @param label - Descriptive pool identifier used for error reporting.
- * @param env - Worker environment bindings.
- * @returns The active connection string and initialized Pool.
- * @throws {Error} If the specified Hyperdrive binding is undefined.
- */
-function poolFor(
-  binding: Hyperdrive | undefined,
-  currentPool: Pool | undefined,
-  currentConnectionString: string | undefined,
-  label: string,
-  env: ApiWorkerEnv,
-): { connectionString: string; pool: Pool } {
-  if (!binding) throw new Error(`${label} Hyperdrive binding is unavailable`);
-  if (env.ENVIRONMENT === "local" || env.DATABASE_POOL_MODE === "request") {
-    return {
-      connectionString: binding.connectionString,
-      pool: destroyClientsOnRelease(createHyperdrivePool(binding)),
-    };
-  }
-  if (!currentPool || currentConnectionString !== binding.connectionString) {
-    const pool = createHyperdrivePool(binding);
-    return {
-      connectionString: binding.connectionString,
-      pool,
-    };
-  }
-  return { connectionString: currentConnectionString, pool: currentPool };
-}
+const resolveAuthenticatedPool = createHyperdrivePoolCache("authenticated");
+const resolveSystemPool = createHyperdrivePoolCache("system");
 
 /**
  * Returns the PostgreSQL pool for tenant-authenticated queries.
  *
  * Connects via `DB_AUTHENTICATED` where Row Level Security is enforced from
- * verified session claims. Request-owned calls close clients on release;
- * deployed managed pools are reused per isolate and connection string.
+ * verified session claims.
  *
  * @param env - Worker environment bindings containing `DB_AUTHENTICATED`.
- * @returns Cached or newly initialized Pool for authenticated transactions.
+ * @returns Cached or request-owned Pool for authenticated transactions.
  */
 export function authenticatedPoolFor(env: ApiWorkerEnv): Pool {
-  const next = poolFor(
-    env.DB_AUTHENTICATED,
-    authenticatedPool,
-    authenticatedConnectionString,
-    "authenticated",
-    env,
-  );
-  authenticatedPool = next.pool;
-  authenticatedConnectionString = next.connectionString;
-  return next.pool;
+  return resolveAuthenticatedPool(env.DB_AUTHENTICATED, env);
 }
 
 /**
  * Returns the PostgreSQL pool for system/administrative queries.
  *
- * Connects via `DB_SYSTEM` for privileged background operations. Request-owned
- * calls close clients on release; deployed managed pools are reused per isolate.
+ * Connects via `DB_SYSTEM` for privileged cross-tenant operations.
  *
  * @param env - Worker environment bindings containing `DB_SYSTEM`.
- * @returns Cached or newly initialized Pool for system transactions.
+ * @returns Cached or request-owned Pool for system transactions.
  */
 export function systemPoolFor(env: ApiWorkerEnv): Pool {
-  const next = poolFor(env.DB_SYSTEM, systemPool, systemConnectionString, "system", env);
-  systemPool = next.pool;
-  systemConnectionString = next.connectionString;
-  return next.pool;
+  return resolveSystemPool(env.DB_SYSTEM, env);
 }
 
 /**

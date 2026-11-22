@@ -6,33 +6,27 @@ import { Context } from "effect";
  */
 export interface RequestContextData {
   readonly requestId: string;
-  readonly session?: Readonly<Record<string, unknown>> | null;
+  readonly session?: object | null;
   readonly tenantId?: string;
   readonly traceId: string;
 }
 
 /**
  * Request-scoped dependency tag for HTTP request metadata.
- *
- * Provides fiber-isolated access to request ID, trace ID, and session state without
- * allowing cross-request state leakage or mutating global singleton instances.
  */
 export class RequestContext extends Context.Service<RequestContext, RequestContextData>()(
   "RequestContext",
 ) {}
 
 /**
- * Creates a validated RequestContextData record for dependency injection.
+ * Builds an immutable RequestContextData record from caller-supplied correlation and session metadata.
  *
- * Ensures request and trace correlation identifiers are present and non-empty,
- * defaulting to fallback identifiers when not provided.
- *
- * @param data - Input metadata including optional request ID and trace ID.
- * @returns Fully populated, immutable RequestContextData instance.
+ * @param data - Request correlation IDs, optional tenant ID, and optional verified session claims.
+ * @returns Immutable RequestContextData with `session` normalized to `null` when omitted.
  */
 export function makeRequestContext(data: {
   readonly requestId: string;
-  readonly session?: Readonly<Record<string, unknown>> | null;
+  readonly session?: object | null;
   readonly tenantId?: string;
   readonly traceId: string;
 }): RequestContextData {

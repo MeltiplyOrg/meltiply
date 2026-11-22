@@ -1,14 +1,6 @@
 import type { PlatformCapability } from "@meltiply/domain";
-import { extractRateLimitBudget } from "./rate-limit";
-import {
-  applyThreadsOptions,
-  parseThreadsOptions,
-  threadsOptionsIssue,
-  type ThreadsPublishOptions,
-} from "./threads-options";
 
 import {
-  addSeconds,
   confirmedFailure,
   isHttp404,
   malformed,
@@ -17,32 +9,43 @@ import {
 } from "./adapter-helpers";
 import { classifyProviderFailure, ProviderAdapterError } from "./failures";
 import { ProviderHttpClient } from "./http";
+import { IDEMPOTENCY_KEY_MAX_CHARS, OAUTH_STATE_MAX_CHARS, PROVIDER_LIMITS } from "./limits";
 import {
   assertConfiguredRedirectUri,
   bearer,
-  boundedCursor,
   boundedString,
   boundedText,
+  codePointLength,
   containerOperationId,
   exactRedirectUri,
-  metaContainerFailureCode,
-  metricValue,
+  insightValue,
+  normalizeContentType,
   parseContainerOperationId,
+  parseMetaCommentPage,
+  parseMetaInsightsMap,
   providerIdentifier,
   record,
   required,
   secureUrl,
-  timestamp,
   validatePageInput,
 } from "./meta-common";
-import type { MetaContainerOperation } from "./meta-common";
+import {
+  lookupMetaContainer,
+  readMetaContainer,
+  type MetaContainerProtocolConfig,
+} from "./meta-containers";
+import { exchangeAuthorizationCodeForm, parseMetaBearerToken } from "./oauth-helpers";
+import { extractRateLimitBudget } from "./rate-limit";
+import {
+  applyThreadsOptions,
+  parseThreadsOptions,
+  threadsOptionsIssue,
+  type ThreadsPublishOptions,
+} from "./threads-options";
 import type {
   OAuthConnection,
   ProviderAdapter,
-  ProviderCredentials,
-  ProviderOperationResult,
   ProviderPublicationLookup,
-  ProviderPublicationStatus,
   ProviderRequestContext,
   ProviderTokenSet,
   PublishInput,
@@ -50,9 +53,7 @@ import type {
 
 const apiOrigin = "https://graph.threads.com";
 const authorizationOrigin = "https://threads.com";
-const imageMaximumBytes = 8 * 1024 * 1024;
-const videoMaximumBytes = 500 * 1024 * 1024;
-const tokenLifetimeMaximumSeconds = 90 * 24 * 60 * 60;
+const limits = PROVIDER_LIMITS.threads;
 
 const publishingScopes = ["threads_basic", "threads_content_publish", "threads_delete"] as const;
 const additionalPublishingScopes = [
@@ -69,7 +70,7 @@ const engagementScopes = [
 ] as const;
 
 /** Threads' caption ceiling remains known even before live publishing is configured. */
-export const THREADS_MAX_CAPTION_LENGTH = 500;
+export const THREADS_MAX_CAPTION_LENGTH = limits.maxCaptionCodePoints;
 
 const capability: PlatformCapability = {
   accepted_mime_types: ["image/jpeg", "image/png", "video/mp4", "video/quicktime"],
@@ -78,10 +79,10 @@ const capability: PlatformCapability = {
   comments: true,
   connect_available: true,
   max_caption_length: THREADS_MAX_CAPTION_LENGTH,
-  max_file_size: videoMaximumBytes,
-  max_hashtags: null,
-  max_media_count: 20,
-  max_video_duration_sec: 300,
+  max_file_size: limits.maxVideoBytes,
+  max_hashtags: limits.maxHashtags,
+  max_media_count: limits.maxCarouselItems,
+  max_video_duration_sec: limits.maxVideoDurationSeconds,
   min_media_count: 0,
   multi_asset_types: ["image", "video"],
   notes: [
@@ -98,9 +99,6 @@ const capability: PlatformCapability = {
   publish: true,
   reply: true,
 };
-
-/** Threads' documented carousel ceiling of items in a single container. */
-const maximumCarouselItems = 20;
 
 export interface ThreadsAdapterOptions {
   clientId: string;
@@ -120,7 +118,7 @@ export interface ThreadsAdapterOptions {
  */
 function postText(input: PublishInput): string {
   const caption = input.caption.trim();
-  if ([...caption].length > THREADS_MAX_CAPTION_LENGTH) {
+  if (codePointLength(caption) > THREADS_MAX_CAPTION_LENGTH) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
         code: "threads_content_invalid",
@@ -142,13 +140,11 @@ interface ThreadsAttachment {
  * remote_ingest mode, an HTTPS URL, JPEG/PNG under 8 MiB, and MP4/MOV under the
  * 500 MiB upload ceiling. Carousel items are held to the same bounds as single
  * posts because Threads publishes them as one container.
- * @param input - Publish input whose `media[index]` is being validated.
- * @param index - Attachment position in creator order.
+ * @param media - Attachment in creator order.
  * @returns The attachment kind and its canonical HTTPS URL.
  * @throws ProviderAdapterError when the attachment cannot be published.
  */
-function attachment(input: PublishInput, index: number): ThreadsAttachment {
-  const media = input.media[index]!;
+function attachment(media: PublishInput["media"][number]): ThreadsAttachment {
   if (media.mode !== "remote_ingest") {
     throw new ProviderAdapterError(
       classifyProviderFailure({
@@ -166,13 +162,13 @@ function attachment(input: PublishInput, index: number): ThreadsAttachment {
       }),
     );
   }
-  const contentType = media.contentType.split(";", 1)[0]!.toLowerCase();
+  const contentType = normalizeContentType(media.contentType);
   const fileSize = media.fileSize;
   const valid =
     Number.isSafeInteger(fileSize) &&
     fileSize >= 1 &&
-    ((["image/jpeg", "image/png"].includes(contentType) && fileSize <= imageMaximumBytes) ||
-      (["video/mp4", "video/quicktime"].includes(contentType) && fileSize <= videoMaximumBytes));
+    ((["image/jpeg", "image/png"].includes(contentType) && fileSize <= limits.maxImageBytes) ||
+      (["video/mp4", "video/quicktime"].includes(contentType) && fileSize <= limits.maxVideoBytes));
   if (!valid) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
@@ -268,7 +264,7 @@ function postAttachments(input: PublishInput): {
   attachments: ThreadsAttachment[];
   text: string;
 } {
-  if (input.media.length > maximumCarouselItems) {
+  if (input.media.length > limits.maxCarouselItems) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
         code: "threads_carousel_too_large",
@@ -277,7 +273,7 @@ function postAttachments(input: PublishInput): {
     );
   }
   return {
-    attachments: input.media.map((_, index) => attachment(input, index)),
+    attachments: input.media.map(attachment),
     text: postText(input),
   };
 }
@@ -290,6 +286,30 @@ function postAttachments(input: PublishInput): {
 function requiredPostId(lookup: ProviderPublicationLookup): string {
   return requiredIdentifier(lookup.providerPostId, "threads_post_id_required");
 }
+
+/** Threads' Meta container protocol parameters. */
+const containerProtocol: MetaContainerProtocolConfig = {
+  apiOrigin,
+  containerReadUrl(containerId) {
+    const url = new URL(`/${encodeURIComponent(containerId)}`, apiOrigin);
+    url.searchParams.set("fields", "id,status,error_message");
+    return url.toString();
+  },
+  extractWarnings(body) {
+    return body.crossreshare_to_ig_status === "FAILED"
+      ? ["instagram_crossshare_failed"]
+      : undefined;
+  },
+  failureDetailField: "error_message",
+  provider: "threads",
+  publishUrl(_credentials, containerId) {
+    const url = new URL("/me/threads_publish", apiOrigin);
+    url.searchParams.set("creation_id", containerId);
+    return url.toString();
+  },
+  publishedOperationPhase: "retain",
+  statusField: "status",
+};
 
 /**
  * Instantiates a ProviderAdapter for Threads publishing, replies, comments, and analytics.
@@ -312,11 +332,12 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
     allowedOrigins: [apiOrigin],
     ...(options.fetch ? { fetch: options.fetch } : {}),
     now,
-    rateLimitBudget: (headers) => extractRateLimitBudget("threads", headers),
+    platform: "threads",
     ...(options.timeoutMilliseconds === undefined
       ? {}
       : { timeoutMilliseconds: options.timeoutMilliseconds }),
   });
+
   /**
    * Introspects the current token with the app credential, retaining only
    * provider-reported grants. Requesting a new optional publishing permission
@@ -335,171 +356,114 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       url: url.toString(),
     });
     const data = record(record(response.body)?.data);
-    const scopes = data?.scopes;
+    const rawScopes = data?.scopes;
     if (
       data?.is_valid !== true ||
       !providerIdentifier(data.user_id) ||
       (expectedAccount && data.user_id !== expectedAccount) ||
-      !Array.isArray(scopes) ||
-      scopes.some((scope) => typeof scope !== "string" || !/^[a-z_]+$/.test(scope))
-    )
+      !Array.isArray(rawScopes)
+    ) {
       throw malformed();
-    return [...new Set(scopes as string[])];
-  };
-
-  /**
-   * Issues the single finalizing publish for a ready Threads media container.
-   * Success and deterministic rejection retain the 'created' operation identity; an
-   * ambiguous outcome records 'submitted:<container>' so reconciliation can prove the
-   * publish was dispatched and must never be issued again.
-   * Returns the normalized ProviderOperationResult for the publish attempt.
-   */
-  const publishContainer = async (
-    context: ProviderRequestContext,
-    accessToken: string,
-    containerId: string,
-  ): Promise<ProviderOperationResult> => {
-    const url = new URL("/me/threads_publish", apiOrigin);
-    url.searchParams.set("creation_id", containerId);
-    try {
-      const response = await http.request<unknown>(context, {
-        headers: bearer(accessToken),
-        method: "POST",
-        sideEffectPossible: true,
-        url: url.toString(),
-      });
-      const providerPostId = providerIdentifier(record(response.body)?.id);
-      if (!providerPostId) throw malformed(true);
-      return {
-        outcome: "confirmed_success",
-        providerOperationId: containerOperationId("created", containerId),
-        providerPostId,
-        ...(record(response.body)?.crossreshare_to_ig_status === "FAILED"
-          ? { warnings: ["instagram_crossshare_failed" as const] }
-          : {}),
-      };
-    } catch (cause) {
-      if (!(cause instanceof ProviderAdapterError)) throw cause;
-      return cause.failure.classification === "ambiguous"
-        ? unknownResult(cause.failure, containerOperationId("submitted", containerId))
-        : {
-            failure: cause.failure,
-            outcome: "confirmed_failure",
-            providerOperationId: containerOperationId("created", containerId),
-          };
     }
+    const scopes = new Set<string>();
+    for (const scope of rawScopes) {
+      if (typeof scope !== "string" || !/^[a-z_]+$/.test(scope)) throw malformed();
+      scopes.add(scope);
+    }
+    return [...scopes];
   };
 
-  /**
-   * Reads a Threads media container's processing status without side effects.
-   * Requests the documented `status` and `error_message` fields; the raw error detail is
-   * bounded here and only ever consumed through metaContainerFailureCode so provider
-   * payloads are never persisted or returned.
-   * Returns the validated container record, or undefined when the container is gone (404).
-   * Throws ProviderAdapterError on transport failure or malformed payloads.
-   */
-  const readContainer = async (
-    context: ProviderRequestContext,
-    accessToken: string,
-    containerId: string,
-  ): Promise<Record<string, unknown> | undefined> => {
-    const url = new URL(`/${encodeURIComponent(containerId)}`, apiOrigin);
-    url.searchParams.set("fields", "id,status,error_message");
-    let response;
-    try {
-      response = await http.request<unknown>(context, {
-        headers: bearer(accessToken),
+  const engagementMethods: Pick<ProviderAdapter, "listAnalytics" | "listComments" | "reply"> = {
+    async listAnalytics(context, credentials, lookup, page) {
+      validatePageInput("threads", page);
+      if (page.cursor) {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({
+            code: "threads_analytics_not_paginated",
+            status: 400,
+          }),
+        );
+      }
+      const providerPostId = requiredPostId(lookup);
+      const url = new URL(`/${encodeURIComponent(providerPostId)}/insights`, apiOrigin);
+      url.searchParams.set("metric", "views,likes,replies,reposts,quotes,shares");
+      const response = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
         method: "GET",
         url: url.toString(),
       });
-    } catch (cause) {
-      if (isHttp404(cause)) return undefined;
-      throw cause;
-    }
-    const body = record(response.body);
-    if (providerIdentifier(body?.id) !== containerId) throw malformed();
-    return body;
-  };
-
-  /**
-   * Reconciles a persisted Threads container operation into a publication status.
-   * A 'created' container that reports FINISHED is finalized exactly once through
-   * publishContainer; a 'submitted' container is never republished, so FINISHED stays
-   * an ambiguous outcome awaiting operator disposition. Container ERROR detail is
-   * normalized to a safe diagnostic category code.
-   * Returns ProviderPublicationStatus for the operation, or not_found when the
-   * container no longer exists.
-   */
-  const lookupContainer = async (
-    context: ProviderRequestContext,
-    credentials: ProviderCredentials,
-    operation: MetaContainerOperation,
-  ): Promise<ProviderPublicationStatus> => {
-    const retainedOperationId = containerOperationId(operation.phase, operation.id);
-    const body = await readContainer(context, credentials.accessToken, operation.id);
-    if (!body) return { state: "not_found" };
-    switch (body.status) {
-      case "IN_PROGRESS":
-        return {
-          providerOperationId: retainedOperationId,
-          state: "processing",
-        };
-      case "FINISHED":
-        if (operation.phase === "created") {
-          const result = await publishContainer(context, credentials.accessToken, operation.id);
-          if (result.outcome === "confirmed_success") {
-            return { result, state: "published" };
-          }
-          if (result.outcome === "unknown") {
-            return { result, state: "unknown" };
-          }
-          // A retryable publish rejection keeps the ready container under its
-          // 'created' identity so the next poll retries finalization.
-          return result.failure.retryable
-            ? {
-                providerOperationId: retainedOperationId,
-                state: "processing",
-              }
-            : { result, state: "failed" };
-        }
-        return {
-          result: unknownResult(
-            classifyProviderFailure({
-              code: "threads_publish_evidence_missing",
-              sideEffectPossible: true,
-            }),
-            retainedOperationId,
-          ),
-          state: "unknown",
-        };
-      case "PUBLISHED":
-        return {
-          result: {
-            outcome: "confirmed_success",
-            providerOperationId: retainedOperationId,
+      const metrics = parseMetaInsightsMap(response.body, { valuesOnly: true });
+      return {
+        items: [
+          {
+            comments: metrics.get("replies") ?? 0,
+            impressions: 0,
+            likes: metrics.get("likes") ?? 0,
+            providerPostId,
+            reach: 0,
+            recordedAt: now().toISOString(),
+            shares:
+              (metrics.get("shares") ?? 0) +
+              (metrics.get("reposts") ?? 0) +
+              (metrics.get("quotes") ?? 0),
+            views: metrics.get("views") ?? 0,
+            watchTimeSeconds: 0,
           },
-          state: "published",
-        };
-      case "ERROR":
-        return {
-          result: confirmedFailure(
-            metaContainerFailureCode("threads", body.error_message),
-            422,
-            retainedOperationId,
-          ),
-          state: "failed",
-        };
-      case "EXPIRED":
-        return {
-          result: confirmedFailure("threads_container_expired", 410, retainedOperationId),
-          state: "failed",
-        };
-      default:
-        throw malformed();
-    }
+        ],
+      };
+    },
+
+    async listComments(context, credentials, lookup, page) {
+      validatePageInput("threads", page);
+      const providerPostId = requiredPostId(lookup);
+      const url = new URL(`/${encodeURIComponent(providerPostId)}/conversation`, apiOrigin);
+      url.searchParams.set("fields", "id,text,timestamp,username,profile_picture_url");
+      url.searchParams.set("limit", String(page.limit));
+      url.searchParams.set("reverse", "false");
+      if (page.cursor) url.searchParams.set("after", page.cursor);
+      const response = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: url.toString(),
+      });
+      return parseMetaCommentPage(response.body, providerPostId, page.limit, {
+        avatarField: "profile_picture_url",
+        usernameField: "username",
+      });
+    },
+
+    /**
+     * Creates a Threads reply container and returns its durable 'created:<container>'
+     * operation identity without publishing. Reply containers follow the same readiness
+     * lifecycle as distribution containers: lookupPublication polls the container and
+     * finalizes it exactly once, so a reply is never published before it is ready.
+     */
+    async reply(context, credentials, input) {
+      required("idempotencyKey", input.idempotencyKey, IDEMPOTENCY_KEY_MAX_CHARS);
+      const providerCommentId = providerIdentifier(input.providerCommentId);
+      const text = boundedText(input.text.trim(), THREADS_MAX_CAPTION_LENGTH);
+      if (!providerCommentId || !text) {
+        return confirmedFailure("threads_reply_invalid", 400);
+      }
+      const url = new URL("/me/threads", apiOrigin);
+      url.searchParams.set("media_type", "TEXT");
+      url.searchParams.set("reply_to_id", providerCommentId);
+      url.searchParams.set("text", text);
+      const response = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "POST",
+        url: url.toString(),
+      });
+      const containerId = providerIdentifier(record(response.body)?.id);
+      if (!containerId) throw malformed();
+      return {
+        outcome: "confirmed_success",
+        providerOperationId: containerOperationId("created", containerId),
+      };
+    },
   };
 
-  const adapter: ProviderAdapter = {
+  return {
     extractRateLimitBudget: (headers) => extractRateLimitBudget("threads", headers),
     /**
      * Builds the Threads OAuth authorize URL for the configured client, redirect URI,
@@ -513,7 +477,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       url.searchParams.set("redirect_uri", configuredRedirectUri);
       url.searchParams.set("response_type", "code");
       url.searchParams.set("scope", configuredScopes.join(","));
-      url.searchParams.set("state", required("state", input.state, 1_024));
+      url.searchParams.set("state", required("state", input.state, OAUTH_STATE_MAX_CHARS));
       return url.toString();
     },
 
@@ -532,7 +496,13 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
           return confirmedFailure("threads_cancel_evidence_invalid", 400);
         }
         const retainedOperationId = containerOperationId(operation.phase, operation.id);
-        const body = await readContainer(context, credentials.accessToken, operation.id);
+        const body = await readMetaContainer(
+          http,
+          containerProtocol,
+          context,
+          credentials.accessToken,
+          operation.id,
+        );
         if (!body || body.status === "ERROR" || body.status === "EXPIRED") {
           return {
             outcome: "confirmed_success",
@@ -597,21 +567,16 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
      */
     async exchangeAuthorizationCode(context, input): Promise<OAuthConnection> {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
-      const shortForm = new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        code: required("authorizationCode", input.code),
-        grant_type: "authorization_code",
-        redirect_uri: configuredRedirectUri,
-      });
-      const shortResponse = await http.request<unknown>(context, {
-        body: shortForm,
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        method: "POST",
-        url: `${apiOrigin}/oauth/access_token`,
-      });
-      const shortBody = record(shortResponse.body);
-      const shortToken = boundedString(shortBody?.access_token, 16_384);
+      const shortBody = record(
+        await exchangeAuthorizationCodeForm(http, context, {
+          clientId,
+          clientSecret,
+          code: input.code,
+          redirectUri: configuredRedirectUri,
+          tokenUrl: `${apiOrigin}/oauth/access_token`,
+        }),
+      );
+      const shortToken = boundedString(shortBody?.access_token, limits.tokenMaxChars);
       if (!shortToken || !providerIdentifier(String(shortBody?.user_id ?? ""))) {
         throw malformed();
       }
@@ -624,10 +589,11 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         method: "GET",
         url: longUrl.toString(),
       });
-      const longBody = record(longResponse.body);
-      const accessToken = boundedString(longBody?.access_token, 16_384);
-      if (!accessToken || longBody?.token_type !== "bearer") throw malformed();
-      const expiresAt = addSeconds(now(), longBody.expires_in, tokenLifetimeMaximumSeconds);
+      const { accessToken, expiresAt } = parseMetaBearerToken(longResponse.body, {
+        maxLifetimeSeconds: limits.tokenLifetimeMaxSeconds,
+        maxTokenChars: limits.tokenMaxChars,
+        now: now(),
+      });
 
       const profileUrl = new URL("/me", apiOrigin);
       profileUrl.searchParams.set("fields", "id,username,name,threads_profile_picture_url");
@@ -687,134 +653,18 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       const data = record(response.body)?.data;
       if (!Array.isArray(data)) throw malformed();
       const metric = data.map(record).find((item) => item?.name === "followers_count");
-      const values = metric?.values;
-      const total = record(metric?.total_value)?.value;
-      const followers = Array.isArray(values)
-        ? metricValue(record(values[0])?.value)
-        : metricValue(total);
+      const followers = metric ? insightValue(metric) : undefined;
       if (followers === undefined) throw malformed();
       return { followers, recordedAt: now().toISOString() };
     },
 
-    async listAnalytics(context, credentials, lookup, page) {
-      validatePageInput("threads", page);
-      if (page.cursor) {
-        throw new ProviderAdapterError(
-          classifyProviderFailure({
-            code: "threads_analytics_not_paginated",
-            status: 400,
-          }),
-        );
-      }
-      const providerPostId = requiredPostId(lookup);
-      const url = new URL(`/${encodeURIComponent(providerPostId)}/insights`, apiOrigin);
-      url.searchParams.set("metric", "views,likes,replies,reposts,quotes,shares");
-      const response = await http.request<unknown>(context, {
-        headers: bearer(credentials.accessToken),
-        method: "GET",
-        url: url.toString(),
-      });
-      const data = record(response.body)?.data;
-      if (!Array.isArray(data) || data.length > 20) throw malformed();
-      const metrics = new Map<string, number>();
-      for (const item of data) {
-        const metric = record(item);
-        const name = boundedString(metric?.name, 64);
-        const values = metric?.values;
-        const value = Array.isArray(values) ? metricValue(record(values[0])?.value) : undefined;
-        if (!name || value === undefined || metrics.has(name)) {
-          throw malformed();
-        }
-        metrics.set(name, value);
-      }
-      return {
-        items: [
-          {
-            comments: metrics.get("replies") ?? 0,
-            impressions: 0,
-            likes: metrics.get("likes") ?? 0,
-            providerPostId,
-            reach: 0,
-            recordedAt: now().toISOString(),
-            shares:
-              (metrics.get("shares") ?? 0) +
-              (metrics.get("reposts") ?? 0) +
-              (metrics.get("quotes") ?? 0),
-            views: metrics.get("views") ?? 0,
-            watchTimeSeconds: 0,
-          },
-        ],
-      };
-    },
-
-    async listComments(context, credentials, lookup, page) {
-      validatePageInput("threads", page);
-      const providerPostId = requiredPostId(lookup);
-      const url = new URL(`/${encodeURIComponent(providerPostId)}/conversation`, apiOrigin);
-      url.searchParams.set("fields", "id,text,timestamp,username,profile_picture_url");
-      url.searchParams.set("limit", String(page.limit));
-      url.searchParams.set("reverse", "false");
-      if (page.cursor) url.searchParams.set("after", page.cursor);
-      const response = await http.request<unknown>(context, {
-        headers: bearer(credentials.accessToken),
-        method: "GET",
-        url: url.toString(),
-      });
-      const body = record(response.body);
-      if (!Array.isArray(body?.data) || body.data.length > page.limit) {
-        throw malformed();
-      }
-      const identifiers = new Set<string>();
-      const items = body.data.map((value) => {
-        const comment = record(value);
-        const providerCommentId = providerIdentifier(comment?.id);
-        const bodyText = boundedText(comment?.text, 10_000, true);
-        const commentedAt = timestamp(comment?.timestamp);
-        const authorDisplayName =
-          comment?.username === undefined ? undefined : boundedString(comment.username, 500);
-        const authorAvatarUrl =
-          comment?.profile_picture_url === undefined
-            ? undefined
-            : secureUrl(comment.profile_picture_url)?.href;
-        if (
-          !providerCommentId ||
-          identifiers.has(providerCommentId) ||
-          bodyText === undefined ||
-          !commentedAt ||
-          (comment?.username !== undefined && !authorDisplayName) ||
-          (comment?.profile_picture_url !== undefined && !authorAvatarUrl)
-        ) {
-          throw malformed();
-        }
-        identifiers.add(providerCommentId);
-        return {
-          ...(authorAvatarUrl ? { authorAvatarUrl } : {}),
-          ...(authorDisplayName ? { authorDisplayName } : {}),
-          body: bodyText,
-          commentedAt,
-          providerCommentId,
-          providerPostId,
-        };
-      });
-      const paging = record(body.paging);
-      const cursors = record(paging?.cursors);
-      if ((body.paging !== undefined && !paging) || (paging?.cursors !== undefined && !cursors)) {
-        throw malformed();
-      }
-      const rawNextCursor = cursors?.after;
-      const nextCursor = rawNextCursor === undefined ? undefined : boundedCursor(rawNextCursor);
-      if (rawNextCursor !== undefined && !nextCursor) throw malformed();
-      return {
-        items,
-        ...(nextCursor ? { nextCursor } : {}),
-      };
-    },
+    ...(engagementEnabled ? engagementMethods : {}),
 
     /**
      * Resolves publication status from either a confirmed post ID or a persisted
      * container operation identity. A matching Post ID confirms publication even
      * when Meta omits a copyright-restricted permalink; present URLs stay validated.
-     * Container lookups delegate to lookupContainer, which polls readiness and finalizes a
+     * Container lookups delegate to lookupMetaContainer, which polls readiness and finalizes a
      * 'created' container exactly once without ever republishing a 'submitted' one.
      */
     async lookupPublication(context, credentials, lookup) {
@@ -852,14 +702,15 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       }
       const operation = parseContainerOperationId(lookup.providerOperationId);
       if (!operation) throw malformed();
-      return lookupContainer(context, credentials, operation);
+      return lookupMetaContainer(http, containerProtocol, context, credentials, operation);
     },
+
     /**
      * Creates a durable 'created:<parent>' operation for text or ordered media;
      * lookupPublication polls readiness and finalizes it exactly once. Text
      * containers can also be asynchronous, so they never bypass that gate.
      * Multi-attachment posts first create one unpublished item container per
-     * attachment, then a CAROUSEL parent binding those item ids in creator order.
+     * attachment in creator order, then a CAROUSEL parent binding those item ids.
      * @param context - Request context carrying abort signal and rate telemetry.
      * @param credentials - Threads long-lived access token.
      * @param input - Composed post text plus the Post's ordered attachments.
@@ -867,7 +718,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
      * reconciliation, or the published identity of a native repost.
      */
     async publish(context, credentials, input) {
-      required("idempotencyKey", input.idempotencyKey, 255);
+      required("idempotencyKey", input.idempotencyKey, IDEMPOTENCY_KEY_MAX_CHARS);
       const { attachments, text } = postAttachments(input);
       const options = parseThreadsOptions(input.providerOptions?.threads ?? {});
       if (!options || threadsOptionsIssue(options, text, attachments.length)) {
@@ -916,9 +767,8 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
           ),
         };
       }
-      // Items are created one at a time in creator order so a rejected
-      // attachment stops the flow before later items exist, and the returned
-      // ids stay aligned with the published carousel order.
+      // Sequential item creation preserves creator order and stops on the first
+      // rejected attachment before creating later remote containers.
       const children: string[] = [];
       for (const item of attachments) {
         children.push(await createContainer(carouselItemParameters(item), false));
@@ -946,44 +796,16 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         method: "GET",
         url: url.toString(),
       });
-      const body = record(response.body);
-      const accessToken = boundedString(body?.access_token, 16_384);
-      if (!accessToken || body?.token_type !== "bearer") throw malformed();
+      const { accessToken, expiresAt } = parseMetaBearerToken(response.body, {
+        maxLifetimeSeconds: limits.tokenLifetimeMaxSeconds,
+        maxTokenChars: limits.tokenMaxChars,
+        now: now(),
+      });
       return {
         accessToken,
-        expiresAt: addSeconds(now(), body.expires_in, tokenLifetimeMaximumSeconds),
+        expiresAt,
         refreshToken: accessToken,
         scopes: await grantedScopes(context, accessToken),
-      };
-    },
-
-    /**
-     * Creates a Threads reply container and returns its durable 'created:<container>'
-     * operation identity without publishing. Reply containers follow the same readiness
-     * lifecycle as distribution containers: lookupPublication polls the container and
-     * finalizes it exactly once, so a reply is never published before it is ready.
-     */
-    async reply(context, credentials, input) {
-      required("idempotencyKey", input.idempotencyKey, 255);
-      const providerCommentId = providerIdentifier(input.providerCommentId);
-      const text = boundedText(input.text.trim(), 500);
-      if (!providerCommentId || !text) {
-        return confirmedFailure("threads_reply_invalid", 400);
-      }
-      const url = new URL("/me/threads", apiOrigin);
-      url.searchParams.set("media_type", "TEXT");
-      url.searchParams.set("reply_to_id", providerCommentId);
-      url.searchParams.set("text", text);
-      const response = await http.request<unknown>(context, {
-        headers: bearer(credentials.accessToken),
-        method: "POST",
-        url: url.toString(),
-      });
-      const containerId = providerIdentifier(record(response.body)?.id);
-      if (!containerId) throw malformed();
-      return {
-        outcome: "confirmed_success",
-        providerOperationId: containerOperationId("created", containerId),
       };
     },
 
@@ -995,10 +817,4 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
 
     transferModes: ["remote_ingest"],
   };
-  if (!engagementEnabled) {
-    delete adapter.listAnalytics;
-    delete adapter.listComments;
-    delete adapter.reply;
-  }
-  return adapter;
 }

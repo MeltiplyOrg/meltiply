@@ -236,6 +236,29 @@ describe("coverageHostnames", () => {
       ["dev-tunnel-app.meltiply.com", "dev-tunnel-public.meltiply.com"],
     );
   });
+
+  it("rejects unknown style or kind even in shared mode", () => {
+    assert.throws(
+      () =>
+        coverageHostnames({
+          branch: "dev-tunnel",
+          domain: "meltiply.com",
+          shared: true,
+          style: "bogus",
+        }),
+      /style must be one of/,
+    );
+    assert.throws(
+      () =>
+        coverageHostnames({
+          branch: "dev-tunnel",
+          domain: "meltiply.com",
+          kind: "bogus",
+          shared: true,
+        }),
+      /kind must be one of/,
+    );
+  });
 });
 
 describe("tunnelNameFor", () => {
@@ -294,6 +317,30 @@ describe("tunnel-hostname CLI", () => {
     const result = runScript(["--branch", "dev-tunnel", "--kind", "app", "--coverage", "--shared"]);
     assert.equal(result.status, 0);
     assert.equal(result.stdout, "*.meltiply.com\n");
+  });
+
+  it("rejects invalid style and kind in shared coverage mode", () => {
+    const badStyle = runScript([
+      "--branch",
+      "dev-tunnel",
+      "--coverage",
+      "--shared",
+      "--style",
+      "bogus",
+    ]);
+    assert.equal(badStyle.status, 1);
+    assert.match(badStyle.stderr, /style must be one of/);
+
+    const badKind = runScript([
+      "--branch",
+      "dev-tunnel",
+      "--coverage",
+      "--shared",
+      "--kind",
+      "bogus",
+    ]);
+    assert.equal(badKind.status, 1);
+    assert.match(badKind.stderr, /kind must be one of/);
   });
 
   it("refuses hostname generation without an explicitly configured owned domain", () => {

@@ -182,6 +182,9 @@ function relayAuthenticatedDiagnostic(
   context: FrontendTelemetryContext,
 ): void {
   if (payload.kind !== "frontend-error") return;
+  // A client exception tagged `api-error` is the API boundary's own failure
+  // mislabeled by an older producer; it is never a crash to report upstream.
+  if (safeField(payload.field) === "api-error") return;
   const authorization = request.headers.get("Authorization");
   if (!authorization || !/^Bearer \S+$/.test(authorization)) return;
   const stack =

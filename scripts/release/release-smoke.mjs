@@ -2,9 +2,10 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { readJsonFile, writeEvidence } from "./release-guard.mjs";
+import { assertReleaseBound, readJsonFile, writeEvidence } from "./release-guard.mjs";
 import { readBoundedJsonResponse } from "./release-http.mjs";
 import {
+  assertWorkerTraffic,
   candidatePath,
   getWorkerTraffic,
   secretPath,
@@ -23,29 +24,6 @@ const smokePollAttempts = 60;
 const gitShaPattern = /^[0-9a-f]{40}$/;
 
 /**
- * Asserts that an evidence record binds the current release identity.
- *
- * @param {object} evidence - Parsed evidence record
- * @param {string} name - Evidence description for error reporting
- * @param {object} spec - Validated release specification
- * @returns {object} The validated evidence record
- * @throws {TypeError} If schema version, release ID, or Git SHA do not match
- */
-function assertReleaseEvidence(evidence, name, spec) {
-  if (
-    !evidence ||
-    typeof evidence !== "object" ||
-    Array.isArray(evidence) ||
-    evidence.schema_version !== 1 ||
-    evidence.release_id !== spec.release_id ||
-    evidence.git_sha !== spec.git_sha
-  ) {
-    throw new TypeError(`${name} does not match the release`);
-  }
-  return evidence;
-}
-
-/**
  * Loads the API candidate and secret-injection evidence for the release.
  *
  * The deployable candidate is the secret-injected version: it is the version
@@ -58,12 +36,12 @@ function assertReleaseEvidence(evidence, name, spec) {
  * @throws {TypeError} If evidence is missing, mismatched, or internally inconsistent
  */
 async function loadApiCandidateEvidence(outDir, spec) {
-  const candidate = assertReleaseEvidence(
+  const candidate = assertReleaseBound(
     await readJsonFile(candidatePath(outDir, "api"), "API candidate evidence"),
     "API candidate evidence",
     spec,
   );
-  const secrets = assertReleaseEvidence(
+  const secrets = assertReleaseBound(
     await readJsonFile(secretPath(outDir, "api"), "API secret evidence"),
     "API secret evidence",
     spec,
@@ -272,23 +250,6 @@ async function verifyCandidateVersion({ environment, outDir, runCommand, spec, v
 }
 
 /**
- * Asserts that control-plane traffic equals the expected deployment split.
- *
- * @param {Array<{ percentage: number, version_id: string }>} traffic - Observed traffic
- * @param {Array<{ percentage: number, version_id: string }>} expected - Expected traffic
- * @param {string} name - Context for error reporting
- * @throws {TypeError} If the observed split differs from the expected split
- */
-function assertTrafficSplit(traffic, expected, name) {
-  const normalized = [...expected].sort((left, right) =>
-    left.version_id.localeCompare(right.version_id),
-  );
-  if (JSON.stringify(traffic) !== JSON.stringify(normalized)) {
-    throw new TypeError(`${name} does not match the release traffic set`);
-  }
-}
-
-/**
  * Probes the immutable API candidate version over HTTPS before promotion.
  *
  * Loads candidate and secret evidence, re-verifies the secrets version tag and
@@ -417,7 +378,7 @@ export async function smokeLiveApi({
   let previousSha;
   let previousVersionId;
   if (spec.deployment_mode === "bootstrap") {
-    const deployment = assertReleaseEvidence(
+    const deployment = assertReleaseBound(
       await readJsonFile(
         path.join(outDir, "worker-api-deployment.json"),
         "API deployment evidence",
@@ -430,7 +391,7 @@ export async function smokeLiveApi({
     }
     expectedTraffic = [{ percentage: 100, version_id: versionId }];
   } else {
-    const rollout = assertReleaseEvidence(
+    const rollout = assertReleaseBound(
       await readJsonFile(
         path.join(outDir, `api-rollout-${percentage}.json`),
         "API rollout evidence",
@@ -463,7 +424,11 @@ export async function smokeLiveApi({
     environment,
     runCommand,
   });
-  assertTrafficSplit(observedTraffic, expectedTraffic, "API deployment");
+  assertWorkerTraffic(
+    observedTraffic,
+    expectedTraffic,
+    "API deployment does not match the release traffic set",
+  );
 
   const acceptedVersions = new Set([spec.git_sha]);
   if (previousSha !== undefined) acceptedVersions.add(previousSha);

@@ -1767,7 +1767,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         ? attachmentsRef.current.findIndex((attachment) => attachment.key === replaceKey)
         : -1;
       files.forEach((file, offset) => {
-        const key = `upload-${Date.now()}-${offset}-${file.size}-${file.name}`;
+        const key = `upload-${crypto.randomUUID()}`;
         // Only the first chosen file takes the targeted row's place; the rest
         // follow it, so a multi-file swap never leaves the old row behind.
         if (offset === 0 && index >= 0) {
@@ -1798,8 +1798,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         return;
       }
       const files = Array.from(event.dataTransfer.files);
-      files.forEach((file, offset) => {
-        const key = `upload-${Date.now()}-${offset}-${file.size}-${file.name}`;
+      files.forEach((file) => {
+        const key = `upload-${crypto.randomUUID()}`;
         startUpload(file, key, null, null);
       });
     },

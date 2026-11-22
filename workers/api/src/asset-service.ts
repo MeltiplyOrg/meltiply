@@ -31,7 +31,7 @@ import {
   activeBrandProfilePredicate,
   requireActiveBrandProfileEffect,
 } from "./brand-profile-guard";
-import { CoreApiError } from "./core-types";
+import { CoreApiError, toCoreApiErrorOrRethrow } from "./core-types";
 import {
   activeOrganizationIdEffect,
   withSystemTransactionEffect,
@@ -1281,7 +1281,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                 title: requiredText(input.title, "title", 200),
               };
             },
-            catch: (cause) => cause as CoreApiError,
+            catch: toCoreApiErrorOrRethrow,
           });
           const layout = uploadLayout(normalized.fileSize);
           const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify(normalized));
@@ -1625,7 +1625,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
               const current = now();
               yield* Effect.try({
                 try: () => ensureActiveSession(upload, current),
-                catch: (cause) => cause as CoreApiError,
+                catch: toCoreApiErrorOrRethrow,
               });
               if (
                 upload.strategy !== "multipart" ||
@@ -1803,11 +1803,11 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
               }
               yield* Effect.try({
                 try: () => ensureActiveSession(row, completionTime),
-                catch: (cause) => cause as CoreApiError,
+                catch: toCoreApiErrorOrRethrow,
               });
               const parts = yield* Effect.try({
                 try: () => validateCompletedParts(row, input.parts),
-                catch: (cause) => cause as CoreApiError,
+                catch: toCoreApiErrorOrRethrow,
               });
               yield* client.query(
                 `UPDATE asset_upload_sessions

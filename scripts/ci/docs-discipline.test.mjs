@@ -82,11 +82,28 @@ test("a closing fence may be longer than its opener", () => {
     "guide.md": [
       "```",
       "Measured on 2026-10-19.",
-      "````",
+      "`````",
       "Implementation note (2026-10-19): real finding.",
     ].join("\n"),
   });
-  assert.equal(collectDisciplineFindings(root, ["guide.md"]).length, 1);
+  const findings = collectDisciplineFindings(root, ["guide.md"]);
+  assert.equal(findings.length, 1, findings.join("\n"));
+  assert.match(findings[0], /guide\.md:4: dated implementation note/u);
+});
+
+test("a longer fence with an info string does not close an outer fence", () => {
+  const root = fixture({
+    "guide.md": [
+      "```md",
+      "````js",
+      "Implementation note (2026-10-19): still inside fence.",
+      "```",
+      "Measured on 2026-10-19: outside fence.",
+    ].join("\n"),
+  });
+  const findings = collectDisciplineFindings(root, ["guide.md"]);
+  assert.equal(findings.length, 1, findings.join("\n"));
+  assert.match(findings[0], /guide\.md:5: dated measurement/u);
 });
 
 test("double-backtick spans mask their whole content", () => {

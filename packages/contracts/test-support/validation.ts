@@ -41,16 +41,36 @@ export interface ContractDocument {
 
 const openApiPath = fileURLToPath(new URL("../openapi.yaml", import.meta.url));
 const methods: HttpMethod[] = ["delete", "get", "patch", "post", "put"];
+let cachedDocumentPromise: Promise<ContractDocument> | undefined;
+
+function isContractDocument(value: unknown): value is ContractDocument {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "paths" in value &&
+    typeof value.paths === "object" &&
+    value.paths !== null
+  );
+}
 
 /**
  * Loads and dereferences the canonical OpenAPI 3.1 specification document from disk.
- * Resolves all $ref pointers using SwaggerParser to produce a self-contained ContractDocument.
+ * Memoizes the dereferenced document per process so multiple test suites do not re-parse 7,000+ lines of YAML.
  *
  * @returns Promise resolving to the dereferenced ContractDocument.
  */
-export async function loadContractDocument(): Promise<ContractDocument> {
-  const source = await readFile(openApiPath, "utf8");
-  return (await SwaggerParser.dereference(YAML.parse(source))) as unknown as ContractDocument;
+export function loadContractDocument(): Promise<ContractDocument> {
+  if (!cachedDocumentPromise) {
+    cachedDocumentPromise = (async () => {
+      const source = await readFile(openApiPath, "utf8");
+      const dereferenced: unknown = await SwaggerParser.dereference(YAML.parse(source));
+      if (!isContractDocument(dereferenced)) {
+        throw new TypeError("OpenAPI document is missing top-level paths");
+      }
+      return dereferenced;
+    })();
+  }
+  return cachedDocumentPromise;
 }
 
 /**

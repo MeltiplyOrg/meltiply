@@ -222,6 +222,14 @@ html.theme-changing *::after {
   animation: dialog-popup-from-bottom 300ms var(--ease-enter) forwards;
 }
 
+/* Centered modals rest at their measured center; the keyframes above own
+ * entry and exit translation, and this rule pins the resting `translate` so
+ * the surface does not depend on the host's transform utilities. */
+.dialog-bottom-popup {
+  transform: none !important;
+  translate: var(--dialog-rest-x, -50%) var(--dialog-rest-y, -50%);
+}
+
 /* Radix retains the final dismissal until its bottom exit finishes. */
 [data-dialog-surface][data-state="closed"] {
   animation: dialog-popout-to-bottom 200ms var(--ease-exit) forwards;

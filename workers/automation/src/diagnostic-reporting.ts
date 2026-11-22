@@ -1,10 +1,9 @@
 import { Effect } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
-import { ProviderAdapterError } from "@meltiply/providers";
 import {
   createReportingServiceLive,
   diagnosticReportInput,
-  isProviderFailureClass,
+  extractProviderFailureClass,
   ReportingService,
   reportingConfiguration,
   type DiagnosticReportInput,
@@ -53,13 +52,6 @@ export function operationForScheduledUnit(unit: string): OperationCategory {
   return "other";
 }
 
-/** Canonical Provider class of an adapter failure, when the value carries one. */
-function providerFailureClass(cause: unknown): DiagnosticReportInput["failureClass"] {
-  if (!(cause instanceof ProviderAdapterError)) return undefined;
-  const classification = cause.failure?.classification;
-  return isProviderFailureClass(classification) ? classification : undefined;
-}
-
 /** Correlation facts a queue boundary already resolved for its log line. */
 export interface QueueDiagnosticContext {
   /** Provider whose queue carried the message, when the queue is Provider-scoped. */
@@ -83,7 +75,7 @@ export function queueDiagnosticReport(
   context: QueueDiagnosticContext,
 ): DiagnosticReportInput {
   const ambiguous = context.outcome === "ambiguous";
-  const failureClass = ambiguous ? "ambiguous" : providerFailureClass(cause);
+  const failureClass = ambiguous ? "ambiguous" : extractProviderFailureClass(cause);
   return diagnosticReportInput(cause, {
     ...(failureClass ? { category: "provider_failure" as const, failureClass } : {}),
     // A queue message that reached a processor was accepted work: the failure is
@@ -98,7 +90,7 @@ export function queueDiagnosticReport(
 
 /** Reports a failed maintenance unit without retaining its local name. */
 export function scheduledDiagnosticReport(cause: unknown, unit: string): DiagnosticReportInput {
-  const failureClass = providerFailureClass(cause);
+  const failureClass = extractProviderFailureClass(cause);
   return diagnosticReportInput(cause, {
     category: failureClass ? "provider_failure" : "scheduled_job_failure",
     ...(failureClass ? { failureClass } : {}),
@@ -112,7 +104,8 @@ export function workflowDiagnosticReport(
   cause: unknown,
   context: { readonly outcome: "ambiguous" | "rejected" | "retry"; readonly provider?: string },
 ): DiagnosticReportInput {
-  const failureClass = context.outcome === "ambiguous" ? "ambiguous" : providerFailureClass(cause);
+  const failureClass =
+    context.outcome === "ambiguous" ? "ambiguous" : extractProviderFailureClass(cause);
   return diagnosticReportInput(cause, {
     ...(failureClass ? { category: "provider_failure" as const, failureClass } : {}),
     handled: true,

@@ -1,13 +1,17 @@
-import { assertTranslationArray, expectedTranslationCount, ProviderError } from "./provider.mjs";
-import { isRetryableStatus } from "./retry.mjs";
+import {
+  assertTranslationArray,
+  createStatusError,
+  DEFAULT_TIMEOUT_MS,
+  expectedTranslationCount,
+  ProviderError,
+} from "./provider.mjs";
 
 const trailingSlashesPattern = /\/+$/u;
 
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const DEFAULT_OLLAMA_MODEL = "qwen3:8b";
 
-/** Default request timeout and context window for one local completion. */
-const DEFAULT_TIMEOUT_MS = 120_000;
+/** Default context window for one local completion. */
 const DEFAULT_CONTEXT_WINDOW = 8192;
 
 /**
@@ -52,25 +56,12 @@ function connectionError(error, url, model) {
  * @returns {ProviderError} Classified error.
  */
 function statusError(status, body, model) {
-  const detail = body.trim().slice(0, 500);
-  const suffix = detail ? `: ${detail}` : "";
-  if (status === 404) {
-    return new ProviderError(
-      `Ollama does not have model "${model}". Run \`ollama pull ${model}\`.${suffix}`,
-      { status, kind: "provider", retryable: false },
-    );
-  }
-  if (isRetryableStatus(status)) {
-    return new ProviderError(`Ollama is temporarily unavailable (HTTP ${status}).${suffix}`, {
-      status,
-      kind: "transient",
-      retryable: true,
-    });
-  }
-  return new ProviderError(`Ollama request failed (HTTP ${status}).${suffix}`, {
-    status,
-    kind: "provider",
-    retryable: false,
+  return createStatusError("Ollama", status, body, {
+    404: {
+      message: `Ollama does not have model "${model}". Run \`ollama pull ${model}\`.`,
+      kind: "provider",
+      retryable: false,
+    },
   });
 }
 

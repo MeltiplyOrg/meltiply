@@ -5,11 +5,12 @@ import {
   type PlatformCapability,
 } from "@meltiply/domain";
 
-import { assertHttpsOrLoopbackUrl } from "./meta-common";
 import { createFacebookAdapter } from "./facebook";
-import { createInstagramAdapter, INSTAGRAM_MAX_CAPTION_LENGTH } from "./instagram";
-import { createThreadsAdapter, THREADS_MAX_CAPTION_LENGTH } from "./threads";
-import { createTikTokAdapter, TIKTOK_MAX_CAPTION_LENGTH } from "./tiktok";
+import { createInstagramAdapter } from "./instagram";
+import { PROVIDER_LIMITS } from "./limits";
+import { assertHttpsOrLoopbackUrl } from "./meta-common";
+import { createThreadsAdapter } from "./threads";
+import { createTikTokAdapter } from "./tiktok";
 import type {
   ProviderAdapter,
   ProviderAnalyticsMetric,
@@ -17,16 +18,56 @@ import type {
   ProviderPublicationStatus,
   ProviderRequestContext,
 } from "./types";
-import { createYouTubeAdapter, YOUTUBE_MAX_CAPTION_LENGTH } from "./youtube";
+import { createYouTubeAdapter } from "./youtube";
 
 /** Draft caption constraints are independent of credentials and runtime activation. */
 const captionLimits: Readonly<Record<Platform, number | null>> = {
-  facebook: null,
-  instagram: INSTAGRAM_MAX_CAPTION_LENGTH,
-  threads: THREADS_MAX_CAPTION_LENGTH,
-  tiktok: TIKTOK_MAX_CAPTION_LENGTH,
-  youtube: YOUTUBE_MAX_CAPTION_LENGTH,
+  facebook: PROVIDER_LIMITS.facebook.maxCaptionCodePoints,
+  instagram: PROVIDER_LIMITS.instagram.maxCaptionCodePoints,
+  threads: PROVIDER_LIMITS.threads.maxCaptionCodePoints,
+  tiktok: PROVIDER_LIMITS.tiktok.maxCaptionCodePoints,
+  youtube: PROVIDER_LIMITS.youtube.maxCaptionCodePoints,
 };
+
+/** Deeply freezes a static capability descriptor so shared references stay immutable. */
+function freezeCapability(capability: PlatformCapability): PlatformCapability {
+  Object.freeze(capability.accepted_mime_types);
+  Object.freeze(capability.asset_types);
+  if (capability.multi_asset_types) Object.freeze(capability.multi_asset_types);
+  Object.freeze(capability.notes);
+  return Object.freeze(capability);
+}
+
+/** Pre-frozen unconfigured capability descriptors indexed by analytics mode and platform. */
+function makeUnconfiguredCapabilities(
+  analytics: boolean,
+): Readonly<Record<Platform, PlatformCapability>> {
+  const map = {} as Record<Platform, PlatformCapability>;
+  for (const platform of PLATFORM_IDS) {
+    map[platform] = freezeCapability({
+      accepted_mime_types: [],
+      analytics,
+      asset_types: [],
+      comments: false,
+      connect_available: false,
+      max_caption_length: captionLimits[platform],
+      max_file_size: null,
+      max_hashtags: null,
+      max_media_count: null,
+      max_video_duration_sec: null,
+      min_media_count: 0,
+      multi_asset_types: [],
+      notes: ["Provider adapter is not configured."],
+      platform,
+      publish: false,
+      reply: false,
+    });
+  }
+  return Object.freeze(map);
+}
+
+const unconfiguredWithAnalytics = makeUnconfiguredCapabilities(true);
+const unconfiguredWithoutAnalytics = makeUnconfiguredCapabilities(false);
 
 export * from "./effect";
 export * from "./failures";
@@ -37,6 +78,7 @@ export * from "./instagram-content";
 export * from "./http";
 export * from "./instagram";
 export * from "./instagram-options";
+export { PROVIDER_LIMITS } from "./limits";
 export * from "./rate-limit";
 export * from "./threads";
 export * from "./tiktok";
@@ -45,26 +87,21 @@ export * from "./validator";
 export * from "./youtube";
 
 /**
- * Attaches extracted provider telemetry metadata from the request context to an operation result.
- * Preserves rate limit budget headers discovered during execution in the returned result object.
- * Returns operation result with metadata attached if present, or original result otherwise.
+ * Wraps a provider adapter method so `context.metadata` is cleared before
+ * invocation and any rate-limit budget extracted during execution is attached
+ * to the returned result.
  */
-function operationResultWithMetadata(
-  context: ProviderRequestContext,
-  result: ProviderOperationResult,
-): ProviderOperationResult {
-  return context.metadata ? { ...result, metadata: context.metadata } : result;
-}
-
-/**
- * Attaches extracted provider telemetry metadata from the request context to a publication status record.
- * Returns publication status record with rate limit metadata attached if present.
- */
-function publicationStatusWithMetadata(
-  context: ProviderRequestContext,
-  result: ProviderPublicationStatus,
-): ProviderPublicationStatus {
-  return context.metadata ? { ...result, metadata: context.metadata } : result;
+function wrapWithMetadata<
+  Args extends readonly unknown[],
+  R extends ProviderOperationResult | ProviderPublicationStatus,
+>(
+  fn: (context: ProviderRequestContext, ...args: Args) => Promise<R>,
+): (context: ProviderRequestContext, ...args: Args) => Promise<R> {
+  return async (context, ...args) => {
+    context.metadata = undefined;
+    const result = await fn(context, ...args);
+    return context.metadata ? { ...result, metadata: context.metadata } : result;
+  };
 }
 
 export interface ProviderRegistryEnvironment {
@@ -194,43 +231,47 @@ export class ProviderRegistry {
     if (adapter.capability.reply && !adapter.reply) {
       throw new TypeError("reply capability requires a reply adapter");
     }
-    const registered: ProviderAdapter = { ...adapter };
-    if (adapter.publish) {
-      registered.publish = async (context, credentials, input) => {
-        context.metadata = undefined;
-        return operationResultWithMetadata(
-          context,
-          await adapter.publish!(context, credentials, input),
-        );
-      };
-    }
-    if (adapter.cancelPublication) {
-      registered.cancelPublication = async (context, credentials, lookup) => {
-        context.metadata = undefined;
-        return operationResultWithMetadata(
-          context,
-          await adapter.cancelPublication!(context, credentials, lookup),
-        );
-      };
-    }
-    if (adapter.reply) {
-      registered.reply = async (context, credentials, input) => {
-        context.metadata = undefined;
-        return operationResultWithMetadata(
-          context,
-          await adapter.reply!(context, credentials, input),
-        );
-      };
-    }
-    if (adapter.lookupPublication) {
-      registered.lookupPublication = async (context, credentials, lookup) => {
-        context.metadata = undefined;
-        return publicationStatusWithMetadata(
-          context,
-          await adapter.lookupPublication!(context, credentials, lookup),
-        );
-      };
-    }
+    const frozenCapability = freezeCapability(structuredClone(adapter.capability));
+    const registered: ProviderAdapter = {
+      ...adapter,
+      capability: frozenCapability,
+      ...(adapter.publish
+        ? {
+            publish: wrapWithMetadata((context, credentials, input) => {
+              const fn = adapter.publish;
+              if (!fn) throw new TypeError("publish adapter method was removed");
+              return fn(context, credentials, input);
+            }),
+          }
+        : {}),
+      ...(adapter.cancelPublication
+        ? {
+            cancelPublication: wrapWithMetadata((context, credentials, lookup) => {
+              const fn = adapter.cancelPublication;
+              if (!fn) throw new TypeError("cancelPublication adapter method was removed");
+              return fn(context, credentials, lookup);
+            }),
+          }
+        : {}),
+      ...(adapter.reply
+        ? {
+            reply: wrapWithMetadata((context, credentials, input) => {
+              const fn = adapter.reply;
+              if (!fn) throw new TypeError("reply adapter method was removed");
+              return fn(context, credentials, input);
+            }),
+          }
+        : {}),
+      ...(adapter.lookupPublication
+        ? {
+            lookupPublication: wrapWithMetadata((context, credentials, lookup) => {
+              const fn = adapter.lookupPublication;
+              if (!fn) throw new TypeError("lookupPublication adapter method was removed");
+              return fn(context, credentials, lookup);
+            }),
+          }
+        : {}),
+    };
     this.#adapters.set(platform, registered);
   }
 
@@ -267,30 +308,11 @@ export class ProviderRegistry {
    * platform order.
    */
   capabilities(): PlatformCapability[] {
-    const anyConfigured = this.#adapters.size > 0;
-    return PLATFORM_IDS.map((platform) => {
-      const adapter = this.#adapters.get(platform);
-      return adapter
-        ? structuredClone(adapter.capability)
-        : {
-            accepted_mime_types: [],
-            analytics: !anyConfigured,
-            asset_types: [],
-            comments: false,
-            connect_available: false,
-            max_caption_length: captionLimits[platform],
-            max_file_size: null,
-            max_hashtags: null,
-            max_media_count: null,
-            max_video_duration_sec: null,
-            min_media_count: 0,
-            multi_asset_types: [],
-            notes: ["Provider adapter is not configured."],
-            platform,
-            publish: false,
-            reply: false,
-          };
-    });
+    const fallbacks =
+      this.#adapters.size > 0 ? unconfiguredWithoutAnalytics : unconfiguredWithAnalytics;
+    return PLATFORM_IDS.map(
+      (platform) => this.#adapters.get(platform)?.capability ?? fallbacks[platform],
+    );
   }
 }
 
@@ -408,59 +430,59 @@ export function createProviderRegistryFromEnvironment(
       : { timeoutMilliseconds: options.timeoutMilliseconds }),
   };
 
-  if (facebookAccepted) {
+  if (facebookAccepted && facebookClientId && facebookClientSecret) {
     registry.register(
       "facebook",
       createFacebookAdapter({
-        clientId: facebookClientId!,
-        clientSecret: facebookClientSecret!,
+        clientId: facebookClientId,
+        clientSecret: facebookClientSecret,
         redirectUri: `${publicUrl.origin}${oauthCallbackPath("facebook")}`,
         ...commonOptions,
       }),
     );
   }
-  if (instagramAccepted) {
+  if (instagramAccepted && instagramClientId && instagramClientSecret) {
     registry.register(
       "instagram",
       createInstagramAdapter({
-        clientId: instagramClientId!,
-        clientSecret: instagramClientSecret!,
+        clientId: instagramClientId,
+        clientSecret: instagramClientSecret,
         engagementEnabled: instagramEngagementAccepted,
         redirectUri: `${publicUrl.origin}${oauthCallbackPath("instagram")}`,
         ...commonOptions,
       }),
     );
   }
-  if (threadsAccepted) {
+  if (threadsAccepted && threadsClientId && threadsClientSecret) {
     registry.register(
       "threads",
       createThreadsAdapter({
-        clientId: threadsClientId!,
-        clientSecret: threadsClientSecret!,
+        clientId: threadsClientId,
+        clientSecret: threadsClientSecret,
         engagementEnabled: threadsEngagementAccepted,
         redirectUri: `${publicUrl.origin}${oauthCallbackPath("threads")}`,
         ...commonOptions,
       }),
     );
   }
-  if (tiktokAccepted) {
+  if (tiktokAccepted && tiktokClientKey && tiktokClientSecret) {
     registry.register(
       "tiktok",
       createTikTokAdapter({
-        clientKey: tiktokClientKey!,
-        clientSecret: tiktokClientSecret!,
+        clientKey: tiktokClientKey,
+        clientSecret: tiktokClientSecret,
         mediaUrlPrefix: tiktokMediaUrlPrefix || `${publicUrl.origin}/api/v1/provider-media/`,
         redirectUri: `${publicUrl.origin}${oauthCallbackPath("tiktok")}`,
         ...commonOptions,
       }),
     );
   }
-  if (youtubeAccepted) {
+  if (youtubeAccepted && youtubeClientId && youtubeClientSecret) {
     registry.register(
       "youtube",
       createYouTubeAdapter({
-        clientId: youtubeClientId!,
-        clientSecret: youtubeClientSecret!,
+        clientId: youtubeClientId,
+        clientSecret: youtubeClientSecret,
         redirectUri: `${publicUrl.origin}${oauthCallbackPath("youtube")}`,
         ...commonOptions,
       }),

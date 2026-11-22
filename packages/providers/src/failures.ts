@@ -49,7 +49,9 @@ function safeCode(value: string | undefined, fallback: string): string {
  * Returns the integer retry delay in seconds, or undefined if absent, negative, or excessive.
  */
 function retryAfter(value: number | undefined): number | undefined {
-  return Number.isInteger(value) && value! >= 0 && value! <= 86_400 ? value : undefined;
+  return value !== undefined && Number.isInteger(value) && value >= 0 && value <= 86_400
+    ? value
+    : undefined;
 }
 
 /**
@@ -88,6 +90,21 @@ function classification(input: ProviderFailureInput): ProviderFailureClass {
 function isRetryable(failureClass: ProviderFailureClass): boolean {
   return (
     failureClass === "rate_limit" || failureClass === "timeout" || failureClass === "transient"
+  );
+}
+
+/**
+ * Reports whether a provider failure leaves a remote mutation's outcome uncertain.
+ * Ambiguous, timeout, and transient failures after a write cannot prove the remote
+ * operation did not commit; when `includeRateLimit` is true, rate-limit rejections
+ * are treated as interrupted/uncertain as well (e.g. mid-stream upload probes).
+ */
+export function isUncertainFailure(failure: ProviderFailure, includeRateLimit = false): boolean {
+  return (
+    failure.classification === "ambiguous" ||
+    failure.classification === "timeout" ||
+    failure.classification === "transient" ||
+    (includeRateLimit && failure.classification === "rate_limit")
   );
 }
 

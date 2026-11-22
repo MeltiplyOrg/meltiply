@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import {
   analyticsTerminalAgeSeconds,
   demandDrivenCommentsAgeSeconds,
+  PLATFORM_IDS,
   type DatabaseError,
   type Platform,
 } from "@meltiply/domain";
@@ -38,6 +39,7 @@ import {
   type ProviderRefreshExecution,
   type ProviderSyncDependencies,
 } from "./provider-sync-provider";
+import { nextDelaySeconds } from "./retry-policy";
 
 /**
  * Transaction runner for provider sync: the Effect-native system transaction
@@ -99,7 +101,6 @@ export interface ProviderSyncProcessingDependencies {
   transaction?: SystemTransaction;
 }
 
-const platforms: readonly Platform[] = ["tiktok", "youtube", "instagram", "facebook", "threads"];
 export {
   maximumDelayedDeliverySeconds,
   minimumProviderVisibilityTimeoutSeconds,
@@ -125,7 +126,7 @@ import {
  * @returns Array of eligible platform names.
  */
 function eligiblePlatforms(registry: ProviderRegistry, workload: ProviderSyncWorkload): Platform[] {
-  return platforms.filter((platform) => {
+  return PLATFORM_IDS.filter((platform) => {
     const adapter = registry.get(platform);
     switch (workload) {
       case "analytics":
@@ -580,19 +581,17 @@ function retryDelaySeconds(
   retryPolicy: ProviderRetryPolicy | undefined,
   random: () => number,
 ): number | null {
-  const maxAttempts = Math.min(maximumProviderSyncAttempts, retryPolicy?.maxAttempts ?? 5);
-  if (!failure.retryable || attemptCount >= maxAttempts) return null;
-  const base = retryPolicy?.baseDelaySeconds ?? 60;
-  const maximum = retryPolicy?.maxDelaySeconds ?? 3_600;
-  const sample = random();
-  const jitter = Number.isFinite(sample) ? 0.75 + Math.min(1, Math.max(0, sample)) * 0.25 : 0.875;
-  return Math.min(
-    maximum,
-    Math.max(
-      1,
-      Math.ceil(base * 2 ** Math.max(0, attemptCount - 1) * jitter),
-      failure.retryAfterSeconds ?? 0,
-    ),
+  if (!failure.retryable) return null;
+  return nextDelaySeconds(
+    {
+      attemptBase: 1,
+      baseSeconds: retryPolicy?.baseDelaySeconds ?? 60,
+      jitter: "quarter",
+      maxAttempts: Math.min(maximumProviderSyncAttempts, retryPolicy?.maxAttempts ?? 5),
+      maxSeconds: retryPolicy?.maxDelaySeconds ?? 3_600,
+    },
+    attemptCount,
+    { random, retryAfterSeconds: failure.retryAfterSeconds },
   );
 }
 
@@ -705,9 +704,16 @@ function recordDistributionFailure(
  * @returns Latest record by recordedAt timestamp, or undefined if array is empty.
  */
 function latestAnalytics(items: ProviderAnalyticsRecord[]): ProviderAnalyticsRecord | undefined {
-  return [...items].sort(
-    (left, right) => new Date(right.recordedAt).valueOf() - new Date(left.recordedAt).valueOf(),
-  )[0];
+  let latest: ProviderAnalyticsRecord | undefined;
+  let latestTime = Number.NEGATIVE_INFINITY;
+  for (const item of items) {
+    const time = new Date(item.recordedAt).valueOf();
+    if (time > latestTime) {
+      latest = item;
+      latestTime = time;
+    }
+  }
+  return latest;
 }
 
 /**
@@ -1209,7 +1215,6 @@ function recordTokenFailure(
  * @param execution - Successful refresh execution result containing new token set.
  * @param now - Reference timestamp.
  * @param transaction - Transaction runner for database operations.
- * @param random - PRNG function.
  * @param dependencies - Optional dependency overrides.
  * @returns Effect completing once rotated credentials are persisted and any
  *   next refresh trigger is dispatched. An encryption failure is recorded as a
@@ -1223,7 +1228,6 @@ function recordTokenSuccess(
   execution: Extract<ProviderRefreshExecution, { outcome: "success" }>,
   now: Date,
   transaction: SystemTransaction,
-  random: () => number,
   dependencies: ProviderSyncProcessingDependencies = {},
 ): Effect.Effect<void, AutomationJobError, QueuePublisher> {
   return Effect.gen(function* () {
@@ -1255,7 +1259,7 @@ function recordTokenSuccess(
         },
         now,
         transaction,
-        random,
+        dependencies.random ?? Math.random,
         dependencies,
       );
       return;
@@ -1379,15 +1383,7 @@ function processTokenRefresh(
         dependencies,
       );
     } else {
-      yield* recordTokenSuccess(
-        env,
-        row,
-        execution,
-        now,
-        transaction,
-        dependencies.random ?? Math.random,
-        dependencies,
-      );
+      yield* recordTokenSuccess(env, row, execution, now, transaction, dependencies);
     }
     return "processed" as const;
   });

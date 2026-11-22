@@ -37,8 +37,10 @@ import {
 } from "./distribution-provider";
 import type { AutomationEnv } from "./env";
 import { createProviderMediaResolver, providerMediaRetrievalLeaseSeconds } from "./provider-media";
+import { armOutboxCommand, outboxDedupeKey } from "./outbox-commands";
 import { decryptStoredToken, tokenCipherFor } from "./provider-credentials";
 import { isOutboxMessage, type OutboxMessage } from "./messages";
+import { nextDelaySeconds } from "./retry-policy";
 
 type DistributionMessage = OutboxMessage;
 
@@ -716,18 +718,15 @@ function prepare(
          WHERE id = $1 AND status IN ('queued', 'processing', 'scheduled')`,
           [distribution.id, parkSeconds],
         );
-        yield* client.query(
-          `INSERT INTO outbox_events
-           (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-         VALUES ($1, 'distribution.publish.requested', 'distribution', $2, $3, $4)
-         ON CONFLICT DO NOTHING`,
-          [
-            distribution.org_id,
-            distribution.id,
-            `distribution:${distribution.id}:rate-limit-park:${message.event_id}`,
-            JSON.stringify({ distribution_id: distribution.id, version: 1 }),
-          ],
-        );
+        yield* armOutboxCommand(client, {
+          aggregateId: distribution.id,
+          aggregateType: "distribution",
+          dedupeKey: outboxDedupeKey.distributionRateLimitPark(distribution.id, message.event_id),
+          onConflict: "nothing",
+          orgId: distribution.org_id,
+          payload: { distribution_id: distribution.id, version: 1 },
+          topic: "distribution.publish.requested",
+        });
         yield* finishJobLease(client, eventKey(message), "skipped");
         return { outcome: "skipped" };
       }
@@ -890,18 +889,18 @@ function prepare(
          WHERE id = $1 AND status NOT IN ('delivered', 'published', 'cancelled')`,
           [distribution.id],
         );
-        yield* client.query(
-          `INSERT INTO outbox_events
-           (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-         VALUES ($1, 'distribution.reconcile.requested', 'distribution', $2, $3, $4)
-         ON CONFLICT DO NOTHING`,
-          [
-            distribution.org_id,
+        yield* armOutboxCommand(client, {
+          aggregateId: distribution.id,
+          aggregateType: "distribution",
+          dedupeKey: outboxDedupeKey.distributionReconcile(
             distribution.id,
-            `distribution:${distribution.id}:reconcile:${distribution.reconciliation_attempt_count + 1}`,
-            JSON.stringify({ distribution_id: distribution.id, version: 1 }),
-          ],
-        );
+            distribution.reconciliation_attempt_count,
+          ),
+          onConflict: "nothing",
+          orgId: distribution.org_id,
+          payload: { distribution_id: distribution.id, version: 1 },
+          topic: "distribution.reconcile.requested",
+        });
         yield* finishJobLease(client, eventKey(message), "succeeded");
         return { outcome: "skipped" };
       }
@@ -1009,14 +1008,18 @@ function boundedDelaySeconds(
   random: () => number,
   retryAfter = 0,
 ): number | null {
-  if (completedAttempts >= policy.maxAttempts) return null;
-  const sample = random();
-  const jitter = Number.isFinite(sample) ? 0.75 + Math.min(1, Math.max(0, sample)) * 0.25 : 0.875;
-  const exponential = Math.min(
-    policy.maxDelaySeconds,
-    policy.baseDelaySeconds * 2 ** Math.max(0, completedAttempts - 1),
+  return nextDelaySeconds(
+    {
+      attemptBase: 1,
+      baseSeconds: policy.baseDelaySeconds,
+      clampBeforeJitter: true,
+      jitter: "quarter",
+      maxAttempts: policy.maxAttempts,
+      maxSeconds: policy.maxDelaySeconds,
+    },
+    completedAttempts,
+    { random, retryAfterSeconds: retryAfter },
   );
-  return Math.min(policy.maxDelaySeconds, Math.max(1, Math.ceil(exponential * jitter), retryAfter));
 }
 
 /**
@@ -1347,10 +1350,7 @@ function recordPublishOutcome(
         }
         // Every reconciliation-eligible outcome leaves its trigger armed in the
         // same transaction that records it, so a lost Queue delivery can never
-        // strand the row. The dedupe key uses the post-update attempt count so
-        // it matches the Due scanner's `reconcile:<attempt>` numbering: a
-        // scanner re-arm dedupes against this event instead of double-arming
-        // (#256). Rows that stayed cancel_requested or terminal gain no
+        // strand the row. Rows that stayed cancel_requested or terminal gain no
         // trigger.
         if (
           nextAttemptDelay !== null &&
@@ -1358,18 +1358,18 @@ function recordPublishOutcome(
           (updatedRow.status === "awaiting_provider" ||
             updatedRow.status === "needs_reconciliation")
         ) {
-          yield* client.query(
-            `INSERT INTO outbox_events
-           (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-         VALUES ($1, 'distribution.reconcile.requested', 'distribution', $2, $3, $4)
-         ON CONFLICT DO NOTHING`,
-            [
-              row.org_id,
+          yield* armOutboxCommand(client, {
+            aggregateId: row.id,
+            aggregateType: "distribution",
+            dedupeKey: outboxDedupeKey.distributionReconcile(
               row.id,
-              `distribution:${row.id}:reconcile:${updatedRow.reconciliation_attempt_count + 1}`,
-              JSON.stringify({ distribution_id: row.id, version: 1 }),
-            ],
-          );
+              updatedRow.reconciliation_attempt_count,
+            ),
+            onConflict: "nothing",
+            orgId: row.org_id,
+            payload: { distribution_id: row.id, version: 1 },
+            topic: "distribution.reconcile.requested",
+          });
         }
         yield* finishJobLease(client, eventKey(message), "succeeded");
       }),
@@ -1427,18 +1427,15 @@ function markCancelNeedsReconciliation(
       );
       // Arm the reconcile trigger with the scanner's `reconcile:<attempt>`
       // dedupe key so a scanner re-arm dedupes against this event (#256).
-      yield* client.query(
-        `INSERT INTO outbox_events
-       (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-       VALUES ($1, 'distribution.reconcile.requested', 'distribution', $2, $3, $4)
-       ON CONFLICT DO NOTHING`,
-        [
-          row.org_id,
-          row.id,
-          `distribution:${row.id}:reconcile:${row.reconciliation_attempt_count + 1}`,
-          JSON.stringify({ distribution_id: row.id, version: 1 }),
-        ],
-      );
+      yield* armOutboxCommand(client, {
+        aggregateId: row.id,
+        aggregateType: "distribution",
+        dedupeKey: outboxDedupeKey.distributionReconcile(row.id, row.reconciliation_attempt_count),
+        onConflict: "nothing",
+        orgId: row.org_id,
+        payload: { distribution_id: row.id, version: 1 },
+        topic: "distribution.reconcile.requested",
+      });
       yield* finishJobLease(client, eventKey(message), "succeeded");
     }),
   );
@@ -1518,18 +1515,18 @@ function recordCancelOutcome(
       // `reconcile:<attempt>` dedupe key so a scanner re-arm dedupes against
       // this event (#256).
       if (!confirmed) {
-        yield* client.query(
-          `INSERT INTO outbox_events
-         (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-         VALUES ($1, 'distribution.reconcile.requested', 'distribution', $2, $3, $4)
-         ON CONFLICT DO NOTHING`,
-          [
-            row.org_id,
+        yield* armOutboxCommand(client, {
+          aggregateId: row.id,
+          aggregateType: "distribution",
+          dedupeKey: outboxDedupeKey.distributionReconcile(
             row.id,
-            `distribution:${row.id}:reconcile:${row.reconciliation_attempt_count + 1}`,
-            JSON.stringify({ distribution_id: row.id, version: 1 }),
-          ],
-        );
+            row.reconciliation_attempt_count,
+          ),
+          onConflict: "nothing",
+          orgId: row.org_id,
+          payload: { distribution_id: row.id, version: 1 },
+          topic: "distribution.reconcile.requested",
+        });
       }
       yield* finishJobLease(client, eventKey(message), "succeeded");
     }),
@@ -1869,28 +1866,25 @@ function recordReconciliationOutcome(
         }
         // Re-arm the next reconcile trigger only when the row actually moved
         // to a reconciliation-eligible state; a concurrent cancel or terminal
-        // transition must not gain a trigger. The dedupe key uses the
-        // post-update attempt count so it matches the Due scanner's
-        // `reconcile:<attempt>` numbering — a scanner re-arm dedupes against
-        // this event instead of claiming an independent budget slot (#256).
+        // transition must not gain a trigger.
         if (
           nextAttemptDelay !== null &&
           updatedRow !== undefined &&
           (updatedRow.status === "awaiting_provider" ||
             updatedRow.status === "needs_reconciliation")
         ) {
-          yield* client.query(
-            `INSERT INTO outbox_events
-           (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-         VALUES ($1, 'distribution.reconcile.requested', 'distribution', $2, $3, $4)
-         ON CONFLICT DO NOTHING`,
-            [
-              row.org_id,
+          yield* armOutboxCommand(client, {
+            aggregateId: row.id,
+            aggregateType: "distribution",
+            dedupeKey: outboxDedupeKey.distributionReconcile(
               row.id,
-              `distribution:${row.id}:reconcile:${updatedRow.reconciliation_attempt_count + 1}`,
-              JSON.stringify({ distribution_id: row.id, version: 1 }),
-            ],
-          );
+              updatedRow.reconciliation_attempt_count,
+            ),
+            onConflict: "nothing",
+            orgId: row.org_id,
+            payload: { distribution_id: row.id, version: 1 },
+            topic: "distribution.reconcile.requested",
+          });
         }
         yield* finishJobLease(client, eventKey(message), "succeeded");
       }),

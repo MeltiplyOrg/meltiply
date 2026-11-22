@@ -1,6 +1,7 @@
 import type { BetterAuthInstance, JwtIdentity } from "@meltiply/auth";
 import { CoreApiError } from "./core-types";
 import { sha256Hex } from "./crypto";
+import { lazySystemPoolFor } from "./database-module";
 import {
   deviceCodeRequest,
   deviceDecisionRequest,
@@ -15,9 +16,8 @@ const controlCharactersPattern = /[\x00-\x1F\x7F]/;
 
 /** Reads only the installation's public initialized bit; never returns owner details. */
 async function installationInitialized(env: ApiWorkerEnv): Promise<boolean> {
-  // Exception: pg cannot be loaded in workerd unit-test isolates.
-  const { systemPoolFor } = await import("./database");
-  const result = await systemPoolFor(env).query<{ initialized: boolean }>(
+  const pool = await lazySystemPoolFor(env);
+  const result = await pool.query<{ initialized: boolean }>(
     `SELECT EXISTS (SELECT 1 FROM "user") AS initialized`,
   );
   return result.rows[0]?.initialized === true;
@@ -55,10 +55,9 @@ async function pendingInvitationEmail(
   env: ApiWorkerEnv,
   token: string,
 ): Promise<{ email: string } | null> {
-  // Exception: pg cannot be loaded in workerd unit-test isolates.
-  const { systemPoolFor } = await import("./database");
+  const pool = await lazySystemPoolFor(env);
   const tokenHash = await sha256Hex(token);
-  const result = await systemPoolFor(env).query<{ email: string }>(
+  const result = await pool.query<{ email: string }>(
     `SELECT email
      FROM workspace_invitations
      WHERE token_hash = $1
@@ -84,9 +83,8 @@ async function pendingInvitationEmail(
  * @returns The operation's result.
  */
 async function withBootstrapLock<T>(env: ApiWorkerEnv, operation: () => Promise<T>): Promise<T> {
-  // Exception: pg cannot be loaded in workerd unit-test isolates.
-  const { systemPoolFor } = await import("./database");
-  const client = await systemPoolFor(env).connect();
+  const pool = await lazySystemPoolFor(env);
+  const client = await pool.connect();
   // Constant advisory-lock key; scoped to this database's bootstrap window.
   await client.query("SELECT pg_advisory_lock($1)", [7_321_541]);
   try {
@@ -232,9 +230,8 @@ async function recordBootstrapIntent(
   workspaceName: string | undefined,
 ): Promise<void> {
   if (!email) return;
-  // Exception: pg cannot be loaded in workerd unit-test isolates.
-  const { systemPoolFor } = await import("./database");
-  await systemPoolFor(env).query(
+  const pool = await lazySystemPoolFor(env);
+  await pool.query(
     `INSERT INTO installation_bootstrap_intent (email, workspace_name)
      VALUES ($1, $2)
      ON CONFLICT (email) DO UPDATE
@@ -257,9 +254,8 @@ async function recordBootstrapIntent(
  */
 async function discardBootstrapIntent(env: ApiWorkerEnv, email: string): Promise<void> {
   if (!email) return;
-  // Exception: pg cannot be loaded in workerd unit-test isolates.
-  const { systemPoolFor } = await import("./database");
-  await systemPoolFor(env).query(
+  const pool = await lazySystemPoolFor(env);
+  await pool.query(
     "DELETE FROM installation_bootstrap_intent WHERE email = $1 AND auth_user_id IS NULL",
     [email.toLowerCase()],
   );
@@ -279,12 +275,11 @@ async function bindBootstrapIntent(
   authUserId: string,
 ): Promise<void> {
   if (!email) return;
-  // Exception: pg cannot be loaded in workerd unit-test isolates.
-  const { systemPoolFor } = await import("./database");
-  await systemPoolFor(env).query(
-    "UPDATE installation_bootstrap_intent SET auth_user_id = $2 WHERE email = $1",
-    [email.toLowerCase(), authUserId],
-  );
+  const pool = await lazySystemPoolFor(env);
+  await pool.query("UPDATE installation_bootstrap_intent SET auth_user_id = $2 WHERE email = $1", [
+    email.toLowerCase(),
+    authUserId,
+  ]);
 }
 
 /**
@@ -305,9 +300,8 @@ async function recordBootstrap(
   workspaceName: string | undefined,
 ): Promise<boolean> {
   if (!authUserId) return false;
-  // Exception: pg cannot be loaded in workerd unit-test isolates.
-  const { systemPoolFor } = await import("./database");
-  await systemPoolFor(env).query(
+  const pool = await lazySystemPoolFor(env);
+  await pool.query(
     `INSERT INTO installation_bootstrap (auth_user_id, workspace_name)
      VALUES ($1, $2)
      ON CONFLICT (auth_user_id) DO UPDATE
@@ -515,9 +509,8 @@ export async function activeIdentity(
 ): Promise<JwtIdentity> {
   if (!identity.sessionId)
     throw new CoreApiError(401, "authentication_required", "Authentication is required.");
-  // Exception: pg cannot be loaded in workerd unit-test isolates.
-  const { systemPoolFor } = await import("./database");
-  const result = await systemPoolFor(env).query<{
+  const pool = await lazySystemPoolFor(env);
+  const result = await pool.query<{
     client_channel: "web" | "cli" | "unknown";
     email: string;
     email_verified: boolean;

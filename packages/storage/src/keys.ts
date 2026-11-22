@@ -1,4 +1,4 @@
-const invalidSegment = /(^\.{1,2}$)|[\\/\u0000-\u001f\u007f]/;
+import { UNSAFE_PATH_SEGMENT_PATTERN } from "@meltiply/domain";
 
 /**
  * Validates and normalizes an object key path segment.
@@ -11,7 +11,7 @@ const invalidSegment = /(^\.{1,2}$)|[\\/\u0000-\u001f\u007f]/;
  */
 export function normalizeSegment(name: string, value: string): string {
   const normalized = value.trim();
-  if (!normalized || invalidSegment.test(normalized)) {
+  if (!normalized || UNSAFE_PATH_SEGMENT_PATTERN.test(normalized)) {
     throw new TypeError(`${name} must be a non-empty path segment`);
   }
   return normalized;

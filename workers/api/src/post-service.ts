@@ -17,7 +17,7 @@ import {
   activeBrandProfilePredicate,
   requireActiveBrandProfileEffect,
 } from "./brand-profile-guard";
-import { CoreApiError } from "./core-types";
+import { CoreApiError, toCoreApiErrorOrRethrow } from "./core-types";
 import {
   activeOrganizationIdEffect,
   withTenantTransactionEffect,
@@ -203,16 +203,6 @@ interface PostAnalyticsRow extends Record<string, unknown> {
   views: number | string;
   impressions: number | string;
   reach: number | string;
-}
-
-/**
- * Keeps expected validation errors typed without asserting unknown exceptions
- * are client failures. Rethrowing unexpected errors lets Effect record defects
- * for the existing dies-first API boundary rather than misclassifying them.
- */
-function validationError(cause: unknown): CoreApiError {
-  if (cause instanceof CoreApiError) return cause;
-  throw cause;
 }
 
 /** Distribution statuses a creator may still create, edit, or cancel. */
@@ -1925,7 +1915,7 @@ export function createPostApiService(
             const post = yield* lockPostEffect(client, postId);
             yield* Effect.try({
               try: () => requireMatchingBrandProfile(post, input.brandProfileId),
-              catch: validationError,
+              catch: toCoreApiErrorOrRethrow,
             });
             yield* requireActiveBrandProfileEffect(client, organizationId, post.brand_profile_id);
             const currentAttachmentIds = yield* loadPostAttachmentIdsEffect(client, postId);
@@ -1945,7 +1935,7 @@ export function createPostApiService(
                 requireNonEmptyPost(defaultText, attachmentIds, effectiveTargets);
                 if (targets) requireTargetAttachmentScope(targets, attachmentIds);
               },
-              catch: validationError,
+              catch: toCoreApiErrorOrRethrow,
             });
             if (attachmentChange) {
               // Lock the union of the current and requested sets in ascending
@@ -2030,7 +2020,7 @@ export function createPostApiService(
             const post = yield* lockPostEffect(client, postId);
             yield* Effect.try({
               try: () => requireMatchingBrandProfile(post, input.brandProfileId),
-              catch: validationError,
+              catch: toCoreApiErrorOrRethrow,
             });
             yield* requireActiveBrandProfileEffect(client, organizationId, post.brand_profile_id);
             // The locked Post projection already carries membership, avoiding a
@@ -2085,7 +2075,7 @@ export function createPostApiService(
                 requireNonEmptyPost(post.default_text, attachmentIds, targets);
                 requireTargetAttachmentScope(targets, attachmentIds);
               },
-              catch: validationError,
+              catch: toCoreApiErrorOrRethrow,
             });
             const now = new Date();
             // The locked read comes before target validation because it
@@ -2347,7 +2337,7 @@ export function createPostApiService(
             // caller with no identity selected cannot destroy one.
             yield* Effect.try({
               try: () => requireMatchingBrandProfile(post, input.brandProfileId),
-              catch: validationError,
+              catch: toCoreApiErrorOrRethrow,
             });
             yield* requireActiveBrandProfileEffect(client, organizationId, post.brand_profile_id);
             // Published history is administratively owned: Editors may delete

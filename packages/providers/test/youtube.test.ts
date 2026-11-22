@@ -260,6 +260,26 @@ describe("createYouTubeAdapter", () => {
     });
   });
 
+  it("adopts a terminal ended_live operation without another provider read", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => {
+      throw new Error("ended_live lookup must not contact YouTube");
+    });
+    await expect(
+      adapter(fetcher).lookupPublication!(context, credentials, {
+        providerOperationId: "ended_live:broadcast-one",
+      }),
+    ).resolves.toEqual({
+      state: "published",
+      result: {
+        outcome: "confirmed_success",
+        providerOperationId: "ended_live:broadcast-one",
+        providerPostId: "broadcast-one",
+        providerUrl: "https://youtu.be/broadcast-one",
+      },
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("builds an offline, PKCE-bound Google authorization URL", () => {
     const provider = adapter(vi.fn<typeof fetch>());
     const url = new URL(

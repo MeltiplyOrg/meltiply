@@ -1,5 +1,5 @@
 import type { components } from "@meltiply/contracts/schema";
-import { record, secureUrl } from "./meta-common";
+import { codePointLength, record, secureUrl } from "./meta-common";
 
 /** Instagram-Login content metadata; Facebook-Login-only music, shopping and partnership APIs are deliberately absent. */
 export type InstagramContentOptions = components["schemas"]["InstagramContentOptions"];
@@ -12,7 +12,7 @@ export function parseInstagramContent(value: unknown): InstagramContentOptions |
     if (["alt_text", "cover_url", "audio_name", "location_id"].includes(key)) {
       const maximum =
         key === "alt_text" ? 1000 : key === "cover_url" ? 2048 : key === "audio_name" ? 255 : 200;
-      if (typeof field !== "string" || [...field].length > maximum) return null;
+      if (typeof field !== "string" || codePointLength(field) > maximum) return null;
     } else if (["share_to_feed", "is_ai_generated"].includes(key)) {
       if (typeof field !== "boolean") return null;
     } else if (key === "thumb_offset") {

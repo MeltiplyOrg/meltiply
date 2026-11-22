@@ -1,16 +1,6 @@
 import { Data } from "effect";
 import { PLATFORM_IDS, type Platform } from "@meltiply/domain";
 
-/**
- * Improvement-reporting contract shared by the API Worker, the Automation
- * Worker and the versioned event catalog in the deployment documentation.
- *
- * Everything here is deliberately closed: categories, platforms, diagnostic
- * classifications and event property names are fixed enumerations. A caller
- * supplies an approved measurement or diagnostic classification; it never
- * supplies arbitrary properties, serialized domain objects or free-form text.
- */
-
 /** The two independent reporting choices an Installation Owner makes. */
 export type ReportingCategory = "usage" | "diagnostics";
 
@@ -190,12 +180,10 @@ export const USAGE_ENGAGEMENT_METRICS: readonly UsageEngagementMetric[] = [
  */
 export interface UsageEngagement {
   readonly comments: number | null;
-  /** Distributions whose stored snapshot contributed to these gauges. */
   readonly distributions: number;
   readonly reactions: number | null;
   readonly shares: number | null;
   readonly views: number | null;
-  /** Newest contributing snapshot capture time, so freshness travels with the gauge. */
   readonly asOf: string | null;
 }
 
@@ -209,7 +197,6 @@ export interface UsageEngagement {
 export interface UsageEngagementCoverage {
   readonly measured: number;
   readonly missing: number;
-  /** Metrics omitted because that Platform could not be shown to expose them. */
   readonly unsupportedMetrics: readonly UsageEngagementMetric[];
   readonly truncated: boolean;
 }
@@ -219,51 +206,27 @@ export interface UsageEngagementCoverage {
  * nothing here identifies a Post, Distribution, Channel, Workspace or member.
  */
 export interface UsageReportInput {
-  /** UTC calendar day the counters cover, `YYYY-MM-DD`. */
   readonly reportDate: string;
-  /** Connected Channels per Platform, an occupancy gauge from the canonical state. */
   readonly channels: Partial<Record<Platform, number>>;
-  /** Confirmed publication counters for the reporting interval. */
   readonly publications: {
     readonly distributions: Partial<Record<Platform, number>>;
     readonly posts: number;
   };
-  /** Latest eligible stored analytics snapshot per Distribution, per Platform. */
   readonly engagement: Partial<Record<Platform, UsageEngagement>>;
-  /** Newest snapshot capture time across every gauge, or null when nothing was measured. */
   readonly engagementAsOf: string | null;
-  /** Cohort coverage and truncation for the gauges above; null when there is no cohort. */
   readonly engagementCoverage: UsageEngagementCoverage | null;
-  /**
-   * Consent interval these measurements were computed under.
-   *
-   * The producer reads policy and aggregates in one snapshot, then enqueues in a
-   * later transaction. Without this, a withdrawal plus re-enable in between would
-   * tag the old interval's counters with the new interval's identity and report
-   * activity the Owner had declined. A mismatch queues nothing.
-   */
   readonly expectedIntervalStartedAt?: string;
 }
 
 /** One allowlisted diagnostic report; the module sanitizes `error` before transport. */
 export interface DiagnosticReportInput {
   readonly category: DiagnosticCategory;
-  /**
-   * Canonical adapter class of the Provider condition this report describes.
-   *
-   * Only meaningful with `category: "provider_failure"`, where it is what makes
-   * "expired authorization" or "rate limited" countable without any Provider
-   * message, status text or response body leaving the installation.
-   */
   readonly failureClass?: ProviderFailureClass;
-  /** Fixed logical identity; a repeated report reuses the same pending row. */
   readonly logicalId?: string;
   readonly occurredAt: string;
   readonly operation: OperationCategory;
   readonly platform?: Platform;
-  /** Handled provider conditions are categorized, not stacked as exceptions. */
   readonly handled: boolean;
-  /** Raw error name and stack; only allowlisted frames survive sanitization. */
   readonly error: { readonly name: string; readonly stack?: string };
 }
 
@@ -288,13 +251,7 @@ export interface CaptureEvent {
   readonly distinctId: string;
   readonly event: string;
   readonly properties: Record<string, unknown>;
-  /** Frozen "$insert_id" UUID shared by every delivery attempt of this report. */
   readonly eventUuid: string;
-  /**
-   * Frozen instant of the measurement or diagnostic. PostHog de-duplicates on
-   * `uuid` + `event` + `timestamp` + `distinct_id`, so a retry must repeat this
-   * value rather than re-stamping the send time.
-   */
   readonly timestamp: string;
 }
 
@@ -310,21 +267,11 @@ export interface CaptureTransport {
 
 /** Requested versus effective status for one reporting category. */
 export interface ReportingCategoryStatus {
-  /** What the Installation Owner asked for, as persisted. */
   readonly requested: boolean;
-  /** Whether an outbound report may actually be sent right now. */
   readonly effective: boolean;
   readonly reason: ReportingCategoryReason;
-  /** When the stored choice was last changed, or null if never decided. */
   readonly decidedAt: string | null;
-  /**
-   * Disclosure version the stored decision was recorded against, or null when
-   * that category was never decided. Reporting fails closed unless it matches
-   * `REPORTING_DISCLOSURE_VERSION`, so this is the truthful record of what the
-   * Owner actually agreed to rather than the version in force today.
-   */
   readonly disclosureVersion: number | null;
-  /** Start of the interval this category counts activity over. */
   readonly intervalStartedAt: string | null;
 }
 
@@ -340,7 +287,6 @@ export interface ReportingPolicySnapshot {
   readonly destinationConfigured: boolean;
   readonly operatorForcedOff: boolean;
   readonly categories: Record<ReportingCategory, ReportingCategoryStatus>;
-  /** Pseudonymous identifier; present only after the first opt-in. */
   readonly installationReportingId: string | null;
 }
 

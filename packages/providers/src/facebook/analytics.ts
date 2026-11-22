@@ -48,7 +48,6 @@ export function createFacebookAnalytics(http: ProviderHttpClient, now: () => Dat
     );
 
   return {
-    /** Page followers only; `fan_count` counts Page likes, not follows. */
     async getAccountAnalytics(
       context: ProviderRequestContext,
       credentials: ProviderCredentials,
@@ -63,10 +62,6 @@ export function createFacebookAnalytics(http: ProviderHttpClient, now: () => Dat
       return { followers, recordedAt: now().toISOString() };
     },
 
-    /**
-     * Reel plays and comments-plus-shares come from Video Insights, likes and
-     * comments from the Video edges. Any missing metric fails closed.
-     */
     async listAnalytics(
       context: ProviderRequestContext,
       credentials: ProviderCredentials,

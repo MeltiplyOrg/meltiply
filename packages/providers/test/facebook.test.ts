@@ -600,8 +600,6 @@ describe("createFacebookAdapter", () => {
     });
   });
 
-  // A successful exchange can omit expires_in; inspect the actual token rather
-  // than rejecting a connectable Page or inventing a fresh token lifetime.
   it("connects a Page using inspected expiry when the exchange omits expires_in", async () => {
     const calls = sequence(
       () => json({ access_token: "short-user-secret" }),
@@ -647,8 +645,6 @@ describe("createFacebookAdapter", () => {
     });
   });
 
-  // Meta's inspected zero timestamp is an absent time-based expiry, not 1970.
-  // Both connecting a Page and rotating its credentials must preserve that fact.
   it("connects and refreshes a Page with inspected zero expiry", async () => {
     const inspect = () =>
       json({
@@ -696,8 +692,6 @@ describe("createFacebookAdapter", () => {
     );
   });
 
-  // Inspection must not accept another app's, invalid, expired, unbounded,
-  // or malformed token merely because the exchange omitted its expiry.
   it.each([
     { app_id: "another-app", is_valid: true, expires_at: 0 },
     { app_id: "facebook-client", is_valid: false, expires_at: 0 },
@@ -723,8 +717,6 @@ describe("createFacebookAdapter", () => {
     });
   });
 
-  // Malformed successful responses must identify the failing OAuth field for
-  // operators without leaking the authorization code, user tokens, or Page data.
   it.each([
     {
       code: "facebook_oauth_authorization_token_invalid",
@@ -960,8 +952,6 @@ describe("createFacebookAdapter", () => {
     expect(result.accounts[1]!.account.username).toBeUndefined();
   });
 
-  // Shared Pages are returned by several edges with edge-specific tokens, so the
-  // retained token proves which discovery record survived deduplication.
   it("includes business-assigned Pages across pagination and deduplicates shared Pages", async () => {
     const page = (id: string, accessToken = `page-token-${id}`) => ({
       id,
@@ -1005,8 +995,6 @@ describe("createFacebookAdapter", () => {
         return url.searchParams.has("after")
           ? json({ data: [page("business-2")] })
           : json({
-              // `direct` is also reachable through /me/accounts; its edge token
-              // must not replace the record discovered first.
               data: [page("direct", "page-token-direct-via-business"), page("business-1")],
               paging: {
                 cursors: { after: "next" },
@@ -1041,7 +1029,6 @@ describe("createFacebookAdapter", () => {
     ]);
   });
 
-  /** Independent business edges overlap, stay bounded, and retain discovery order despite response order. */
   it("discovers independent business Page edges concurrently without unbounded fan-out", async () => {
     let release!: () => void;
     let started!: () => void;
@@ -1229,8 +1216,6 @@ describe("createFacebookAdapter", () => {
     if (!("accounts" in result)) throw new Error("Expected account selection");
     expect(result.accounts).toHaveLength(2);
     expect(result.accounts.map((item) => item.account.id)).toEqual(["page-1", "page-2"]);
-    // The first record for `page-1` wins; a later duplicate must not replace the
-    // retained token or display name.
     expect(result.accounts.map((item) => item.accessToken)).toEqual([
       "page-one-token",
       "page-two-token",
@@ -1326,14 +1311,7 @@ describe("createFacebookAdapter", () => {
     });
   });
 
-  /**
-   * Empty Graph pages still advance cursors, so the item count alone cannot bound discovery.
-   * An excessive empty chain must fail before a later Page can disguise the unbounded traversal.
-   */
   it("bounds pagination without discovered Pages", async () => {
-    // Exactly 1,000 empty pages is still inside the request ceiling: the chain
-    // ends with a terminal page that omits paging, so traversal stops normally.
-    // Without this control a stricter bound (e.g. 999) would pass the test below.
     const atLimitPages = Array.from(
       { length: 1_000 },
       (_, index) => () =>
@@ -1410,8 +1388,6 @@ describe("createFacebookAdapter", () => {
         tasks: ["CREATE_CONTENT"],
       }));
 
-    // Exactly 1,000 discovered Pages is still inside the documented ceiling and
-    // must be accepted; only the 1,001st record fails closed below.
     const atLimitResponders = [
       () => json({ access_token: "short" }),
       () => json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
@@ -1451,7 +1427,6 @@ describe("createFacebookAdapter", () => {
         }),
       defaultGrantedPermissions,
     ];
-    // 10 pages of 100 items = 1,000 items, then 11th page has 1 item (1,001 items)
     for (let pageIdx = 0; pageIdx < 10; pageIdx++) {
       responders.push(() =>
         json({
@@ -1642,8 +1617,6 @@ describe("createFacebookAdapter", () => {
           },
         ],
       }),
-      // Facebook publishes one video as one Reel, so a post carrying several
-      // attachments is rejected instead of publishing only the first.
       publishInput({
         media: [
           {
@@ -1811,12 +1784,7 @@ describe("createFacebookAdapter", () => {
   });
 
   it("maps processing failures and HTTP 404 without provider detail leakage", async () => {
-    // The provider payload carries detail the adapter must never echo: the
-    // published result is a canonical failure code, so any raw passthrough of
-    // the response body surfaces here.
     const providerDetail = "private provider detail code=abc123";
-    // Meta reports Reel processing detail under `status.processing_phase.error.message`,
-    // so the fixture uses that documented envelope rather than an invented field.
     const failedCalls = sequence(() =>
       json({
         id: "video-failed",

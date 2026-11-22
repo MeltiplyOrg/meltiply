@@ -84,7 +84,6 @@ function oauthMalformed(field: OAuthField, cause?: Error): ProviderAdapterError 
   );
 }
 
-/** Log evidence for a rejected expiry: provider values render as finite numbers, booleans, or their type. */
 function expiryDiagnostic(
   source: "exchange" | "debug_token",
   facts: Readonly<Record<string, unknown>>,
@@ -105,7 +104,6 @@ function expiryDiagnostic(
   );
 }
 
-/** Page tokens are renewed from the user token, so the refresh secret stores both identities. */
 function decodeRefreshSecret(value: string): FacebookRefreshSecret {
   const raw = required("refreshToken", value, OAUTH_TOKEN_MAX_CHARS);
   let parsed: unknown;
@@ -127,7 +125,6 @@ function encodeRefreshSecret(value: FacebookRefreshSecret): string {
   return JSON.stringify(value);
 }
 
-/** Only `granted` entries count; requested scopes are never evidence of consent. */
 function grantedPermissions(value: unknown): string[] {
   const data = record(value)?.data;
   if (!Array.isArray(data)) throw oauthMalformed("permissions");
@@ -142,7 +139,6 @@ function grantedPermissions(value: unknown): string[] {
   return [...granted];
 }
 
-/** A single non-reserved, non-numeric facebook.com path segment; anything else is no handle. */
 function facebookVanityHandle(link: unknown): string | undefined {
   if (typeof link !== "string" || !URL.canParse(link)) return undefined;
   const url = new URL(link);
@@ -163,10 +159,6 @@ function facebookVanityHandle(link: unknown): string | undefined {
   return candidate;
 }
 
-/**
- * The next cursor from `paging`: `cursors.after` and the `next` URL's `after`
- * must agree, `next` must stay on the Graph origin, and a repeated cursor is a cycle.
- */
 function nextPageCursor(pagingValue: unknown, seenCursors: Set<string>): string | undefined {
   if (pagingValue === undefined) return undefined;
   const paging = record(pagingValue);
@@ -223,10 +215,6 @@ export function createFacebookOAuth(runtime: AdapterRuntime) {
       })
     ).body;
 
-  /**
-   * Exchanges a user token for a long-lived one. Without `expires_in`, same-app
-   * token inspection decides: `expires_at: 0` means no time-based expiry.
-   */
   const exchangeLongLived = async (
     context: ProviderRequestContext,
     currentToken: string,
@@ -296,11 +284,6 @@ export function createFacebookOAuth(runtime: AdapterRuntime) {
         scope: [...FACEBOOK_CONFIGURED_SCOPES, FACEBOOK_BUSINESS_DISCOVERY_SCOPE].join(","),
       }),
 
-    /**
-     * Discovers Pages the user can create content on, directly managed first and
-     * then business-assigned (with `business_management`). Requests and Pages are
-     * bounded; business edges are read concurrently but merged in discovery order.
-     */
     async exchangeAuthorizationCode(
       context: ProviderRequestContext,
       input: OAuthExchangeInput,
@@ -438,7 +421,6 @@ export function createFacebookOAuth(runtime: AdapterRuntime) {
       return { accounts: eligible };
     },
 
-    /** Rotates the user token, then re-reads the same Page's token and the current grants. */
     async refreshAccessToken(
       context: ProviderRequestContext,
       value: string,

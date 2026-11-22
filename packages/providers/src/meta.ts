@@ -249,15 +249,10 @@ export interface MetaContainerProtocol {
   failureDetailField: "status" | "error_message";
   provider: "instagram" | "threads";
   publishUrl: (credentials: ProviderCredentials, containerId: string) => string;
-  /** Phase recorded when a container already reports `PUBLISHED`. */
   publishedOperationPhase: "retain" | "submitted";
   statusField: "status_code" | "status";
 }
 
-/**
- * Container `ERROR` detail is free text; it is reduced to a fixed category so no
- * provider wording is persisted. Earlier patterns win.
- */
 const containerFailurePatterns: ReadonlyArray<readonly [pattern: RegExp, category: string]> = [
   [/fetch|retrieve(?:d|ing)?|retrieval|download|url|unreach|access/i, "media_retrieval"],
   [/duration|too short|too long|length/i, "media_duration"],
@@ -296,11 +291,6 @@ export async function readMetaContainer(
   return body;
 }
 
-/**
- * Issues the single finalizing publish. An ambiguous outcome records
- * `submitted:<id>` so it is never published twice; a retryable rejection keeps
- * the container processing so the next poll retries finalization.
- */
 async function finalizeMetaContainer(
   http: ProviderHttpClient,
   protocol: MetaContainerProtocol,

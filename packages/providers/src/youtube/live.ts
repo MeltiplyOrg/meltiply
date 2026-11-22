@@ -38,7 +38,6 @@ const lifecycleStatuses = new Set([
 ]);
 const privacyStatuses = ["public", "private", "unlisted"];
 const maxIngestChars = 2048;
-/** Google requires a future `scheduledStartTime`; one minute survives request transit. */
 const scheduledStartLeadMilliseconds = 60_000;
 
 function openBroadcastId(lookup: ProviderPublicationLookup): string {
@@ -47,7 +46,6 @@ function openBroadcastId(lookup: ProviderPublicationLookup): string {
   return operation.id;
 }
 
-/** Exactly the requested resource from a Google list response, never another row. */
 function onlyResource(value: unknown, id: string): Record<string, unknown> {
   const items = record(value)?.items;
   if (!Array.isArray(items) || items.length !== 1) throw malformed();
@@ -90,7 +88,6 @@ export function createYouTubeLive(request: GoogleRequest, now: () => Date) {
   };
 
   return {
-    /** Returns only a non-secret broadcast handoff; encoder details are read on demand. */
     async publish(
       context: ProviderRequestContext,
       credentials: ProviderCredentials,
@@ -225,7 +222,6 @@ export function createYouTubeLive(request: GoogleRequest, now: () => Date) {
       };
     },
 
-    /** A broadcast that never went live is deleted; a live one transitions to complete. */
     async end(
       context: ProviderRequestContext,
       credentials: ProviderCredentials,

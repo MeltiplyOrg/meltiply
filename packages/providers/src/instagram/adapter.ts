@@ -113,7 +113,6 @@ function accountId(credentials: ProviderCredentials): string {
   return requiredIdentifier(credentials.accountId, "instagram_professional_account_required");
 }
 
-/** Images are JPEG-only; videos use the Reel or Story ceiling when published as one. */
 function attachment(media: ProviderMedia, postType: string): InstagramAttachment {
   if (media.mode !== "remote_ingest") throw rejected("instagram_remote_media_required");
   const url = secureUrl(media.url)?.href;
@@ -168,7 +167,6 @@ function publishInput(input: PublishInput): {
   return { attachments, options, text };
 }
 
-/** Carousel children carry no caption and use VIDEO, never the standalone REELS surface. */
 function carouselItemParameters(item: InstagramAttachment): URLSearchParams {
   return new URLSearchParams(
     item.kind === "image"
@@ -230,7 +228,6 @@ const containerProtocol: MetaContainerProtocol = {
   statusField: "status_code",
 };
 
-/** Instagram Login returns either a bare node or a single-entry `data` envelope. */
 function loginRecord(value: unknown): Record<string, unknown> {
   const body = record(value);
   if (!body) throw malformed();
@@ -241,7 +238,6 @@ function loginRecord(value: unknown): Record<string, unknown> {
   return account;
 }
 
-/** Permissions arrive as an array or a comma-separated string. */
 function grantedPermissions(value: unknown): (string | undefined)[] | undefined {
   if (Array.isArray(value)) {
     return value.length <= maxGrantedPermissions
@@ -348,10 +344,6 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
     },
     ambiguousZeroMetrics: ["views", "reactions", "comments", "shares"],
 
-    /**
-     * The long-lived token authenticates `/me`, whose `user_id` is the
-     * professional account ID; the short-lived token response's ID need not match.
-     */
     async exchangeAuthorizationCode(context, input): Promise<OAuthConnection> {
       assertConfiguredRedirectUri(input.redirectUri, redirectUri);
       const shortBody = loginRecord(
@@ -462,11 +454,6 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
       return lookupMetaContainer(http, containerProtocol, context, credentials, operation);
     },
 
-    /**
-     * Creates the containers and returns `created:<parent>` without publishing;
-     * `lookupPublication` finalizes it once ready. Carousel children are created
-     * sequentially so a rejected attachment stops before later remote objects exist.
-     */
     async publish(context, credentials, input) {
       requireIdempotencyKey(input.idempotencyKey);
       const { attachments, options: resolved, text } = publishInput(input);

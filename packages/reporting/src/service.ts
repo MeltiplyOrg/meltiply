@@ -66,7 +66,6 @@ export type ReportingTransactionRunner = <A, E>(
   operation: (client: ReportingClient) => Effect.Effect<A, E>,
 ) => Effect.Effect<A, E | DatabaseError>;
 
-/** Pending row as the delivery pass reads it. */
 interface PendingRow extends Record<string, unknown> {
   attempts: number;
   category: PendingReportCategory;
@@ -82,7 +81,6 @@ interface PendingRow extends Record<string, unknown> {
   payload: Record<string, unknown>;
 }
 
-/** Feedback row as the feedback surface reads it. */
 interface FeedbackRow extends Record<string, unknown> {
   discovery_source: string;
   response_id: string;
@@ -91,9 +89,7 @@ interface FeedbackRow extends Record<string, unknown> {
 }
 
 export interface ReportingServiceShape {
-  /** Current policy for any authenticated member. */
   readonly policy: () => Effect.Effect<ReportingPolicySnapshot, DatabaseError>;
-  /** Applies the Owner's requested choices and returns the effective policy. */
   readonly setPreferences: (input: {
     readonly diagnostics: boolean;
     readonly usage: boolean;
@@ -124,46 +120,21 @@ export class ReportingService extends Context.Service<ReportingService, Reportin
 
 /** Options for the live layer. */
 export interface ReportingServiceOptions {
-  /** Deployment configuration resolved from the invocation's bindings. */
   readonly configuration: ReportingConfiguration;
-  /** Application version reported with each event. */
   readonly appVersion: string | undefined;
-  /** Capture transport; absent means no destination or no transport available. */
   readonly transport: CaptureTransport | null;
-  /** Worker-supplied system transaction adapter. */
   readonly transaction: ReportingTransactionRunner;
-  /** Injectable clock so tests can freeze intervals, expiry and retry windows. */
   readonly now?: () => Date;
 }
 
-/**
- * Transaction-scoped advisory lock serializing every reporting mutation.
- *
- * The preference row, the attribution singleton and the pending queue are
- * installation-wide single rows/tables, so `SELECT ... FOR UPDATE` on an absent
- * row locks nothing. One constant key therefore serializes the read-then-write
- * sequences that must not interleave: two concurrent first decisions, two
- * concurrent first attribution submissions, an enqueue racing a withdrawal's
- * discard, and the pending-cap check against concurrent inserts.
- */
 const reportingMutationLockKey = 810_000_101;
 
-/** Takes the reporting mutation lock for the rest of the transaction. */
 function lockReportingMutations(client: ReportingClient): Effect.Effect<void, DatabaseError> {
   return Effect.asVoid(
     client.query("SELECT pg_advisory_xact_lock($1)", [reportingMutationLockKey]),
   );
 }
 
-/**
- * Key of the lock that orders publication measurement against the daily
- * snapshot.
- *
- * Both sides take it before reading the clock or the aggregates, so a
- * measurement that commits late is included by the next snapshot instead of
- * being excluded from a day that was already measured — and it is counted in the
- * day it actually committed, not the day its transaction started.
- */
 const reportingMeasurementLockKey = 810_000_102;
 
 /**
@@ -171,9 +142,6 @@ const reportingMeasurementLockKey = 810_000_102;
  *
  * Exported because the in-transaction measurement and the scheduled producer must
  * share one lock identity; a second constant would silently stop ordering them.
- *
- * @param client - Client bound to the caller's open transaction.
- * @returns Effect resolving once the lock is held.
  */
 export function lockReportingMeasurement(
   client: ReportingClient,
@@ -183,16 +151,6 @@ export function lockReportingMeasurement(
   );
 }
 
-/**
- * Deletes terminal rows' payloads and rows themselves once they are old enough
- * to be off any retry path, keeping only the minimal delivery receipt.
- *
- * Payload retention is what the seven-day optional-data rule is really about: a
- * sent or discarded row that kept its payload forever would hold data beyond its
- * window and let the pending cap be circumvented one row at a time. Receipts keep
- * the frozen identity so the same logical report is never re-created and re-sent
- * after pruning.
- */
 function pruneTerminalReports(client: ReportingClient): Effect.Effect<number, DatabaseError> {
   return Effect.map(
     client.query(
@@ -220,25 +178,11 @@ function pruneTerminalReports(client: ReportingClient): Effect.Effect<number, Da
   );
 }
 
-/** Converts a database payload column into a plain property record. */
 function payloadRecord(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
 }
 
-/**
- * Reads the singleton preference row through a caller-supplied client.
- *
- * Exported because every producer that gates on consent — the service itself, the
- * in-transaction publication measurement, and the daily usage producer — must read
- * exactly these columns. A second projection is how the per-category disclosure
- * versions went missing once already, and the resulting gate would authorize a
- * send the service refuses.
- *
- * @param client - Active client, either a transaction or the caller's own.
- * @param lock - Whether to take the row lock (mutations only).
- * @returns Effect resolving the row, or null when no choice was ever saved.
- */
 const LOAD_PREFERENCES_SQL = `SELECT diagnostics_decided_at, diagnostics_disclosure_version,
               diagnostics_interval_started_at, diagnostics_requested,
               installation_reporting_id, schema_version, usage_decided_at,
@@ -266,7 +210,6 @@ export function loadPreferences(
   );
 }
 
-/** Reads the one-time attribution row, locking it for a submission. */
 function loadFeedback(
   client: ReportingClient,
   lock: boolean,
@@ -277,18 +220,6 @@ function loadFeedback(
   );
 }
 
-/**
- * Reads the delivery state of the feedback pending row, if one exists.
- *
- * Terminal rows are pruned once their payload has outlived its window, so the
- * minimal receipt is the second source of truth: a pruned `sent` row still means
- * the destination accepted the answer, and a pruned `discarded` row still means
- * it was not delivered.
- *
- * @param client - Active system transaction client.
- * @param responseId - Recorded attribution response identity, if any.
- * @returns Honest delivery state for the surface.
- */
 function feedbackDeliveryStatus(
   client: ReportingClient,
   responseId: string | null,
@@ -296,9 +227,6 @@ function feedbackDeliveryStatus(
   if (!responseId) return Effect.succeed("not_recorded");
   return Effect.map(
     client.query<{ state: string }>(
-      // The ordering runs outside the union: PostgreSQL only accepts an output
-      // column name in a set-operation ORDER BY, so the preference for a
-      // confirmed send has to be applied to the combined rows.
       `SELECT state FROM (
          SELECT state FROM reporting_pending_reports
          WHERE category = 'feedback' AND logical_id = $1
@@ -319,7 +247,6 @@ function feedbackDeliveryStatus(
   );
 }
 
-/** Projects the attribution row plus delivery state into the API shape. */
 function feedbackStateFrom(
   row: FeedbackRow | null,
   deliveryStatus: FeedbackDeliveryStatus,
@@ -332,12 +259,10 @@ function feedbackStateFrom(
   };
 }
 
-/** Builds the frozen logical identity of one daily usage summary. */
 function usageLogicalId(intervalStartedAt: string | null, reportDate: string): string {
   return `${intervalStartedAt ?? "unstarted"}:${reportDate}`;
 }
 
-/** Buckets a diagnostic timestamp to the hour so a repeated failure is one report. */
 function hourBucket(occurredAt: string): string {
   const date = new Date(occurredAt);
   if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 13);
@@ -351,9 +276,6 @@ function hourBucket(occurredAt: string): string {
  * persisted policy is re-read inside the write transaction for preference
  * changes and inside a fresh transaction before each send, which is what makes a
  * withdrawn or operator-disabled category stop transmitting immediately.
- *
- * @param options - Configuration, transport, transaction adapter and clock.
- * @returns Layer providing `ReportingService` with `R = never`.
  */
 export function createReportingServiceLive(
   options: ReportingServiceOptions,
@@ -363,13 +285,11 @@ export function createReportingServiceLive(
   const transport = options.transport;
   const appVersion = reportedAppVersion(options.appVersion);
 
-  /** Re-reads persisted policy inside a transaction and returns it. */
   const policyProgram = Effect.flatMap(
     transaction((client) => loadPreferences(client, false)),
     (row) => Effect.succeed(policySnapshot(row, configuration)),
   );
 
-  /** Emits one capture attempt, sanitizing and validating first. */
   const sendCapture = (
     event: CaptureEvent,
   ): Effect.Effect<{
@@ -390,8 +310,6 @@ export function createReportingServiceLive(
     setPreferences: (input) =>
       transaction((client) =>
         Effect.gen(function* () {
-          // Serialized with enqueue and delivery so a withdrawal's discard cannot
-          // interleave with a producer that already read the old consent.
           yield* lockReportingMutations(client);
           const current = yield* loadPreferences(client, true);
           const nextUsage = input.usage === true;
@@ -402,8 +320,6 @@ export function createReportingServiceLive(
           const installationId =
             current?.installation_reporting_id ??
             (nextUsage || nextDiagnostics ? crypto.randomUUID() : null);
-          // Re-enabling starts a new interval; staying enabled keeps the running
-          // one so an unchanged decision never replays or re-windows activity.
           const usageInterval = nextUsage
             ? wasUsage
               ? current?.usage_interval_started_at
@@ -414,10 +330,6 @@ export function createReportingServiceLive(
               ? current?.diagnostics_interval_started_at
               : decidedAt
             : null;
-          // A decision is recorded with time and disclosure version only when it
-          // is actually made. Re-saving an unchanged choice must not silently
-          // upgrade the stored consent to a disclosure the Owner never saw, nor
-          // restate when the choice was made.
           const usageDecided = current === null || wasUsage !== nextUsage;
           const diagnosticsDecided = current === null || wasDiagnostics !== nextDiagnostics;
           const usageDecidedAt = usageDecided ? decidedAt : (current?.usage_decided_at ?? null);
@@ -465,9 +377,6 @@ export function createReportingServiceLive(
             ],
           );
 
-          // Withdrawal stops future reports and discards the unsent backlog for
-          // that category, so a new choice takes effect instead of leaving a
-          // hidden queue that would transmit hours later.
           for (const category of REPORTING_CATEGORIES) {
             const turnedOff =
               (category === "usage" && wasUsage && !nextUsage) ||
@@ -511,27 +420,15 @@ export function createReportingServiceLive(
     submitFeedback: (source) =>
       transaction((client) =>
         Effect.gen(function* () {
-          // The attribution row is an installation-wide singleton, so a
-          // non-existent row cannot be locked with FOR UPDATE. The advisory lock
-          // makes two concurrent first submissions (with different idempotency
-          // keys) converge on one recorded answer instead of racing the primary
-          // key insert.
           yield* lockReportingMutations(client);
           const existing = yield* loadFeedback(client, true);
-          // Shareable answers only. `prefer_not_to_say` records a local decision
-          // and never produces an attribution event.
           const shareable = source !== "prefer_not_to_say";
           if (existing) {
-            // A refresh or retry reuses the recorded logical identity instead of
-            // creating a second response.
             const deliveryStatus = yield* feedbackDeliveryStatus(client, existing.response_id);
             return feedbackStateFrom(existing, deliveryStatus);
           }
           const responseId = crypto.randomUUID();
           const decidedAt = now();
-          // The lock above guarantees the row is still absent here, so a plain
-          // insert records exactly the answer this call returns. A conflict would
-          // mean this response described an identity it never stored.
           yield* client.query(
             `INSERT INTO reporting_attribution_responses (
                id, response_id, discovery_source, shared, schema_version, submitted_at
@@ -576,9 +473,6 @@ export function createReportingServiceLive(
     enqueueUsageReport: (input) =>
       transaction((client) =>
         Effect.gen(function* () {
-          // Serialized with preference changes: a withdrawal's discard and this
-          // enqueue cannot interleave, so a row can never be written after the
-          // consent it assumed was withdrawn.
           yield* lockReportingMutations(client);
           const row = yield* loadPreferences(client, false);
           const policy = policySnapshot(row, configuration);
@@ -587,9 +481,6 @@ export function createReportingServiceLive(
           if (!installationId) return "skipped" as const;
           const intervalStartedAt = policy.categories.usage.intervalStartedAt;
           if (!intervalStartedAt) return "skipped" as const;
-          // The producer computed these counters under one interval. If the Owner
-          // withdrew or re-enabled since, the live interval differs and the
-          // counters describe activity that consent no longer covers.
           if (
             input.expectedIntervalStartedAt !== undefined &&
             input.expectedIntervalStartedAt !== intervalStartedAt
@@ -634,13 +525,6 @@ export function createReportingServiceLive(
             appVersion,
             deploymentCategory: configuration.deploymentCategory,
           });
-          // The logical identity is what collapses a repeating failure into one
-          // pending row per hour. The Provider class joins it because two
-          // expected conditions in the same hour — expired authorization and a
-          // rate limit, say — are different facts, not a repeat of one. The
-          // consent interval joins it too: after a withdrawal and re-enable in
-          // the same hour, the previous interval's discarded row must not absorb
-          // the newly consented failure.
           const failureClass =
             input.category === "provider_failure" && isProviderFailureClass(input.failureClass)
               ? input.failureClass
@@ -657,8 +541,6 @@ export function createReportingServiceLive(
             category: "diagnostics",
             distinctId: installationId,
             eventName: REPORTING_EVENTS.diagnostics,
-            // The diagnostic keeps the instant it occurred, and the hour bucket
-            // in the logical id makes a repeating failure one pending row.
             eventTimestamp: Number.isNaN(occurredAt.getTime()) ? now() : occurredAt,
             intervalStartedAt,
             logicalId,
@@ -683,8 +565,6 @@ export function createReportingServiceLive(
         );
         const startedAt = now().getTime();
         const elapsed = () => now().getTime() - startedAt;
-        // Expiry is checked first: a row that outlived the seven-day window is
-        // discarded, never sent late, and never blocks the queue.
         const expired = yield* transaction((client) =>
           Effect.map(
             client.query(
@@ -697,12 +577,6 @@ export function createReportingServiceLive(
             (result) => result.rowCount ?? result.rows.length,
           ),
         );
-        // A claim leases a row for longer than one invocation can hold it. Any
-        // lease left behind by an interrupted invocation, a crash after the claim
-        // committed, or a database failure is already expired by the time a later
-        // pass runs, and must be reclaimed through the same frozen row rather than
-        // waiting for the seven-day discard: the UUID and timestamp on the row are
-        // what make the retry the same measurement instead of a second one.
         const claimed = yield* transaction((client) =>
           client
             .query<PendingRow>(
@@ -739,23 +613,11 @@ export function createReportingServiceLive(
         let skipped = 0;
         let discarded = 0;
         let released = 0;
-        // One row at a time: the module's bounded delivery is a sequential pass so
-        // two reports can never be in flight together and the invocation's shared
-        // post-response budget is spent predictably.
         for (const [index, row] of claimed.entries()) {
-          // A send costs up to the transport timeout. Claiming a row we then
-          // cannot finish would strand it leased, so the pass stops before that
-          // and releases everything it has not dispatched back to `pending`.
           if (elapsed() + CAPTURE_TIMEOUT_MILLISECONDS > budgetMilliseconds) {
             const unprocessed = claimed.slice(index);
             yield* transaction((client) =>
               Effect.gen(function* () {
-                // Each release names the lease token it is giving back. A blanket
-                // `id = ANY(...) AND state = 'leased'` would also match a row a
-                // different pass had already reclaimed, handing that pass's
-                // ownership to this one and letting two invocations decide the
-                // same row. Rows whose token no longer matches are skipped, and
-                // only the releases that actually happened are reported.
                 for (const entry of unprocessed) {
                   const result = yield* client.query(
                     `UPDATE reporting_pending_reports
@@ -770,18 +632,8 @@ export function createReportingServiceLive(
             );
             break;
           }
-          // Every decision below is made from the row as it exists now, holding
-          // its lease: a withdrawal that discarded this row, or a re-enable that
-          // started a different interval, must win over the batch claimed before
-          // it happened. The policy read and this fenced re-read share one
-          // transaction so no preference change can slip between them.
           const decision = yield* transaction((client) =>
             Effect.gen(function* () {
-              // The decision itself is serialized with preference changes: a
-              // withdrawal either commits before this read (so the row and its
-              // interval are already discarded/stale here) or after it. The
-              // completion update below is fenced on the lease, so a withdrawal
-              // that wins later is never overwritten by this pass.
               yield* lockReportingMutations(client);
               const live = yield* client.query<{
                 category: PendingReportCategory;
@@ -804,17 +656,11 @@ export function createReportingServiceLive(
               const preferences = yield* loadPreferences(client, false);
               const policy = policySnapshot(preferences, configuration);
               if (current.category === "feedback") {
-                // Feedback has its own one-time disclosure and its own random
-                // response identity; it is not governed by either reporting
-                // category's interval, so only its own consent applies.
                 return feedbackEffective(configuration)
                   ? ("permitted" as const)
                   : ("revoked" as const);
               }
               if (!categoryEffective(policy, current.category)) return "revoked" as const;
-              // The claimed row belongs to one consent interval. A different
-              // interval in the live policy means the Owner withdrew and re-consented
-              // since this row was produced, so the row describes declined activity.
               const liveInterval = policy.categories[current.category].intervalStartedAt;
               const rowInterval = isoOrNull(current.interval_started_at);
               if (rowInterval === null || liveInterval !== rowInterval) {
@@ -824,8 +670,6 @@ export function createReportingServiceLive(
             }),
           );
           if (decision === "lost") {
-            // Another pass reclaimed the expired lease while this one was working;
-            // its owner now decides the row's fate.
             skipped += 1;
             continue;
           }
@@ -850,9 +694,6 @@ export function createReportingServiceLive(
           const result = yield* sendCapture({
             distinctId: row.distinct_id,
             event: row.event_name,
-            // Both identities are frozen on the row, so a retry after a partial
-            // send repeats the same PostHog de-duplication key instead of
-            // creating a second measurement.
             eventUuid: row.event_uuid,
             properties,
             timestamp:
@@ -862,9 +703,6 @@ export function createReportingServiceLive(
           });
           if (result.ok) {
             delivered += 1;
-            // Fenced on the lease token: if this lease expired and another pass
-            // reclaimed the row, this completion must not overwrite that pass's
-            // ownership or its outcome.
             yield* transaction((client) =>
               client.query(
                 `UPDATE reporting_pending_reports
@@ -905,9 +743,6 @@ export function createReportingServiceLive(
             ),
           );
         }
-        // Terminal payloads are deleted on the same bounded pass that produces
-        // them. Only the minimal delivery receipt survives, so the optional data
-        // window is enforced on the bytes, not just on the row's state.
         yield* transaction((client) => pruneTerminalReports(client));
         skipped += claimed.length === 0 ? 1 : 0;
         return {
@@ -924,27 +759,16 @@ export function createReportingServiceLive(
   return Layer.succeed(ReportingService, service);
 }
 
-/** One report ready to be written to the bounded pending queue. */
 interface PendingInsert {
   category: PendingReportCategory;
   distinctId: string;
   eventName: string;
   eventTimestamp: Date;
-  /** Consent interval that produced the report; delivery compares it to the live one. */
   intervalStartedAt: string;
   logicalId: string;
   payload: Record<string, unknown>;
 }
 
-/**
- * Caps a category's pending backlog so bounded storage is a property of the module.
- *
- * The cap is checked under the reporting mutation lock, so concurrent producers
- * cannot each observe a below-cap count and then all insert past it. A logical
- * identity already receipted as sent or discarded is not rewritten either:
- * re-creating it would send a measurement the installation already declined or
- * delivered.
- */
 function insertPending(
   client: ReportingClient,
   input: PendingInsert,
@@ -984,13 +808,6 @@ function insertPending(
   );
 }
 
-/**
- * Inserts one pending report, reusing an existing logical identity.
- *
- * The frozen `event_uuid` and `event_timestamp` are what make a retry the same
- * measurement, so a repeated enqueue keeps the original row instead of minting a
- * second identity.
- */
 function enqueuePending(
   client: ReportingClient,
   input: PendingInsert,

@@ -267,12 +267,6 @@ const registryCache = new WeakMap<object, RegistryCacheEntry>();
 export class ProviderRegistry {
   readonly #adapters = new Map<Platform, ProviderAdapter>();
 
-  /**
-   * Registers and wraps an initialized ProviderAdapter for a specific social media platform.
-   * Enforces strict capability validation, required lifecycle methods, retry policy bounds (1-10 attempts, up to 24h),
-   * and wraps mutation operations to attach telemetry context metadata to operation results.
-   * Throws TypeError if the platform is already registered, capabilities mismatch, or contracts are violated.
-   */
   register(platform: Platform, adapter: ProviderAdapter): void {
     if (this.#adapters.has(platform)) {
       throw new TypeError(`provider adapter is already registered: ${platform}`);
@@ -375,38 +369,14 @@ export class ProviderRegistry {
     this.#adapters.set(platform, registered);
   }
 
-  /**
-   * Retrieves the registered ProviderAdapter instance for a platform.
-   * Returns the ProviderAdapter if registered, or undefined if unconfigured.
-   */
   get(platform: Platform): ProviderAdapter | undefined {
     return this.#adapters.get(platform);
   }
 
-  /**
-   * Returns the metrics whose stored zero this Platform's adapter cannot vouch for.
-   *
-   * A missing adapter declares nothing ambiguous: it reports no analytics at all,
-   * which coverage states separately.
-   *
-   * @param platform - Platform whose adapter is consulted.
-   * @returns Ambiguous metric names, empty when the adapter sets none.
-   */
   ambiguousZeroMetrics(platform: Platform): readonly ProviderAnalyticsMetric[] {
     return this.#adapters.get(platform)?.ambiguousZeroMetrics ?? [];
   }
 
-  /**
-   * Returns capability descriptors for all platforms defined in PLATFORM_IDS.
-   * Registered adapters supply their active descriptors. Unconfigured providers
-   * retain their declared caption ceilings while every runtime operation remains
-   * unavailable. Analytics follows the configured set: when no adapter is
-   * configured at all (the local fixture stack), every supported Platform keeps
-   * its declared analytics support so stored snapshots stay readable. Once any
-   * adapter exists, an unconfigured Platform reports no analytics and coverage
-   * fails closed. Returned descriptors are isolated and follow canonical
-   * platform order.
-   */
   capabilities(): PlatformCapability[] {
     const fallbacks =
       this.#adapters.size > 0 ? unconfiguredWithoutAnalytics : unconfiguredWithAnalytics;
@@ -416,11 +386,6 @@ export class ProviderRegistry {
   }
 }
 
-/**
- * Parses and validates an environment boolean acceptance flag.
- * Requires value to be 'true', 'false', or empty/undefined (defaults to false).
- * Returns true if value is 'true', false otherwise. Throws TypeError if value contains invalid text.
- */
 function acceptanceFlag(name: string, value: string | undefined): boolean {
   const normalized = value?.trim() ?? "false";
   if (!["", "false", "true"].includes(normalized)) {
@@ -429,11 +394,6 @@ function acceptanceFlag(name: string, value: string | undefined): boolean {
   return normalized === "true";
 }
 
-/**
- * Validates that the public API base URL is a non-empty, credential-free HTTPS or loopback URL.
- * Required for deriving canonical OAuth callback URLs for provider redirect registrations.
- * Returns validated URL object. Throws TypeError if empty, malformed, or untrusted.
- */
 function trustedPublicUrl(value: string | undefined): URL {
   if (!value?.trim()) {
     throw new TypeError("accepted provider configuration is incomplete");

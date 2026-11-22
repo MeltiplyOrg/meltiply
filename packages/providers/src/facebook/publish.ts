@@ -70,7 +70,6 @@ const publishedStoryStatuses = ["PUBLISHED", "ARCHIVED"];
 const maxStreamUrlChars = 4096;
 const storyPageSize = "100";
 
-/** One remotely ingested MP4/MOV attachment, for Reels, video Stories, and regular videos. */
 function remoteVideoUrl(input: PublishInput): string {
   const [media] = input.media;
   if (input.media.length !== 1 || !media || media.mode !== "remote_ingest") {
@@ -180,7 +179,6 @@ export function createFacebookPublish(http: ProviderHttpClient) {
     }
   };
 
-  /** Finishes a Reel or video Story once; an uncertain write retains the known video identity. */
   const submitFinish = async (
     context: ProviderRequestContext,
     credentials: ProviderCredentials,
@@ -363,7 +361,6 @@ export function createFacebookPublish(http: ProviderHttpClient) {
     return { providerOperationId: retainedOperationId, state: "processing" };
   };
 
-  /** Starts a Reel or video Story upload, has Meta fetch the hosted file, then finishes it. */
   const publishVideoUpload = async (
     context: ProviderRequestContext,
     credentials: ProviderCredentials,
@@ -405,7 +402,6 @@ export function createFacebookPublish(http: ProviderHttpClient) {
   };
 
   return {
-    /** Encoder URLs are read on demand and never retained in results or snapshots. */
     async getBroadcastInfo(
       context: ProviderRequestContext,
       credentials: ProviderCredentials,
@@ -513,7 +509,6 @@ export function createFacebookPublish(http: ProviderHttpClient) {
       return lookupReel(context, credentials, videoId, operation);
     },
 
-    /** Dispatches one Page publication to the endpoint its resolved post type requires. */
     async publish(
       context: ProviderRequestContext,
       credentials: ProviderCredentials,

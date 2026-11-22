@@ -17,14 +17,12 @@ const releaseScript = resolve("packages/contracts/scripts/contract-release.mjs")
 const output = resolve("artifacts/contract-preview");
 await mkdir(output, { recursive: true });
 
-/** Runs the public release CLI; negative scenarios must reject with an actionable diagnostic. */
 function release(args, cwd = process.cwd(), expected = 0) {
   const result = spawnSync(process.execPath, [releaseScript, ...args], { cwd, encoding: "utf8" });
   assert.equal(result.status, expected, `${result.stdout}${result.stderr}`);
   return `${result.stdout}${result.stderr}`;
 }
 
-/** Exercises actual release assets and refuses corruption, internal attachments and stale source versions. */
 async function releaseSmoke() {
   release(["verify"]);
   const jsonPath = resolve("packages/contracts/dist/release/openapi.json");
@@ -48,7 +46,6 @@ async function releaseSmoke() {
   );
   release(["verify"]);
 
-  // A disposable Git history tests automatic version decisions at the release CLI seam.
   const directory = await mkdtemp(resolve(tmpdir(), "meltiply-contract-release-"));
   try {
     const contracts = resolve(directory, "packages/contracts");
@@ -67,7 +64,6 @@ async function releaseSmoke() {
       resolve(contracts, "CHANGELOG.md"),
       "# Contract changelog\n\n## Unreleased\n\n## 1.2.3\n\n- Previous release.\n",
     );
-    /** Keeps fixture commits and tags confined to this temporary release repository. */
     const commit = (tag) => {
       for (const args of [
         ["add", "."],
@@ -131,7 +127,6 @@ async function releaseSmoke() {
     );
     release(["artifacts", "--tag", "contract-v1.2.4"], directory);
     release(["verify"], directory);
-    // Make all metadata and checksums self-consistent, but contradict the tagged Markdown notes.
     const fixtureManifestPath = resolve(contracts, "release.json");
     const forged = JSON.parse(await readFile(fixtureManifestPath, "utf8"));
     forged.changes = ["**Patch:** A different, unreviewed release note."];
@@ -150,7 +145,6 @@ async function releaseSmoke() {
     await writeFile(resolve(distributed, "SHA256SUMS"), `${sums.join("\n")}\n`);
     assert.match(release(["artifacts"], directory, 1), /changelog notes.*match/i);
     assert.match(release(["verify"], directory, 1), /changelog notes.*match/i);
-    // Editing the worktree to agree must not rewrite a tagged release's review history.
     const fixtureNotesPath = resolve(contracts, "CHANGELOG.md");
     const taggedNotes = await readFile(fixtureNotesPath, "utf8");
     await writeFile(
@@ -186,7 +180,6 @@ async function releaseSmoke() {
   }
 }
 
-/** Starts the production Worker entry with isolated local bindings and verifies unauthenticated HTTP health. */
 async function healthSmoke() {
   const source = YAML.parse(await readFile("packages/contracts/openapi.yaml", "utf8"));
   const log = createWriteStream(resolve(output, "worker.log"));

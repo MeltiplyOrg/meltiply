@@ -30,20 +30,10 @@ const sha256Pattern = /^sha256:[a-f0-9]{64}$/;
 const maximumEvidenceBytes = 1024 * 1024;
 const evidenceTimeoutMilliseconds = 10_000;
 
-/**
- * Asserts whether a value is a non-null, non-array object record.
- * Used across schema and metadata validation to reject primitives and lists.
- * Returns true if value is a plain record object, false otherwise.
- */
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/**
- * Enforces strict object schema shape by rejecting unexpected property keys.
- * Fails closed against undocumented metadata fields or accidental typo keys.
- * Throws Error listing unexpected keys if value contains keys outside allowedKeys.
- */
 function assertExactKeys(value, allowedKeys, subject) {
   const unexpected = Object.keys(value).filter((key) => !allowedKeys.includes(key));
   if (unexpected.length > 0) {
@@ -51,12 +41,6 @@ function assertExactKeys(value, allowedKeys, subject) {
   }
 }
 
-/**
- * Extracts and deduplicates all valid HTTP operations defined in an OpenAPI specification.
- * Validates that every path item operation has a non-empty string operationId without duplicates.
- * Returns an array of `{ method, operationId, path }` descriptor records sorted by path occurrence.
- * Throws Error if document is malformed or duplicate operationIds are found.
- */
 export function collectOpenApiOperations(document) {
   if (!isRecord(document) || !isRecord(document.paths)) {
     throw new Error("OpenAPI document must contain a paths object");
@@ -93,12 +77,6 @@ export function collectOpenApiOperations(document) {
   return operations;
 }
 
-/**
- * Validates an immutable external evidence artifact reference descriptor.
- * Enforces that reference is an object containing exact `{ url, digest }` keys,
- * where url is a credential-free HTTPS URL and digest is a lowercase sha256 hex string.
- * Throws Error if reference shape, URL format, protocol, or digest format is invalid.
- */
 function validateEvidenceReference(reference, subject) {
   if (!isRecord(reference)) {
     throw new Error(`${subject} must be an object`);
@@ -130,12 +108,6 @@ function validateEvidenceReference(reference, subject) {
   }
 }
 
-/**
- * Validates readiness metadata for a single OpenAPI operation against promotion criteria.
- * Verifies allowed keys, supported state ('specified'|'worker-preview'|'staging-ready'|'accepted'),
- * non-empty single-line gate text, and the presence of all required immutable evidence kinds.
- * Throws Error if metadata fields are invalid or required evidence references are missing.
- */
 function validateOperationReadiness(operationId, readiness) {
   const subject = `readiness metadata for ${operationId}`;
   if (!isRecord(readiness)) {
@@ -179,12 +151,6 @@ function validateOperationReadiness(operationId, readiness) {
   }
 }
 
-/**
- * Validates that the readiness metadata catalog strictly mirrors the OpenAPI contract.
- * Enforces schemaVersion 1, exact version match with openApi.info.version, and 1:1 bijective
- * mapping between OpenAPI operationIds and catalog operation entries.
- * Returns collected OpenAPI operations. Throws Error on version drift, missing, or extra IDs.
- */
 export function validateReadinessCatalog(openApi, catalog) {
   if (!isRecord(catalog)) {
     throw new Error("readiness metadata must be an object");
@@ -230,12 +196,6 @@ export function validateReadinessCatalog(openApi, catalog) {
   return openApiOperations;
 }
 
-/**
- * Resolves optional HTTP authorization headers for evidence artifact downloads.
- * Strictly checks that authorization is only attached when url matches the origin specified
- * in MELTIPLY_READINESS_EVIDENCE_AUTH_ORIGIN, preventing credential leakage to third parties.
- * Returns `{ authorization }` header record if origin matches, or undefined otherwise.
- */
 function evidenceRequestHeaders(url, environment) {
   const authorization = environment.MELTIPLY_READINESS_EVIDENCE_AUTHORIZATION?.trim();
   if (!authorization) return undefined;
@@ -268,12 +228,6 @@ function evidenceRequestHeaders(url, environment) {
   return new URL(url).origin === origin ? { authorization } : undefined;
 }
 
-/**
- * Reads an HTTP response body into memory with strict byte limit enforcement (1 MiB).
- * Prevents memory exhaustion during CI verification by inspecting Content-Length upfront
- * and terminating streaming readers early if byte count exceeds maximumEvidenceBytes.
- * Returns Uint8Array of downloaded bytes. Throws Error on invalid length or limit overflow.
- */
 async function readBoundedEvidence(response, url) {
   const contentLength = response.headers?.get("content-length");
   if (contentLength !== null && contentLength !== undefined) {
@@ -317,12 +271,6 @@ async function readBoundedEvidence(response, url) {
   return bytes;
 }
 
-/**
- * Fetches, reads, and cryptographically verifies an immutable JSON evidence artifact.
- * Issues a timeout-bounded, redirect-denied HTTP request, calculates SHA-256 over received bytes,
- * asserts exact match against reference.digest, and parses valid UTF-8 JSON.
- * Returns parsed JSON artifact record. Throws Error on fetch failure, status error, or digest mismatch.
- */
 async function fetchEvidenceArtifact(reference, fetchImplementation, environment) {
   let response;
   try {
@@ -352,12 +300,6 @@ async function fetchEvidenceArtifact(reference, fetchImplementation, environment
   }
 }
 
-/**
- * Validates the contents and scope of a fetched evidence artifact record.
- * Asserts schemaVersion 1, matching evidence kind, passing result ('passed'),
- * and explicit inclusion of target operationId within artifact.operationIds.
- * Throws Error if artifact structure is invalid or does not certify operationId passing.
- */
 function validateFetchedEvidence(artifact, kind, operationId, url) {
   if (!isRecord(artifact) || artifact.schemaVersion !== 1) {
     throw new Error(`evidence artifact has an unsupported schema: ${url}`);
@@ -381,12 +323,6 @@ function validateFetchedEvidence(artifact, kind, operationId, url) {
   }
 }
 
-/**
- * Verifies all required promotion evidence artifacts for promoted OpenAPI operations in parallel.
- * Collects distinct artifact URLs across operations, downloads each artifact concurrently using a worker
- * pool (up to 4 workers), and verifies cryptographic digests and passing status for each required evidence kind.
- * Throws Error if evidence fetching fails, digests mismatch, or requirements are unsatisfied.
- */
 export async function verifyPromotionEvidence(
   openApi,
   catalog,
@@ -430,11 +366,6 @@ export async function verifyPromotionEvidence(
   await Promise.all(Array.from({ length: Math.min(4, entries.length) }, () => worker()));
 }
 
-/**
- * Formats markdown links and SHA-256 digests for checked-in promotion evidence references.
- * Iterates defined evidence kinds in standard order to generate a markdown table suffix.
- * Returns formatted markdown string, or an empty string if no promotion evidence is provided.
- */
 function promotionEvidenceSuffix(promotionEvidence) {
   if (!promotionEvidence) return "";
   const references = evidenceKinds
@@ -446,11 +377,6 @@ function promotionEvidenceSuffix(promotionEvidence) {
   return references.length > 0 ? ` Immutable promotion evidence: ${references.join(", ")}.` : "";
 }
 
-/**
- * Renders an aligned Markdown table from row tuples with computed column widths.
- * Formats header, delimiter, and data rows with uniform padding for deterministic diffs.
- * Returns complete multi-line Markdown table string.
- */
 function markdownTable(rows) {
   const headers = [
     "Operation",
@@ -469,11 +395,6 @@ function markdownTable(rows) {
   ].join("\n");
 }
 
-/**
- * Renders the complete Markdown document for endpoint-readiness.md from contract and catalog.
- * Validates catalog integrity and formats each operation row with state, gate, and evidence.
- * Returns a deterministic Markdown document with Bun evidence commands for CI drift verification.
- */
 export function renderEndpointReadiness(openApi, catalog) {
   const operations = validateReadinessCatalog(openApi, catalog);
   const rows = operations.map(({ operationId }) => {
@@ -527,12 +448,6 @@ matrix in memory and rejects source/output drift.
 `;
 }
 
-/**
- * Parses CLI arguments for the endpoint readiness tool into normalized execution options.
- * Validates that exactly one mode (--check or --write) is specified alongside optional path flags.
- * Returns parsed options object with resolved absolute file paths and execution mode.
- * Throws Error on missing, duplicate, or unrecognized arguments.
- */
 function parseArguments(args) {
   const options = { ...defaultPaths, mode: undefined };
   for (let index = 0; index < args.length; index += 1) {
@@ -557,11 +472,6 @@ function parseArguments(args) {
   return options;
 }
 
-/**
- * Reads and parses the OpenAPI YAML specification and readiness JSON catalog in parallel.
- * Used by CLI runner to load source files before generation or drift verification.
- * Returns `{ catalog, openApi }` parsed data object.
- */
 async function readInputs(options) {
   const [openApiSource, metadataSource] = await Promise.all([
     readFile(options.openApi, "utf8"),
@@ -573,12 +483,6 @@ async function readInputs(options) {
   };
 }
 
-/**
- * Main execution entry point for endpoint readiness matrix generation and validation.
- * In write mode, updates endpoint-readiness.md. In check mode, verifies that the checked-in
- * file matches generated output and validates all external promotion evidence artifacts.
- * Throws on stale output with the Bun regeneration command, invalid evidence, or invalid arguments.
- */
 export async function run(args, dependencies) {
   const options = parseArguments(args);
   const { catalog, openApi } = await readInputs(options);

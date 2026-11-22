@@ -138,7 +138,6 @@ function mediaParameters(item: ThreadsAttachment): Record<string, string> {
     : { media_type: "VIDEO", video_url: item.url };
 }
 
-/** A GIF or long-text attachment supplies its own content, so the text may be empty. */
 function textParameters(text: string, options: ThreadsPublishOptions): URLSearchParams {
   if (!text && !options.gif_attachment && !options.text_attachment) {
     throw rejected("threads_text_invalid");
@@ -196,7 +195,6 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
     parameters: Record<string, string>,
   ) => requestMetaBearerToken(http, context, `${apiOrigin}${path}`, parameters, limits, now());
 
-  /** Reports only grants the provider confirms, never the scopes merely requested. */
   const grantedScopes = async (
     context: ProviderRequestContext,
     token: string,
@@ -269,7 +267,6 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       });
     },
 
-    /** Replies are containers too: `lookupPublication` finalizes them once ready. */
     async reply(context, credentials, input) {
       const reply = parseMetaReply(input, limits.maxCaptionCodePoints);
       if (!reply) return confirmedFailure(rejection("threads_reply_invalid"));
@@ -298,11 +295,6 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         scope: configuredScopes.join(","),
       }),
 
-    /**
-     * Without a post ID only the container can be inspected: a failed or vanished
-     * container published nothing, while a live one stays ambiguous because a
-     * container ID cannot authorize deleting a post.
-     */
     async cancelPublication(context, credentials, lookup) {
       const providerPostId = providerIdentifier(lookup.providerPostId);
       const providerOperationId = providerIdentifier(lookup.providerOperationId);
@@ -356,10 +348,6 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
     },
     ambiguousZeroMetrics: ["views", "reactions", "comments", "shares"],
 
-    /**
-     * The `/me` profile's string ID is authoritative: the token response's numeric
-     * `user_id` can exceed the safe integer range.
-     */
     async exchangeAuthorizationCode(context, input): Promise<OAuthConnection> {
       assertConfiguredRedirectUri(input.redirectUri, redirectUri);
       const shortBody = record(
@@ -426,7 +414,6 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
 
     ...(engagementEnabled ? engagementMethods : {}),
 
-    /** Meta may omit the permalink of a copyright-restricted post; a matching ID still confirms it. */
     async lookupPublication(context, credentials, lookup) {
       const providerPostId = providerIdentifier(lookup.providerPostId);
       if (lookup.providerPostId && !providerPostId) throw malformed();
@@ -445,12 +432,6 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       return lookupMetaContainer(http, containerProtocol, context, credentials, operation);
     },
 
-    /**
-     * Creates `created:<parent>` for text or media; even text containers are
-     * asynchronous, so all finalize through `lookupPublication`. A native repost
-     * publishes immediately. Carousel items are created sequentially so a rejected
-     * attachment stops before later remote objects exist.
-     */
     async publish(context, credentials, input) {
       requireIdempotencyKey(input.idempotencyKey);
       const { attachments, options, text } = publishInput(input);
@@ -509,7 +490,6 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       };
     },
 
-    /** Meta refreshes only unexpired long-lived tokens that are at least 24 hours old. */
     async refreshAccessToken(context, refreshToken): Promise<ProviderTokenSet> {
       const { accessToken, expiresAt } = await tokenGrant(context, "/refresh_access_token", {
         grant_type: "th_refresh_token",

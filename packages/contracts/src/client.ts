@@ -7,11 +7,6 @@ export const apiVersionPath = "/api/v1";
 /**
  * Factory creating a typed openapi-fetch client bound to the Meltiply v1 API surface.
  * Enforces that baseUrl is an origin without path, query, or fragment, and appends the canonical apiVersionPath (`/api/v1`).
- *
- * @param baseUrl - Base API origin URL (e.g., "https://api.meltiply.com").
- * @param fetchImpl - Optional custom fetch implementation (defaults to global fetch).
- * @returns Fully typed MeltiplyClient instance configured for the OpenAPI schema.
- * @throws {TypeError} When baseUrl contains a path, query, or hash.
  */
 export function createMeltiplyClient(baseUrl: string, fetchImpl: typeof fetch = fetch) {
   const origin = new URL(baseUrl);

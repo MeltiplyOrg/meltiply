@@ -29,7 +29,6 @@ export const FACEBOOK_PUBLISHING_SCOPES = [
   "pages_manage_posts",
 ] as const;
 
-/** Reels analytics needs these; they are requested but not required to connect. */
 const analyticsScopes = ["pages_manage_engagement", "read_insights"] as const;
 
 export const FACEBOOK_CONFIGURED_SCOPES = [

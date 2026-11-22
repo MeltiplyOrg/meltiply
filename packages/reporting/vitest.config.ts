@@ -1,6 +1,5 @@
 import { packageTestConfig } from "../../scripts/lib/package-test-config";
 
-// `src/service.ts` runs only against real PostgreSQL in the Worker integration suites.
 export default packageTestConfig(
   { branches: 70, functions: 80, lines: 75, statements: 75 },
   {

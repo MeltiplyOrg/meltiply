@@ -174,7 +174,6 @@ function resolveTarget(options: {
 
 export interface SigV4SignerOptions {
   accessKeyId: string;
-  /** Development-only: accept a plain-HTTP origin (see {@link resolveTarget}). */
   allowInsecureEndpoint?: boolean;
   addressing: BucketAddressing;
   bucket: string;
@@ -242,33 +241,10 @@ export class SigV4Signer {
     return url;
   }
 
-  /**
-   * Builds the `x-amz-copy-source` value for a server-side copy.
-   *
-   * The S3 copy API always names the bucket in the path, even under
-   * virtual-hosted addressing, so this is derived from the bucket rather than
-   * from {@link objectUrl}. The leading slash is the AWS-specified form that
-   * S3, MinIO, and Ceph all accept; an origin that rejects it is
-   * non-conformant, and dropping the slash to satisfy one would break every
-   * conforming origin.
-   *
-   * The bundled gateway does not implement server-side copy. The external
-   * `S3_CHECK_ENDPOINT` mode of `bun run storage:s3:check` verifies this against
-   * MinIO, including source-ETag and destination-absence guards.
-   */
   copySource(key: string): string {
     return `${this.#target.pathPrefix}/${encode(this.#target.bucket)}${canonicalKey(normalizeKey(key))}`;
   }
 
-  /**
-   * Signs one worker-issued request with the `Authorization` header scheme.
-   *
-   * The payload digest is computed from the request body whenever there is
-   * one, which is what generic S3-compatible origins require; bodyless calls
-   * use the standard empty-payload digest. `host` is taken from the resolved
-   * URL rather than a caller-supplied header, so a signed request can never be
-   * replayed against another origin.
-   */
   prepareRequest(input: {
     body?: Uint8Array<ArrayBuffer> | null;
     headers?: Readonly<Record<string, string>>;
@@ -279,13 +255,6 @@ export class SigV4Signer {
     return this.#sign(this.objectUrl(input.key, input.query), input);
   }
 
-  /**
-   * Signs a request addressed at the bucket itself rather than an object, which
-   * is what CreateBucket and HeadBucket require.
-   *
-   * Kept separate from {@link prepareRequest} because the bucket path is not an
-   * object key and must not be run through key validation.
-   */
   prepareBucketRequest(method: string): Promise<SignedRequest> {
     const segment = this.#target.addressing === "virtual" ? "" : `/${encode(this.#target.bucket)}`;
     return this.#sign(new URL(`${this.#target.origin}${this.#target.pathPrefix}${segment}`), {
@@ -500,20 +469,6 @@ export abstract class SigV4UrlSigner implements ObjectUrlSigner {
     return this.signer.presign("GET", request);
   }
 
-  /**
-   * Generates a short-lived presigned PUT URL for one exact object key.
-   *
-   * Unlike `signUpload`, no `content-length` is signed, so the grant is usable
-   * for output whose size is only known once it has been produced. The caller
-   * must therefore verify the written object's real size and checksum before
-   * treating the upload as complete.
-   *
-   * Passing `requiredHeaders` binds those headers into the signature, turning
-   * the grant into a create-only write (`{"if-none-match": "*"}`): a consumer
-   * that omits the header is rejected by the origin, and one that sends it
-   * against an existing key gets a precondition failure instead of silently
-   * overwriting an earlier attempt's bytes.
-   */
   signObjectWrite(request: SignedObjectWriteRequest): Promise<string> {
     return this.signer.presign("PUT", request, undefined, request.requiredHeaders);
   }

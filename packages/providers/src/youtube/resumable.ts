@@ -45,11 +45,6 @@ const angleBracketsPattern = /[<>]/;
 const uploadRangePattern = /^bytes=0-(\d+)$/;
 const utf8Encoder = new TextEncoder();
 
-/**
- * Coalescing threshold for small stream reads: reads below this size are copied
- * into a bounded staging slab before joining the part list, bounding the part
- * array length even for degenerate 1-byte-per-read streams.
- */
 const STAGING_BUFFER_BYTES = 64 * 1024;
 
 export interface UploadInput {
@@ -70,10 +65,6 @@ type UploadOutcome =
   | { acknowledged: number; failure: ProviderFailure; kind: "interrupted" }
   | { id: string; kind: "complete" };
 
-/**
- * Validates one standard YouTube video or Shorts-candidate upload against
- * title/description/tag/media/options bounds.
- */
 function parseYouTubeUploadInput(input: PublishInput): UploadInput {
   requireIdempotencyKey(input.idempotencyKey);
   const description = input.caption.trim();
@@ -152,10 +143,6 @@ function parseYouTubeUploadInput(input: PublishInput): UploadInput {
   };
 }
 
-/**
- * Parses a resumable-upload `Range` response header into the acknowledged byte
- * count, falling back to `absent` when the header is missing.
- */
 function acknowledgedOffset(headers: Headers, fileSize: number, absent: number): number {
   const range = headers.get("Range");
   if (range === null) return absent;
@@ -166,16 +153,10 @@ function acknowledgedOffset(headers: Headers, fileSize: number, absent: number):
   return lastByte + 1;
 }
 
-/** Narrows a byte view to the `ArrayBuffer`-backed shape `fetch` BodyInit requires. */
 function isArrayBufferBacked(value: Uint8Array): value is Uint8Array<ArrayBuffer> {
   return value.buffer instanceof ArrayBuffer;
 }
 
-/**
- * Bounded stream read buffer that coalesces tiny reads into a 64 KiB staging
- * slab while passing large ArrayBuffer-backed chunks through without copying.
- * Keeps `parts.length` bounded even on degenerate 1-byte-per-read streams.
- */
 class ChunkWindow {
   readonly #parts: Uint8Array<ArrayBuffer>[] = [];
   #partStart = 0;
@@ -205,7 +186,6 @@ class ChunkWindow {
     this.#buffered += part.byteLength;
   }
 
-  /** Assembles the next `chunkLength` bytes without advancing the window. */
   peek(chunkLength: number): Uint8Array<ArrayBuffer> {
     this.#flushStaging();
     const first = this.#parts[this.#partStart];
@@ -229,7 +209,6 @@ class ChunkWindow {
     return assembled;
   }
 
-  /** Drops `byteCount` acknowledged bytes from the front of the window. */
   consume(byteCount: number): void {
     this.#flushStaging();
     let remaining = byteCount;
@@ -273,10 +252,6 @@ export interface YouTubeResumableConfig {
 export function createYouTubeResumable(config: YouTubeResumableConfig) {
   const { categoryId, googleRequest, uploadChunkBytes } = config;
 
-  /**
-   * Probes an open resumable upload session (`PUT` with `Content-Range: bytes *\/size`).
-   * Shared by both in-flight chunk recovery and reconciliation lookup.
-   */
   const probeSession = async (
     context: ProviderRequestContext,
     credentials: ProviderCredentials,
@@ -302,11 +277,6 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
       : { kind: "complete", videoId: youtubeVideoId(response.body, sideEffectOnVideoId) };
   };
 
-  /**
-   * Streams the media body to a resumable session in bounded 256 KiB-aligned
-   * chunks, coalescing small stream reads into 64 KiB slabs and probing the
-   * session on uncertain chunk failures without resending acknowledged bytes.
-   */
   const uploadBytes = async (
     context: ProviderRequestContext,
     credentials: ProviderCredentials,
@@ -476,9 +446,6 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
     }
   };
 
-  /**
-   * Polls a completed upload's video processing state through `videos.list`.
-   */
   const lookupVideo = async (
     context: ProviderRequestContext,
     credentials: ProviderCredentials,

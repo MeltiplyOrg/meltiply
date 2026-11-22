@@ -74,13 +74,6 @@ function adapter(fetcher: typeof fetch, now = new Date("2026-07-19T00:00:00Z")) 
   });
 }
 
-/**
- * Returns the canonical valid TikTok Direct Post publish request — a 120 s
- * portrait MP4 ingested from a `mediaUrlPrefix` URL with full creator options —
- * so each spec overrides only the dimension it exercises. `patch` is spread
- * last, so its keys replace whole top-level fields (e.g. `media`,
- * `providerOptions`) rather than deep-merging into the defaults.
- */
 function publishInput(patch: Partial<PublishInput> = {}): PublishInput {
   return {
     caption: "A direct post\n\n#launch",

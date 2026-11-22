@@ -53,12 +53,6 @@ function isContractDocument(value: unknown): value is ContractDocument {
   );
 }
 
-/**
- * Loads and dereferences the canonical OpenAPI 3.1 specification document from disk.
- * Memoizes the dereferenced document per process so multiple test suites do not re-parse 7,000+ lines of YAML.
- *
- * @returns Promise resolving to the dereferenced ContractDocument.
- */
 export function loadContractDocument(): Promise<ContractDocument> {
   if (!cachedDocumentPromise) {
     cachedDocumentPromise = (async () => {
@@ -73,13 +67,6 @@ export function loadContractDocument(): Promise<ContractDocument> {
   return cachedDocumentPromise;
 }
 
-/**
- * Indexes all OpenAPI operations in the contract document by their unique operationId.
- * Iterates through all path items and HTTP methods (delete, get, patch, post, put).
- *
- * @param document - Dereferenced OpenAPI contract document.
- * @returns Map indexing operationId to ContractOperation descriptor.
- */
 export function operationsById(document: ContractDocument) {
   const operations = new Map<string, ContractOperation>();
   for (const pathItem of Object.values(document.paths)) {
@@ -96,48 +83,22 @@ export class ContractValidator {
   readonly #ajv: Ajv2020;
   readonly #validators = new WeakMap<object, ValidateFunction>();
 
-  /**
-   * Initializes the contract validator with indexed operations and an Ajv JSON schema engine.
-   *
-   * @param document - Dereferenced OpenAPI specification document.
-   */
   private constructor(document: ContractDocument) {
     this.operations = operationsById(document);
     this.#ajv = new Ajv2020({ allErrors: true, strict: false });
     addFormats(this.#ajv);
   }
 
-  /**
-   * Asynchronous factory that loads the OpenAPI specification and returns an initialized ContractValidator.
-   *
-   * @returns Promise resolving to a new ContractValidator instance.
-   */
   static async create(): Promise<ContractValidator> {
     return new ContractValidator(await loadContractDocument());
   }
 
-  /**
-   * Validates an incoming HTTP request body against the documented JSON schema for an operation.
-   *
-   * @param operationId - Target OpenAPI operation ID.
-   * @param body - Parsed JSON request payload.
-   * @returns Undefined if valid, or a formatted validation error message string.
-   */
   validateRequest(operationId: string, body: unknown): string | undefined {
     const operation = this.operation(operationId);
     const schema = operation.requestBody?.content?.["application/json"]?.schema;
     return schema ? this.validate(schema, body) : undefined;
   }
 
-  /**
-   * Validates an HTTP response status code and body against the OpenAPI operation schema.
-   * Confirms the status code is documented, verifies schema conformance, and checks for unexpected body presence.
-   *
-   * @param operationId - Target OpenAPI operation ID.
-   * @param status - HTTP response status code.
-   * @param body - Parsed JSON response body or undefined.
-   * @returns Undefined if conforming, or an error message explaining the discrepancy.
-   */
   validateResponse(operationId: string, status: number, body: unknown): string | undefined {
     const operation = this.operation(operationId);
     const response = operation.responses[String(status)];
@@ -154,26 +115,12 @@ export class ContractValidator {
     return this.validate(schema, body);
   }
 
-  /**
-   * Resolves an operation descriptor by its operationId, failing if unknown.
-   *
-   * @param operationId - Operation identifier to look up.
-   * @returns ContractOperation descriptor.
-   * @throws {Error} When operationId is not in the contract document.
-   */
   private operation(operationId: string): ContractOperation {
     const operation = this.operations.get(operationId);
     if (!operation) throw new Error(`unknown OpenAPI operation: ${operationId}`);
     return operation;
   }
 
-  /**
-   * Compiles or retrieves cached Ajv validator for a schema object and evaluates input data.
-   *
-   * @param schema - JSON schema object.
-   * @param body - Data payload to validate against the schema.
-   * @returns Undefined if validation passed, or formatted Ajv error text.
-   */
   private validate(schema: object, body: unknown): string | undefined {
     let validator = this.#validators.get(schema);
     if (!validator) {

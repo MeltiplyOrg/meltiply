@@ -61,12 +61,6 @@ export function providerCallEffect<A>(
   });
 }
 
-/**
- * Fails with a deterministic non-retryable `provider_unsupported` error.
- * Used when an adapter does not implement an optional capability method, so
- * Effect callers observe a typed failure instead of a TypeError on undefined.
- * Returns a failing Effect; never resolves.
- */
 function unsupported(method: string): Effect.Effect<never, ProviderAdapterError> {
   return Effect.fail(
     new ProviderAdapterError(
@@ -78,11 +72,6 @@ function unsupported(method: string): Effect.Effect<never, ProviderAdapterError>
   );
 }
 
-/**
- * Resolves an optional adapter method and invokes it inside `providerCallEffect`
- * without non-null assertions. Missing methods fail deterministically with
- * `provider_unsupported_<label>`.
- */
 function withAdapterMethod<M, A>(
   method: M | undefined,
   label: string,
@@ -382,14 +371,12 @@ export function withReadRetry<A>(
  * transient/timeout failures.
  */
 export interface ProviderServiceShape {
-  /** Reads secret encoder details only at an explicitly authorized, no-store API boundary. */
   readonly getBroadcastInfo: (
     platform: Platform,
     context: ProviderRequestContext,
     credentials: ProviderCredentials,
     lookup: ProviderPublicationLookup,
   ) => Effect.Effect<ProviderBroadcastInfo, ProviderAdapterError>;
-  /** Ends one broadcast exactly once; ambiguous writes must be reconciled, not retried. */
   readonly endBroadcast: (
     platform: Platform,
     context: ProviderRequestContext,
@@ -475,12 +462,6 @@ export interface ProviderAdapterSource {
   get(platform: Platform): ProviderAdapter | undefined;
 }
 
-/**
- * Resolves the adapter for a platform or fails typed when unconfigured.
- * Missing platforms surface as deterministic non-retryable
- * `provider_not_configured` failures rather than undefined dereferences.
- * Returns Effect resolving to the registered adapter.
- */
 function resolveAdapter(
   source: ProviderAdapterSource,
   platform: Platform,
@@ -498,13 +479,6 @@ function resolveAdapter(
       );
 }
 
-/**
- * Builds the ProviderService implementation over an adapter source.
- * Each method resolves the platform adapter then delegates to the matching
- * Effect wrapper, so provider-specific logic stays inside the adapters while
- * workers compose a uniform Effect interface.
- * Returns the service implementation.
- */
 function makeProviderService(source: ProviderAdapterSource): ProviderServiceShape {
   const on = <A>(
     platform: Platform,

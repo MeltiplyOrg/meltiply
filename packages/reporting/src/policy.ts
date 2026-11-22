@@ -28,7 +28,6 @@ export function isoOrNull(value: Date | string | null): string | null {
   return isoDateTimeOrNull(value);
 }
 
-/** Columns backing one category, so both categories read the same way. */
 function categoryColumns(row: PreferencesRow, category: ReportingCategory) {
   return category === "usage"
     ? {
@@ -45,25 +44,6 @@ function categoryColumns(row: PreferencesRow, category: ReportingCategory) {
       };
 }
 
-/**
- * Decides one category's requested and effective status.
- *
- * The order is deliberate and answers the operator's real question: an Owner who
- * never asked sees `not_requested`; an Owner who asked but cannot transmit sees
- * why. Unreadable preference state outranks everything because the stored choice
- * itself is untrustworthy.
- *
- * Consent is granted against a specific disclosure text, so a category whose
- * stored disclosure version is missing or no longer the supported one fails
- * closed as `preference_unavailable`: the persisted choice cannot authorize a
- * payload the Owner never saw described. Retrieval is unaffected — the Owner can
- * still read the state and record a fresh decision.
- *
- * @param row - Persisted preference row, or null when no choice was ever saved.
- * @param category - Category to evaluate.
- * @param configuration - Deployment configuration for the current invocation.
- * @returns Requested status, effective status, reason and interval bounds.
- */
 function categoryReason(
   row: PreferencesRow | null,
   requested: boolean,
@@ -104,11 +84,6 @@ export function categoryStatus(
 /**
  * Projects persisted state and deployment configuration into the policy the API
  * and the delivery path both act on.
- *
- * @param row - Persisted preference row, or null for an installation that has
- *   never saved a choice (existing installations and fresh ones alike).
- * @param configuration - Deployment configuration for the current invocation.
- * @returns Complete policy snapshot for a member-readable response.
  */
 export function policySnapshot(
   row: PreferencesRow | null,
@@ -128,10 +103,6 @@ export function policySnapshot(
 
 /**
  * Reports whether one category may transmit under the current policy.
- *
- * @param policy - Snapshot already evaluated for this invocation's configuration.
- * @param category - Category the pending report belongs to.
- * @returns True only when the category is effective.
  */
 export function categoryEffective(
   policy: ReportingPolicySnapshot,
@@ -151,11 +122,6 @@ export function feedbackEffective(configuration: ReportingConfiguration): boolea
  * Reuses the repository's exponential convention rather than inventing a second
  * delivery framework, and never schedules beyond the row's expiry: a pending
  * report that would retry after it expired is discarded instead.
- *
- * @param attempts - Attempts already recorded, including the current one.
- * @param expiresAt - The row's hard expiry.
- * @param now - Current instant.
- * @returns Backoff delay in seconds, or null when the row should be discarded.
  */
 export function retryDelaySeconds(attempts: number, expiresAt: Date, now: Date): number | null {
   const delay = Math.min(3_600, 300 * 2 ** Math.max(0, attempts - 1));

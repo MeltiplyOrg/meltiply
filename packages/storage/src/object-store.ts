@@ -8,15 +8,12 @@ import {
 
 export interface ObjectMetadata {
   contentType: string | null;
-  /** User metadata the provider exposes alongside the object; promotion copies carry the source provenance here. */
   customMetadata?: Record<string, string> | null;
   etag: string;
   key: string;
-  /** Hex SHA-256 digest reported for the object; absent unless the write carried a checksum. */
   sha256?: string | null;
   size: number;
   uploadedAt: Date;
-  /** Immutable object version reported by the provider; absent on S3 without versioning. */
   version?: string | null;
 }
 
@@ -58,19 +55,6 @@ export interface EffectMultipartUpload {
 }
 
 export interface ObjectStore {
-  /**
-   * Copies an object inside the bucket without buffering it in the worker.
-   *
-   * The source read is conditional (`ifSourceEtagMatches`) so a stale or
-   * rewritten staging object can never be promoted, and the destination write
-   * is conditional (`ifDestinationAbsent`) so a replayed copy adopts the object
-   * a previous attempt already wrote instead of duplicating work.
-   *
-   * Required rather than optional: promoting verified upload bytes out of the
-   * staging namespace is the store's core job, so a store that cannot copy
-   * cannot fulfill the contract and must fail at wiring time instead of
-   * silently skipping the promotion step.
-   */
   copyObject(
     sourceKey: string,
     destinationKey: string,
@@ -83,11 +67,6 @@ export interface ObjectStore {
   createMultipartUpload(key: string, contentType: string): Promise<MultipartUpload>;
   delete(key: string): Promise<void>;
   head(key: string): Promise<ObjectMetadata | null>;
-  /**
-   * Opens the whole object for streaming. Optional on the interface because
-   * injected test doubles only implement what their scenario exercises; every
-   * store the provider factory constructs implements it.
-   */
   read?(key: string): Promise<ObjectBody | null>;
   readRange?(key: string, offset: number, maximumBytes: number): Promise<Uint8Array | null>;
   readPrefix(key: string, maximumBytes: number): Promise<Uint8Array | null>;
@@ -98,17 +77,6 @@ export interface SignedObjectRequest {
   contentLength?: number;
   contentType?: string;
   downloadFilename?: string;
-  /**
-   * Absolute instant the signed URL must not outlive.
-   *
-   * The signer captures its own clock once at signing time and clamps
-   * `expiresInSeconds` to the remaining time on this deadline, so a signature
-   * computed late — after the caller paused — can never mint a URL that
-   * outlives a deadline the caller already persisted (e.g. an
-   * `asset_objects.write_hold_until`). An `expiresAt` that has already
-   * elapsed when signing starts is rejected instead of being stretched into a
-   * late grant.
-   */
   expiresAt?: Date;
   expiresInSeconds: number;
   key: string;
@@ -151,26 +119,10 @@ export interface SignedMultipartPartRequest extends SignedUploadRequest {
  * before trusting it.
  */
 export interface SignedObjectWriteRequest {
-  /** Optional signed content type; omit when the writer picks the format. */
   contentType?: string;
-  /**
-   * Absolute instant the grant must not outlive. The signer clamps
-   * `expiresInSeconds` to the time remaining on this deadline measured at
-   * signing time and rejects an already-elapsed deadline, so a delayed
-   * signature can never mint a write capability past a persisted
-   * `asset_objects.write_hold_until`.
-   */
   expiresAt?: Date;
-  /** Presigned lifetime in seconds, between 1 and 604800. */
   expiresInSeconds: number;
-  /** Exact object key the grant may write; no other key is reachable. */
   key: string;
-  /**
-   * Extra headers bound into the SigV4 signature, e.g.
-   * `{ "if-none-match": "*" }` for a create-only output write. Names are
-   * lowercased and canonicalized exactly like `content-type`/`content-length`;
-   * `host` may not be overridden. Must be non-empty when present.
-   */
   requiredHeaders?: Readonly<Record<string, string>>;
 }
 
@@ -258,10 +210,6 @@ export abstract class EffectObjectStore implements ObjectStore {
     });
   }
 
-  /**
-   * Retrieves metadata for an object as a typed Effect, failing with NotFoundError if not found.
-   * Distinguishes non-existent objects from transient storage unavailability.
-   */
   getMetadataEffect(
     key: string,
   ): Effect.Effect<ObjectMetadata, NotFoundError | StorageUnavailableError | InvalidRequestError> {
@@ -323,13 +271,6 @@ export abstract class EffectObjectStore implements ObjectStore {
     });
   }
 
-  /**
-   * Resumes an in-flight multipart upload session as a typed Effect.
-   *
-   * Enters the Effect error boundary before touching the provider so a
-   * synchronous throw from `resumeMultipartUpload` becomes a typed failure
-   * instead of escaping as a defect. `resume("k","u")` resolves to the handle.
-   */
   resumeMultipartUploadEffect(
     key: string,
     uploadId: string,

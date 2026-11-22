@@ -111,7 +111,7 @@ function acceptedStatuses(values: readonly number[] | undefined): Set<number> {
   return new Set(values);
 }
 
-/** `Retry-After` is either delay-seconds or an HTTP-date (RFC 9110 §10.2.3). */
+// `Retry-After` is either delay-seconds or an HTTP-date (RFC 9110 §10.2.3).
 function retryAfterSeconds(value: string | null, now: Date): number | undefined {
   if (!value) return undefined;
   const numeric = Number(value);

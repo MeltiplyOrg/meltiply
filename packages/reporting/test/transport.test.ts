@@ -31,7 +31,6 @@ const server = createServer((request, response) => {
       url: request.url ?? "",
     });
     if (receiver.mode.kind === "hang") {
-      // Never respond: the transport's abort signal is the only way out.
       return;
     }
     response.writeHead(receiver.mode.kind === "ok" ? 200 : receiver.mode.status, {
@@ -93,7 +92,6 @@ describe("PostHog capture transport", () => {
     expect(receiver.requests).toHaveLength(1);
     const [captured] = receiver.requests;
     expect(captured!.method).toBe("POST");
-    // The capture reference documents `/i/v0/e/`, not `/capture/`.
     expect(captured!.url).toBe("/i/v0/e/");
     expect(captured!.headers["content-type"]).toBe("application/json");
     expect(captured!.body).toMatchObject({
@@ -114,7 +112,6 @@ describe("PostHog capture transport", () => {
     const properties = receiver.requests[0]!.body.properties as Record<string, unknown>;
     expect(properties.$process_person_profile).toBe(false);
     expect(properties.$geoip_disable).toBe(true);
-    // No identification or enrichment payload may accompany a report.
     expect(properties.$set).toBeUndefined();
     expect(properties.$set_once).toBeUndefined();
     expect(Object.keys(properties).some((key) => key.startsWith("$group"))).toBe(false);
@@ -132,7 +129,6 @@ describe("PostHog capture transport", () => {
 
     resetReceiver({ kind: "status", status: 401 });
     const rejected = await transport.capture(usageEvent);
-    // A wrong token cannot be fixed by retrying; the row must be discarded.
     expect(rejected).toMatchObject({
       errorCode: "capture_status_401",
       ok: false,
@@ -154,8 +150,6 @@ describe("PostHog capture transport", () => {
 
   it("resolves a refused connection as a transport failure value", async () => {
     resetReceiver();
-    // Port 9 is closed on loopback; nothing listens and no socket is opened
-    // outside the machine.
     const transport = createPostHogTransport({
       destination: destinationFor("http://127.0.0.1:9"),
       timeoutMilliseconds: CAPTURE_TIMEOUT_MILLISECONDS,

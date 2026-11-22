@@ -556,13 +556,6 @@ describe("createThreadsAdapter", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  /**
-   * Strict Threads container creation fixture that models Meta Graph API requirements:
-   * child containers must be marked is_carousel_item=true with a valid media_type discriminator
-   * (IMAGE with image_url, or VIDEO with video_url), while carousel parent containers must specify
-   * media_type=CAROUSEL with comma-separated children ids. Rejects omitted or mismatched
-   * discriminators with HTTP 400.
-   */
   function strictThreadsContainer(expectedId: string): Responder {
     return (url) => {
       const isCarouselItem = url.searchParams.get("is_carousel_item");
@@ -642,8 +635,6 @@ describe("createThreadsAdapter", () => {
     });
 
     expect(providerCalls.calls).toHaveLength(3);
-    // Items stay unpublished and carry no text; the parent owns the post text.
-    // Child containers require the IMAGE or VIDEO discriminator alongside is_carousel_item.
     expect(Object.fromEntries(providerCalls.calls[0]!.url.searchParams)).toEqual({
       image_url: "https://assets.example/one.jpg",
       is_carousel_item: "true",
@@ -661,9 +652,6 @@ describe("createThreadsAdapter", () => {
     });
   });
 
-  // A rejected item container must stop the carousel where it failed: the
-  // provider error surfaces unchanged and no later item or parent container is
-  // created, so a partially created carousel never looks publishable.
   it("surfaces a provider rejection and halts carousel creation on the first failed item", async () => {
     const providerCalls = sequence(() =>
       json(

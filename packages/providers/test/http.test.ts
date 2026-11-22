@@ -23,8 +23,6 @@ function json(value: unknown, init: ResponseInit = {}) {
 }
 
 describe("ProviderHttpClient", () => {
-  // Workers fetch rejects a client instance as its receiver; model that native
-  // constraint to ensure valid provider responses remain reachable at runtime.
   it("supports a fetch implementation requiring the global receiver", async () => {
     const fetcher: typeof fetch = function (this: typeof globalThis) {
       if (this !== globalThis) {
@@ -193,9 +191,6 @@ describe("ProviderHttpClient", () => {
   });
 
   it("denies provider redirects instead of following them to an unapproved host", async () => {
-    // Each request needs its own response double: cancelling a body is
-    // one-shot, so sharing one Response would let the read case satisfy the
-    // write case's cancel assertion without the write path ever running.
     const redirectResponse = () => {
       const cancel = vi.fn();
       return {
@@ -223,8 +218,6 @@ describe("ProviderHttpClient", () => {
       url: "https://api.provider.example/publish",
     });
 
-    // The Workers runtime has no redirect: "error" mode, so denial is explicit.
-    // A redirect is a deterministic provider fault and never a retryable read.
     await expect(readOperation).rejects.toMatchObject({
       failure: {
         classification: "deterministic",
@@ -235,14 +228,10 @@ describe("ProviderHttpClient", () => {
     await expect(writeOperation).rejects.toMatchObject({
       failure: { code: "provider_http_redirect" },
     });
-    // The unapproved `Location` body must be released on both paths, not just
-    // the read one.
     expect(read.cancel).toHaveBeenCalledOnce();
     expect(write.cancel).toHaveBeenCalledOnce();
   });
 
-  // Native JSON.parse errors can embed response bytes; internal diagnostics
-  // retain the failure kind and request status, never that provider payload.
   it("does not retain malformed provider response bytes in exception diagnostics", async () => {
     const transport = client(
       async () =>

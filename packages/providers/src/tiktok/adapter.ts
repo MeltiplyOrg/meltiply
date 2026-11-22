@@ -44,7 +44,6 @@ import {
 } from "../values";
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:~-]{0,254}$/;
-/** TikTok documents `open_id` as opaque; live values may begin with `-` or `_`. */
 const openIdPattern = /^[A-Za-z0-9_-][A-Za-z0-9._:~-]{0,254}$/;
 const errorCodePattern = /^[a-z0-9][a-z0-9._-]{0,79}$/;
 const scopePattern = /^[a-z][a-z0-9._-]{0,99}$/;
@@ -57,10 +56,8 @@ const jsonContentType = "application/json; charset=UTF-8";
 const videoTypes = ["video/mp4", "video/quicktime", "video/webm"];
 const imageTypes = ["image/jpeg", "image/webp"];
 const authErrorCodes = ["access_token_invalid", "scope_not_authorized", "token_not_authorized"];
-/** TikTok permits retrying these terminal publish failures; `auth_removed` needs reconnection. */
 const retryableFailReasons = ["internal", "video_pull_failed", "photo_pull_failed"];
 const processingStatuses = ["PROCESSING_UPLOAD", "PROCESSING_DOWNLOAD"];
-/** Identity is required; either direct-publish or inbox-upload consent enables publishing. */
 const requiredScopes = ["user.info.basic"] as const;
 const requestedScopes = [
   ...requiredScopes,
@@ -107,7 +104,6 @@ const capability: PlatformCapability = {
 };
 
 export interface TikTokAdapterOptions extends ProviderAdapterOptions {
-  /** HTTPS directory verified in the TikTok developer portal for PULL_FROM_URL media. */
   mediaUrlPrefix: string;
 }
 
@@ -170,7 +166,6 @@ function apiError(code: string): ProviderAdapterError {
   return rejected(`tiktok_${normalized}`, apiFailureStatus(normalized));
 }
 
-/** TikTok v2 responses wrap `data` with `error.code`, which is `"ok"` on success. */
 function envelope(value: unknown, sideEffectPossible = false): Record<string, unknown> {
   const body = record(value);
   const code = boundedString(record(body?.error)?.code, 80);
@@ -193,7 +188,6 @@ function scopeSet(value: unknown): string[] | undefined {
     : undefined;
 }
 
-/** An absent `token_type` is accepted: the token is always presented as a Bearer credential. */
 function tokenBody(value: unknown, now: Date): TikTokTokenBody {
   const body = record(value);
   const providerError = boundedString(body?.error, 80);
@@ -225,7 +219,6 @@ function tokenBody(value: unknown, now: Date): TikTokTokenBody {
   };
 }
 
-/** Connecting requires identity plus direct-publish or inbox-upload consent. */
 function publishingGrant(scope: TikTokTokenBody["scope"]): string[] {
   if (scope.kind === "invalid") throw malformed(false, "tiktok_token_response_invalid");
   const granted = scope.kind === "granted" ? scope.scopes : [];
@@ -255,7 +248,6 @@ function configuredMediaPrefix(value: string): URL {
   return url;
 }
 
-/** The URL's authorization shape belongs to the delivery layer; only origin and path prefix are checked. */
 function pullMedia(media: ProviderMedia, mediaPrefix: URL): PullMedia {
   const url = media.mode === "remote_ingest" ? secureUrl(media.url) : undefined;
   if (!url) throw rejected("tiktok_pull_media_required");
@@ -331,7 +323,6 @@ function creatorRequirements(value: unknown): TikTokPublicationRequirements {
   };
 }
 
-/** The inbox flag must round-trip: an inbox handoff is Delivered, never a Direct Post. */
 function operationId(operation: TikTokOperation): string {
   return `${operation.inbox ? "inbox" : "publish"}:${operation.publishId}`;
 }
@@ -366,7 +357,6 @@ function videoInvalid(media: PullMedia, maxDuration: number): boolean {
   );
 }
 
-/** The 1080 px photo limit applies to the short side, so portrait and landscape both fit. */
 function photoInvalid(media: PullMedia): boolean {
   const { height, width } = media.metadata ?? {};
   return (
@@ -440,7 +430,6 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
   };
 
   return {
-    /** Disables auto-authorization so another account can be connected. */
     authorizationUrl: (input) =>
       authorizationCodeUrl("https://www.tiktok.com/v2/auth/authorize/", input, redirectUri, {
         client_key: clientId,
@@ -469,7 +458,6 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
 
     capability,
 
-    /** Profile fields must match the actual grant: `username` needs the optional profile scope. */
     async exchangeAuthorizationCode(context, input): Promise<OAuthConnection> {
       assertConfiguredRedirectUri(input.redirectUri, redirectUri);
       const tokens = tokenBody(
@@ -531,7 +519,6 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       };
     },
 
-    /** Display API `video/query` (scope `video.list`); an omitted video yields no snapshot. */
     async listAnalytics(context, credentials, lookup, page) {
       validateSnapshotPage("tiktok", page);
       const providerPostId = requiredIdentifier(lookup.providerPostId, "tiktok_video_id_required");
@@ -560,10 +547,6 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       return engagementSnapshot({ comments, likes, providerPostId, shares, views }, now());
     },
 
-    /**
-     * `SEND_TO_USER_INBOX` is a terminal delivery for an inbox operation but a
-     * failure for a Direct Post. Public post IDs keep their exact integer digits.
-     */
     async lookupPublication(context, credentials, lookup): Promise<ProviderPublicationStatus> {
       accountId(credentials);
       const operation = requiredOperation(lookup.providerOperationId);
@@ -628,11 +611,6 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       };
     },
 
-    /**
-     * One video or up to 35 images as a photo post; videos and photos use different
-     * endpoints, so a mixed set is rejected rather than dropping an attachment.
-     * Direct Post re-checks live creator requirements first.
-     */
     async publish(context, credentials, input) {
       accountId(credentials);
       requireIdempotencyKey(input.idempotencyKey);
@@ -743,7 +721,6 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       }
     },
 
-    /** A refresh rotates credentials without renegotiating the grant. */
     async refreshAccessToken(context, refreshToken): Promise<ProviderTokenSet> {
       const tokens = tokenBody(
         await postForm(http, context, tokenUrl, {

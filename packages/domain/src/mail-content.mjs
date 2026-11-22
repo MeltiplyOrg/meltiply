@@ -3,7 +3,6 @@ const htmlMetacharactersPattern = /[&<>"']/g;
 const senderAddressPattern =
   /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/;
 const unsafeDisplayNamePunctuation = '",:;<>\\';
-/** @type {Readonly<Record<string, string>>} */
 const htmlEscapes = {
   "&": "&amp;",
   "'": "&#39;",
@@ -14,9 +13,6 @@ const htmlEscapes = {
 
 /**
  * Bare dot-atom sender address of at most 254 characters; single-label domains pass unless `requireDottedDomain`.
- * @param {string} value
- * @param {boolean} [requireDottedDomain]
- * @returns {boolean}
  */
 export function isMailSenderAddress(value, requireDottedDomain = false) {
   return (
@@ -28,8 +24,6 @@ export function isMailSenderAddress(value, requireDottedDomain = false) {
 
 /**
  * Display name of at most 200 characters, safe unquoted in a mail header.
- * @param {string} value
- * @returns {boolean}
  */
 export function isMailSenderName(value) {
   if (value.length > 200) return false;
@@ -48,8 +42,6 @@ export function isMailSenderName(value) {
 
 /**
  * Configured sender, or undefined (mail unavailable) when the address or a nonblank name is unsafe.
- * @param {{ MAIL_FROM_ADDRESS?: string, MAIL_FROM_NAME?: string }} env
- * @returns {{ email: string, name?: string } | undefined}
  */
 export function mailSenderConfiguration(env) {
   const email = env.MAIL_FROM_ADDRESS?.trim();
@@ -68,8 +60,6 @@ export function mailSenderConfiguration(env) {
 
 /**
  * Escapes raw text for HTML mail content and quoted attributes; existing entities are escaped again.
- * @param {string} value
- * @returns {string}
  */
 export function escapeMailHtml(value) {
   return value.replace(

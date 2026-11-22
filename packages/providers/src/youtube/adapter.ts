@@ -24,7 +24,6 @@ import {
 
 const categoryIdPattern = /^\d{1,3}$/;
 const defaultCategoryId = "22";
-/** Google requires resumable chunks in multiples of 256 KiB. */
 const chunkAlignmentBytes = 256 * 1024;
 const maxChunkBytes = 64 * 1024 * 1024;
 const defaultChunkBytes = 8 * 1024 * 1024;
@@ -61,7 +60,6 @@ const capability: PlatformCapability = {
 
 export interface YouTubeAdapterOptions extends ProviderAdapterOptions {
   categoryId?: string;
-  /** At most 64 MiB so one chunk PUT fits the HTTP client's timeout. */
   uploadChunkBytes?: number;
 }
 

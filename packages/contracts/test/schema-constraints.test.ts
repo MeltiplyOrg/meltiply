@@ -31,7 +31,6 @@ function findUnconstrainedObjects(
   const types = Array.isArray(schema.type) ? schema.type : [schema.type];
   const declaresObject = types.includes("object");
   const objectShaped = declaresObject || schema.properties !== undefined;
-  // Only an untyped composite member may inherit closure from its parent.
   const inheritsClosure = refinement && !declaresObject;
   if (
     !inheritsClosure &&

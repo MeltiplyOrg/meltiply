@@ -541,8 +541,6 @@ describe("createInstagramAdapter", () => {
     expect(providerCalls.calls).toHaveLength(0);
   });
 
-  // Observe the actual mixed-carousel protocol: unpublished VIDEO children,
-  // one parent caption, and ordered child ids rather than standalone Reels.
   it("creates one child container per attachment and binds them in creator order", async () => {
     const providerCalls = sequence(
       () => json({ id: "child-1" }),
@@ -577,8 +575,6 @@ describe("createInstagramAdapter", () => {
       }),
     );
 
-    // Each child is created unpublished and in its own request, so nothing is
-    // published until every attachment is retrievable.
     expect(providerCalls.calls).toHaveLength(4);
     expect(Object.fromEntries(providerCalls.calls[0]!.url.searchParams)).toMatchObject({
       image_url: "https://assets.example/one.jpg",
@@ -594,12 +590,9 @@ describe("createInstagramAdapter", () => {
       image_url: "https://assets.example/three.jpg",
       is_carousel_item: "true",
     });
-    // A caption on a child would publish the text once per carousel item, so
-    // only the parent may carry it.
     expect(
       providerCalls.calls.slice(0, 3).every(({ url }) => url.searchParams.has("caption") === false),
     ).toBe(true);
-    // The parent carries the caption exactly once and the children in order.
     expect(Object.fromEntries(providerCalls.calls[3]!.url.searchParams)).toEqual({
       caption: "An Instagram post #launch",
       children: "child-1,child-2,child-3",
@@ -938,9 +931,6 @@ describe("ambiguous provider metrics", () => {
       redirectUri: "https://app.example/api/auth/oauth/instagram/callback",
     });
 
-    // Instagram writes `metrics.get(name) ?? 0`, so a stored zero cannot be told
-    // apart from an absent insight. The declaration is what lets a consumer treat
-    // those zeros as unknown instead of as observed counts.
     expect(declaration.ambiguousZeroMetrics).toEqual(["views", "reactions", "comments", "shares"]);
   });
 });

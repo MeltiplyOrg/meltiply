@@ -89,8 +89,6 @@ function attachmentIssues(
   const durationLimit = capability.max_video_duration_sec;
   if (kind === "video" && durationLimit !== null) {
     const duration = media.metadata?.durationSeconds;
-    // An unknown duration cannot be shown to fit, so it fails the duration
-    // constraint rather than passing unchecked.
     if (duration === undefined) {
       issues.push({
         constraint: "provider_video_duration_limit",
@@ -112,24 +110,12 @@ function attachmentIssues(
   return issues;
 }
 
-/**
- * Evaluates the ordered attachment set against the capability's attachment
- * count and combination rules.
- * Enforces the platform minimum (so a media-required platform rejects a
- * text-only attempt), the maximum, and that every attachment of a
- * multi-attachment publication is a kind the platform combines.
- * @param capability - Target platform capability authority.
- * @param input - Publish input owning the ordered attachment array.
- * @returns Count and combination issues; empty when the set shape is accepted.
- */
 function attachmentSetIssues(
   capability: PlatformCapability,
   input: PublishInput,
 ): ValidationIssue[] {
   const count = input.media.length;
   const issues: ValidationIssue[] = [];
-  // null means the capability carries no usable bound, which only happens for
-  // unconfigured adapters that cannot publish at all.
   const minimum =
     capability.platform === "youtube" && input.providerOptions?.youtube?.postType === "live"
       ? 0
@@ -153,8 +139,6 @@ function attachmentSetIssues(
     });
   }
   if (count > 1) {
-    // null and [] both mean the platform publishes no multi-attachment
-    // composition, so either way a set of two or more is rejected here.
     const combined = capability.multi_asset_types ?? [];
     const unsupported =
       combined.length === 0 ||
@@ -183,10 +167,6 @@ function attachmentSetIssues(
  * Validates the ordered attachment set (count bounds, combination rules, per-attachment
  * MIME type, kind, file size, and video duration), codepoint caption length, hashtag
  * count, an empty-publication guard, and provider-option platform compatibility.
- * @param capability - Target platform capability authority.
- * @param input - Composed caption plus the Post's ordered attachments.
- * @returns Issues in field order: attachments, then text, then provider options.
- * Empty when the payload is publishable for this target.
  */
 export function validatePublishInput(
   capability: PlatformCapability,

@@ -13,19 +13,14 @@ import type { DeploymentCategory } from "./contracts";
  * request handling.
  */
 export interface ReportingConfiguration {
-  /** Deployment category reported alongside each event. */
   readonly deploymentCategory: DeploymentCategory;
-  /** `null` when the destination is missing or unusable. */
   readonly destination: ReportingDestination | null;
-  /** Operator force-off override, which outranks any saved preference. */
   readonly forcedOff: boolean;
 }
 
 /** Validated capture endpoint derived from the operator's token and host. */
 export interface ReportingDestination {
-  /** Absolute capture URL, always `{host}/i/v0/e/`. */
   readonly captureUrl: string;
-  /** Publishable project token sent as `api_key`. */
   readonly projectToken: string;
 }
 
@@ -38,19 +33,10 @@ export interface ReportingBindingValues {
   readonly VERSION?: string;
 }
 
-/**
- * Ingestion path PostHog Cloud documents for a single event.
- *
- * The capture reference at https://posthog.com/docs/api/capture names
- * `/i/v0/e/` (with `/batch/` as the multi-event sibling) and takes the
- * publishable project token, event name, `distinct_id` and `properties`.
- */
 const capturePath = "/i/v0/e/";
 
-/** Publishable project tokens are `phc_`-prefixed, url-safe and bounded. */
 const projectTokenPattern = /^phc_[A-Za-z0-9_-]{8,200}$/;
 
-/** Deployment labels collapse to a coarse category; anything else is `unknown`. */
 function deploymentCategory(value: string | undefined): DeploymentCategory {
   if (value?.trim() === "managed") return "managed";
   if (value?.trim() === "selfhosted") return "selfhosted";
@@ -65,9 +51,6 @@ function deploymentCategory(value: string | undefined): DeploymentCategory {
  * acceptance stack can point at a controlled receiver without weakening a
  * deployed installation. A trailing slash is tolerated because operators copy
  * the origin from the PostHog project settings page.
- *
- * @param value - Configured host, e.g. `https://us.i.posthog.com`.
- * @returns The destination, or null when the host is unusable.
  */
 export function reportingDestination(
   value: string | undefined,
@@ -101,9 +84,6 @@ export function reportingDestination(
  * Absent or malformed bindings are configuration, not failures: the resulting
  * configuration reports no destination and the policy layer then fails closed
  * for both categories.
- *
- * @param bindings - Raw Worker environment bindings.
- * @returns Usable configuration with a validated destination or a disabled one.
  */
 export function reportingConfiguration(bindings: ReportingBindingValues): ReportingConfiguration {
   return {

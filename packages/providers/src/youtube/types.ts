@@ -16,7 +16,6 @@ export const YOUTUBE_TOKEN_ORIGIN = "https://oauth2.googleapis.com";
 export const YOUTUBE_AUTHORIZATION_ORIGIN = "https://accounts.google.com";
 export const YOUTUBE_LIMITS = PROVIDER_LIMITS.youtube;
 
-/** The automation Worker persists operation identities of at most 512 characters. */
 const maximumOperationIdLength = 512;
 const maximumSessionUriLength =
   maximumOperationIdLength -

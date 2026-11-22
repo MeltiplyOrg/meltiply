@@ -25,10 +25,6 @@ export interface R2BucketLike {
     },
   ): Promise<R2ObjectBodyLike | null>;
   head(key: string): Promise<R2ObjectLike | null>;
-  /**
-   * Object writes back a streamed copy. Required because `copyObject` is the
-   * only promotion primitive, and it exists on every real R2 binding.
-   */
   put(
     key: string,
     value: ReadableStream | ArrayBuffer | ArrayBufferView | Blob,
@@ -107,18 +103,6 @@ export class R2ObjectStore extends EffectObjectStore {
     return object ? metadata(object) : null;
   }
 
-  /**
-   * Copies an object inside the bucket using a streamed conditional GET and PUT.
-   *
-   * Byte-for-byte promotion of a staging upload to a protected ready key never
-   * buffers the object in the worker: the source body stream feeds the
-   * destination write directly. `ifSourceEtagMatches` pins the source
-   * generation so a staging key rewritten by a still-valid upload grant cannot
-   * be promoted, and `ifDestinationAbsent` makes a replayed copy adopt the
-   * destination a crashed attempt already wrote. R2 answers a failed
-   * precondition with the object metadata and no body, so a bodyless response
-   * declines the copy exactly like an absent source.
-   */
   async copyObject(
     sourceKey: string,
     destinationKey: string,
@@ -189,15 +173,9 @@ export class R2ObjectStore extends EffectObjectStore {
 export interface R2SigV4SignerOptions {
   accessKeyId: string;
   accountId: string;
-  /**
-   * Development-only: accept a plain-HTTP origin. Never set this from
-   * configuration in production; `createR2SignerFromEnv` derives it solely
-   * from `ENVIRONMENT === "local" | "test"`.
-   */
   allowInsecureEndpoint?: boolean;
   bucket: string;
   endpoint?: string;
-  /** Path prefix prepended to `/<bucket>/<key>`, e.g. `/cdn-cgi/local/r2/s3`. */
   endpointPathPrefix?: string;
   now?: () => Date;
   secretAccessKey: string;
@@ -235,22 +213,11 @@ export class R2SigV4Signer extends SigV4UrlSigner {
  * from a configurable flag.
  */
 export interface R2SignerEnv {
-  /** Worker environment label; only `local`/`test` may sign a plain-HTTP origin. */
   ENVIRONMENT?: string;
   R2_ACCESS_KEY_ID?: string;
   R2_ACCOUNT_ID?: string;
   R2_BUCKET_NAME?: string;
-  /**
-   * Trusted S3-compatible origin. Must be an origin with no path; plain HTTP is
-   * accepted only for loopback hosts or when `ENVIRONMENT` is `local`/`test`.
-   * Omit to sign the account's public R2 endpoint.
-   */
   R2_ENDPOINT?: string;
-  /**
-   * Optional path prefix prepended to `/<bucket>/<key>` and to the signed
-   * canonical URI, for origins that serve the bucket under a route (a local
-   * runtime serves it at `/cdn-cgi/local/r2/s3`). Ignored without `R2_ENDPOINT`.
-   */
   R2_ENDPOINT_PATH_PREFIX?: string;
   R2_SECRET_ACCESS_KEY?: string;
 }

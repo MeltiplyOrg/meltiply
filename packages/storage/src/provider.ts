@@ -17,11 +17,8 @@ const defaultObjectStorageProvider: ObjectStorageProvider = "r2";
  * sweeps, and private media delivery.
  */
 export interface ObjectStorageEnv {
-  /** R2 bucket binding; only read when the provider is `r2`. */
   ASSETS?: R2BucketLike;
-  /** Worker environment label; only `local`/`test` may sign a plain-HTTP origin. */
   ENVIRONMENT?: string;
-  /** `r2` (default) or `s3`. */
   OBJECT_STORAGE_PROVIDER?: string;
   R2_ACCESS_KEY_ID?: string;
   R2_ACCOUNT_ID?: string;
@@ -31,11 +28,8 @@ export interface ObjectStorageEnv {
   R2_SECRET_ACCESS_KEY?: string;
   S3_ACCESS_KEY_ID?: string;
   S3_BUCKET?: string;
-  /** Origin only (no path), e.g. `https://minio.internal:9000`. */
   S3_ENDPOINT?: string;
-  /** `true` (default) addresses the bucket in the path, `false` in the host. */
   S3_FORCE_PATH_STYLE?: string;
-  /** Lowercase letters, digits, and hyphens; defaults to `us-east-1`. */
   S3_REGION?: string;
   S3_SECRET_ACCESS_KEY?: string;
 }

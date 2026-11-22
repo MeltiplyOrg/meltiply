@@ -87,24 +87,12 @@ function metadataFromHeaders(key: string, headers: Headers): ObjectMetadata {
 /** Configuration for the S3-compatible SigV4 signer. */
 export interface S3SigV4SignerOptions {
   accessKeyId: string;
-  /**
-   * Development-only: accept a plain-HTTP origin. Provider construction derives
-   * this solely from `ENVIRONMENT === "local" | "test"`, never from a
-   * configurable operator flag, so a deployed environment can only sign HTTPS.
-   */
   allowInsecureEndpoint?: boolean;
   bucket: string;
-  /** Origin only (no path, query, or fragment), e.g. `https://minio.internal:9000`. */
   endpoint: string;
   endpointPathPrefix?: string;
-  /**
-   * Put the bucket in the request path (`/bucket/key`) instead of the host
-   * (`bucket.host/key`). Defaults to true, which is what MinIO, Ceph, and
-   * other self-hosted origins require; AWS endpoints want `false`.
-   */
   forcePathStyle?: boolean;
   now?: () => Date;
-  /** Signing region; defaults to `us-east-1`. Set the origin's region when different. */
   region?: string;
   secretAccessKey: string;
 }
@@ -135,13 +123,6 @@ export class S3SigV4Signer extends SigV4UrlSigner {
     });
   }
 
-  /**
-   * Signer for requests the worker issues itself against this origin.
-   *
-   * Presigned capabilities are for external consumers (browsers, the native
-   * processor); the object store needs the header-authenticated form to read
-   * metadata, copy objects, and drive multipart uploads without a public URL.
-   */
   requestSigner(): SigV4Signer {
     return this.signer;
   }
@@ -149,7 +130,6 @@ export class S3SigV4Signer extends SigV4UrlSigner {
 
 /** Configuration for {@link S3ObjectStore}; identical to the signer options. */
 export type S3ObjectStoreOptions = S3SigV4SignerOptions & {
-  /** Fetch implementation override; defaults to the runtime global. */
   fetch?: typeof fetch;
 };
 
@@ -172,13 +152,6 @@ export class S3ObjectStore extends EffectObjectStore {
     this.#fetch = options.fetch ?? ((input, init) => fetch(input, init));
   }
 
-  /**
-   * Issues one signed S3 request.
-   *
-   * `host` is dropped from the wire headers because the runtime derives it from
-   * the URL, while the signed header block still contains the value the origin
-   * will see. The bounded, non-shared payload view is hashed and sent without copying.
-   */
   async #send(input: {
     body?: Uint8Array<ArrayBuffer>;
     headers?: Readonly<Record<string, string>>;
@@ -212,7 +185,6 @@ export class S3ObjectStore extends EffectObjectStore {
     }
   }
 
-  /** Releases an unread response body so the connection can be reused. */
   async #discard(response: Response): Promise<void> {
     await response.body?.cancel().catch(() => undefined);
   }
@@ -259,12 +231,6 @@ export class S3ObjectStore extends EffectObjectStore {
     return new Uint8Array(await response.arrayBuffer());
   }
 
-  /**
-   * Deletes an object from the bucket.
-   *
-   * A 404 is a success: deleting an already-removed key is a bucket no-op on
-   * R2, and retention sweeps rely on that to retry an interrupted reclaim.
-   */
   async delete(key: string): Promise<void> {
     const response = await this.#send({ key, method: "DELETE" });
     if (response.status === 404) {
@@ -275,15 +241,6 @@ export class S3ObjectStore extends EffectObjectStore {
     await this.#discard(response);
   }
 
-  /**
-   * Copies an object inside the bucket using the origin's server-side copy API.
-   *
-   * The bytes never enter the worker, matching the R2 promotion path. The
-   * source generation is pinned with `x-amz-copy-source-if-match`, and a
-   * create-only destination is enforced both by probing for an existing object
-   * (so a replay adopts it instead of failing) and by sending `If-None-Match: *`
-   * on the copy itself.
-   */
   async copyObject(
     sourceKey: string,
     destinationKey: string,
@@ -336,12 +293,6 @@ export class S3ObjectStore extends EffectObjectStore {
     return this.#session(key, uploadId);
   }
 
-  /**
-   * Resumes an in-flight S3 multipart upload session using its known uploadId.
-   *
-   * No request is issued: the handle is a pure function of the key and id, so a
-   * redelivered job can re-drive an upload the worker started earlier.
-   */
   resumeMultipartUpload(key: string, uploadId: string): MultipartUpload {
     return this.#session(key, uploadId);
   }

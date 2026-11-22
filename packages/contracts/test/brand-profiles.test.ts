@@ -272,9 +272,6 @@ describe("brand profile contract", async () => {
 
   it("rejects brand-owned mutations that omit brand_profile_id", () => {
     const owned = brandOwnedMutations(document);
-    // Anti-vacuity guard: the derived set must still contain every mutation that
-    // owns content, so deleting the property from the contract fails loudly here
-    // instead of shrinking the loop to nothing.
     expect(owned).toEqual(
       expect.arrayContaining([
         "confirmOAuthSelection",

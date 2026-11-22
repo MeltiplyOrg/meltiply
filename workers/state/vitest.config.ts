@@ -11,7 +11,6 @@ export default defineConfig({
   ],
   test: {
     clearMocks: false,
-    fsModuleCache: true,
     coverage: {
       enabled: true,
       provider: "istanbul",

@@ -11,7 +11,6 @@ export default defineConfig({
   ],
   test: {
     clearMocks: false,
-    fsModuleCache: true,
     setupFiles: ["../../scripts/lib/vitest-offline-collector.ts"],
     coverage: {
       enabled: true,

@@ -282,3 +282,45 @@ ruleTester.run("meltiply/no-commented-out-code", rule("no-commented-out-code"), 
     },
   ],
 });
+
+ruleTester.run("meltiply/no-sql-date-column", rule("no-sql-date-column"), {
+  valid: [
+    {
+      code: "client.query(`SELECT (at AT TIME ZONE 'UTC')::date::text AS day FROM t`);",
+      filename: workerFile,
+    },
+    { code: "client.query(`SELECT $1::date FROM t`);", filename: workerFile },
+  ],
+  invalid: [
+    {
+      code: "client.query(`SELECT date_trunc('day', at)::date AS day FROM t`);",
+      filename: workerFile,
+      errors: [{ messageId: "restricted" }],
+    },
+    {
+      code: "const fragment = 'SELECT at::date as day';",
+      filename: workerFile,
+      errors: [{ messageId: "restricted" }],
+    },
+  ],
+});
+
+ruleTester.run("meltiply/no-workerd-fs-module-cache", rule("no-workerd-fs-module-cache"), {
+  valid: [
+    {
+      code: "import { defineConfig } from 'vite-plus'; export default defineConfig({ test: { fsModuleCache: true } });",
+      filename: `${repositoryRoot}frontend/app/vitest.config.ts`,
+    },
+    {
+      code: "import { cloudflareTest } from '@cloudflare/vitest-plugin'; export default { test: { clearMocks: false } };",
+      filename: `${repositoryRoot}workers/state/vitest.config.ts`,
+    },
+  ],
+  invalid: [
+    {
+      code: "import { cloudflareTest } from '@cloudflare/vitest-plugin'; export default { test: { fsModuleCache: true } };",
+      filename: `${repositoryRoot}workers/state/vitest.config.ts`,
+      errors: [{ messageId: "restricted" }],
+    },
+  ],
+});

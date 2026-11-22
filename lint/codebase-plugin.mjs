@@ -9,6 +9,7 @@ const toolDirectivePattern =
 const messageClassifierMethods = new Set(["includes", "startsWith", "endsWith", "match", "test"]);
 const docCommentAllowedPattern = /\/packages\/[^/]+\/src\//;
 const vendoredPattern = /\/frontend\/app\/src\/components\/evilcharts\//;
+const sqlDateColumnPattern = /::date\s+AS\s/i;
 
 function readsErrorMessage(node) {
   if (node?.type === "CallExpression" && node.callee.type === "MemberExpression") {
@@ -244,6 +245,45 @@ const codebasePlugin = {
           report(node);
         },
       }),
+    ),
+
+    "no-sql-date-column": rule(
+      "Select calendar dates as `::date::text`. node-postgres parses DATE as local midnight, which shifts the day on hosts east of UTC.",
+      (_context, report) => ({
+        TemplateLiteral(node) {
+          if (node.quasis.some((quasi) => sqlDateColumnPattern.test(quasi.value.cooked ?? ""))) {
+            report(node);
+          }
+        },
+        Literal(node) {
+          if (typeof node.value === "string" && sqlDateColumnPattern.test(node.value)) {
+            report(node);
+          }
+        },
+      }),
+    ),
+
+    "no-workerd-fs-module-cache": rule(
+      "Do not enable fsModuleCache in a workerd test pool. Cache hits are read through the workerd virtual filesystem and fail with ENOENT.",
+      (_context, report) => {
+        let usesWorkerdPool = false;
+        return {
+          ImportDeclaration(node) {
+            if (node.source.value === "@cloudflare/vitest-plugin") usesWorkerdPool = true;
+          },
+          Property(node) {
+            if (
+              usesWorkerdPool &&
+              node.key?.type === "Identifier" &&
+              node.key.name === "fsModuleCache" &&
+              node.value?.type === "Literal" &&
+              node.value.value === true
+            ) {
+              report(node);
+            }
+          },
+        };
+      },
     ),
 
     "no-history-comments": commentRule(

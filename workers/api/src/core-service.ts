@@ -110,7 +110,7 @@ interface AnalyticsPostRow extends Record<string, unknown> {
 
 interface AnalyticsSeriesRow extends Record<string, unknown> {
   comments: number | string;
-  date: Date | string;
+  date: string;
   impressions: number | string;
   last_synced_at: Date | string | null;
   likes: number | string;
@@ -255,12 +255,6 @@ function number(value: number | string | null): number {
  */
 function optionalDateTime(value: Date | string | null): string | null {
   return value === null ? null : isoDateTime(value);
-}
-
-/** Formats a database date as the contract's date-only string. */
-function dateOnly(value: Date | string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? String(value) : date.toISOString().slice(0, 10);
 }
 
 /**
@@ -1272,7 +1266,7 @@ export function createCoreApiService(
                WINDOW w AS (PARTITION BY e.distribution_id ORDER BY e.snapshot_at, e.id)
              ),
              snapshot_days AS (
-               SELECT date_trunc('day', snapshot_at)::date AS date, platform,
+               SELECT (snapshot_at AT TIME ZONE 'UTC')::date::text AS date, platform,
                       SUM(views) AS views, SUM(likes) AS likes,
                       SUM(comments) AS comments, SUM(shares) AS shares,
                       SUM(impressions) AS impressions, SUM(reach) AS reach,
@@ -1281,7 +1275,7 @@ export function createCoreApiService(
                GROUP BY 1, 2
              ),
              published_days AS (
-               SELECT date_trunc('day', published_at)::date AS date, platform,
+               SELECT (published_at AT TIME ZONE 'UTC')::date::text AS date, platform,
                       COUNT(*) AS posts
                FROM candidates
                GROUP BY 1, 2
@@ -1603,7 +1597,7 @@ export function createCoreApiService(
               start: filters.start.toISOString(),
             },
             series: seriesResult.rows.map((row) => ({
-              date: dateOnly(row.date),
+              date: row.date,
               platform: row.platform,
               posts: number(row.posts),
               views: number(row.views),

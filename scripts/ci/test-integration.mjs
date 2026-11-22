@@ -22,6 +22,7 @@ const adminUrl = integrationDatabaseUrl(
   process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL,
 );
 
+const positiveOffsetTimeZone = "Asia/Bangkok";
 const suiteFilters = ["@meltiply/database", "@meltiply/api-worker", "@meltiply/automation-worker"];
 
 function fail(message) {
@@ -143,6 +144,7 @@ function runSuites() {
       stdio: "inherit",
       env: {
         ...process.env,
+        TZ: positiveOffsetTimeZone,
         MELTIPLY_DATABASE_TEST_URL: testUrl,
         MELTIPLY_DATABASE_TEST_ADMIN_URL: adminUrl,
       },

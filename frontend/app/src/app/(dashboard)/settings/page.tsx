@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { useCallback, useMemo, useState } from "react";
 import { Navigate } from "react-router";
 import { Crown, MoreHorizontal, ShieldCheck, UserPlus, Users } from "lucide-react";
@@ -175,7 +176,7 @@ export default function SettingsPage({
   );
   const failureToast = (title: string) => (cause: unknown) => {
     toast(title, {
-      description: cause instanceof Error ? cause.message : t("Try again in a moment."),
+      description: errorMessage(cause, t("Try again in a moment.")),
       variant: "error",
     });
   };

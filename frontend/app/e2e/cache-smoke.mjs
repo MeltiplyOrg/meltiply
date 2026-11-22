@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { chromium, expect } from "@playwright/test";
 
-/** Signs the seeded local Installation Owner in through the real form; returns only cookies and suppresses sensitive form errors. */
 export async function managedOwnerCookie(origin) {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -20,7 +19,6 @@ export async function managedOwnerCookie(origin) {
   }
 }
 
-/** Observes warm private reads, shared Analytics cohorts and explicit Refresh through real SPA controls in both palettes/sizes. */
 export async function capabilityNavigation({ origin, cookie, label, progressFixture }) {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -95,7 +93,6 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
     await page.getByRole("button", { name: "Analytics", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Analytics", exact: true })).toBeVisible();
     await expect.poll(() => analyticsReads.length).toBe(2);
-    // A started read can be canceled on unmount; only completed reads are warm.
     await expect.poll(() => completedAnalyticsReads).toBe(2);
     assert.equal(
       analyticsReads[0].searchParams.get("start"),

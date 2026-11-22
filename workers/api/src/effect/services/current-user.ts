@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import { ActiveOrganizationRequiredError, DatabaseError } from "@meltiply/domain";
+import { ActiveOrganizationRequiredError, DatabaseError, errorMessage } from "@meltiply/domain";
 import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
 
@@ -48,7 +48,7 @@ export function createCurrentUserServiceLive(
         catch: (cause) =>
           new DatabaseError({
             cause,
-            message: cause instanceof Error ? cause.message : "Failed to query current user",
+            message: errorMessage(cause, "Failed to query current user"),
           }),
         try: async () => {
           if (loader) {

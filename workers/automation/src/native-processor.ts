@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { Effect } from "effect";
 import { createObjectUrlSignerFromEnv } from "@meltiply/storage";
 
@@ -122,7 +123,7 @@ export function processorJobUrlsEffect(
       catch: (cause) =>
         new NativeProcessorError(
           "processor_unavailable",
-          cause instanceof Error ? cause.message : "Object storage signing is unavailable.",
+          errorMessage(cause, "Object storage signing is unavailable."),
           true,
         ),
       try: () => createObjectUrlSignerFromEnv(env),
@@ -132,7 +133,7 @@ export function processorJobUrlsEffect(
       catch: (cause) =>
         new NativeProcessorError(
           "processor_unavailable",
-          cause instanceof Error ? cause.message : "The input capability could not be signed.",
+          errorMessage(cause, "The input capability could not be signed."),
           true,
         ),
       try: () => signer.signDownload({ expiresInSeconds, key: request.inputKey }),
@@ -141,7 +142,7 @@ export function processorJobUrlsEffect(
       catch: (cause) =>
         new NativeProcessorError(
           "processor_unavailable",
-          cause instanceof Error ? cause.message : "The output capability could not be signed.",
+          errorMessage(cause, "The output capability could not be signed."),
           true,
         ),
       try: () =>

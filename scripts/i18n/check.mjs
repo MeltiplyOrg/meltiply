@@ -10,10 +10,6 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const defaultLocaleRoot = join(repositoryRoot, "frontend/app/src/locales");
 const locksPath = join(repositoryRoot, ".shipi18n/locks.json");
 
-/**
- * Shipi18n treats placeholder, plural, and untranslated findings as advisory by
- * default.
- */
 export function runCheck({ localeRoot = defaultLocaleRoot } = {}) {
   const root = resolve(localeRoot);
   let ignoreKeys;

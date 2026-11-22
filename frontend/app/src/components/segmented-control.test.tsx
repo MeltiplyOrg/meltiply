@@ -12,22 +12,27 @@ import {
   DropdownMenuTrigger,
 } from "@meltiply/ui/dropdown-menu";
 
-beforeAll(() => {
-  class ResizeObserverMock {
-    disconnect() {}
-    observe() {}
-    unobserve() {}
-  }
-  globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-  window.matchMedia = ((query: string) => ({
+function createMatchMediaMock(matches = false): typeof window.matchMedia {
+  return (query: string): MediaQueryList => ({
     addEventListener: () => {},
     addListener: () => {},
-    matches: false,
+    dispatchEvent: () => false,
+    matches: matches && query.includes("prefers-reduced-motion"),
     media: query,
     onchange: null,
     removeEventListener: () => {},
     removeListener: () => {},
-  })) as unknown as typeof window.matchMedia;
+  });
+}
+
+beforeAll(() => {
+  class ResizeObserverMock implements ResizeObserver {
+    disconnect() {}
+    observe() {}
+    unobserve() {}
+  }
+  globalThis.ResizeObserver = ResizeObserverMock;
+  window.matchMedia = createMatchMediaMock();
 });
 
 afterEach(() => {
@@ -209,15 +214,7 @@ describe("SegmentedControl single-select semantics", () => {
 
   it("keeps selection working when the operating system requests reduced motion", () => {
     const media = window.matchMedia;
-    window.matchMedia = ((query: string) => ({
-      addEventListener: () => {},
-      addListener: () => {},
-      matches: query.includes("prefers-reduced-motion"),
-      media: query,
-      onchange: null,
-      removeEventListener: () => {},
-      removeListener: () => {},
-    })) as unknown as typeof window.matchMedia;
+    window.matchMedia = createMatchMediaMock(true);
     try {
       render(<GroupingSelector />);
       fireEvent.keyDown(screen.getByRole("radio", { name: "Week" }), { key: "ArrowRight" });

@@ -12,25 +12,17 @@ const adminDatabaseUrl =
   process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
   "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
 const egressUrl = process.env.MELTIPLY_E2E_EGRESS_URL?.trim() || "http://127.0.0.1:9787";
-/** Origin of the API Worker the acceptance stack exposes to the browser. */
 const apiOrigin = process.env.MELTIPLY_E2E_API_BASE_URL?.trim() || "http://127.0.0.1:8787";
 const databaseHelper = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "support/onboarding-db.mjs",
 );
 
-/** One captured outbound report, kept only as the parsed JSON body. */
 interface CapturedEvent {
   body: Record<string, unknown>;
   path: string;
 }
 
-/**
- * Starts the controlled PostHog-compatible receiver used as the reporting
- * egress seam. It records request bodies only; nothing is forwarded anywhere.
- *
- * @returns Receiver handle with the captured events and a close function.
- */
 async function startEgressReceiver(): Promise<{
   events: CapturedEvent[];
   close: () => Promise<void>;
@@ -45,8 +37,12 @@ async function startEgressReceiver(): Promise<{
     });
     request.on("end", () => {
       try {
+        const parsed: unknown = JSON.parse(body);
         events.push({
-          body: JSON.parse(body) as Record<string, unknown>,
+          body:
+            parsed !== null && typeof parsed === "object"
+              ? (parsed as Record<string, unknown>)
+              : {},
           path: request.url ?? "",
         });
       } catch {
@@ -57,16 +53,12 @@ async function startEgressReceiver(): Promise<{
     });
   });
   const listening = Promise.withResolvers<void>();
-  // The listener reports a Node error, whose message is what a rejection needs;
-  // passing the error object directly does not satisfy the promise reject type.
   server.once("error", (cause) => listening.reject(cause));
   server.listen(Number(new URL(egressUrl).port), new URL(egressUrl).hostname, listening.resolve);
   await listening.promise;
   return {
     close: () => {
       const closed = Promise.withResolvers<void>();
-      // `close` invokes its callback with an optional error, which must be
-      // discarded so the resolver keeps the promise's void shape.
       server.close(() => closed.resolve());
       return closed.promise;
     },
@@ -75,25 +67,12 @@ async function startEgressReceiver(): Promise<{
   };
 }
 
-/** Runs one installation fixture action against the loopback test database. */
 function runInstallationFixture(action: "resume" | "complete"): void {
   execFileSync(process.execPath, [databaseHelper, adminDatabaseUrl, action], {
     stdio: "inherit",
   });
 }
 
-/**
- * Runs the Automation Worker's daily scheduled pass through the acceptance
- * trigger.
- *
- * Reporting delivery is a scheduled responsibility: a feedback or diagnostic
- * write only enqueues a row, and the daily unit is what claims and sends it.
- * The acceptance entry exposes the same production scheduled handler, so this
- * advances the real lifecycle instead of waiting on a clock the suite cannot
- * move.
- *
- * @returns Nothing; a non-204 response fails the journey.
- */
 async function runScheduledDelivery(): Promise<void> {
   const response = await fetch(`${apiOrigin}/__test__/automation/scheduled?cron=0 0 * * *`, {
     method: "POST",
@@ -103,14 +82,6 @@ async function runScheduledDelivery(): Promise<void> {
   }
 }
 
-/**
- * Waits for the receiver to see one event with this name, tolerating the
- * Worker's background continuation after the mutation response.
- *
- * @param events Receiver capture.
- * @param name Expected event name.
- * @returns The captured event, or `null` when it never arrived.
- */
 async function waitForEvent(events: CapturedEvent[], name: string) {
   for (let attempt = 0; attempt < 60; attempt++) {
     const found = events.find((event) => event.body.event === name);
@@ -122,7 +93,6 @@ async function waitForEvent(events: CapturedEvent[], name: string) {
   return null;
 }
 
-/** Signs the seeded Owner in through the real form with functional consent granted. */
 async function signIn(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const consent = encodeURIComponent(
@@ -140,13 +110,6 @@ async function signIn(page: Page): Promise<void> {
   await page.getByRole("button", { name: /^sign in$/i }).click();
 }
 
-/**
- * Opens the wizard in a fresh signed-in context after the fixture marked the
- * installation as resuming optional onboarding.
- *
- * @param browser - Playwright browser fixture.
- * @returns The opened page and its context.
- */
 async function openWizard(browser: Browser) {
   runInstallationFixture("resume");
   const context = await browser.newContext({ reducedMotion: "reduce" });
@@ -161,15 +124,6 @@ async function openWizard(browser: Browser) {
 test.use({ screenshot: "off", trace: "off" });
 test.setTimeout(180_000);
 
-/**
- * First-run wizard acceptance over the real API, real PostgreSQL and the
- * controlled reporting egress. The journey covers both optional screens, the
- * explicit skip and share actions, resumption across a reload, withdrawal in
- * Settings, and the member-facing read-only disclosure.
- *
- * No screenshot or trace is produced, and the setup secret, password, and any
- * session credential stay in process memory.
- */
 test("resumes optional onboarding, keeps reporting off unless chosen, and withdraws later", async ({
   browser,
 }) => {
@@ -177,31 +131,25 @@ test("resumes optional onboarding, keeps reporting off unless chosen, and withdr
   try {
     const { context, page } = await openWizard(browser);
 
-    // Screen 2: both switches start off and reading the screen transmits nothing.
     await expect(page.getByRole("switch", { name: "Usage statistics" })).not.toBeChecked();
     await expect(page.getByRole("switch", { name: "Diagnostic reports" })).not.toBeChecked();
     expect(receiver.events, "reading the improvement screen must not transmit").toEqual([]);
 
-    // Choosing an answer is local; only Share feedback may transmit it.
     await page.getByRole("combobox", { name: "Discovery source" }).click();
     await page.getByRole("option", { name: "GitHub", exact: true }).click();
     expect(receiver.events, "selecting an answer must not transmit").toEqual([]);
 
     await page.getByRole("button", { name: "Share feedback", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "Queued to send" })).toBeVisible();
-    // The share is durable but unsent until the reporting queue drains.
     await runScheduledDelivery();
     const feedback = await waitForEvent(receiver.events, "meltiply_feedback_discovery_source");
     expect(feedback, "the explicit share must reach the reporting destination").not.toBeNull();
     expect(feedback?.body.properties).toMatchObject({ discovery_source: "github" });
-    // The answer is pseudonymous: no account or Workspace identity rides with it.
     expect(JSON.stringify(feedback?.body)).not.toContain(ownerEmail);
     expect(JSON.stringify(feedback?.body)).not.toContain("Alpha Creator");
-    // Sharing feedback never enables a category.
     await expect(page.getByRole("switch", { name: "Usage statistics" })).not.toBeChecked();
     expect(receiver.events).toHaveLength(1);
 
-    // Opt into usage only, then finish into the Workspace.
     await page.getByRole("switch", { name: "Usage statistics" }).click();
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(page.getByRole("heading", { name: "You're ready", exact: true })).toBeVisible();
@@ -209,10 +157,8 @@ test("resumes optional onboarding, keeps reporting off unless chosen, and withdr
     await page.getByRole("button", { name: "Enter the Workspace", exact: true }).click();
     await page.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
     await expect(page.getByRole("heading", { name: "Posts", exact: true })).toBeVisible();
-    // Usage reports drain on the daily scheduled unit, never from this request.
     expect(receiver.events, "a finished setup must not send a usage report").toHaveLength(1);
 
-    // Settings shows the stored choice and lets the Owner withdraw it.
     await page.goto("/settings?section=privacy");
     await expect(
       page.getByRole("heading", { name: "Improvement reporting", exact: true }),
@@ -228,12 +174,10 @@ test("resumes optional onboarding, keeps reporting off unless chosen, and withdr
     ).not.toBeChecked();
     expect(receiver.events, "withdrawal sends nothing").toHaveLength(1);
 
-    // A reload keeps the withdrawn state; nothing resumes the wizard.
     await page.reload();
     await expect(page.getByRole("switch", { name: "Usage statistics" })).not.toBeChecked();
     await expect(page.getByRole("heading", { name: "Help improve Meltiply" })).toHaveCount(0);
 
-    // Phone width and the dark palette stay usable on the disclosure surface.
     await page.setViewportSize({ width: 390, height: 844 });
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
@@ -246,7 +190,6 @@ test("resumes optional onboarding, keeps reporting off unless chosen, and withdr
 
     await context.close();
 
-    // A member without ownership reads the same policy and cannot change it.
     const memberContext = await browser.newContext({ reducedMotion: "reduce" });
     const memberPage = await memberContext.newPage();
     await memberPage.addInitScript(() => {
@@ -285,15 +228,10 @@ test("resumes optional onboarding, keeps reporting off unless chosen, and withdr
   }
 });
 
-/**
- * Skipping the improvement screen must leave both categories off, transmit
- * nothing, and still allow setup to finish.
- */
 test("skips the improvement screen without opting in or transmitting", async ({ browser }) => {
   const receiver = await startEgressReceiver();
   try {
     const { context, page } = await openWizard(browser);
-    // Prefer not to say is a local decision: it records the answer, sends nothing.
     await page.getByRole("combobox", { name: "Discovery source" }).click();
     await page.getByRole("option", { name: "Prefer not to say", exact: true }).click();
     await page.getByRole("button", { name: "Share feedback", exact: true }).click();
@@ -316,10 +254,6 @@ test("skips the improvement screen without opting in or transmitting", async ({ 
   }
 });
 
-/**
- * An interrupted journey resumes at the same optional screen after a reload and
- * after signing out and back in, with no credential kept in browser storage.
- */
 test("resumes an interrupted journey without keeping secrets", async ({ browser }) => {
   const { context, page } = await openWizard(browser);
   try {
@@ -333,9 +267,6 @@ test("resumes an interrupted journey without keeping secrets", async ({ browser 
       "no password or setup secret may be stored",
     ).not.toMatch(new RegExp(password));
 
-    // Reading the improvement screen must not hide the acquisition controls: the
-    // feedback read always resolves to a shape, so only a recorded answer may
-    // replace the selector.
     await expect(
       page.getByRole("combobox", { name: "Discovery source" }),
       "a fresh installation keeps the discovery-source control actionable",
@@ -357,10 +288,6 @@ test("resumes an interrupted journey without keeping secrets", async ({ browser 
 
     await page.getByRole("button", { name: "Account menu", exact: true }).count();
 
-    // Advance to the final screen without completing, then close the browser
-    // entirely: the reached screen is durable installation state, so the new
-    // session must resume at "You're ready" rather than restarting the optional
-    // improvement step.
     await page.getByRole("button", { name: "Skip", exact: true }).click();
     await expect(page.getByRole("heading", { name: "You're ready", exact: true })).toBeVisible();
     await context.close();
@@ -371,8 +298,6 @@ test("resumes an interrupted journey without keeping secrets", async ({ browser 
     await expect(
       restartedPage.getByRole("heading", { name: "You're ready", exact: true }),
     ).toBeVisible({ timeout: 30_000 });
-    // The improvement screen must not reappear, and neither category was enabled
-    // by the skip.
     await expect(
       restartedPage.getByRole("heading", { name: "Help improve Meltiply", exact: true }),
     ).toHaveCount(0);
@@ -382,10 +307,6 @@ test("resumes an interrupted journey without keeping secrets", async ({ browser 
   }
 });
 
-/**
- * A completed installation never reopens the wizard, and registration stays
- * closed once the Owner exists.
- */
 test("keeps closed registration and never forces a completed installation back into setup", async ({
   browser,
 }) => {
@@ -399,7 +320,6 @@ test("keeps closed registration and never forces a completed installation back i
     await page.goto("/settings");
     await expect(page.getByRole("heading", { name: "Help improve Meltiply" })).toHaveCount(0);
 
-    // Registration is closed and the setup form never renders again.
     await context.clearCookies();
     await page.goto("/sign-up");
     await expect(page.getByLabel(/setup secret/i)).toHaveCount(0);

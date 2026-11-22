@@ -224,6 +224,14 @@ ruleTester.run(
         code: "/** Encrypts a token for storage. */\nexport function f() {}",
         filename: packageFile,
       },
+      {
+        code: "export interface Options {\n  /** Signing region. */\n  region?: string;\n}",
+        filename: packageFile,
+      },
+      {
+        code: "/** Generated schema doc. */\ninterface Schema { a: string }",
+        filename: `${repositoryRoot}packages/contracts/src/generated/schema.ts`,
+      },
       { code: "/** @license MIT */\nconst a = 1;", filename: workerFile },
       { code: "// Vendor rejects batches above 50 items.\nconst a = 1;", filename: workerFile },
       {
@@ -239,6 +247,11 @@ ruleTester.run(
       },
       {
         code: "/** Internal helper. */\nfunction f() {}",
+        filename: packageFile,
+        errors: [{ messageId: "restricted" }],
+      },
+      {
+        code: "export function f() {\n  /** Narration inside body. */\n  const x = 1;\n  return x;\n}",
         filename: packageFile,
         errors: [{ messageId: "restricted" }],
       },
@@ -320,6 +333,95 @@ ruleTester.run("meltiply/no-workerd-fs-module-cache", rule("no-workerd-fs-module
     {
       code: "import { cloudflareTest } from '@cloudflare/vitest-plugin'; export default { test: { fsModuleCache: true } };",
       filename: `${repositoryRoot}workers/state/vitest.config.ts`,
+      errors: [{ messageId: "restricted" }],
+    },
+  ],
+});
+
+ruleTester.run("meltiply/no-session-advisory-lock", rule("no-session-advisory-lock"), {
+  valid: [
+    {
+      code: "client.query('SELECT pg_advisory_xact_lock($1)', [key]);",
+      filename: workerFile,
+    },
+    {
+      code: "client.query(`SELECT pg_try_advisory_xact_lock($1)`, [key]);",
+      filename: workerFile,
+    },
+  ],
+  invalid: [
+    {
+      code: "client.query('SELECT pg_advisory_lock($1)', [key]);",
+      filename: workerFile,
+      errors: [{ messageId: "restricted" }],
+    },
+    {
+      code: "client.query(`SELECT pg_try_advisory_lock($1)`, [key]);",
+      filename: workerFile,
+      errors: [{ messageId: "restricted" }],
+    },
+  ],
+});
+
+ruleTester.run("meltiply/no-throw-in-effect-gen", rule("no-throw-in-effect-gen"), {
+  valid: [
+    {
+      code: "Effect.gen(function* () { return yield* Effect.fail(new Error('bad')); });",
+      filename: workerFile,
+    },
+    {
+      code: "Effect.gen(function* () { const fn = () => { throw new Error('inner'); }; return fn; });",
+      filename: workerFile,
+    },
+  ],
+  invalid: [
+    {
+      code: "Effect.gen(function* () { throw new Error('defect'); });",
+      filename: workerFile,
+      errors: [{ messageId: "restricted" }],
+    },
+  ],
+});
+
+ruleTester.run("meltiply/no-worker-effect-run", rule("no-worker-effect-run"), {
+  valid: [
+    {
+      code: "Effect.runPromiseExit(program);",
+      filename: `${repositoryRoot}workers/automation/src/effect/boundary.ts`,
+    },
+    {
+      code: "Effect.runPromiseExit(program);",
+      filename: `${repositoryRoot}workers/state/src/index.ts`,
+    },
+    {
+      code: "Effect.runPromise(program);",
+      filename: `${repositoryRoot}workers/automation/test/worker.test.ts`,
+    },
+  ],
+  invalid: [
+    {
+      code: "Effect.runPromise(program);",
+      filename: `${repositoryRoot}workers/automation/src/distribution.ts`,
+      errors: [{ messageId: "restricted" }],
+    },
+  ],
+});
+
+ruleTester.run("meltiply/no-naive-redirect-prefix", rule("no-naive-redirect-prefix"), {
+  valid: [
+    {
+      code: "const safe = sameOriginPath(candidate, origin);",
+      filename: componentFile,
+    },
+    {
+      code: "const ok = value.startsWith('/');",
+      filename: componentFile,
+    },
+  ],
+  invalid: [
+    {
+      code: "const safe = target.startsWith('/') && !target.startsWith('//');",
+      filename: componentFile,
       errors: [{ messageId: "restricted" }],
     },
   ],

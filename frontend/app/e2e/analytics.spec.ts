@@ -8,15 +8,6 @@ import {
 } from "./publication-fixtures";
 import { openIsolatedOwnerWorkspace } from "./workspace-session";
 
-/**
- * Real-stack Analytics journey.
- *
- * Runs in the controlled-Provider acceptance project: the API advertises real
- * Instagram/Threads analytics capabilities there, and the fixture provisions
- * connected Channels. Stored snapshots are seeded directly because the feature
- * is read-only over sync output and the controlled Provider does not fetch
- * engagement counters.
- */
 test("keeps analytics honest across scope, range, platform, and ranking changes", async ({
   page,
   request,
@@ -38,8 +29,6 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   ]);
   await seedAnalyticsCohort(workspace.profileName);
 
-  // The Analytics route and its chart bundle are lazy: no loaded script on the
-  // Posts surface may contain the comparison card or Recharts implementation.
   const analyticsChunk = await page.evaluate(async () => {
     const scripts = performance
       .getEntriesByType("resource")
@@ -59,43 +48,31 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();
   await expect(page.getByText(`${workspace.profileName} · Performance`)).toBeVisible();
 
-  // KPI totals count cumulative snapshots at the range end. The launch Post
-  // contributes Instagram + Threads + TikTok destinations.
   await expect(page.getByLabel("Views: 4,080")).toBeVisible();
   await expect(page.getByLabel("Published destinations: 14")).toBeVisible();
   await expect(page.getByText(/Metrics are cumulative snapshots/)).toBeVisible();
 
-  // The chart exposes the same values as a table for every measured platform.
   const chartTable = page.locator("div.sr-only table").filter({ hasText: "Total engagement" });
   await expect(chartTable).toContainText("Instagram");
   await expect(chartTable).toContainText("3,820");
   await expect(chartTable).toContainText("Threads");
   await expect(chartTable.getByRole("row", { name: /TikTok/ })).toContainText("60");
 
-  // Default ranking is views descending. Ten rows load; Load more reaches the
-  // not-yet-synced destinations that rank below them.
   const table = page.locator("div.hidden.lg\\:block table");
   await expect(table.locator("tbody tr")).toHaveCount(10);
   await expect(table.locator("tbody tr").first()).toContainText("Analytics E2E older");
   await page.getByRole("button", { name: "Load more" }).click();
   await expect(table.locator("tbody tr")).toHaveCount(12);
-  // The cohort's TikTok-only Post is measured in acceptance mode: the controlled
-  // Provider advertises TikTok analytics, so the row must show its stored counter
-  // rather than an unsupported-platform state.
   const tiktokOnly = table.getByRole("row", { name: /Analytics E2E TikTok only/ });
   await expect(tiktokOnly).toContainText("50");
   await expect(table.getByText("Not supported")).toHaveCount(0);
-  // One fully un-synced Post renders the state in its four content cells.
   await expect(table.getByText("Awaiting sync", { exact: true })).toHaveCount(4);
   await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
 
-  // Metric headers re-rank. Shares tie between the launch and older Posts, and
-  // the tie-break prefers the newer publication.
   await table.getByRole("button", { name: "Sort by Shares" }).click();
   await expect(page).toHaveURL(/metric=shares/);
   await expect(table.locator("tbody tr").first()).toContainText("Analytics E2E launch");
 
-  // The compact filter builder owns range, platform, account, and format.
   const filterSummary = page.getByRole("toolbar").locator("summary");
   const ensureFiltersOpen = async () => {
     if (!(await page.getByRole("group", { name: "Filters" }).isVisible())) {
@@ -103,7 +80,6 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
     }
   };
 
-  // Range changes are shareable and back returns to the previous view.
   await ensureFiltersOpen();
   await page.getByRole("button", { name: "Add Range filter" }).click();
   await page.getByRole("combobox", { name: "Range" }).click();
@@ -114,7 +90,6 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   await expect(page.getByLabel("Views: 4,080")).toBeVisible();
   await expect(page).toHaveURL(/range=30d/);
 
-  // One-platform filtering narrows KPIs, chart, and ranking.
   await ensureFiltersOpen();
   await page.getByRole("button", { name: "Add Platform filter" }).click();
   await page.getByRole("combobox", { name: "Platform" }).click();
@@ -123,29 +98,22 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   await expect(page.getByLabel("Views: 200")).toBeVisible();
   await expect(page.getByLabel("Published destinations: 1")).toBeVisible();
   await expect(table.locator("tbody tr")).toHaveCount(1);
-  // One platform is the whole cohort: the comparison card would be a single
-  // bar against empty space, so the page omits it.
   await expect(page.getByRole("heading", { name: "Engagement by platform" })).toBeHidden();
   await page.goBack();
   await expect(page.getByLabel("Views: 4,080")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Engagement by platform" })).toBeVisible();
 
-  // Close the filter builder before the remaining toolbar checks and screenshots.
   if (await page.getByRole("group", { name: "Filters" }).isVisible()) {
     await filterSummary.click();
   }
 
-  // Refresh re-reads stored metrics; it never implies a provider sync.
   await page.getByRole("button", { name: "Refresh analytics" }).click();
   await expect(page.getByText(/Last synced/)).toBeVisible();
 
-  // Every ranking control is keyboard operable.
   await table.getByRole("button", { name: "Sort by Views" }).focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/metric=views/);
 
-  // Both palettes keep the chart and table legible. The before-paint bootstrap
-  // prefers the shared theme cookie, so set the same explicit choice there.
   await page.evaluate(() => {
     localStorage.setItem("meltiply.theme", "light");
     document.cookie = "meltiply-theme=light; Path=/; Max-Age=31536000; SameSite=Lax";
@@ -170,14 +138,12 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
     path: testInfo.outputPath("analytics-dark.png"),
   });
 
-  // Reduced-motion preference must not break the page or its chart.
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.reload();
   await activeBrandProfileName(page);
   await expect(page.getByRole("heading", { name: "Engagement by platform" })).toBeVisible();
   await expect(page.getByLabel("Views: 4,080")).toBeVisible();
 
-  // Phones keep the stacked rows and never force page-level horizontal scroll.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
   await activeBrandProfileName(page);
@@ -188,7 +154,6 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   );
   expect(overflow).toBeLessThanOrEqual(1);
 
-  // The 24-hour heatmap reflows into the card on phones instead of scrolling.
   const heatmap = page.locator("[data-best-time-heatmap]");
   await expect(heatmap).toBeVisible();
   await expect

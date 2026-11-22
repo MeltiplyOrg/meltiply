@@ -6,7 +6,6 @@ const datePattern = /^\d{4}-\d\d-\d\d(?:T|$)/;
 const httpUrlPattern = /^https?:\/\//;
 const imageFieldPattern = /avatar|image|thumbnail|download|picture|^url$/;
 
-/** Copies validated data into a fresh browser scenario and removes external resource URLs. Catalog dates shift near today by default; a zero dateOffset preserves real seed timestamps and timezone-aware Queue assignments. */
 export function scenarioValue(
   value: PreviewValue,
   options: PreviewOptions,
@@ -65,7 +64,6 @@ export function scenarioValue(
   return value;
 }
 
-/** Empties data arrays and aggregate counters while retaining the envelope and pagination configuration. */
 export function emptyValue(value: PreviewValue): PreviewValue {
   if (Array.isArray(value)) return [];
   if (value === null || typeof value !== "object") return value;
@@ -83,12 +81,6 @@ export function emptyValue(value: PreviewValue): PreviewValue {
   );
 }
 
-/**
- * Applies form fields to a validated response shape. Identity-matched array
- * defaults retain response-only fields without borrowing another Channel's
- * settings. Provider option maps are authoritative replacements: a method
- * change must remove old nested choices and retain newly introduced fields.
- */
 export function mergeExample(example: PreviewValue, input: PreviewValue): PreviewValue {
   if (Array.isArray(input)) {
     const rows = Array.isArray(example) ? example : [];

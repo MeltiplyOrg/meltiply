@@ -1,6 +1,3 @@
-// Wrangler's outer dev proxy rejects non-loopback /cdn-cgi Host headers even with
-// --local-upstream; --local-upstream restores the signed authority before its S3
-// handler verifies SigV4.
 import { spawn } from "node:child_process";
 import { readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -17,10 +14,6 @@ const downloadResponseHeaders = [
   ["response-content-type", "content-type"],
 ];
 
-/**
- * Miniflare omits download response overrides, so successful GETs apply the two
- * signed download headers after upstream SigV4 validation.
- */
 const server = createServer((incoming, outgoing) => {
   if (!incoming.url?.startsWith(`${pathPrefix}/`)) {
     outgoing.writeHead(404).end();
@@ -78,7 +71,6 @@ if (!address || typeof address === "string") {
 const authority = `${gatewayHost}:${address.port}`;
 console.log(`Local signed R2 gateway: http://${authority}${pathPrefix}`);
 
-// Secondary Workers ignore CLI env-file/var overrides.
 const configIndexes = args.flatMap((arg, index) =>
   arg === "--config" && args[index + 1] ? [index + 1] : [],
 );

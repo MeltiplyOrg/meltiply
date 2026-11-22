@@ -7,10 +7,6 @@ const closingFencePattern = /^\s{0,3}(`{3,}|~{3,})\s*$/u;
 
 const vendoredMarkdownPrefixes = [".agents/", ".claude/", ".opencode/", ".kiro/", ".omp/"];
 
-/**
- * CommonMark: a closing fence repeats the opening character at least as many times
- * and carries no info string.
- */
 export function markdownLines(content) {
   let fence;
   return content.split("\n").map((line) => {
@@ -31,7 +27,6 @@ export function markdownLines(content) {
   });
 }
 
-/** CommonMark: a code span closes at the next backtick run of the same length. */
 export function maskInlineCode(line) {
   let masked = "";
   let index = 0;

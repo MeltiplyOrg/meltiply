@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { useState } from "react";
 import { Alert } from "@meltiply/ui/alert";
 import { Button } from "@meltiply/ui/button";
@@ -39,9 +40,7 @@ export function ReportingSettings(): React.ReactElement {
       await save.mutateAsync({ diagnostics, usage });
       setChoiceOverride(null);
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : t("Your choices could not be saved. Try again."),
-      );
+      setError(errorMessage(cause, t("Your choices could not be saved. Try again.")));
     }
   };
 

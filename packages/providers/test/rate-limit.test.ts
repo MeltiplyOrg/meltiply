@@ -1,10 +1,13 @@
+import { PLATFORM_IDS } from "@meltiply/domain";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { RateLimitBudget } from "../src/rate-limit";
 import { extractRateLimitBudget } from "../src/rate-limit";
 
-const metaPlatforms = ["facebook", "instagram", "threads"] as const;
-const allPlatforms = [...metaPlatforms, "tiktok", "youtube"] as const;
+const metaPlatforms = PLATFORM_IDS.filter(
+  (platform) => platform === "facebook" || platform === "instagram" || platform === "threads",
+);
+const allPlatforms = PLATFORM_IDS;
 
 function budget(patch: Partial<RateLimitBudget>): RateLimitBudget {
   return {

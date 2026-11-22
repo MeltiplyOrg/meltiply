@@ -24,8 +24,10 @@ const server = createServer((request, response) => {
   request.on("data", (chunk: Buffer) => chunks.push(chunk));
   request.on("end", () => {
     const text = Buffer.concat(chunks).toString("utf8");
+    const parsed: unknown = text.length === 0 ? {} : JSON.parse(text);
     receiver.requests.push({
-      body: text.length === 0 ? {} : (JSON.parse(text) as Record<string, unknown>),
+      body:
+        parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {},
       headers: request.headers,
       method: request.method ?? "",
       url: request.url ?? "",

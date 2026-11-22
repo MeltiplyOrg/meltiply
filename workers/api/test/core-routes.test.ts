@@ -16,6 +16,7 @@ import { tokenCipherFor } from "../src/token-credentials";
 import {
   ActiveOrganizationRequiredError,
   DatabaseError,
+  PLATFORM_IDS,
   StorageUnavailableError,
   type PlatformCapability,
 } from "@meltiply/domain";
@@ -87,7 +88,7 @@ const brandProfile: components["schemas"]["BrandProfile"] = {
 };
 
 function unavailableCapabilities(): ReturnType<ProviderRegistry["capabilities"]> {
-  return (["tiktok", "youtube", "instagram", "facebook", "threads"] as const).map((platform) => ({
+  return PLATFORM_IDS.map((platform) => ({
     accepted_mime_types: [],
     analytics: false,
     asset_types: [],

@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { Effect } from "effect";
 import type { Context, Hono } from "hono";
 
@@ -56,9 +57,7 @@ function lazyOperatorReconciliationService(): OperatorReconciliationService {
           : new CoreApiError(
               500,
               "internal_error",
-              cause instanceof Error
-                ? cause.message
-                : "The reconciliation service could not be loaded.",
+              errorMessage(cause, "The reconciliation service could not be loaded."),
             ),
       try: async () =>
         (await import("./operator-reconciliation")).createOperatorReconciliationService(),

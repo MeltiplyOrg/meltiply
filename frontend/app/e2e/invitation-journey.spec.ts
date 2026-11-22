@@ -7,7 +7,6 @@ import { expect, test } from "@playwright/test";
 
 import { signIn, waitForWorkspace } from "./workspace-session";
 
-/** Local development database where the E2E backend stores the shared Workspace. */
 const adminDatabaseUrl =
   process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
   "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
@@ -16,16 +15,6 @@ const databaseHelper = resolve(
   "support/invitation-db.mjs",
 );
 
-/**
- * Runs one invitation database operation in a short-lived child process.
- *
- * Keeping PostgreSQL outside the Playwright worker avoids an open client handle
- * surviving the test and preventing the runner from exiting.
- *
- * @param action - `repoint` or `cleanup`.
- * @param email - Invitee email address.
- * @param tokenHash - Replacement invitation token hash for `repoint`.
- */
 function runInvitationDatabaseAction(
   action: "repoint" | "cleanup",
   email: string,
@@ -38,21 +27,10 @@ function runInvitationDatabaseAction(
   );
 }
 
-/**
- * Hashes an invitation token exactly as the workspace lifecycle does.
- *
- * @param token - Raw invitation token from the emailed link.
- * @returns Lowercase SHA-256 digest stored in `workspace_invitations.token_hash`.
- */
 function invitationTokenHash(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-/**
- * Deletes the account and invitation created by the journey.
- *
- * @param email - Invitee email address.
- */
 function cleanupInvitee(email: string): void {
   runInvitationDatabaseAction("cleanup", email);
 }
@@ -85,8 +63,6 @@ test("Admin invites an address and the invitee joins through the link as an Edit
     await expect(inviteDialog).not.toBeVisible();
     await expect(admin.getByText(email, { exact: true })).toBeVisible();
 
-    // The test acts as the mail transport: point the created invitation at a
-    // token this journey can open without reading Wrangler's simulated mail log.
     runInvitationDatabaseAction("repoint", email, invitationTokenHash(token));
 
     const invitee = await inviteeContext.newPage();

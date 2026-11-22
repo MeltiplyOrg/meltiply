@@ -18,7 +18,6 @@ const SPDX_LICENSE_URLS = {
   "MPL-2.0": "https://spdx.org/licenses/MPL-2.0.html",
 };
 
-/** LGPLv3 incorporates GPLv3 by reference, so both texts ship together. */
 const CANONICAL_LICENSE_FILES = {
   "LGPL-3.0-or-later": ["LICENSES/LGPL-3.0-or-later.txt", "LICENSES/GPL-3.0-or-later.txt"],
 };
@@ -162,7 +161,6 @@ function projectLicenseSection() {
   ].join("\n");
 }
 
-/** Gr8r has no public license; the notice records the permission basis instead. */
 function copiedInterfaceSection() {
   const sections = COPIED_INTERFACE_NOTICES.map((notice) => {
     const lines = [

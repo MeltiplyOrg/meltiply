@@ -24,7 +24,6 @@ type Delivery = {
 };
 
 export default class SelfhostAutomation extends AutomationEntrypoint {
-  /** Miniflare's synchronous RPC discovery would block its Node event loop, so the host dispatches over fetch. */
   async fetch(request: Request) {
     if (request.method !== "POST") return new Response(null, { status: 404 });
     const payload: unknown = await request.json();

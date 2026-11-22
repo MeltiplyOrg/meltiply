@@ -92,9 +92,16 @@ const catalog = YAML.parse(readFileSync(catalogPath, "utf8"), {
 const parityManifestPath = fileURLToPath(
   new URL("../../../packages/contracts/examples/runtime-contract-cases.json", import.meta.url),
 );
-const parityManifest = JSON.parse(
-  readFileSync(parityManifestPath, "utf8"),
-) as RuntimeContractManifest;
+const parsedParityManifest: unknown = JSON.parse(readFileSync(parityManifestPath, "utf8"));
+if (
+  typeof parsedParityManifest !== "object" ||
+  parsedParityManifest === null ||
+  !("cases" in parsedParityManifest) ||
+  !Array.isArray(parsedParityManifest.cases)
+) {
+  throw new TypeError("runtime-contract-cases.json must export a cases array");
+}
+const parityManifest = parsedParityManifest as RuntimeContractManifest;
 
 const cases: ConformanceCase[] = [
   { method: "GET", operationId: "getHealth", path: "/api/v1/health" },

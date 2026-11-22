@@ -3,7 +3,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { Effect, Schema } from "effect";
-import { DatabaseError, INSTALLATION_SEAT_LIMIT } from "../../packages/domain/src/index";
+import {
+  DatabaseError,
+  errorMessage,
+  INSTALLATION_SEAT_LIMIT,
+} from "../../packages/domain/src/index";
 import { ProviderRegistry } from "../../packages/providers/src/index";
 import type { EffectTransactionClient } from "../../packages/database/src/index";
 import { assemblePostsEffect } from "../../workers/api/src/post-service";
@@ -93,7 +97,7 @@ async function compileSeedSnapshot(): Promise<SeedSnapshot> {
           catch: (cause) =>
             new DatabaseError({
               cause,
-              message: cause instanceof Error ? cause.message : "Seed projection query failed",
+              message: errorMessage(cause, "Seed projection query failed"),
             }),
         }),
     };
@@ -296,8 +300,6 @@ async function compileSeedSnapshot(): Promise<SeedSnapshot> {
 try {
   process.stdout.write(JSON.stringify(await compileSeedSnapshot()));
 } catch (error) {
-  console.error(
-    error instanceof Error ? error.message : "Could not compile the canonical development seed",
-  );
+  console.error(errorMessage(error, "Could not compile the canonical development seed"));
   process.exitCode = 1;
 }

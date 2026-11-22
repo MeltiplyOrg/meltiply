@@ -1,8 +1,4 @@
 #!/usr/bin/env node
-/**
- * Cloudflare compresses text assets at its edge while Vite's preview serves them
- * identity-encoded, so Lighthouse measures this brotli/gzip-negotiating preview instead.
- */
 import { readFile, stat } from "node:fs/promises";
 import { createServer, request } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";

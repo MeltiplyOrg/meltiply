@@ -6,6 +6,7 @@ import type { components } from "@meltiply/contracts/schema";
 import type { Queryable } from "@meltiply/database";
 import {
   ASSET_UPLOAD_POLICY,
+  errorMessage,
   InvalidRequestError,
   COMMUNITY_LIMITS,
   mediaUploadMaximum,
@@ -155,7 +156,7 @@ function signedUploadCall<A>(operation: () => Promise<A>) {
       cause instanceof InvalidRequestError
         ? cause
         : new InvalidRequestError({
-            message: cause instanceof Error ? cause.message : "Failed to sign an upload capability",
+            message: errorMessage(cause, "Failed to sign an upload capability"),
           }),
     try: async () => {
       await gateUploadSign();
@@ -197,10 +198,7 @@ function bucketOperation<A>(
   return Effect.tryPromise({
     catch: (cause) =>
       new StorageUnavailableError({
-        message:
-          cause instanceof Error
-            ? cause.message
-            : "The object storage operation could not be completed.",
+        message: errorMessage(cause, "The object storage operation could not be completed."),
       }),
     try: operation,
   });

@@ -14,7 +14,6 @@ const output = resolve(root, "dist/selfhost/notices");
 const policy = JSON.parse(readFileSync(join(root, "scripts/ci/allowed-licenses.json"), "utf8"));
 const components = [];
 
-/** LGPLv3 incorporates GPLv3 by reference, so both texts ship together. */
 const fallbackLicenses = {
   "LGPL-3.0-or-later": ["LGPL-3.0-or-later.txt", "GPL-3.0-or-later.txt"],
 };

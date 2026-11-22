@@ -1944,11 +1944,22 @@ export function registerCoreRoutes(
           catch: () =>
             new CoreApiError(500, "internal_error", "Invalid connection credentials payload."),
           try: () => {
-            const parsed = JSON.parse(plaintext) as OAuthConnection;
-            if (!parsed.accessToken || !parsed.account?.id || parsed.account.id !== accountId) {
+            const parsed: unknown = JSON.parse(plaintext);
+            if (
+              typeof parsed !== "object" ||
+              parsed === null ||
+              !("accessToken" in parsed) ||
+              typeof parsed.accessToken !== "string" ||
+              !parsed.accessToken ||
+              !("account" in parsed) ||
+              typeof parsed.account !== "object" ||
+              parsed.account === null ||
+              !("id" in parsed.account) ||
+              parsed.account.id !== accountId
+            ) {
               throw new TypeError("Invalid connection credentials payload.");
             }
-            return parsed;
+            return parsed as OAuthConnection;
           },
         });
         yield* saveConnection(

@@ -63,10 +63,6 @@ function committedTheme(): Theme {
   return document.documentElement.classList.contains("dark") ? "dark" : "light";
 }
 
-/**
- * Owns the document palette for one hydrated surface: explicit choices, live OS changes in System
- * mode, and consent-gated persistence. The returned `start` is idempotent and returns its disposer.
- */
 export function createThemeController(): ThemeController {
   if (typeof document === "undefined") {
     return {

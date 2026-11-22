@@ -8,7 +8,6 @@ const pathParameterPattern = /^\/\{([^}]+)\}$/;
 type Collection = { path: string; field: string; envelope: PreviewObject; items: PreviewObject[] };
 type Parameters = Readonly<Record<string, string | readonly string[] | undefined>>;
 
-/** Projects generated collection examples into tab-local CRUD state. It models frontend read-after-save/delete behavior, not backend business rules or external effects. */
 export function createPreviewState(
   operations: PreviewOperation[],
   assets: Map<string, PreviewObject>,
@@ -66,7 +65,6 @@ export function createPreviewState(
     ]),
   );
 
-  /** Resolves exact collection/entity operations from their generated paths and keeps uploaded Asset references current in saved Posts. */
   function respond(
     operation: PreviewOperation,
     request: Request,

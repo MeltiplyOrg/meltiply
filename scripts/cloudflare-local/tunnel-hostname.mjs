@@ -8,7 +8,6 @@ const trailingHyphensPattern = /-+$/g;
 const hostnamePattern = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 const tunnelNamePattern = /^[a-zA-Z0-9._-]+$/;
 
-/** RFC 1035 label length limit. */
 const maximumLabelLength = 63;
 const kinds = new Set(["app", "public"]);
 const styles = new Set(["wildcard", "flat"]);
@@ -60,8 +59,6 @@ export function hostnameFor({
     throw new Error(`style must be one of ${[...styles].join(", ")}, got ${style}`);
   }
   const slug = branchLabelFrom(branch);
-  // Cloudflare's default Universal SSL certificate covers the apex and `*.<zone>`
-  // only; a deeper hostname fails the TLS handshake with alert 40.
   const suffix = devLabel ? `.${devLabel}` : "";
   if (style === "wildcard") {
     const service = kind === "app" ? slug : `${slug}-${kind}`;
@@ -73,10 +70,6 @@ export function hostnameFor({
   );
 }
 
-/**
- * A wildcard DNS record has one CNAME target, so it can reach only one tunnel;
- * per-branch tunnels need explicit records.
- */
 export function coverageHostnames({
   branch,
   domain,
@@ -101,7 +94,6 @@ export function coverageHostnames({
   return concrete();
 }
 
-/** Cloudflare tunnel names accept letters, digits, hyphens, underscores, and periods. */
 export function tunnelNameFor({ branch, prefix = defaultTunnelNamePrefix }) {
   const name = `${prefix}-${branchLabelFrom(branch)}`;
   if (name.length > 100) {

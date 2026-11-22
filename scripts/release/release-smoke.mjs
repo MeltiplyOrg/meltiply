@@ -42,10 +42,6 @@ async function loadApiCandidateEvidence(outDir, spec) {
   return { candidate, versionId };
 }
 
-/**
- * Cloudflare version URLs prefix the workers.dev subdomain with the first eight
- * characters of the version UUID.
- */
 function versionUrlOrigin(spec, versionId) {
   const origin = new URL(spec.api_workers_dev_url);
   return `https://${versionId.slice(0, 8)}-${origin.hostname}`;
@@ -67,7 +63,6 @@ export async function fetchHealth({
       signal: AbortSignal.timeout(Math.min(requestTimeoutMs, Math.max(1, requestBudgetMs))),
     });
   } catch (cause) {
-    // Node fetch reports transport failures as TypeError too.
     throw new Error("API health transport failed", { cause });
   }
   if (!response.ok) {

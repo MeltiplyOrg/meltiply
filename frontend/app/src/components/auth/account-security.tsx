@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import React, { useEffect, useState } from "react";
 import { useBeforeUnload, useBlocker } from "react-router";
 import { Button } from "@meltiply/ui/button";
@@ -62,7 +63,7 @@ export function AccountSecurity(): React.ReactElement {
         } else setEnrollment(result);
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("Could not update account security."));
+      setError(errorMessage(cause, t("Could not update account security.")));
     } finally {
       setBusy(false);
     }

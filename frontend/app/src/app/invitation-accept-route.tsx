@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { ArrowRight, MailCheck, ShieldCheck } from "lucide-react";
@@ -92,7 +93,7 @@ function InvitationAcceptance(): React.ReactElement {
         );
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("The account could not be created."));
+      setError(errorMessage(cause, t("The account could not be created.")));
     } finally {
       setBusy(false);
     }

@@ -2,10 +2,6 @@ import { copyFile, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
-/**
- * Env files stay hidden throughout the mirrored ancestors because Bun's root dotenv
- * bootstrap would otherwise reintroduce checkout secrets.
- */
 export async function createWorkerConfigSession(repoRoot, configPaths, envText) {
   const root = resolve(repoRoot);
   const configs = configPaths.map((path) => relative(root, resolve(path)));

@@ -1,3 +1,5 @@
+import { errorMessage } from "@meltiply/domain";
+
 import { applyAuthJwt } from "./auth-token";
 
 const unsafeFieldCharactersPattern = /[^a-zA-Z0-9_.-]/g;
@@ -69,7 +71,7 @@ function boundedHash(hash: string | undefined): string | undefined {
 }
 
 export function reportFrontendError(error: unknown, context: string): void {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error, String(error));
   const name = error instanceof Error ? error.name : "UnknownError";
   const stack = error instanceof Error ? frameLines(error.stack) : undefined;
 

@@ -117,11 +117,6 @@ export default class PrometheusReporter implements Reporter {
     this.metrics.durationSeconds += result.duration / 1_000;
   }
 
-  /**
-   * Finalizes scrape metrics and optionally pushes them to an explicitly configured gateway.
-   * Local/CI runs without a gateway perform no network push; configured gateway failures
-   * remain diagnostic and do not replace the browser suite's own outcome.
-   */
   async onEnd(result: FullResult): Promise<void> {
     this.metrics.lastRunSuccess = result.status === "passed" ? 1 : 0;
     this.metrics.lastRunTimestamp = Date.now() / 1_000;

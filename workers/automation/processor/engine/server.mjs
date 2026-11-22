@@ -91,10 +91,6 @@ function runStreaming(argv, onChunk, timeoutMs) {
   return promise;
 }
 
-/**
- * FFmpeg cannot decode animated WebP, so only video is probed with ffprobe.
- * `-count_frames` is the only frame count for formats that declare none.
- */
 async function probe(file, { countFrames = false, timeoutMs }) {
   const argv = ["ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams"];
   if (countFrames) argv.push("-count_frames");
@@ -120,10 +116,6 @@ async function probe(file, { countFrames = false, timeoutMs }) {
   return summarize(parsed, countFrames);
 }
 
-/**
- * ffprobe reports MP4 and QuickTime through the same demuxer family; the ISO
- * brand disambiguates them.
- */
 function summarize(parsed, counted) {
   const streams = parsed.streams ?? [];
   const video = streams.find((stream) => stream.codec_type === "video");
@@ -185,10 +177,6 @@ function rotationOf(stream) {
   return Number.isFinite(value) ? ((Math.round(value) % 360) + 360) % 360 : 0;
 }
 
-/**
- * ffprobe's `sample_aspect_ratio` is a ratio string ("15:16"); "0:1" and "N/A"
- * mean unknown.
- */
 function parseSampleAspect(raw) {
   const [numerator, denominator = "1"] = String(raw ?? "").split(":");
   const top = Number(numerator);
@@ -223,10 +211,6 @@ function isAnimatedContainer(formatName) {
   );
 }
 
-/**
- * FFmpeg cannot decode animated WebP ("image data not found"), so the libvips
- * loader decides the image type.
- */
 const IMAGE_CONTENT_TYPES = new Map([
   ["gifload", "image/gif"],
   ["jpegload", "image/jpeg"],
@@ -234,10 +218,6 @@ const IMAGE_CONTENT_TYPES = new Map([
   ["webpload", "image/webp"],
 ]);
 
-/**
- * libvips' pngload decodes only the first APNG frame and FFmpeg does not surface
- * the acTL play count, so the chunk is read directly.
- */
 async function apngPlayCount(file) {
   const handle = await open(file, "r");
   try {
@@ -260,10 +240,6 @@ async function apngPlayCount(file) {
   }
 }
 
-/**
- * FFmpeg is the only local APNG frame decoder; some containers leave
- * `duration_time` unset.
- */
 async function apngFrameDelays(file, timeoutMs) {
   const { stdout } = await run(
     [
@@ -295,10 +271,6 @@ async function apngFrameDelays(file, timeoutMs) {
   return deltas.length >= frames.length - 1 ? deltas.slice(0, frames.length - 1) : null;
 }
 
-/**
- * A raw alpha plane far exceeds memory and scratch disk, so FFmpeg's
- * `alphaextract` output is scanned as a 16-bit stream.
- */
 async function apngHasAlpha(file, timeoutMs) {
   let minimum = 0xffff;
   let carry = null;
@@ -448,7 +420,6 @@ async function probeImage(file, timeoutMs) {
     );
   }
   if (fields.get("vips-loader") === "pngload") {
-    // pngload decodes only the first frame of an APNG.
     const plays = await apngPlayCount(file);
     if (plays !== null) return probeApng(file, timeoutMs, plays);
   }
@@ -544,7 +515,6 @@ async function downloadInput(url, file, { expectedChecksum, expectedSize, signal
   return { bytes: written, sha256 };
 }
 
-/** libvips has no has-alpha metadata field. */
 async function hasAlpha(file, timeoutMs) {
   const { stdout: header } = await run(["vipsheader", "-a", file], timeoutMs);
   const bands = Number(bandsPattern.exec(header)?.[1]);
@@ -603,7 +573,6 @@ function sameFrameTiming(source, candidate) {
   return source.every((delta, index) => Math.abs((candidate[index] ?? 0) - delta) <= 4);
 }
 
-/** `-xerror` makes any decode error fatal. */
 async function verifyVideoFullDecode(file, timeoutMs) {
   try {
     await run(
@@ -635,7 +604,6 @@ async function verifyVideoFullDecode(file, timeoutMs) {
   }
 }
 
-/** The JPEG and PNG loaders reject the `[n=-1]` page selector. */
 async function verifyImageFullDecode(file, timeoutMs, allFrames) {
   const target = `${file}.verify.v`;
   try {
@@ -650,7 +618,6 @@ async function verifyImageFullDecode(file, timeoutMs, allFrames) {
   }
 }
 
-/** yuv420p requires even dimensions. */
 function targetDimensions(source, profile) {
   const { height, width } =
     source.sampleAspect === 1
@@ -690,7 +657,6 @@ function deterministicFlags() {
   return ["-fflags", "+bitexact", "-flags:v", "+bitexact"];
 }
 
-/** libvips encoders accept quality 1-100. */
 function encoderQuality(raw) {
   const quality = Math.round(Number(raw));
   return Number.isFinite(quality) ? Math.min(100, Math.max(1, quality)) : 82;
@@ -759,10 +725,6 @@ function stillImageCandidates(source, profile, directory) {
   return plans;
 }
 
-/**
- * FFmpeg cannot decode animated WebP. libvips scale operations do not update
- * `page-height`, and GIF holds at most one transparent index.
- */
 function animatedImageCandidates(source, profile, directory) {
   const media = source.media;
   if ((media.orientation ?? 1) !== 1) return [];
@@ -771,7 +733,6 @@ function animatedImageCandidates(source, profile, directory) {
   const apngTarget = animatedFrameDimensions(media, profile, { even: true });
   const target = animatedFrameDimensions(media, profile);
   const resize = target.width !== media.width || target.pageHeight !== media.height;
-  // `vips resize` takes its scale after the output.
   const argvFor = (file, options) => [
     [
       "vips",
@@ -1007,7 +968,6 @@ function profileRejection(media, profile, sourceMedia) {
   return null;
 }
 
-/** R2's binding `etag` is the HTTP ETag without quotes. */
 async function uploadOutput(url, file, contentType, signal) {
   const { size } = await stat(file);
   const digest = createHash("sha256");

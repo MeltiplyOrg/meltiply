@@ -148,11 +148,6 @@ function morphHandoff(
   arriving.visible = start;
 }
 
-/**
- * Registers a centered dialog surface so that opening one dialog over another with the same center
- * morphs a single shell between their sizes instead of popping both. Covered dialogs stay mounted
- * for focus and form state. Returns the ref callback for the content element.
- */
 export function useCenterDialogMorph<T extends HTMLElement>(
   forwardedRef: React.ForwardedRef<T>,
 ): React.RefCallback<T> {

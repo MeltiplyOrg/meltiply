@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowRight, Check, Share2, UserRoundPlus } from "lucide-react";
@@ -133,9 +134,7 @@ function ImprovementScreen({
       setChoiceOverride(null);
       onContinue();
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : t("Your choices could not be saved. Try again."),
-      );
+      setError(errorMessage(cause, t("Your choices could not be saved. Try again.")));
     }
   };
 
@@ -145,9 +144,7 @@ function ImprovementScreen({
     try {
       await submitFeedback.mutateAsync({ discoverySource: source });
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : t("Your answer could not be shared. Try again."),
-      );
+      setError(errorMessage(cause, t("Your answer could not be shared. Try again.")));
     }
   };
 
@@ -312,9 +309,7 @@ export function OnboardingWizard({
       await saveProgress.mutateAsync({ step: "ready" });
       setStep("ready");
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : t("Your progress could not be saved. Try again."),
-      );
+      setError(errorMessage(cause, t("Your progress could not be saved. Try again.")));
     }
   };
 
@@ -324,9 +319,7 @@ export function OnboardingWizard({
       await complete.mutateAsync({});
       navigate(destination, { replace: true });
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : t("Setup could not be finished. Try again."),
-      );
+      setError(errorMessage(cause, t("Setup could not be finished. Try again.")));
     }
   };
 

@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { useCallback, useState } from "react";
 import { AlertCircle, ArrowLeft, Check, Link2, Loader2 } from "lucide-react";
 import { Link } from "react-router";
@@ -86,9 +87,7 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
           onSuccess();
         },
         onError: (err) => {
-          setActionError(
-            err instanceof Error ? err.message : t("The selected Channel could not be connected."),
-          );
+          setActionError(errorMessage(err, t("The selected Channel could not be connected.")));
         },
       },
     );
@@ -118,9 +117,7 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
           return;
         }
         setActionError(
-          error instanceof Error
-            ? error.message
-            : t("We could not complete that request. Try again in a moment."),
+          errorMessage(error, t("We could not complete that request. Try again in a moment.")),
         );
       },
     });
@@ -229,9 +226,10 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
                 <div className="space-y-1">
                   <p className="font-semibold">{t("Unable to load authorized accounts")}</p>
                   <p className="text-xs">
-                    {selectionQuery.error instanceof Error
-                      ? selectionQuery.error.message
-                      : t("The assignment ticket has expired or could not be found.")}
+                    {errorMessage(
+                      selectionQuery.error,
+                      t("The assignment ticket has expired or could not be found."),
+                    )}
                   </p>
                 </div>
               </Alert>

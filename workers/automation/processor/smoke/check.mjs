@@ -211,10 +211,6 @@ function jobFor(name, overrides = {}) {
   };
 }
 
-/**
- * undici's fetch caps the wait for response headers at 300 s with no option to
- * raise it; native jobs can run longer under emulation.
- */
 function engineRequest(body, auth) {
   const url = new URL(`${baseUrl}/process`);
   return new Promise((resolve, reject) => {
@@ -259,7 +255,6 @@ async function processRequest(payload, { auth = true } = {}) {
   return { body, status };
 }
 
-/** The JPEG and PNG loaders reject the `[n=-1]` page selector. */
 async function vipsFullyDecodes(file, { allFrames = false } = {}) {
   const target = `${file}.decoded.v`;
   try {
@@ -272,7 +267,6 @@ async function vipsFullyDecodes(file, { allFrames = false } = {}) {
   }
 }
 
-/** FFmpeg cannot decode animated WebP ("image data not found"). */
 async function vipsImageFacts(file) {
   const header = await exec("vipsheader", ["-a", file]).catch(() => null);
   if (header === null) return null;
@@ -300,7 +294,6 @@ async function vipsImageFacts(file) {
   };
 }
 
-/** libvips' pngload returns only the first APNG frame. */
 async function apngFacts(file) {
   const counted = await probe(file, { countFrames: true }).catch(() => null);
   if (!counted || (counted.frameCount ?? 0) < 1) return null;
@@ -754,7 +747,6 @@ async function main() {
         ) <= 0.05,
         `${animated.result.media.duration_seconds}s vs ${sourceInfo.delays.reduce((total, delay) => total + delay, 0) / 1000}s`,
       );
-      // libvips decodes palette GIFs into four bands regardless of content.
       if (!name.endsWith(".png")) {
         const renditionAlpha = outputInfo.bands >= 4 ? await alphaRange(animated.uploaded) : null;
         assert(
@@ -1116,7 +1108,6 @@ async function main() {
       "size mismatch between engine report and stored object",
     );
     if (name === "high10.mp4") {
-      // HTTP strong ETags are quoted; R2 binding etags are not.
       const recorded = (await recordedUploads()).find(
         (entry) => entry.key === "rendition-smoke-high10.mp4",
       );

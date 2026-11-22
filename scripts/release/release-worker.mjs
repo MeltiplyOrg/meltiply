@@ -252,10 +252,6 @@ function releaseTag(spec, worker, kind) {
   return `${spec.release_id}-${worker}-${kind}`;
 }
 
-/**
- * Cloudflare API error 10007 (`workers.api.error.script_not_found`), surfaced by
- * Wrangler as `[code: 10007]`.
- */
 export function isMissingWorker(error) {
   const text = error instanceof Error ? error.message : String(error);
   return workerNotFoundApiCodePattern.test(text);

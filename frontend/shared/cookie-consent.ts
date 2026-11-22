@@ -26,12 +26,10 @@ function withBrowserStorage<T>(access: () => T, blocked: T): T {
   try {
     return access();
   } catch {
-    // localStorage and document.cookie throw a SecurityError when the browser blocks site data.
     return blocked;
   }
 }
 
-/** Writes a root-path cookie shared across production subdomains and host-scoped elsewhere. */
 export function writeSiteCookie(name: string, value: string, maxAgeSeconds: number): void {
   const { hostname, protocol } = window.location;
   const secure = protocol === "https:" ? "; Secure" : "";
@@ -62,7 +60,6 @@ function parseConsent(raw: string): CookieConsent | null {
   return { functional: value.functional };
 }
 
-/** Reads the essential consent record; malformed, expired, or unversioned records grant nothing. */
 export function readCookieConsent(): CookieConsent | null {
   if (typeof document === "undefined") return null;
   if (volatileConsent !== null) return volatileConsent;
@@ -80,7 +77,6 @@ export function hasCookieConsent(category: ConsentCategory): boolean {
   return readCookieConsent()?.[category] === true;
 }
 
-/** Removes the inventoried optional records on this origin; authentication data is untouched. */
 export function clearFunctionalStorage(): void {
   withBrowserStorage(() => {
     for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
@@ -103,7 +99,6 @@ function syncConsentAttributes(consent: CookieConsent | null): void {
   if (consent?.functional !== true) clearFunctionalStorage();
 }
 
-/** Saves an explicit choice; when the browser refuses the cookie the choice holds for this page only. */
 export function writeCookieConsent(consent: CookieConsent): void {
   const encoded = encodeURIComponent(
     JSON.stringify({ v: 1, ...consent, expires: Date.now() + consentLifetimeSeconds * 1000 }),
@@ -126,7 +121,6 @@ export function readFunctionalStorage(key: string): string | null {
   return withBrowserStorage(() => window.localStorage.getItem(key), null);
 }
 
-/** Persists optional data only with consent; removing a record (`null`) is always permitted. */
 export function writeFunctionalStorage(key: string, value: string | null): void {
   if (value !== null && !hasCookieConsent("functional")) return;
   withBrowserStorage(() => {
@@ -135,10 +129,6 @@ export function writeFunctionalStorage(key: string, value: string | null): void 
   }, undefined);
 }
 
-/**
- * Observes choices made on this page and, on focus or visibility, on sibling sites. The listener
- * runs only when the decision changes; leaving functional consent clears this origin's records.
- */
 export function subscribeCookieConsent(listener: () => void): () => void {
   let previous = readCookieConsent();
   syncConsentAttributes(previous);

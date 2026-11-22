@@ -1,10 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 
-/**
- * cloudflared prints the Quick Tunnel origin inside box-drawing characters and
- * trailing padding; it has no API to query it.
- */
 const quickTunnelOrigin = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
 const pollIntervalMs = 250;
 const defaultTimeoutSeconds = 90;
@@ -63,10 +59,6 @@ function readQuickTunnelOrigin(logPath) {
   return quickTunnelOrigin.exec(contents)?.[0].toLowerCase() ?? null;
 }
 
-/**
- * Signal 0 checks existence without delivering a signal; EPERM means the process
- * exists under another user.
- */
 function isRunning(pid) {
   if (pid === undefined) return true;
   try {

@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { BarChart3, TriangleAlert } from "lucide-react";
@@ -281,7 +282,7 @@ export function AnalyticsView(): React.ReactElement {
             <div>
               <p className="font-medium">{t("Analytics could not be loaded")}</p>
               <p className="mt-0.5 text-xs">
-                {error instanceof Error ? error.message : t("We could not load analytics.")}
+                {errorMessage(error, t("We could not load analytics."))}
               </p>
             </div>
             <Button

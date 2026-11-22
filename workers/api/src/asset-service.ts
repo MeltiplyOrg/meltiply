@@ -446,16 +446,20 @@ function getAssetRowEffect(
     requireActiveProfile?: boolean;
   } = {},
 ): Effect.Effect<AssetRow, CoreApiError | DatabaseError> {
-  return Effect.gen(function* () {
-    const result = yield* client.query<AssetRow>(
-      `SELECT ${assetColumns}
+  const selectSql = options.requireActiveProfile
+    ? `SELECT ${assetColumns}
        FROM assets
        WHERE id = $1
          AND org_id = public.auth_active_org_id()
          AND status != 'deleted'
-         ${options.requireActiveProfile ? `AND ${activeBrandProfilePredicate("assets.brand_profile_id")}` : ""}`,
-      [assetId],
-    );
+         AND ${activeBrandProfilePredicate("assets.brand_profile_id")}`
+    : `SELECT ${assetColumns}
+       FROM assets
+       WHERE id = $1
+         AND org_id = public.auth_active_org_id()
+         AND status != 'deleted'`;
+  return Effect.gen(function* () {
+    const result = yield* client.query<AssetRow>(selectSql, [assetId]);
     const row = result.rows[0];
     if (!row) {
       return yield* Effect.fail(new CoreApiError(404, "not_found", "The asset was not found."));
@@ -469,14 +473,16 @@ function lockAssetStatusEffect(
   assetId: string,
   requireActiveProfile = false,
 ): Effect.Effect<AssetRow["status"], CoreApiError | DatabaseError> {
-  return Effect.gen(function* () {
-    const result = yield* client.query<Pick<AssetRow, "status">>(
-      `SELECT status FROM assets
+  const lockSql = requireActiveProfile
+    ? `SELECT status FROM assets
        WHERE id = $1 AND org_id = public.auth_active_org_id() AND status != 'deleted'
-         ${requireActiveProfile ? `AND ${activeBrandProfilePredicate("assets.brand_profile_id")}` : ""}
-       FOR UPDATE`,
-      [assetId],
-    );
+         AND ${activeBrandProfilePredicate("assets.brand_profile_id")}
+       FOR UPDATE`
+    : `SELECT status FROM assets
+       WHERE id = $1 AND org_id = public.auth_active_org_id() AND status != 'deleted'
+       FOR UPDATE`;
+  return Effect.gen(function* () {
+    const result = yield* client.query<Pick<AssetRow, "status">>(lockSql, [assetId]);
     const row = result.rows[0];
     if (!row) {
       return yield* Effect.fail(new CoreApiError(404, "not_found", "The asset was not found."));
@@ -561,17 +567,22 @@ function getSessionRowEffect(
   sessionId: string,
   lock = false,
 ): Effect.Effect<UploadSessionRow, CoreApiError | DatabaseError> {
-  return Effect.gen(function* () {
-    const result = yield* client.query<UploadSessionRow>(
-      `SELECT
+  const sessionSql = lock
+    ? `SELECT
          id, org_id, asset_id, strategy, status, content_type, file_size,
          object_key, multipart_upload_id, part_size, part_count,
          max_parallel_parts, expires_at
        FROM asset_upload_sessions
        WHERE id = $1 AND org_id = public.auth_active_org_id()
-       ${lock ? "FOR UPDATE" : ""}`,
-      [sessionId],
-    );
+       FOR UPDATE`
+    : `SELECT
+         id, org_id, asset_id, strategy, status, content_type, file_size,
+         object_key, multipart_upload_id, part_size, part_count,
+         max_parallel_parts, expires_at
+       FROM asset_upload_sessions
+       WHERE id = $1 AND org_id = public.auth_active_org_id()`;
+  return Effect.gen(function* () {
+    const result = yield* client.query<UploadSessionRow>(sessionSql, [sessionId]);
     const row = result.rows[0];
     if (!row) {
       return yield* Effect.fail(

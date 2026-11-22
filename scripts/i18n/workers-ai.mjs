@@ -20,10 +20,6 @@ function statusError(status, body) {
   });
 }
 
-/**
- * Workers AI returns either `result.response` or the OpenAI-compatible
- * `result.choices[0].message.content`.
- */
 function modelText(payload) {
   const result = payload?.result;
   const content = result?.choices?.[0]?.message?.content;

@@ -4,7 +4,6 @@ import { mkdir } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { capabilityNavigation } from "../../frontend/app/e2e/cache-smoke.mjs";
 
-/** Requires pg_stat_statements on the disposable database. */
 export async function cacheSmoke({ origin, frontendOrigin = origin, cookie, query, label }) {
   const minted = await fetch(`${origin}/api/auth/token`, {
     headers: { cookie, origin: frontendOrigin },

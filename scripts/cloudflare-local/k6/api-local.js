@@ -1,7 +1,3 @@
-/**
- * K6_VUS and K6_DURATION are reserved by k6 and override scenarios; use the
- * MELTIPLY_K6_* variables instead.
- */
 import http from "k6/http";
 import { check, group, sleep } from "k6";
 import { Rate, Trend } from "k6/metrics";
@@ -112,7 +108,6 @@ export default function apiLocalScenario() {
     });
     checkFailures.add(!unauthOk);
 
-    // Local Wrangler may return 500 when Hyperdrive work hangs the isolate.
     if (authToken) {
       const authed = http.get(
         `${baseUrl}/api/v1/users/me`,

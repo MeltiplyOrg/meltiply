@@ -31,8 +31,13 @@ const server = createServer((request, response) => {
   request.on("data", (chunk: Buffer) => chunks.push(chunk));
   request.on("end", () => {
     const text = Buffer.concat(chunks).toString("utf8");
-    if (text.length > 0)
-      receiver.requests.push({ body: JSON.parse(text) as Record<string, unknown> });
+    if (text.length > 0) {
+      const parsed: unknown = JSON.parse(text);
+      receiver.requests.push({
+        body:
+          parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {},
+      });
+    }
     const status = receiver.mode.kind === "status" ? receiver.mode.status : 200;
     response.writeHead(status, { "Content-Type": "application/json" });
     response.end(status === 200 ? '{"status":1}' : '{"status":0}');

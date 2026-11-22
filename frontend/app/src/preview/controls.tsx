@@ -10,7 +10,6 @@ const selection = Schema.decodeUnknownSync(
   Schema.Struct({ id: Schema.String, platform: Schema.String }),
 )(contract.fixtures.oauth_selection);
 
-/** Owns the DevBox Preview tab's scenario, operation, response, and route controls. Apply reloads with shareable URL options and fresh browser data; no backend or production state changes. */
 export function PreviewControls() {
   const { t } = useI18n();
   const [scenario, setScenario] = useState(activePreviewOptions.scenario ?? "populated");
@@ -23,7 +22,6 @@ export function PreviewControls() {
     ...(operation?.responses.map((response) => String(response.status)) ?? []),
   ];
 
-  /** Applies only explicit developer options, preserving feature query parameters and supplying synthetic credentials for standalone handoff routes. */
   const apply = (reset = false) => {
     const url = new URL(window.location.href);
     url.pathname = route;

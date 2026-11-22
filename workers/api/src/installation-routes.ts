@@ -1,5 +1,10 @@
 import { Effect } from "effect";
-import { INSTALLATION_SEAT_LIMIT, isWorkspaceRole, isoDateTime } from "@meltiply/domain";
+import {
+  codePointLength,
+  INSTALLATION_SEAT_LIMIT,
+  isWorkspaceRole,
+  isoDateTime,
+} from "@meltiply/domain";
 import type { EffectTransactionClient } from "@meltiply/database";
 import type { DatabaseError } from "@meltiply/domain";
 import type { Context, Hono } from "hono";
@@ -333,7 +338,7 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
         yield* fromPromise(() => onlyKeys(body, ["reason"]));
         const reason = yield* fromPromise(() => {
           const value = optionalStringField(body, "reason");
-          if (value !== undefined && value !== null && [...value].length > 500) {
+          if (value !== undefined && value !== null && codePointLength(value) > 500) {
             throw new CoreApiError(
               400,
               "validation_error",

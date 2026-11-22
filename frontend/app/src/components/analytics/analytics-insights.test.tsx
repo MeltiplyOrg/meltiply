@@ -14,12 +14,12 @@ import {
 import type { AnalyticsDashboard } from "@/types";
 
 beforeAll(() => {
-  class ResizeObserverMock {
+  class ResizeObserverMock implements ResizeObserver {
     disconnect() {}
     observe() {}
     unobserve() {}
   }
-  globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+  globalThis.ResizeObserver = ResizeObserverMock;
 });
 
 afterEach(() => {

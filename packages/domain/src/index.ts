@@ -128,7 +128,6 @@ export const ASSET_UPLOAD_POLICY = {
   signedUrlTtlSeconds: 15 * 60,
 } as const;
 
-/** Resource ceilings; `null` leaves that resource unrestricted. */
 interface CommunityLimits {
   readonly max_distributions: number | null;
   readonly max_platforms: number | null;

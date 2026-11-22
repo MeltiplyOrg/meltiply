@@ -28,7 +28,6 @@ function assertRecord(value, description) {
   }
 }
 
-/** Shipi18n splits `--ignore-keys` on commas. */
 export function loadGlossary(path) {
   let glossary;
   try {

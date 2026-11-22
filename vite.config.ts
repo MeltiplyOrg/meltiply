@@ -1,8 +1,5 @@
 import { defineConfig } from "vite-plus";
 
-// Keeps UI imports on shared data boundaries, icon primitives, and the single
-// Sileo notification store. Both no-restricted-imports overrides reference
-// this list so the broad and component scopes cannot drift apart.
 const frontendRestrictedImports = [
   {
     name: "@meltiply/database",
@@ -39,20 +36,14 @@ export default defineConfig({
     plugins: ["oxc", "typescript", "unicorn"],
     categories: {
       // Legacy recommended rules are enumerated below. Enabling Oxlint's
-      // unrelated preset would add new policies, including type-aware checks
       // on Node test registration that the old ESLint config never enforced.
       correctness: "off",
     },
     options: {
       typeAware: true,
       typeCheck: true,
-      // Repo policy is zero-warning lint (CONTRIBUTING: "zero-warning" gate).
-      // Setting it here makes `vp check` and bare `vp lint` fail on warnings
-      // too — the root and frontend scripts still pass --deny-warnings
-      // explicitly for clarity.
       denyWarnings: true,
       // Match ESLint 9's default: stale disable directives warn (and therefore
-      // fail the zero-warning gate above).
       reportUnusedDisableDirectives: "warn",
     },
     env: {
@@ -64,14 +55,10 @@ export default defineConfig({
       "**/node_modules/**",
       "**/worker-configuration.d.ts",
       "packages/contracts/src/generated/**",
-      // Public JavaScript/TypeScript is linted; generated Astro types are not.
       "frontend/public/.astro/**",
       // ESLint had no Astro parser or matching .astro config. Preserve that
-      // scope; Astro's existing workspace checks own component validation.
       "**/*.astro",
       // Artifact/generated ignores carried over from frontend/eslint.config.mjs
-      // (paths re-rooted; `**/dist/**` and `**/.wrangler/**` already cover two
-      // of the original six).
       "frontend/app/coverage/**",
       "frontend/app/playwright-report/**",
       "frontend/app/test-results/**",
@@ -144,9 +131,7 @@ export default defineConfig({
       "use-isnan": "error",
       "valid-typeof": "error",
       // Off globally: tseslint's recommended config only ever ran
-      // no-unused-expressions/no-array-constructor on TS files (the core
       // variants are in its eslint-recommended OFF list). Enabled for TS in
-      // the override below.
       "no-unused-expressions": "off",
       "typescript/ban-ts-comment": "error",
       "typescript/no-duplicate-enum-values": "error",
@@ -170,8 +155,6 @@ export default defineConfig({
     overrides: [
       {
         // TS files: mirror tseslint's eslint-recommended adjustments — core
-        // checks TypeScript already covers are off, while the TS variants of
-        // no-unused-expressions/no-array-constructor become errors.
         files: ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"],
         rules: {
           "constructor-super": "off",
@@ -196,8 +179,6 @@ export default defineConfig({
         },
       },
       {
-        // Scripts deliberately match literal control characters and whitespace
-        // in external output/CI YAML; keep the bug-catching rules, drop style.
         files: ["**/*.{js,mjs,cjs}"],
         env: {
           node: true,
@@ -209,24 +190,19 @@ export default defineConfig({
         },
       },
       {
-        // k6 injects __ENV into its script runtime, rather than Node's process.env.
         files: ["scripts/cloudflare-local/k6/**/*.js"],
         globals: {
           __ENV: "readonly",
         },
       },
       {
-        // packages/ + workers/ hardening rules (AUD-001/034/055). `plugins`
         // REPLACES the base plugin list in Oxlint overrides, so the import
-        // plugin must be added to the base set, not listed alone.
         files: ["packages/**/*.ts", "workers/**/*.ts"],
         plugins: ["oxc", "typescript", "unicorn", "import"],
         env: {
           node: true,
         },
         rules: {
-          // Belt-and-braces under tsconfig noUnusedLocals/noUnusedParameters
-          // (AUD-001): keeps underscore-prefixed params allowed, matching tsc.
           "no-unused-vars": [
             "error",
             {
@@ -235,32 +211,23 @@ export default defineConfig({
               caughtErrors: "none",
             },
           ],
-          // AUD-055: hardened after the `as unknown as` cleanup; the only
-          // remaining assertions are justified and carry file-level disables.
           "typescript/no-unnecessary-type-assertion": "error",
           "typescript/ban-ts-comment": "error",
-          // Catches always-truthy branches like `if (queryResult)` (AUD-034).
           // Oxlint ships a single TS-aware core implementation, so the
           // @typescript-eslint extension rule maps to the same eslint name
-          // already enabled for *.ts above; kept here for intent.
           "no-unused-expressions": "error",
-          // Matches the repo's verbatimModuleSyntax style (inline `type` modifiers).
           "typescript/consistent-type-imports": "error",
           "import/no-duplicates": "error",
-          // Sanitization regexes deliberately strip control characters from
-          // provider/user content; the literal \x00-\x1f classes are the point.
           "no-control-regex": "off",
         },
       },
       {
-        // Workers must use the observability package, not console output.
         files: ["workers/**/*.ts"],
         rules: {
           "no-console": "error",
         },
       },
       {
-        // Browser + node globals for frontend application, shared and public-site code.
         files: [
           "frontend/app/**/*.{js,mjs,cjs,ts,tsx,mts,cts}",
           "frontend/shared/**/*.{js,mjs,cjs,ts,tsx,mts,cts}",
@@ -272,7 +239,6 @@ export default defineConfig({
         },
       },
       {
-        // Unused-vars keeps the underscore-prefix convention for frontend TS.
         files: ["frontend/app/**/*.{ts,tsx,mts,cts}", "frontend/shared/**/*.{ts,tsx,mts,cts}"],
         rules: {
           "no-unused-vars": [
@@ -287,9 +253,6 @@ export default defineConfig({
       },
       {
         // eslint-plugin-react-hooks flat/recommended (v7), loaded verbatim as
-        // a JS plugin under the `react-hooks-js` alias — identical severities:
-        // exhaustive-deps, incompatible-library and unsupported-syntax warn,
-        // everything else errors.
         files: ["frontend/app/**", "frontend/shared/**", "frontend/public/**"],
         rules: {
           "react-hooks-js/rules-of-hooks": "error",
@@ -311,9 +274,6 @@ export default defineConfig({
         },
       },
       {
-        // Database, icon, and notification-store imports are banned from
-        // feature code (iconoir is reserved for the brand-logo mapping in
-        // platforms.ts; toast APIs funnel through the shared Sileo wrapper).
         files: ["frontend/app/src/**/*.{ts,tsx}", "frontend/shared/**/*.{ts,tsx}"],
         excludeFiles: ["frontend/app/src/lib/platforms.ts", "frontend/app/src/**/*.test.{ts,tsx}"],
         rules: {
@@ -326,13 +286,7 @@ export default defineConfig({
         },
       },
       {
-        // Feature components additionally ban raw Radix imports and retired
-        // app-local component paths (the canonical @meltiply/ui wrapper owns
-        // motion/focus/styling), native `alert` notifications, and direct
-        // clipboard access so feedback stays in the shared Sileo store and
         // copy-text helper. As in ESLint flat config, this later-matching
-        // override replaces no-restricted-imports for these files, so it must
-        // repeat the shared path list.
         files: ["frontend/app/src/components/**/*.{ts,tsx}"],
         excludeFiles: ["frontend/app/src/**/*.test.{ts,tsx}"],
         rules: {
@@ -386,8 +340,6 @@ export default defineConfig({
         },
       },
       {
-        // platforms.ts is the sanctioned iconoir consumer; the database ban
-        // still applies.
         files: ["frontend/app/src/lib/platforms.ts"],
         rules: {
           "no-restricted-imports": [
@@ -405,8 +357,6 @@ export default defineConfig({
         },
       },
       {
-        // @shadcn/lint design-system rules on feature code (tests excluded).
-        // The `shadcn.ui` setting and `note` live in top-level `settings`
         // because Oxlint overrides cannot carry settings.
         files: ["frontend/app/src/**/*.{ts,tsx}", "frontend/shared/**/*.{ts,tsx}"],
         excludeFiles: ["frontend/app/src/**/*.test.{ts,tsx}"],
@@ -440,9 +390,6 @@ export default defineConfig({
         },
       },
       {
-        // Component-library directories own their geometry/motion styles: the
-        // arbitrary-value and static-class bans lift, and inline styles are
-        // narrowed to the animation/layout properties Motion needs.
         files: [
           "frontend/app/src/components/{ui,atoms,primitives,devbox}/**/*.{ts,tsx}",
           "frontend/shared/**/*.{ts,tsx}",
@@ -474,13 +421,6 @@ export default defineConfig({
         },
       },
       {
-        // EvilCharts registry source is vendored third-party implementation
-        // (recorded in THIRD_PARTY_NOTICES) and is reviewed as code, not
-        // rewritten into Meltiply's authored-style contract. Its SVG geometry,
-        // tooltip internals, and loading chrome legitimately need raw SVG
-        // colors and computed inline positions; authored feature code keeps
-        // the design-system rules. The analytics page still supplies the
-        // series token (var(--accent)) and translated labels.
         files: ["frontend/app/src/components/evilcharts/**/*.{ts,tsx}"],
         rules: {
           "shadcn/no-arbitrary-values": "off",
@@ -493,8 +433,6 @@ export default defineConfig({
         },
       },
       {
-        // Custom boundary policies (ported 1:1 into lint/boundaries-plugin.mjs):
-        // adapter-only env/fetch/Effect.run access and shared UI control/color contracts.
         files: ["frontend/app/src/**/*.{ts,tsx}", "frontend/shared/**/*.{ts,tsx}"],
         rules: {
           "boundaries/no-effect-run": "error",
@@ -506,9 +444,63 @@ export default defineConfig({
           "boundaries/no-canonical-ui-clones": "error",
         },
       },
+      {
+        files: [
+          "packages/**/*.{ts,tsx,mts,cts,mjs,js}",
+          "workers/**/*.{ts,tsx,mts,cts,mjs,js}",
+          "frontend/**/*.{ts,tsx,mts,cts,mjs,js}",
+          "scripts/**/*.{ts,tsx,mts,cts,mjs,js}",
+          "lint/**/*.{ts,tsx,mts,cts,mjs,js}",
+          "vite.config.ts",
+        ],
+        rules: {
+          "meltiply/no-unknown-double-cast": "error",
+          "meltiply/no-error-message-classification": "error",
+          "meltiply/no-platform-roster-literal": "error",
+          "meltiply/no-sql-conditional-fragment": "error",
+          "meltiply/no-codepoint-spread-length": "error",
+          "meltiply/no-json-parse-cast": "error",
+          "meltiply/no-time-derived-key": "error",
+          "meltiply/no-export-star": "error",
+          "meltiply/no-sql-date-column": "error",
+          "meltiply/no-workerd-fs-module-cache": "error",
+          "meltiply/no-throw-in-effect-gen": "error",
+          "meltiply/no-worker-effect-run": "error",
+          "meltiply/no-naive-redirect-prefix": "error",
+          "meltiply/no-history-comments": "error",
+          "meltiply/no-jsdoc-type-tags": "error",
+          "meltiply/no-doc-comment-outside-package-contract": "error",
+          "meltiply/no-banner-comments": "error",
+          "meltiply/no-commented-out-code": "error",
+        },
+      },
+      {
+        files: [
+          "packages/*/{src,test}/**/*.ts",
+          "workers/*/{src,test,test-support}/**/*.ts",
+          "frontend/app/src/**/*.{ts,tsx}",
+          "frontend/shared/**/*.{ts,tsx}",
+          "scripts/lib/*.ts",
+          "scripts/selfhost/*.ts",
+        ],
+        rules: {
+          "meltiply/prefer-error-message-helper": "error",
+        },
+      },
+      {
+        files: ["packages/*/src/**/*.ts", "workers/*/src/**/*.ts"],
+        rules: {
+          "meltiply/no-session-advisory-lock": "error",
+        },
+      },
+      {
+        files: ["lint/codebase-plugin.test.mjs"],
+        rules: {
+          "meltiply/no-sql-date-column": "off",
+        },
+      },
     ],
     settings: {
-      // Design-system contract consumed by the @shadcn/lint rules above.
       shadcn: {
         ui: ["@/components/ui", "@/components/atoms", "@/components/primitives", "@meltiply/ui"],
         note: "Use the existing Meltiply tokens, component variants, and primitives; do not introduce a route-specific visual treatment.",
@@ -518,6 +510,10 @@ export default defineConfig({
       {
         name: "boundaries",
         specifier: "./lint/boundaries-plugin.mjs",
+      },
+      {
+        name: "meltiply",
+        specifier: "./lint/codebase-plugin.mjs",
       },
       {
         name: "shadcn",

@@ -9,7 +9,6 @@ import type {
 type Upload = { asset: PreviewObject; upload_session: PreviewObject };
 type Parameters = Readonly<Record<string, string | readonly string[] | undefined>>;
 
-/** Supplies browser-only file effects behind generated operations. Response templates come from the contract; bytes remain local Blobs and are never sent to R2. */
 export function createPreviewUploads(assetTemplate: PreviewObject, sessionTemplate: PreviewObject) {
   const assets = new Map<string, PreviewObject>();
   if (typeof assetTemplate.id === "string") assets.set(assetTemplate.id, assetTemplate);
@@ -29,7 +28,6 @@ export function createPreviewUploads(assetTemplate: PreviewObject, sessionTempla
     return new HttpResponse(null, { headers: { ETag: "preview-local-blob" } });
   });
 
-  /** Applies local byte/session effects; completion returns the Asset itself, while session reads retain their envelope. Generated handlers own registration and selected errors. */
   function handle(
     operation: PreviewOperation,
     request: Request,

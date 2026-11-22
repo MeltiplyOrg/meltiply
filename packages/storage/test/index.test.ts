@@ -130,7 +130,7 @@ describe("R2ObjectStore", () => {
   });
 
   it("promotes staged bytes to a ready key under a pinned source ETag", async () => {
-    const body = { locked: false } as unknown as ReadableStream;
+    const body = new ReadableStream();
     const uploaded = new Date("2026-01-01T00:00:00Z");
     const get = vi.fn().mockResolvedValue({
       body,
@@ -230,7 +230,7 @@ describe("R2ObjectStore", () => {
   });
 
   it("adopts an existing destination instead of duplicating a replayed copy", async () => {
-    const body = {} as unknown as ReadableStream;
+    const body = new ReadableStream();
     const put = vi.fn().mockResolvedValue(null);
     const store = new R2ObjectStore({
       createMultipartUpload: vi.fn(),

@@ -1,6 +1,5 @@
 import type { Page } from "@playwright/test";
 
-/** One measured journey: elapsed wall time plus resource, task, and layout attribution. */
 export interface JourneyMetrics {
   apiMs: number;
   cls: number;
@@ -9,7 +8,6 @@ export interface JourneyMetrics {
   resourceBytes: number;
 }
 
-/** Budgets are intentionally generous so a shared CI runner catches regressions, not jitter. */
 export interface JourneyBudget {
   apiMs: number;
   cls: number;
@@ -17,11 +15,6 @@ export interface JourneyBudget {
   longTaskMs: number;
 }
 
-/**
- * Reports whether a measurement is inside one budget. Every dimension must pass;
- * a slow API, long main-thread task, or visible layout shift fails the journey
- * even when the total wall time happened to land inside the ceiling.
- */
 export function withinBudget(metrics: JourneyMetrics, budget: JourneyBudget): boolean {
   return (
     metrics.elapsedMs <= budget.elapsedMs &&
@@ -31,19 +24,10 @@ export function withinBudget(metrics: JourneyMetrics, budget: JourneyBudget): bo
   );
 }
 
-/**
- * Compares typed composer content with what remains in the field. A dropped or
- * reordered keystroke fails even when the journey's timing budget passed.
- */
 export function typedContentMatches(actual: string, expected: string): boolean {
   return actual === expected;
 }
 
-/**
- * Installs buffered PerformanceObservers before application code runs. The
- * collector resets between journeys so one page's navigation cannot inflate the
- * next journey's attribution.
- */
 export async function installPerformanceCollector(page: Page): Promise<void> {
   await page.addInitScript(() => {
     type Collector = {
@@ -52,7 +36,7 @@ export async function installPerformanceCollector(page: Page): Promise<void> {
       longTaskMs: number;
       resourceBytes: number;
     };
-    const target = window as unknown as { __meltiplyPerf?: Collector };
+    const target = window as Window & { __meltiplyPerf?: Collector };
     const fresh = (): Collector => ({ apiMs: 0, cls: 0, longTaskMs: 0, resourceBytes: 0 });
     target.__meltiplyPerf = fresh();
     const observe = (type: string, callback: (entry: PerformanceEntry) => void) => {
@@ -61,7 +45,7 @@ export async function installPerformanceCollector(page: Page): Promise<void> {
           for (const entry of list.getEntries()) callback(entry);
         }).observe({ type, buffered: true });
       } catch {
-        // Older engines may not expose a type; the remaining attribution still runs.
+        return;
       }
     };
     observe("layout-shift", (entry) => {
@@ -83,20 +67,12 @@ export async function installPerformanceCollector(page: Page): Promise<void> {
   });
 }
 
-/**
- * Runs one journey and reads the collector after the caller's readiness
- * condition completes. The wall clock starts immediately before the action.
- *
- * @param page - Playwright page with {@link installPerformanceCollector} installed.
- * @param action - User action plus its real readiness wait.
- * @returns Measured journey attribution.
- */
 export async function measureJourney(
   page: Page,
   action: () => Promise<void>,
 ): Promise<JourneyMetrics> {
   await page.evaluate(() => {
-    const target = window as unknown as {
+    const target = window as Window & {
       __meltiplyPerf?: {
         apiMs: number;
         cls: number;
@@ -112,7 +88,7 @@ export async function measureJourney(
   await action();
   const elapsedMs = Date.now() - started;
   const metrics = await page.evaluate(() => {
-    const target = window as unknown as {
+    const target = window as Window & {
       __meltiplyPerf?: {
         apiMs: number;
         cls: number;
@@ -125,7 +101,6 @@ export async function measureJourney(
   return { ...metrics, elapsedMs };
 }
 
-/** Median of a non-empty sample, used to compare repeat runs without one outlier deciding the gate. */
 function median(values: readonly number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
@@ -134,7 +109,6 @@ function median(values: readonly number[]): number {
     : (sorted[middle] ?? 0);
 }
 
-/** Median across repeated journey samples, preserving each attribution dimension. */
 export function medianMetrics(samples: readonly JourneyMetrics[]): JourneyMetrics {
   return {
     apiMs: median(samples.map((sample) => sample.apiMs)),

@@ -10,6 +10,7 @@ import { createApiApp } from "../src/app";
 import { withSystemTransactionEffect } from "../src/database";
 import type { ApiWorkerEnv } from "../src/env";
 import { tokenCipherFor } from "../src/token-credentials";
+import { errorMessage } from "@meltiply/domain";
 import { Effect } from "effect";
 import { Hono } from "hono";
 
@@ -159,7 +160,7 @@ controlledProviderRouter.post("/channels", async (c) => {
     );
     return c.json(provisioned, 201);
   } catch (cause) {
-    return c.json({ error: cause instanceof Error ? cause.message : "provisioning failed" }, 422);
+    return c.json({ error: errorMessage(cause, "provisioning failed") }, 422);
   }
 });
 

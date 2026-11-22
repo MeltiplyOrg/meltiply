@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import React, { useId, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 
@@ -222,7 +223,7 @@ export function PublishingPreferencesSection(): React.ReactElement {
       });
     } catch (cause) {
       toast(t("Publishing preferences could not be saved"), {
-        description: cause instanceof Error ? cause.message : t("Try again in a moment."),
+        description: errorMessage(cause, t("Try again in a moment.")),
         variant: "error",
       });
     } finally {

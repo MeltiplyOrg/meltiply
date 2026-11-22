@@ -5,6 +5,7 @@ import {
   assetOrphanGraceSeconds,
   type DatabaseError,
   COMMUNITY_LIMITS,
+  errorMessage,
   mediaUploadMaximum,
 } from "@meltiply/domain";
 import { readyObjectKey, type ObjectStore } from "@meltiply/storage";
@@ -119,7 +120,7 @@ function asJobError(cause: unknown): RetryableJobError | TerminalJobError {
   }
   return new RetryableJobError({
     cause: cause instanceof Error ? cause.name : "processor_error",
-    message: cause instanceof Error ? cause.message : String(cause),
+    message: errorMessage(cause, String(cause)),
   });
 }
 

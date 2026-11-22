@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { ArrowRight, ShieldCheck } from "lucide-react";
@@ -69,7 +70,7 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
       .catch((cause: unknown) => {
         if (!cancelled) {
           setMode("unavailable");
-          setError(cause instanceof Error ? cause.message : "Could not check installation status.");
+          setError(errorMessage(cause, "Could not check installation status."));
         }
       });
     return () => {
@@ -147,9 +148,7 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
         else complete();
       }
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : t("Authentication failed. Please try again."),
-      );
+      setError(errorMessage(cause, t("Authentication failed. Please try again.")));
       if (mode === "setup") {
         try {
           if ((await authClient.setupStatus()).initialized) {
@@ -182,7 +181,7 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
       await authClient.resendVerification(email.trim());
       setNotice(t("If verification is needed, a new link will arrive by email."));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("Could not send a verification link."));
+      setError(errorMessage(cause, t("Could not send a verification link.")));
     } finally {
       setBusy(false);
     }

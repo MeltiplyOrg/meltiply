@@ -1,19 +1,5 @@
 import { Client } from "pg";
 
-/**
- * Installation-state fixture for the first-run journey, run in a short-lived
- * child process so no PostgreSQL handle outlives the Playwright worker.
- *
- * Usage: onboarding-db.mjs CONNECTION_STRING resume|complete
- *
- * `resume` marks the seeded shared Workspace's Owner as resuming optional
- * onboarding at the first optional screen and clears the stored reporting facts,
- * so the wizard renders and both categories start off. The saved screen is reset
- * with the completion flag: a journey that had already advanced to `ready` would
- * otherwise reopen on the last screen and skip the journey under test.
- * `complete` finishes onboarding without touching the Workspace name, restoring
- * the ordinary workspace for later journeys.
- */
 const [connectionString, action] = process.argv.slice(2);
 if (!connectionString || !action) {
   throw new Error("usage: onboarding-db.mjs CONNECTION_STRING resume|complete");

@@ -527,7 +527,6 @@ function providerVars(spec) {
   return values;
 }
 
-/** Wrangler `send_email` entries are keyed by `name`; other binding tables by `binding`. */
 function replaceBinding(entries, identifier, replacement, key = "binding") {
   const filtered = (entries ?? []).filter((entry) => entry[key] !== identifier);
   return [...filtered, replacement];
@@ -547,7 +546,6 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
       binding.binding === "API" ? { ...binding, service: iac.worker_names.api } : binding,
     ),
   });
-  // Vite selects Cloudflare environments at build time, before flattening.
   frontend.env = {
     [spec.environment]: {
       name: frontend.name,
@@ -658,8 +656,6 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
     { binding: "DB_AUTHENTICATED", id: iac.authenticated_hyperdrive_id },
     { binding: "DB_SYSTEM", id: iac.system_hyperdrive_id },
   ];
-  // `preview_urls` is a Worker-level setting written by `wrangler deploy`; secret
-  // versions created by `wrangler versions secret bulk` inherit it.
   api.preview_urls = true;
 
   return {
@@ -714,7 +710,6 @@ function rewriteConfigRelativePath(configDir, sourceDir, value) {
   return path.relative(configDir, path.resolve(sourceDir, value)).split(path.sep).join("/");
 }
 
-/** Wrangler resolves relative paths against the directory holding the config file. */
 export async function writeRenderedConfigs({ outDir, repoRoot, spec, iac }) {
   const sourceConfigs = await loadSourceConfigs(repoRoot);
   const configs = renderWranglerConfigs(sourceConfigs, spec, iac);

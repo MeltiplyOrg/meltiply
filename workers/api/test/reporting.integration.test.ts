@@ -48,8 +48,10 @@ const server = createServer((request, response) => {
   request.on("end", () => {
     const text = Buffer.concat(chunks).toString("utf8");
     if (text.length > 0) {
+      const parsed: unknown = JSON.parse(text);
       receiver.requests.push({
-        body: JSON.parse(text) as Record<string, unknown>,
+        body:
+          parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {},
         url: request.url ?? "",
       });
     }

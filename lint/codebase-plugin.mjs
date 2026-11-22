@@ -8,8 +8,15 @@ const toolDirectivePattern =
   /^\s*(?:prettier-ignore|eslint-|oxlint-|@ts-|istanbul|c8|v8|vite-ignore|webpackChunkName|@vite-ignore|#__PURE__|@__PURE__|global\s)/;
 const messageClassifierMethods = new Set(["includes", "startsWith", "endsWith", "match", "test"]);
 const docCommentAllowedPattern = /\/packages\/[^/]+\/src\//;
+const generatedPattern = /\/generated\//;
 const vendoredPattern = /\/frontend\/app\/src\/components\/evilcharts\//;
 const sqlDateColumnPattern = /::date\s+AS\s/i;
+const sessionAdvisoryLockPattern = /\bpg_(?:try_)?advisory_lock\s*\(/i;
+const workerEffectRunAllowed = [
+  "/workers/automation/src/effect/boundary.ts",
+  "/workers/state/src/index.ts",
+];
+const workerEffectRunScoped = /\/workers\/(?:automation|state)\/src\//;
 
 function readsErrorMessage(node) {
   if (node?.type === "CallExpression" && node.callee.type === "MemberExpression") {
@@ -81,13 +88,16 @@ function rule(message, create) {
 }
 
 function commentRule(message, matches) {
-  return rule(message, (context, report) => ({
-    Program() {
-      for (const comment of context.sourceCode.getAllComments()) {
-        if (matches(comment, context)) report({ loc: comment.loc });
-      }
-    },
-  }));
+  return rule(message, (context, report) => {
+    if (vendoredPattern.test(filenameOf(context))) return {};
+    return {
+      Program() {
+        for (const comment of context.sourceCode.getAllComments()) {
+          if (matches(comment, context)) report({ loc: comment.loc });
+        }
+      },
+    };
+  });
 }
 
 function isToolDirective(comment) {
@@ -98,9 +108,31 @@ function isLicenseHeader(comment) {
   return /@license|SPDX-License-Identifier|Copyright \(c\)/i.test(comment.value);
 }
 
+function isExportedContractDeclaration(node) {
+  let current = node;
+  while (current) {
+    if (current.type === "ExportNamedDeclaration" || current.type === "ExportDefaultDeclaration") {
+      return true;
+    }
+    if (
+      current.type === "FunctionDeclaration" ||
+      current.type === "FunctionExpression" ||
+      current.type === "ArrowFunctionExpression" ||
+      current.type === "BlockStatement"
+    ) {
+      return false;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
 function isExportDocComment(comment, context) {
   const token = context.sourceCode.getTokenAfter(comment, { includeComments: false });
-  return token?.type === "Keyword" && token.value === "export";
+  if (!token) return false;
+  if (token.type === "Keyword" && token.value === "export") return true;
+  const node = context.sourceCode.getNodeByRangeIndex?.(token.range[0]);
+  return node ? isExportedContractDeclaration(node) : false;
 }
 
 const codebasePlugin = {
@@ -163,7 +195,15 @@ const codebasePlugin = {
     "no-platform-roster-literal": rule(
       "Do not re-declare the Platform roster. Import PLATFORM_IDS from @meltiply/domain (or derive from it).",
       (context, report) => {
-        if (filenameOf(context).endsWith("packages/domain/src/index.ts")) return {};
+        const filename = filenameOf(context);
+        if (
+          !/\.[cm]?tsx?$/.test(filename) ||
+          filename.endsWith("packages/domain/src/index.ts") ||
+          filename.endsWith("packages/domain/test/index.test.ts") ||
+          filename.endsWith("lint/codebase-plugin.mjs")
+        ) {
+          return {};
+        }
         return {
           ArrayExpression(node) {
             if (node.elements.filter(isPlatformLiteral).length >= 3) report(node);
@@ -286,6 +326,103 @@ const codebasePlugin = {
       },
     ),
 
+    "no-session-advisory-lock": rule(
+      "Use transaction-scoped pg_advisory_xact_lock instead of session-level pg_advisory_lock under Hyperdrive transaction pooling.",
+      (_context, report) => ({
+        TemplateLiteral(node) {
+          if (
+            node.quasis.some((quasi) => sessionAdvisoryLockPattern.test(quasi.value.cooked ?? ""))
+          ) {
+            report(node);
+          }
+        },
+        Literal(node) {
+          if (typeof node.value === "string" && sessionAdvisoryLockPattern.test(node.value)) {
+            report(node);
+          }
+        },
+      }),
+    ),
+
+    "no-throw-in-effect-gen": rule(
+      "Do not throw inside Effect.gen. Return `yield* Effect.fail(...)` with a typed error instead of raising an untyped defect.",
+      (_context, report) => ({
+        ThrowStatement(node) {
+          let current = node.parent;
+          while (current) {
+            if (
+              current.type === "FunctionExpression" ||
+              current.type === "ArrowFunctionExpression" ||
+              current.type === "FunctionDeclaration"
+            ) {
+              if (
+                current.generator &&
+                isMemberCall(current.parent, "Effect", "gen") &&
+                current.parent.arguments[0] === current
+              ) {
+                report(node);
+              }
+              return;
+            }
+            current = current.parent;
+          }
+        },
+      }),
+    ),
+
+    "no-worker-effect-run": rule(
+      "Effect.run* in automation/state workers is restricted to approved boundary adapters (effect/boundary.ts or workers/state/src/index.ts).",
+      (context, report) => {
+        const filename = filenameOf(context);
+        if (
+          !workerEffectRunScoped.test(filename) ||
+          workerEffectRunAllowed.some((allowed) => filename.endsWith(allowed))
+        ) {
+          return {};
+        }
+        return {
+          MemberExpression(node) {
+            if (
+              !node.computed &&
+              node.object?.type === "Identifier" &&
+              node.object.name === "Effect" &&
+              node.property?.type === "Identifier" &&
+              /^run(Promise|Sync|Fork|PromiseExit|SyncExit)$/.test(node.property.name)
+            ) {
+              report(node);
+            }
+          },
+        };
+      },
+    ),
+
+    "no-naive-redirect-prefix": rule(
+      "Do not validate same-origin redirects with startsWith('/') && !startsWith('//'). Use URL origin validation (sameOriginPath).",
+      (_context, report) => ({
+        LogicalExpression(node) {
+          if (node.operator !== "&&") return;
+          const isStartsWith = (expr, prefix) =>
+            expr?.type === "CallExpression" &&
+            expr.callee.type === "MemberExpression" &&
+            !expr.callee.computed &&
+            expr.callee.property?.name === "startsWith" &&
+            expr.arguments.length === 1 &&
+            expr.arguments[0]?.type === "Literal" &&
+            expr.arguments[0].value === prefix;
+          const isNegatedDoubleSlash = (expr) =>
+            expr?.type === "UnaryExpression" &&
+            expr.operator === "!" &&
+            isStartsWith(expr.argument, "//");
+          if (
+            (isStartsWith(node.left, "/") && isNegatedDoubleSlash(node.right)) ||
+            (isNegatedDoubleSlash(node.left) && isStartsWith(node.right, "/"))
+          ) {
+            report(node);
+          }
+        },
+      }),
+    ),
+
     "no-history-comments": commentRule(
       "Comments state current behavior. Remove audit IDs, issue numbers, and migration history; Git records history.",
       (comment) => historyReferencePattern.test(comment.value),
@@ -302,7 +439,7 @@ const codebasePlugin = {
         if (comment.type !== "Block" || !comment.value.startsWith("*")) return false;
         if (isLicenseHeader(comment) || isToolDirective(comment)) return false;
         const filename = filenameOf(context);
-        if (vendoredPattern.test(filename)) return false;
+        if (vendoredPattern.test(filename) || generatedPattern.test(filename)) return false;
         return !(docCommentAllowedPattern.test(filename) && isExportDocComment(comment, context));
       },
     ),

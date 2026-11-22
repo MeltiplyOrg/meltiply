@@ -38,7 +38,6 @@ export interface AccessClaims {
   subject: string;
 }
 
-/** `issuer` is the Better Auth base URL origin without the `/api/auth` path. */
 interface JwtVerifierConfig {
   audience: string;
   issuer: string;

@@ -51,7 +51,7 @@ describe("frontend Worker telemetry boundary", () => {
 
     expect(response.status).toBe(204);
     expect(logger).toHaveBeenCalledTimes(1);
-    const event = JSON.parse(logger.mock.calls[0]?.[0] as string) as Record<string, unknown>;
+    const event: unknown = JSON.parse(logger.mock.calls[0]?.[0] as string);
     expect(event).toMatchObject({
       context: expect.objectContaining({
         configuration_key: "APP_URL",
@@ -129,7 +129,7 @@ describe("frontend Worker telemetry boundary", () => {
     expect(response.status).toBe(500);
     await expect(response.text()).resolves.toBe("An error has occurred.");
     expect(logger).toHaveBeenCalledTimes(1);
-    const event = JSON.parse(logger.mock.calls[0]?.[0] as string) as Record<string, unknown>;
+    const event: unknown = JSON.parse(logger.mock.calls[0]?.[0] as string);
     expect(event).toMatchObject({
       context: expect.objectContaining({
         error_code: "asset_fetch_failed",
@@ -253,7 +253,7 @@ describe("frontend Worker API proxy", () => {
     expect(response.status).toBe(502);
     await expect(response.text()).resolves.toBe("The API is unavailable.");
     expect(logger).toHaveBeenCalledTimes(1);
-    const event = JSON.parse(logger.mock.calls[0]?.[0] as string) as Record<string, unknown>;
+    const event: unknown = JSON.parse(logger.mock.calls[0]?.[0] as string);
     expect(event).toMatchObject({
       context: expect.objectContaining({
         error_code: "api_proxy_failed",

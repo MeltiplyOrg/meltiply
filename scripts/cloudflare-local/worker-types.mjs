@@ -1,6 +1,3 @@
-// `wrangler types` merges config secrets, a sibling `.dev.vars`, and (through its
-// .env bootstrap and CLOUDFLARE_INCLUDE_PROCESS_ENV) process environment into Env,
-// so generation runs in a session mirror with empty env files.
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -22,10 +19,6 @@ function workerConfigPaths(root) {
     .filter((configPath) => existsSync(configPath));
 }
 
-/**
- * `wrangler types` consults CLOUDFLARE_* and WRANGLER_* variables that change its
- * output.
- */
 function wranglerNeutralEnv(source) {
   return Object.fromEntries(
     Object.entries(source).filter(

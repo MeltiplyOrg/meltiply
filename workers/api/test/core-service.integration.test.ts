@@ -1,7 +1,8 @@
 import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import {
-  type DatabaseError,
+  DatabaseError,
   MailSubmissionError,
+  PLATFORM_IDS,
   StorageUnavailableError,
   type Platform,
   type PlatformCapability,
@@ -902,7 +903,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           { connect_available: false, platform: "threads", publish: false },
         ],
       });
-      for (const platform of ["tiktok", "youtube", "instagram", "facebook", "threads"]) {
+      for (const platform of PLATFORM_IDS) {
         const connect = await app.request(
           `/api/v1/platforms/${platform}/connect`,
           { headers: { Authorization: bearerAuthorization } },
@@ -2181,7 +2182,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const start = new Date("2026-12-01T00:00:00Z");
     const end = new Date("2026-12-31T23:59:59Z");
     const postId = "4f000000-0000-4000-8000-000000000080";
-    const platforms = ["facebook", "instagram", "threads", "tiktok", "youtube"] as const;
+    const platforms = [...PLATFORM_IDS].sort();
     const distributionIds = platforms.map(
       (_, index) => `97000000-0000-4000-8000-00000000008${index}`,
     );
@@ -3210,7 +3211,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   });
 
   it("schedules many Channels once with atomic usage and outbox state", async () => {
-    const posts = postServiceWith(["youtube", "instagram", "facebook"]);
+    const posts = postServiceWith(PLATFORM_IDS.slice(1, 4));
     const period = currentUsagePeriod;
     const usageBefore = await currentUsageCount();
     const distributionAllowance = COMMUNITY_LIMITS.max_distributions ?? 0;
@@ -4503,8 +4504,9 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   });
 
   it("keeps per-Channel outcomes editable only while they are pending", async () => {
-    const distributionService = distributionServiceWith(["youtube", "instagram", "facebook"]);
-    const posts = postServiceWith(["youtube", "instagram", "facebook"]);
+    const testPlatforms = PLATFORM_IDS.slice(1, 4);
+    const distributionService = distributionServiceWith(testPlatforms);
+    const posts = postServiceWith(testPlatforms);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -6419,7 +6421,9 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         );
         const objectId = promoted.rows[0]?.id;
         if (!objectId) {
-          throw new Error("Promotion found no verified staging object.");
+          return yield* Effect.fail(
+            new DatabaseError({ message: "Promotion found no verified staging object." }),
+          );
         }
         yield* client.query(
           `INSERT INTO asset_renditions

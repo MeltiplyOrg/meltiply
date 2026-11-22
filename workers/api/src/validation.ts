@@ -1,6 +1,6 @@
 import type { components } from "@meltiply/contracts/schema";
 import type { TikTokPrivacyLevel } from "@meltiply/providers";
-import { PLATFORM_IDS, type Platform } from "@meltiply/domain";
+import { codePointLength, PLATFORM_IDS, type Platform } from "@meltiply/domain";
 import type { Context } from "hono";
 import { z } from "zod";
 
@@ -94,7 +94,7 @@ export function postTextField(body: Record<string, unknown>, name: string): stri
   if (value === undefined) return undefined;
   if (
     typeof value !== "string" ||
-    [...value].length > 10_000 ||
+    codePointLength(value) > 10_000 ||
     unsafePostTextPattern.test(value)
   ) {
     throw new CoreApiError(

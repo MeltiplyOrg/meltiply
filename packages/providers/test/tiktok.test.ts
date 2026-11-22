@@ -510,10 +510,8 @@ describe("createTikTokAdapter", () => {
       outcome: "confirmed_success",
       providerOperationId: "publish:p_pub_url~v2.789",
     });
-    const body = JSON.parse(String(providerCalls.calls[1]!.init.body)) as {
-      post_info: { auto_add_music?: boolean };
-    };
-    expect(body.post_info.auto_add_music).toBe(true);
+    const body: unknown = JSON.parse(String(providerCalls.calls[1]!.init.body));
+    expect(body).toMatchObject({ post_info: { auto_add_music: true } });
   });
 
   it("accepts a 1080p portrait photo rather than requiring a square image", async () => {

@@ -34,12 +34,6 @@ test("reaches the real API health endpoint", async ({ request }) => {
   await expect(response.json()).resolves.toMatchObject({ status: "ok" });
 });
 
-/**
- * The product app owns only protected workspace routes; the marketing landing
- * page is a separate Astro project. The root path therefore follows the same
- * redirect chain as any unknown path (`/` → `/posts` → sign-in) rather than
- * rendering any landing content here.
- */
 test("redirects the root path to sign-in without a session", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveURL(/\/sign-in(?:\/|$)/, { timeout: 30_000 });
@@ -64,11 +58,6 @@ for (const route of protectedRoutes) {
 for (const route of retiredRoutes) {
   test(`retired route ${route} follows unknown-route behaviour`, async ({ page }) => {
     await page.goto(route);
-    // No alias or legacy page survives the cutover, so a retired path takes the
-    // same `*` → `/posts` fallback as any unknown path. Without a session that
-    // protected route redirects to sign-in: the marketing landing page lives in
-    // the separate Astro project and is never served from this origin, so an
-    // assertion on the landing heading here could never hold.
     await expect(page).toHaveURL(/\/sign-in(?:\/|$)/, { timeout: 30_000 });
   });
 }

@@ -15,14 +15,9 @@ import {
 export const themeBootstrapMarker = "<!-- meltiply-theme-bootstrap -->";
 
 export interface ThemeBootstrapSettings {
-  /** Sites whose links receive the theme transfer parameter without `data-theme-link`. */
   siteUrls?: readonly string[];
 }
 
-/**
- * Builds the blocking inline script that resolves consent and the palette before first paint.
- * The output is safe to embed inside a `<script>` element.
- */
 export function renderThemeBootstrap(
   runtime: string,
   { siteUrls = [] }: ThemeBootstrapSettings = {},

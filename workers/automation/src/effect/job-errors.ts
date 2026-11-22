@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { Data } from "effect";
 
 export class RetryableJobError extends Data.TaggedError("RetryableJobError")<{
@@ -45,7 +46,7 @@ export function classifyJobError(
   if (ambiguous !== undefined) {
     return new AmbiguousJobError({
       code: ambiguous.code ?? fallbackCode,
-      message: cause instanceof Error ? cause.message : "ambiguous provider outcome",
+      message: errorMessage(cause, "ambiguous provider outcome"),
     });
   }
   if (cause instanceof Error) {

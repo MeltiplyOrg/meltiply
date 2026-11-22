@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
-import { isoDateTime, type DatabaseError } from "@meltiply/domain";
+import { codePointLength, isoDateTime, type DatabaseError } from "@meltiply/domain";
 import {
   composeCaption,
   parseThreadsOptions,
@@ -364,14 +364,17 @@ export function lockPostEffect(
   postId: string,
   readModel = false,
 ): Effect.Effect<PostMutationRow, CoreApiError | DatabaseError> {
-  return Effect.gen(function* () {
-    const result = yield* client.query<PostMutationRow>(
-      `SELECT ${readModel ? postColumns : `id, org_id, brand_profile_id, title, default_text, ${postQueueMembershipColumn}`}
+  const selectSql = readModel
+    ? `SELECT ${postColumns}
          FROM posts
         WHERE id = $1 AND org_id = public.auth_active_org_id() AND deleted_at IS NULL
-        FOR UPDATE`,
-      [postId],
-    );
+        FOR UPDATE`
+    : `SELECT id, org_id, brand_profile_id, title, default_text, ${postQueueMembershipColumn}
+         FROM posts
+        WHERE id = $1 AND org_id = public.auth_active_org_id() AND deleted_at IS NULL
+        FOR UPDATE`;
+  return Effect.gen(function* () {
+    const result = yield* client.query<PostMutationRow>(selectSql, [postId]);
     const row = result.rows[0];
     if (!row) {
       return yield* Effect.fail(new CoreApiError(404, "post_not_found", "The post was not found."));
@@ -1021,7 +1024,7 @@ function validatePostText(title: string, defaultText: string): void {
   if (title.length > 200) {
     throw new CoreApiError(422, "validation_error", "title is too long.");
   }
-  if ([...defaultText].length > 10_000) {
+  if (codePointLength(defaultText) > 10_000) {
     throw new CoreApiError(422, "validation_error", "default_text is too long.");
   }
 }

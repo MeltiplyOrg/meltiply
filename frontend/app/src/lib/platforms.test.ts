@@ -1,3 +1,4 @@
+import { PLATFORM_IDS } from "@meltiply/domain";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -32,27 +33,17 @@ describe("platformDisplayName", () => {
 
 describe("getAvailablePlatforms", () => {
   it("returns all platforms when none connected", () => {
-    expect(getAvailablePlatforms([])).toEqual([
-      "tiktok",
-      "youtube",
-      "instagram",
-      "facebook",
-      "threads",
-    ]);
+    expect(getAvailablePlatforms([])).toEqual([...PLATFORM_IDS]);
   });
 
   it("excludes connected platforms", () => {
-    expect(getAvailablePlatforms(["tiktok", "instagram"])).toEqual([
-      "youtube",
-      "facebook",
-      "threads",
-    ]);
+    expect(getAvailablePlatforms(["tiktok", "instagram"])).toEqual(
+      PLATFORM_IDS.filter((platform) => platform !== "tiktok" && platform !== "instagram"),
+    );
   });
 
   it("returns empty when all connected", () => {
-    expect(
-      getAvailablePlatforms(["tiktok", "youtube", "instagram", "facebook", "threads"]),
-    ).toEqual([]);
+    expect(getAvailablePlatforms([...PLATFORM_IDS])).toEqual([]);
   });
 });
 

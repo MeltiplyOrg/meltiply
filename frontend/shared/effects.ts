@@ -1,6 +1,4 @@
-/** Mirrors `--ease-enter` in `motion.css`; WAAPI timing cannot resolve CSS variables. */
 export const effectEasing = "cubic-bezier(0.16, 1, 0.3, 1)";
-/** Mirrors `--ease-drawer` in `motion.css`, for moving or resizing something already on screen. */
 export const effectMoveEasing = "cubic-bezier(0.32, 0.72, 0, 1)";
 
 const effectDurationMs = 240;
@@ -28,11 +26,6 @@ function prefersReducedMotion(view: Window | null): boolean {
   return view?.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 }
 
-/**
- * Plays one WAAPI effect, replacing any effect already running on the element. The element's own
- * styles are the final state, so cancellation never hides content. Returns null under reduced
- * motion or without WAAPI.
- */
 export function playEffect(
   element: Element,
   frames: Keyframe[],
@@ -71,7 +64,6 @@ export function disclosureEffect(element: Element): Animation | null {
   return playEffect(element, disclosureEffectFrames);
 }
 
-/** Morphs `element` from `previousHeight` (CSS px) to its current height. */
 export function morphHeightEffect(element: HTMLElement, previousHeight?: number): Animation | null {
   elementEffects.get(element)?.cancel();
   const nextHeight = element.offsetHeight;
@@ -81,11 +73,6 @@ export function morphHeightEffect(element: HTMLElement, previousHeight?: number)
 
 let activeViewTransition: ViewTransition | undefined;
 
-/**
- * Commits a synchronous view change through a native View Transition. A newer call skips the
- * previous transition's animation, never its commit; unsupported browsers and reduced motion
- * commit immediately.
- */
 export function transitionViewEffect(commit: () => void): void {
   activeViewTransition?.skipTransition();
   if (!("startViewTransition" in document) || prefersReducedMotion(window)) {

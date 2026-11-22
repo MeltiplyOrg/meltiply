@@ -4,7 +4,6 @@ import { mkdir } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium, expect } from "@playwright/test";
 
-/** Polls actual SMTP capture for a requested owner action, without printing links or secrets. */
 async function mailLink(email, subject, after) {
   for (let attempt = 0; attempt < 60; attempt++) {
     const messages = await (await fetch("http://localhost:8025/api/v1/messages")).json();
@@ -26,7 +25,6 @@ async function mailLink(email, subject, after) {
   throw new Error("Expected authentication email did not reach SMTP capture");
 }
 
-/** Generates a live enrollment proof; the URI and decoded secret never leave process memory. */
 function totp(uri) {
   const secret = new URL(uri).searchParams.get("secret");
   if (!secret) throw new Error("Missing authenticator secret");
@@ -43,13 +41,6 @@ function totp(uri) {
   ).padStart(6, "0");
 }
 
-/**
- * Exercises the production images in Chromium: guarded first setup, real SMTP
- * verification, closed signup, owner login, password change/reset, TOTP enrollment
- * and backup recovery. Sign-out follows the canonical sidebar account menu.
- * Never records traces, filled forms, or secret artifacts.
- * Returns only the current cookie to the API smoke in the same process.
- */
 export async function ownerBrowserSession({ origin, email, password, setupSecret, workspaceName }) {
   const browser = await chromium.launch({ headless: true });
   let context = await browser.newContext({
@@ -65,18 +56,7 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await page.getByLabel("Password", { exact: true }).fill(currentPassword);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
   };
-  /**
-   * Captures one optional-surface screenshot in both palettes and at both widths.
-   *
-   * Only screens the journey has already left behind credentials are captured:
-   * the improvement/ready screens and Settings. The sign-up, sign-in, password,
-   * token and verification screens are never captured, and the captured region
-   * carries no email, name or token because those fields are cleared first.
-   */
   const captureOptionalSurface = async (name, heading) => {
-    // The cookie choice panel overlays the page until answered. Rejecting the
-    // optional cookies is the choice that grants nothing, and it clears the
-    // panel so the captured interface is the actual surface.
     const rejectOptional = page.getByRole("button", { name: "Reject optional", exact: true });
     if (await rejectOptional.count()) await rejectOptional.click();
     for (const palette of ["light", "dark"]) {
@@ -114,8 +94,6 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
   try {
     await page.goto(`${origin}/sign-in`);
     await expect(page.getByRole("heading", { name: "Make this workspace yours." })).toBeVisible();
-    // The setup form carries the setup secret and the owner's credentials, so it
-    // is asserted for layout only and never captured.
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
@@ -138,8 +116,6 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     phase = "email verification across a browser restart";
     const link = await mailLink(email, "Verify your Meltiply email", new Set());
     await page.goto(link);
-    // A real restart across the verification handoff: the browser is closed and
-    // a new one signs in, so the journey can only resume from installation state.
     await context.close();
     const restartedContext = await browser.newContext({
       reducedMotion: "reduce",
@@ -153,26 +129,19 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await expect(
       restartedPage.getByRole("heading", { name: "Help improve Meltiply", exact: true }),
     ).toBeVisible({ timeout: 30_000 });
-    // Continue this journey in the restarted session; the cookie it holds is what
-    // the API smoke below reuses.
     context = restartedContext;
     page = restartedPage;
     phase = "resumed first-run improvement screen";
     await expect(page.getByRole("switch", { name: "Usage statistics" })).not.toBeChecked();
     await expect(page.getByRole("switch", { name: "Diagnostic reports" })).not.toBeChecked();
     await captureOptionalSurface("improvement", "Help improve Meltiply");
-    // Skip is explicit and leaves both categories off: no implicit consent.
     await page.getByRole("button", { name: "Skip", exact: true }).click();
     phase = "final first-run screen";
     await expect(page.getByRole("heading", { name: "You're ready", exact: true })).toBeFocused();
-    // The screen's own actions must be interactive before the capture proves the
-    // interface; a pending completion or an overlay would photograph a dead CTA.
     await expect(
       page.getByRole("button", { name: "Enter the Workspace", exact: true }),
     ).toBeEnabled();
     await captureOptionalSurface("ready", "You're ready");
-    // The reached screen is durable: a reload resumes "You're ready" rather than
-    // restarting the optional improvement step.
     await page.reload();
     await expect(page.getByRole("heading", { name: "You're ready", exact: true })).toBeVisible({
       timeout: 30_000,
@@ -194,9 +163,6 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await page.waitForURL(/\/posts/);
     phase = "account workspace name";
     await page.goto(`${origin}/settings?section=account`);
-    // The canonical name appears in the sidebar and the account definition list;
-    // assert the account entry, which is what proves the chosen setup name was
-    // persisted to the shared Workspace.
     const workspaceField = page
       .locator("dl > div")
       .filter({ has: page.locator("dt", { hasText: "Workspace" }) });
@@ -206,8 +172,6 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await expect(
       page.getByRole("heading", { name: "Improvement reporting", exact: true }),
     ).toBeVisible();
-    // The operator and this deployment configure no destination here, so the
-    // disclosure must say so instead of claiming working reporting.
     await expect(page.getByText("Not requested").first()).toBeVisible();
     await expect(page.getByRole("switch", { name: "Usage statistics" })).not.toBeChecked();
     await captureOptionalSurface("settings-privacy", "Improvement reporting");
@@ -290,7 +254,6 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await page.waitForURL(/\/posts/);
     return (await context.cookies()).map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
   } catch {
-    // Playwright call logs can include fill values: never forward the exception.
     const current = new URL(page.url());
     console.error("Owner browser state", {
       phase,

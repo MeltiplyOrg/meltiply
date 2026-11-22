@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
@@ -247,7 +248,7 @@ function BrandProfileDialogForm({
       <BrandProfileDialogActions>
         {mutationError ? (
           <p className="text-xs text-destructive" role="alert">
-            {mutationError instanceof Error ? mutationError.message : t("Something went wrong")}
+            {errorMessage(mutationError, t("Something went wrong"))}
           </p>
         ) : null}
 

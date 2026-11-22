@@ -9,23 +9,14 @@ import boundariesPlugin from "../../lint/boundaries-plugin.mjs";
 import { checkAstroSource } from "../../lint/astro-ui-contract.mjs";
 
 // Oxlint's RuleTester drives the same rule objects the linter loads via
-// lint.jsPlugins, so these cases exercise the exact policy code `vp lint`
 // runs — the suite the old ESLint-based test verified. RuleTester delegates
-// its scenario wrappers to whatever runner provides describe/it.
 RuleTester.describe = describe;
 RuleTester.it = it;
 
 const appRoot = dirname(fileURLToPath(import.meta.url));
 const ruleTester = new RuleTester({ cwd: appRoot });
-/**
- * Feature-component path used by every case: it lands inside `src/` so the
- * rules run, while staying outside every adapter/directory exemption the
- * rules check on `context.filename` (`.test.` / `src/test/` /
- * `platform-icon.tsx` / canonical component dirs / devbox).
- */
 const featureFile = `${appRoot}/src/components/example.tsx`;
 
-/** Wraps a class list as a string literal, the node type both color rules inspect. */
 function classSnippet(classes: string): string {
   return `export const classes = "${classes}";`;
 }
@@ -35,13 +26,11 @@ const providerRule = boundariesPlugin.rules["no-provider-color-leak"];
 const rawControlsRule = boundariesPlugin.rules["no-raw-interactive-elements"];
 const cloneGuardRule = boundariesPlugin.rules["no-canonical-ui-clones"];
 
-/** Canonical shared-library path modeled as a real normalized filename. */
 const sharedUiFile = resolve(appRoot, "../shared/src/components/ui/example.tsx");
 const sharedAtomsFile = resolve(appRoot, "../shared/src/components/atoms/example.tsx");
 
 ruleTester.run("boundaries/no-raw-palette-utility", paletteRule, {
   valid: [
-    // Non-color utilities: size/style slots that must not read as palette steps.
     ...[
       "shadow-md",
       "dark:shadow-2xl",
@@ -68,7 +57,6 @@ ruleTester.run("boundaries/no-raw-palette-utility", paletteRule, {
       code: classSnippet(classes),
       filename: featureFile,
     })),
-    // Theme tokens resolve through globals.css and are always allowed.
     ...[
       "dark:fill-ink",
       "hover:bg-hover/40",
@@ -94,7 +82,6 @@ ruleTester.run("boundaries/no-raw-palette-utility", paletteRule, {
     })),
   ],
   invalid: [
-    // Variant prefixes (hover:/dark:/data-[...]/) cannot smuggle a raw step.
     ...[
       "dark:fill-white",
       "hover:bg-red-500",
@@ -191,16 +178,6 @@ ruleTester.run("boundaries/no-provider-color-leak", providerRule, {
   ],
 });
 
-/**
- * Exercises the root `vite.config.ts` lint policy end-to-end — core
- * `no-restricted-imports`, `no-alert`, and `no-restricted-properties` overrides
- * plus the `boundaries/*` ownership rules loaded through `lint.jsPlugins` —
- * since the core rules are config-level and the RuleTester cannot drive them.
- * These cases lint one batch of temporary fixture files through `vp lint`
- * itself. Each run gets its own `src/components/` directory so the feature
- * override matches without colliding with another run. The directory is
- * deleted in `afterAll`, including on assertion failures.
- */
 describe("shared UI import contract", () => {
   const repoRoot = resolve(appRoot, "../..");
   const vpBin = join(repoRoot, "node_modules", "vite-plus", "bin", "vp");
@@ -241,17 +218,8 @@ describe("shared UI import contract", () => {
     ] as const,
   ]);
 
-  /** Diagnostic codes emitted per fixture file, populated by lintFixtures(). */
   let diagnosticsByFile = new Map<string, string[]>();
 
-  /**
-   * Writes every fixture and lints the directory in a single `vp lint` run —
-   * repeated CLI invocations would each pay the cold compiler startup. The JSON
-   * output uses `eslint(rule)` codes for core rules and `typescript(TSxxxx)`
-   * for type diagnostics; both are preserved, callers assert on specific codes.
-   * A nonzero exit merely means diagnostics were found, so stdout is used even
-   * when the child reports failure.
-   */
   function lintFixtures(): Map<string, string[]> {
     fixturesDir = mkdtempSync(join(appRoot, "src", "components", "lint-contract-"));
     for (const [file, source] of Object.entries(fixtures)) {
@@ -260,7 +228,6 @@ describe("shared UI import contract", () => {
     const result = spawnSync(
       process.execPath,
       [vpBin, "lint", relative(repoRoot, fixturesDir), "--format=json"],
-      // Type-aware cold lint competes with the parallel suite; 10s timed out under load.
       { cwd: repoRoot, encoding: "utf8", timeout: 120_000 },
     );
     const stdout = result.stdout ?? "";
@@ -270,11 +237,16 @@ describe("shared UI import contract", () => {
         `vp lint produced no JSON output (status ${result.status}): ${result.error?.message ?? ""}\n${result.stderr}`,
       );
     }
-    const report = JSON.parse(stdout.slice(jsonStart)) as {
-      diagnostics?: { code?: string; filename?: string }[];
-    };
+    const parsed: unknown = JSON.parse(stdout.slice(jsonStart));
+    const diagnostics =
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "diagnostics" in parsed &&
+      Array.isArray(parsed.diagnostics)
+        ? (parsed.diagnostics as { code?: string; filename?: string }[])
+        : [];
     const grouped = new Map<string, string[]>();
-    for (const diagnostic of report.diagnostics ?? []) {
+    for (const diagnostic of diagnostics) {
       if (!diagnostic.filename || !diagnostic.code) continue;
       const file = basename(diagnostic.filename);
       grouped.set(file, [...(grouped.get(file) ?? []), diagnostic.code]);
@@ -282,7 +254,6 @@ describe("shared UI import contract", () => {
     return grouped;
   }
 
-  /** Returns the ESLint-style rule ids reported for one fixture file. */
   function ruleIdsFor(file: string): string[] {
     return (diagnosticsByFile.get(file) ?? [])
       .filter((code) => code.startsWith("eslint("))
@@ -336,10 +307,6 @@ describe("shared UI import contract", () => {
 });
 
 ruleTester.run("boundaries/no-raw-interactive-elements", rawControlsRule, {
-  // Feature code and the retired app component dirs (which only hold
-  // composition wrappers now) must reuse the canonical controls: the
-  // raw-element exemption is limited to `frontend/shared/src/components/`
-  // plus devbox chrome and tests.
   valid: [
     {
       name: "allows a control implementation inside the canonical shared ui dir",
@@ -403,10 +370,6 @@ ruleTester.run("boundaries/no-raw-interactive-elements", rawControlsRule, {
 });
 
 ruleTester.run("boundaries/no-canonical-ui-clones", cloneGuardRule, {
-  // File-level guardrails keyed to the linted path rather than its imports:
-  // the retired app component dirs cannot grow new primitives, flat-namespace
-  // stems cannot collide inside the shared library, and no other frontend
-  // file may claim a canonical component basename.
   valid: [
     {
       name: "allows a uniquely-named feature component",
@@ -480,12 +443,6 @@ ruleTester.run("boundaries/no-canonical-ui-clones", cloneGuardRule, {
   ],
 });
 
-/**
- * Drives the `.astro` contract checker (lint/astro-ui-contract.mjs) — the only
- * enforcement on landing/docs markup since vp lint cannot parse Astro files.
- * Synthetic filenames under `frontend/` exercise the same path classification
- * the CLI applies to the real tree.
- */
 describe("astro UI contract", () => {
   const repoRoot = resolve(appRoot, "../..");
   const astroSrc = (frontmatter: string): string => `---\n${frontmatter}\n---\n<div />`;

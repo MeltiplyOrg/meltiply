@@ -5,8 +5,6 @@ import { createApiApp } from "../src/app";
 import type { ApiWorkerEnv } from "../src/env";
 import type { OperatorReconciliationService } from "../src/operator-resolution";
 
-// The route graph statically reaches ./database via workspace-lifecycle; an
-// empty mock keeps the `pg` client out of the workerd unit-test isolate.
 vi.mock("../src/database", () => ({}));
 
 const distributionId = "93000000-0000-4000-8000-000000000020";
@@ -40,14 +38,6 @@ function operatorApp(
   };
 }
 
-/**
- * Builds an operator reconciliation service mock whose methods return Effects.
- *
- * The route boundary executes the injected distribution resolution Effect once.
- *
- * @param resolveDistribution - Effect-returning distribution resolution mock.
- * @returns OperatorReconciliationService test double.
- */
 function service(
   resolveDistribution = vi.fn(() =>
     Effect.succeed({
@@ -102,10 +92,6 @@ describe("Access-protected operator reconciliation route", () => {
     expect(resolveDistribution).not.toHaveBeenCalled();
   });
 
-  // The route's own contract: verify the Access identity, forward the parsed
-  // resolution once, and map the reconciliation outcome (including the replay
-  // header). Replay deduplication is owned by the reconciliation service's
-  // idempotency ledger, so it is not asserted through a value this double sets.
   it("verifies Access identity, forwards one strict resolution, and maps a replay outcome", async () => {
     const resolveDistribution = vi.fn(() =>
       Effect.succeed({

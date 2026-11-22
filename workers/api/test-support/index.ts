@@ -1,28 +1,3 @@
-/**
- * Controlled-Provider acceptance entry for the API Worker.
- *
- * The HTTP surface is the production one: `createApiApp` is instantiated
- * unmodified and every `/api/v1/**`, `/api/auth/**`, `/operator/v1/**`, flow,
- * and health route behaves exactly as it does in `src/index.ts`. The single
- * difference is the {@link ProviderRegistry} supplied through
- * `createApiApp({ providerRegistry })`, the dependency slot the route module
- * already exposes, so the acceptance run sees real publishing capabilities and
- * the real OAuth boundary instead of the "provider adapter is not configured"
- * stubs a credential-less local stack would otherwise advertise.
- *
- * This module additionally mounts `/controlled-provider/v1/**`, a fixture-only
- * namespace used by the Playwright acceptance specs to (a) provision the
- * Channels a signed-up workspace needs, because the OAuth connect boundary
- * requires an HTTPS provider origin that a plain-HTTP local stack cannot
- * provide, and (b) read back the controlled Provider's own durable publication
- * records and stored media bytes. It also mounts
- * {@link automationScheduledRoute}, which runs one Automation Worker scheduled
- * pass through the existing service binding because Wrangler fires no cron
- * triggers locally. Those endpoints exist only inside this acceptance entry: no
- * production route, service, or interface was added, and the production
- * `wrangler.local.jsonc` still points at `src/index.ts`.
- */
-
 import {
   createControlledProviderRegistry,
   controlledProviderPlatforms,
@@ -38,33 +13,22 @@ import { tokenCipherFor } from "../src/token-credentials";
 import { Effect } from "effect";
 import { Hono } from "hono";
 
-/** One Channel an acceptance spec asks the fixture to provision. */
 interface ChannelRequest {
   display_name: string;
   platform: string;
   provider_user_id: string;
 }
 
-/** Body accepted by the channel provisioning endpoint. */
 interface ProvisionChannelsRequest {
   channels: ChannelRequest[];
   profile_name: string;
 }
 
-/** Body accepted by the provider script endpoint. */
 interface ScriptRequest {
   account_id: string;
   fail_next_publishes?: number;
 }
 
-/**
- * Parses a positive integer from an untrusted query or body value.
- *
- * @param value - Untrusted value to parse.
- * @param field - Field name used in the thrown message.
- * @returns The parsed non-negative integer.
- * @throws {TypeError} When the value is missing, negative, or not an integer.
- */
 function requireCount(value: unknown, field: string): number {
   const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) {
@@ -73,27 +37,8 @@ function requireCount(value: unknown, field: string): number {
   return parsed;
 }
 
-/**
- * Path the acceptance entry uses to run cron work on the Automation Worker.
- *
- * Wrangler does not fire cron triggers in local development, so the queue
- * acceptance journey asks this route to invoke the production scheduled handler
- * through the API Worker's `AUTOMATION` service binding. The nominal scheduled
- * instant therefore stays untouched; only the trigger comes from the test.
- */
 const automationScheduledRoute = "/__test__/automation/scheduled";
 
-/**
- * Invokes the Automation Worker's on-demand scheduled route through a service
- * binding, without asserting the binding's production shape.
- *
- * The binding is a Fetcher at runtime; its declared type only names the RPC
- * methods the application uses, so the runtime capability is checked here.
- *
- * @param binding - Runtime `AUTOMATION` binding, or undefined when unbound.
- * @param cron - Cron expression the dispatcher should report.
- * @returns True when the scheduled pass ran; false when the binding cannot run it.
- */
 async function runAutomationScheduledWork(binding: unknown, cron: string): Promise<boolean> {
   if (!binding || typeof binding !== "object" || !("fetch" in binding)) return false;
   const forward = binding.fetch;
@@ -107,27 +52,11 @@ async function runAutomationScheduledWork(binding: unknown, cron: string): Promi
   return response.status === 204;
 }
 
-/**
- * Path prefix owned solely by this acceptance entry.
-…
- */
 const controlledProviderRoutePrefix = "/controlled-provider/v1";
-/**
- * Fixture-only router exposing the controlled Provider's own state and the
- * Channel provisioning local acceptance needs.
- *
- * Deliberately unauthenticated: it is unreachable outside
- * `wrangler.local.acceptance.jsonc`, and it never reads or writes application
- * data beyond the `platform_accounts` rows it creates for an existing Brand
- * Profile that a signed-up workspace owns.
- * The router's base path matches the full namespace passed by the Worker fetch
- * entry; relative endpoint registrations must not receive unmounted URLs.
- */
 const controlledProviderRouter = new Hono<{
   Bindings: ApiWorkerEnv;
 }>().basePath(controlledProviderRoutePrefix);
 
-/** Provisions supported controlled Channels for an existing workspace Profile; rejects empty names/lists. */
 controlledProviderRouter.post("/channels", async (c) => {
   const body = await c.req.json<ProvisionChannelsRequest>();
   const profileName = body.profile_name?.trim();
@@ -148,9 +77,6 @@ controlledProviderRouter.post("/channels", async (c) => {
   }
 
   try {
-    // Encrypted exactly the way the OAuth callback encrypts a real token, so the
-    // automation Worker decrypts it through the production credential path. The
-    // plaintext is a fixture marker, never a social credential.
     const accessToken = await tokenCipherFor(c.env).encrypt(
       "controlled-provider-token-not-a-social-credential",
     );
@@ -280,7 +206,6 @@ controlledProviderRouter.get("/publications/:publicationId/media/:index", async 
   });
 });
 
-/** Sets an account's deterministic publish-failure count in fixture storage; zero clears the script. */
 controlledProviderRouter.post("/scripts", async (c) => {
   const body = await c.req.json<ScriptRequest>();
   const accountId = body.account_id?.trim();
@@ -305,18 +230,6 @@ controlledProviderRouter.get("/scripts", async (c) => {
   return c.json({ script });
 });
 
-/**
- * Builds the production API app bound to the controlled Provider registry.
- *
- * The app is created per environment rather than once at module scope because
- * the registry stores and reads its durable publication records through
- * `env.ASSETS`, which workerd only binds once the Worker is constructed. One
- * app per environment keeps the production module-scope singleton behaviour
- * (route table and readiness cache) intact inside a single local isolate.
- *
- * @param env - API Worker bindings for this isolate.
- * @returns The production app wired to the controlled Provider.
- */
 function acceptanceApp(env: ApiWorkerEnv) {
   return createApiApp({
     providerRegistry: createControlledProviderRegistry({
@@ -325,23 +238,7 @@ function acceptanceApp(env: ApiWorkerEnv) {
   });
 }
 
-/**
- * Acceptance API Worker entry.
- *
- * Routes the fixture-only namespace to {@link controlledProviderRouter} and
- * delegates everything else — including the not-found fallback and all error
- * envelopes — to the unmodified production app, so acceptance runs observe the
- * same routing behaviour a deployed stack does.
- */
 export default {
-  /**
-   * Handles one HTTP request.
-   *
-   * @param request - Incoming HTTP request.
-   * @param env - API Worker bindings.
-   * @param executionContext - Execution context used for logging and continuations.
-   * @returns The response produced by the fixture router or the production app.
-   */
   async fetch(request, env, executionContext) {
     const url = new URL(request.url);
     if (url.pathname === automationScheduledRoute) {

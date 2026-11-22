@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import YAML from "yaml";
+import { fakeEnv, fakeOAuthStateNamespace, fakeR2Bucket } from "../test-support/fakes";
 
 const {
   registerInstallationRoutes,
@@ -291,10 +292,6 @@ const cases: ConformanceCase[] = [
   {
     method: "GET",
     operationId: "completePlatformOAuth",
-    // The state must carry a canonical 22-character routing key: a shorter or
-    // differently shaped value is rejected as `state_invalid` before the
-    // Durable Object is consulted, which would leave the documented
-    // `select_account` redirect unexercised while the case still "passed".
     path: "/api/v1/platforms/threads/callback?code=provider-code&state=ABCDEFGHIJKLMNOPQRSTUV.statenonce1234567890",
   },
   {
@@ -547,8 +544,6 @@ const coreService = {
     }),
 } as CoreApiService;
 
-// Upload-session surface only: media inventory reads are single-Asset scoped,
-// so the library listing, text composition, and Asset deletion are gone.
 const assetService = {
   abortUploadSession: () => Effect.succeed({ replayed: false }),
   completeUploadSession: () =>
@@ -568,8 +563,6 @@ const assetService = {
   getUploadSession: () => Effect.succeed(body("getUploadSession")),
 } as AssetApiService;
 
-// Post composition double: each operation returns its own golden fixture so
-// route responses validate against the shared catalog rather than an echo.
 const postService = {
   createPost: () =>
     Effect.succeed({
@@ -595,8 +588,6 @@ const postService = {
     }),
 } as PostApiService;
 
-// Schema-only responses isolate the public contract from the real PostgreSQL
-// behavior exercised by publishing-queues.integration.test.ts.
 const publishingQueueService: PublishingQueueApiService = {
   list: () => Effect.succeed(body<components["schemas"]["QueueListResponse"]>("listQueues")),
   get: () => Effect.succeed(body<components["schemas"]["PublishingQueue"]>("getQueue")),
@@ -626,8 +617,6 @@ const publishingPreferencesService: PublishingPreferencesApiService = {
     }),
 };
 
-// Brand Profile conformance double: every lifecycle method returns the golden
-// fixture for its operation so route responses match the shared catalog.
 const brandProfileService = {
   createBrandProfile: () =>
     Effect.succeed({
@@ -717,7 +706,7 @@ const oauthState = {
   finalizeSelection: async () => undefined,
   getSelection: async () => {
     if (contractFailureStatus === 404) return null;
-    return body("getOAuthSelection");
+    return body("getOAuthSelection") as components["schemas"]["OAuthSelection"];
   },
   claimSelection: async () => {
     if (contractFailureStatus === 404) return { status: "not_found" as const };
@@ -750,22 +739,20 @@ const oauthState = {
     return { status: "cancelled" as const };
   },
 };
-const readyBinding = {};
-const env = {
+const env = fakeEnv({
   ALLOWED_ORIGINS: "http://localhost:3000",
-  ASSETS: readyBinding,
-  DB_AUTHENTICATED: readyBinding,
-  DB_SYSTEM: readyBinding,
-  ENVIRONMENT: "test",
+  ASSETS: fakeR2Bucket({}),
+  DB_AUTHENTICATED: {} as Hyperdrive,
+  DB_SYSTEM: {} as Hyperdrive,
   APP_URL: "http://localhost:3000",
-  OAUTH_STATE: { getByName: () => oauthState },
+  OAUTH_STATE: fakeOAuthStateNamespace(oauthState),
   R2_ACCESS_KEY_ID: "test-access-key",
   R2_ACCOUNT_ID: "test-account",
   R2_BUCKET_NAME: "test-assets",
   R2_SECRET_ACCESS_KEY: "test-secret-key",
   TOKEN_ENCRYPTION_KEY: conformanceTestKey,
   VERSION: "1.0.0-target.0",
-} as unknown as ApiWorkerEnv;
+});
 
 const actorFixture = {
   authUserId: "ba_user_alpha_01",
@@ -787,30 +774,16 @@ const actorFixture = {
   },
 };
 
-// Verified Better Auth JWT identity returned by the `verifyJwtToken` test
-// double; the bearer JWT is the only credential protected routes may accept.
 const jwtIdentity: JwtIdentity = {
   email: "alpha@example.com",
   name: "Alpha User",
   subject: "ba_user_alpha_01",
 };
 
-// Protected-route credential: a fixed bearer JWT standing in for the Better
-// Auth access token the browser mints; `verifyJwtToken` maps it to jwtIdentity.
 const bearerAuthorization = "Bearer test-only.jwt";
 
 let contractFailureStatus: number | undefined;
 
-/**
- * Resolves the Better Auth operation represented by its same-origin route.
- *
- * The conformance double must return the golden payload for Better Auth's
- * pass-through routes, while production delegates the same paths unchanged to
- * Better Auth.
- *
- * @param request - Auth handler request emitted by the API router.
- * @returns OpenAPI operation identifier for that route.
- */
 function authOperationId(request: Request): string {
   const operationByPath: Record<string, string> = {
     "/api/auth/setup-status": "getSetupStatus",
@@ -836,14 +809,6 @@ function authOperationId(request: Request): string {
   return operation;
 }
 
-/**
- * Builds a golden contract response from the success fixture or a requested
- * documented error. The response is intentionally opaque to the application:
- * Better Auth is a delegated HTTP handler rather than an API service method.
- *
- * @param operationId - OpenAPI operation represented by the delegated route.
- * @returns Handler response matching that operation's active fixture.
- */
 function authContractResponse(operationId: string): Response {
   const operation = catalog.operations[operationId]!;
   const response =
@@ -862,13 +827,6 @@ function authContractResponse(operationId: string): Response {
   });
 }
 
-/**
- * Delegates auth conformance requests to their operation-specific golden
- * Better Auth response. It models the library boundary without reimplementing
- * Better Auth in the API test. `getSession` remains only to satisfy the
- * BetterAuthInstance shape: protected routes authenticate the bearer JWT
- * through `verifyJwtToken`, never a session lookup.
- */
 const betterAuthStub = {
   api: {
     getSession: async () => null,
@@ -876,16 +834,6 @@ const betterAuthStub = {
   handler: async (request: Request) => authContractResponse(authOperationId(request)),
 };
 
-/**
- * Returns the lifecycle contract response for a native Workspace route.
- *
- * Production lifecycle routes own transaction and authorization behavior,
- * exercised by the lifecycle integration tests. This conformance double
- * isolates response-schema verification from a PostgreSQL fixture.
- *
- * @param operationId - OpenAPI Workspace operation served by the route.
- * @returns Golden success or documented error response for that operation.
- */
 function workspaceContractResponse(operationId: string): Response {
   const operation = catalog.operations[operationId]!;
   const response =
@@ -904,13 +852,6 @@ function workspaceContractResponse(operationId: string): Response {
   });
 }
 
-/**
- * Registers native Workspace conformance doubles at the same paths as the
- * production lifecycle module. This preserves app-level auth/error middleware
- * coverage while database-backed lifecycle behavior remains covered separately.
- *
- * @param lifecycleApp - API app receiving the Workspace route registrations.
- */
 function registerWorkspaceContractRoutes(lifecycleApp: Hono<ApiWorkerEnvironment>): void {
   lifecycleApp.get("/api/v1/workspaces/:workspaceId/members", () =>
     workspaceContractResponse("listWorkspaceMembers"),
@@ -947,11 +888,6 @@ function registerWorkspaceContractRoutes(lifecycleApp: Hono<ApiWorkerEnvironment
   );
 }
 
-/**
- * Registers installation conformance doubles at the production paths.
- *
- * @param installationApp - API app receiving installation route registrations.
- */
 function registerInstallationContractRoutes(installationApp: Hono<ApiWorkerEnvironment>): void {
   installationApp.get("/api/v1/installation", () => workspaceContractResponse("getInstallation"));
   installationApp.post("/api/v1/installation/members/:memberId/suspend", () =>
@@ -968,16 +904,6 @@ function registerInstallationContractRoutes(installationApp: Hono<ApiWorkerEnvir
   );
 }
 
-/**
- * Registers reporting conformance doubles at the production paths.
- *
- * The reporting routes own consent, authorization, idempotency and Audit
- * behavior, exercised by reporting.integration.test.ts against real PostgreSQL
- * and a controlled capture receiver. This double isolates response-schema
- * verification from that fixture.
- *
- * @param reportingApp - API app receiving reporting route registrations.
- */
 function registerReportingContractRoutes(reportingApp: Hono<ApiWorkerEnvironment>): void {
   reportingApp.get("/api/v1/installation/reporting", () =>
     workspaceContractResponse("getReportingPolicy"),
@@ -996,15 +922,6 @@ function registerReportingContractRoutes(reportingApp: Hono<ApiWorkerEnvironment
   );
 }
 
-/**
- * Registers onboarding conformance doubles at the production paths.
- *
- * Production onboarding owns its transaction, Owner authorization, and
- * idempotency; those are exercised by the bootstrap integration suite. This
- * double isolates response-schema verification from a PostgreSQL fixture.
- *
- * @param onboardingApp - API app receiving onboarding route registrations.
- */
 function registerOnboardingContractRoutes(onboardingApp: Hono<ApiWorkerEnvironment>): void {
   onboardingApp.get("/api/v1/onboarding", () => workspaceContractResponse("getOnboarding"));
   onboardingApp.patch("/api/v1/onboarding", () => workspaceContractResponse("saveOnboarding"));
@@ -1051,15 +968,6 @@ const unsupportedCapabilities = capabilities.map((capability) => ({
   connect_available: false,
 }));
 
-/**
- * Creates an app whose service boundaries return one documented error status.
- *
- * Workspace and Better Auth conformance doubles share the selected status so
- * every route reaches the production error middleware with its fixture shape.
- *
- * @param status - OpenAPI error response status to exercise.
- * @returns API app configured to emit that documented error.
- */
 function errorApp(status: number) {
   contractFailureStatus = status;
   const code =
@@ -1142,8 +1050,6 @@ const errorPathOverrides: Record<string, string> = {
 describe("API Worker OpenAPI conformance", () => {
   beforeEach(() => {
     contractFailureStatus = undefined;
-    // Exercise the actual broadcast program against database outcomes, including
-    // its own role/state failures; do not replace the program with a golden echo.
     const query = vi
       .fn<EffectTransactionClient["query"]>()
       .mockImplementationOnce(() => {
@@ -1200,9 +1106,6 @@ describe("API Worker OpenAPI conformance", () => {
   for (const testCase of cases) {
     it(`${testCase.method} ${testCase.path} implements ${testCase.operationId}`, async () => {
       const example = catalog.operations[testCase.operationId]!;
-      // A valid caller-supplied correlation id the app must echo back: asserting
-      // only that the header is non-empty would pass for any generated value,
-      // including one that ignored the request.
       const requestId = `conformance-${testCase.operationId}`;
       const headers: Record<string, string> = {
         Authorization: bearerAuthorization,
@@ -1240,11 +1143,6 @@ describe("API Worker OpenAPI conformance", () => {
         const actual = response.headers.get(headerName);
         expect(actual, `${testCase.operationId} ${headerName}`).toBeTruthy();
         if (headerName.toLowerCase() === "location") {
-          // The redirect target is application behavior, not a library echo, so
-          // require the contract's origin and path rather than any well-formed
-          // URL (which is what an open redirect would also satisfy). The
-          // callback's path carries the selection ticket, so it is compared
-          // with the ticket segment collapsed to its stable prefix.
           const expected = example.success.headers![headerName]!;
           const actualUrl = new URL(actual!);
           const expectedUrl = new URL(expected);
@@ -1257,15 +1155,11 @@ describe("API Worker OpenAPI conformance", () => {
             );
             const expectedParams = new URLSearchParams(expectedUrl.search);
             expectedParams.delete("selection_id");
-            // The catalog's TikTok URL is an example; this request selects its
-            // own Platform, which must survive the callback redirect.
             const platform = new URL(testCase.path, expectedUrl.origin).pathname.split("/")[4];
             if (!platform) throw new Error("The callback fixture must name a Platform");
             expectedParams.set("provider", platform);
             const actualParams = new URLSearchParams(actualUrl.search);
             const actualTicket = actualParams.get("selection_id");
-            // The ticket is freshly minted per request, so assert its shape and
-            // that it is not empty instead of pinning the example value.
             expect(actualTicket).toMatch(/^[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}$/);
             actualParams.delete("selection_id");
             expect(actualParams.toString(), `${testCase.operationId} Location query`).toBe(
@@ -1306,9 +1200,9 @@ describe("API Worker OpenAPI conformance", () => {
 
         const errorEnvironment =
           testCase.operationId === "getReadiness"
-            ? ({ ...env, DB_SYSTEM: undefined } as unknown as ApiWorkerEnv)
+            ? fakeEnv({ ...env, DB_SYSTEM: undefined })
             : testCase.operationId === "completePlatformOAuth"
-              ? ({ ...env, APP_URL: undefined } as unknown as ApiWorkerEnv)
+              ? fakeEnv({ ...env, APP_URL: undefined })
               : env;
         const response = await errorApp(errorExample.status).request(
           errorRequest,

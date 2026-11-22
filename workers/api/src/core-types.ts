@@ -17,28 +17,12 @@ type PlatformAccount = Schemas["PlatformAccount"];
 type PlatformCapability = Schemas["PlatformCapability"];
 type ReplyStatus = Schemas["ReplyStatus"];
 
-/**
- * Domain-specific error thrown by HTTP route handlers, validation guards, and core services.
- *
- * Encapsulates HTTP status codes, structured error codes, optional retry delays, and per-field
- * validation details rendered into the canonical API error envelope.
- */
 export class CoreApiError extends Error {
-  /**
-   * Creates an instance of CoreApiError.
-   *
-   * @param status - HTTP response status code (e.g. 400, 401, 403, 404, 409, 413, 422, 500, 503).
-   * @param code - Machine-readable error code string (e.g. "invalid_request", "quota_exceeded").
-   * @param message - User-facing or client-diagnostic error description.
-   * @param retryAfterSeconds - Optional delay in seconds for `Retry-After` response header on rate-limits.
-   * @param details - Optional list of detailed constraint violations rendered in `error.details`.
-   */
   constructor(
     readonly status: number,
     readonly code: string,
     message: string,
     readonly retryAfterSeconds?: number,
-    /** Per-field causes rendered in the error envelope's `details` array. */
     readonly details: readonly Schemas["ErrorDetail"][] = [],
   ) {
     super(message);
@@ -46,18 +30,6 @@ export class CoreApiError extends Error {
   }
 }
 
-/**
- * Narrows one `Effect.try` catch to expected API errors without misclassifying
- * programming defects as client failures.
- *
- * Returns `cause` only when it is already a `CoreApiError`; any other thrown
- * value is rethrown so Effect records it as a defect and the request boundary
- * answers 500 `internal_error` instead of a 4xx envelope.
- *
- * @param cause - Unknown value thrown by the wrapped operation.
- * @returns The cause when it is a CoreApiError.
- * @throws The original cause when it is not a CoreApiError.
- */
 export function toCoreApiErrorOrRethrow(cause: unknown): CoreApiError {
   if (cause instanceof CoreApiError) return cause;
   throw cause;
@@ -102,10 +74,6 @@ export interface IdempotentResult<T> {
 export type CoreServiceError = CoreApiError | ActiveOrganizationRequiredError | DatabaseError;
 
 export interface CoreApiService {
-  /**
-   * Organization the caller's session is active in, confirmed by the database
-   * inside an authenticated transaction rather than trusted from the token.
-   */
   activeOrganization(
     env: ApiWorkerEnv,
     session: SessionClaims,

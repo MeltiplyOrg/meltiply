@@ -5,11 +5,9 @@ import { INSTALLATION_SEAT_LIMIT } from "@meltiply/domain";
 
 import { CoreApiError } from "./core-types";
 
-/** Installation-wide Seat usage for one Workspace. */
 export interface SeatUsage {
   activeMembers: number;
   pendingInvitations: number;
-  /** Active members plus pending invitations; the number compared with the limit. */
   used: number;
 }
 
@@ -18,20 +16,6 @@ interface SeatUsageRow extends Record<string, unknown> {
   pending_invitations: number | string;
 }
 
-/**
- * Reads installation-wide Seat usage for a Workspace inside the caller's
- * transaction.
- *
- * Active membership excludes suspended accounts because suspension releases
- * the Seat. Pending, unexpired invitations reserve Seats; expired, revoked, and
- * accepted invitations do not. Callers that are about to consume a Seat must
- * first lock the `organizations` row (`lockOrganizationEffect`) so two
- * concurrent invitations cannot both observe capacity.
- *
- * @param client - Active transaction client.
- * @param orgId - Workspace UUID.
- * @returns Effect resolving active members, pending invitations, and their sum.
- */
 export function seatUsageEffect(
   client: EffectTransactionClient,
   orgId: string,
@@ -64,16 +48,6 @@ export function seatUsageEffect(
     );
 }
 
-/**
- * Fails unless one more Seat can be consumed at this instant.
- *
- * @param client - Active transaction client.
- * @param orgId - Workspace UUID.
- * @param reservedSeats - Seats being consumed by the current operation that are
- *   not yet visible in Seat usage (for example, a new invitation row).
- * @returns Effect resolving the current usage when capacity remains.
- * @throws {CoreApiError} 409 `seat_limit_reached` when the limit is exhausted.
- */
 export function requireSeatCapacityEffect(
   client: EffectTransactionClient,
   orgId: string,

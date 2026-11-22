@@ -11,28 +11,10 @@ export interface IdempotencyRecord extends Record<string, unknown> {
   response_status: number | null;
 }
 
-/**
- * Calculates a SHA-256 hexadecimal hash of the serialized request payload via Effect.
- *
- * Used to detect payload mutations across retries using the same idempotency key.
- *
- * @param value - Canonical string representation of the request payload or parameters.
- * @returns Effect resolving to a 64-character lowercase hexadecimal SHA-256 digest string.
- */
 export function hashIdempotencyRequestEffect(value: string): Effect.Effect<string> {
   return Effect.promise(() => sha256Hex(value));
 }
 
-/**
- * Attempts to reserve an idempotency key slot or retrieve a cached prior result using an Effect client.
- *
- * @param client - Active EffectTransactionClient.
- * @param organizationId - Tenant organization UUID scoping the idempotency key.
- * @param operation - Unique string identifier for the API operation.
- * @param idempotencyKey - Client-provided idempotency header value.
- * @param requestHash - SHA-256 digest of the current request body/parameters.
- * @returns Effect resolving to the cached record or null if newly reserved.
- */
 export function reserveIdempotencyEffect(
   client: EffectTransactionClient,
   organizationId: string,
@@ -41,10 +23,6 @@ export function reserveIdempotencyEffect(
   requestHash: string,
 ): Effect.Effect<IdempotencyRecord | null, CoreApiError | DatabaseError> {
   return Effect.gen(function* () {
-    // A leader that rolls back after inserting leaves this contender's
-    // ON CONFLICT insert returning no row while its FOR UPDATE select also
-    // sees nothing. Re-inserting in a bounded loop lets the contender claim
-    // the freed key instead of reporting a permanent in-progress 409.
     const maximumReserveAttempts = 3;
     for (let attempt = 0; attempt < maximumReserveAttempts; attempt += 1) {
       const inserted = yield* client.query(
@@ -86,8 +64,6 @@ export function reserveIdempotencyEffect(
         }
         return record;
       }
-      // No visible row means the conflicting leader rolled back; loop to
-      // retry the insert rather than failing the request permanently.
     }
     return yield* Effect.fail(
       new CoreApiError(
@@ -99,17 +75,6 @@ export function reserveIdempotencyEffect(
   });
 }
 
-/**
- * Updates an idempotency record with the final HTTP status code and response payload using an Effect client.
- *
- * @param client - Active EffectTransactionClient.
- * @param organizationId - Tenant organization UUID scoping the idempotency key.
- * @param operation - Unique string identifier for the API operation.
- * @param idempotencyKey - Client-provided idempotency header value.
- * @param status - Completed HTTP response status code.
- * @param body - Serializable response payload body to store and replay.
- * @returns Effect resolving when the idempotency record is updated.
- */
 export function completeIdempotencyEffect(
   client: EffectTransactionClient,
   organizationId: string,

@@ -1,27 +1,4 @@
 import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
-// Workspace storage Entitlement accounting for issue #284, proven through the
-// consumer-visible seams only: the authenticated API app (upload sessions,
-// finalization, Post drafts and scheduling) and the automation AssetJobProcessor
-// (output-capacity reservation, orphan reclamation, usage reconciliation), both
-// against the real PostgreSQL schema and one bucket double that holds real
-// bytes.
-//
-// Every case drives a real transition and reads the outcome back through the
-// HTTP status/error envelope, the public `GET /api/v1/billing/usage` counters,
-// and durable storage accounting. No SQL text, source text, or echoed request is
-// asserted. Byte arithmetic is exact on purpose: the plan cap is known and every
-// fixture size is chosen to land on a boundary, so a case proves *which* bytes
-// are charged instead of only proving that something is non-zero.
-//
-// Isolation: both workspaces are created by this file and dropped in `afterAll`,
-// so no seeded organization is mutated by these cases. The maintenance sweep is
-// global by design, so the one seeded row another suite deliberately leaves due
-// for it is snapshotted and restored here as well.
-//
-// The native media engine is replaced only at its documented external boundary
-// (`env.MEDIA_PROCESSOR`). The double performs no media optimization and reports
-// only facts measured from the bytes actually stored, so capacity accounting can
-// be observed without asserting anything about optimization quality.
 import { createHash } from "node:crypto";
 
 import type { JwtIdentity } from "@meltiply/auth";
@@ -48,8 +25,6 @@ import type { Hono } from "hono";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import type * as Domain from "@meltiply/domain";
 
-// Finite allowances are a test policy, not the unrestricted community default.
-// Preserve transactional quota and accounting regressions for bounded policies.
 vi.mock("@meltiply/domain", async (importOriginal) => ({
   ...(await importOriginal<typeof Domain>()),
   COMMUNITY_LIMITS: {
@@ -80,15 +55,8 @@ if (!connectionString) {
 }
 const describeIntegration = describe;
 
-// The seeded local user is only the uploader identity on fixture rows; the
-// workspaces themselves belong to this file.
 const seededUserId = "10000000-0000-4000-8000-000000000001";
 
-/**
- * Finite storage allowance injected by this suite to exercise quota boundaries.
- * Community deployments use `null`; these cases intentionally retain a bounded
- * policy so quota enforcement remains covered for future hosted deployments.
- */
 const storageCap = (() => {
   const cap = COMMUNITY_LIMITS.max_storage_bytes;
   if (cap === null || !Number.isFinite(cap) || cap <= 0) {
@@ -97,16 +65,8 @@ const storageCap = (() => {
   return cap;
 })();
 
-/** Real payload size used by every probe upload. */
 const probeBytes = 8192;
 
-/**
- * The per-media-type upload ceiling the product accepts, read from the same
- * media rules the upload and processing paths enforce. Normalization can
- * legitimately produce larger bytes, so a processing run reserves this ceiling
- * rather than the uploaded size, and the concurrency case needs the real number
- * rather than a hardcoded one.
- */
 function mediaCeiling(contentType: string): number {
   const ceiling = mediaUploadMaximum(contentType);
   if (ceiling === null) {
@@ -115,7 +75,6 @@ function mediaCeiling(contentType: string): number {
   return ceiling;
 }
 
-/** Largest accepted image, used to fill a baseline and to size a reservation. */
 const imageCeilingBytes = mediaCeiling("image/png");
 
 const apiEnv = {
@@ -139,28 +98,12 @@ const automationEnv = {
   VERSION: "upload-quota-test",
 } satisfies AutomationEnv;
 
-/**
- * Platform capabilities this workspace schedules against.
- *
- * Scheduling validates the resolved media against the target Platform's
- * capability before it accepts a Distribution, and an unconfigured registry
- * reports every Platform as `publish: false`. Scheduling is therefore measured
- * against the Threads capability the Channel actually owns — the real one,
- * not the unconfigured stub — so a refused schedule proves what the
- * attachment's media was worth rather than which Platforms are configured.
- */
 const capabilities = new ProviderRegistry()
   .capabilities()
   .map((capability) =>
     capability.platform === "threads" ? { ...capability, publish: true } : capability,
   );
 
-/**
- * Real SigV4 signer for upload capabilities. The cases below parse the minted
- * URLs — the signature timestamp and X-Amz-Expires must be real SigV4 output,
- * not a doubled string, or a deadline claim could never outlive a persisted
- * `write_hold_until` without this suite noticing.
- */
 const uploadSigner = new R2SigV4Signer({
   accessKeyId: "quota-test-access-key",
   accountId: "quota-test-account",
@@ -168,15 +111,6 @@ const uploadSigner = new R2SigV4Signer({
   secretAccessKey: "quota-test-secret-key",
 });
 
-/**
- * One deferred sign boundary a case can hold open: the next capability mint
- * reports `entered` and then waits for `release` before the real signer runs.
- *
- * The latch models the async gap between the API deciding to issue a grant
- * and the signature actually being computed — the interval in which a stale
- * read or a cancelled session used to mint a URL past its recorded deadline.
- * One gate exists at a time because specs run serially.
- */
 interface SignGate {
   entered: Promise<void>;
   release(): void;
@@ -184,13 +118,10 @@ interface SignGate {
 
 let pausedSign: { notify(): void; wait: Promise<void> } | undefined;
 
-/** Pauses the next upload capability mint until the returned gate is released. */
 function pauseNextUploadSign(): SignGate {
   if (pausedSign) {
     throw new Error("a deferred sign gate is already armed");
   }
-  // The repository compiles against lib ES2023, so the deferred pattern is
-  // spelled out rather than using Promise.withResolvers.
   let notify!: () => void;
   let resume!: () => void;
   const entered = new Promise<void>((resolve) => {
@@ -209,7 +140,6 @@ function pauseNextUploadSign(): SignGate {
   };
 }
 
-/** Applies the armed deferral latch before the real signer runs. */
 async function gateUploadSign(): Promise<void> {
   const gate = pausedSign;
   pausedSign = undefined;
@@ -219,10 +149,6 @@ async function gateUploadSign(): Promise<void> {
   }
 }
 
-/**
- * Runs one real signing call behind the deferral latch, mapping signer
- * rejections onto the typed error channel the production boundary maps to.
- */
 function signedUploadCall<A>(operation: () => Promise<A>) {
   return Effect.tryPromise({
     catch: (cause) =>
@@ -238,26 +164,12 @@ function signedUploadCall<A>(operation: () => Promise<A>) {
   });
 }
 
-/**
- * Waits on the real platform clock for a bounded, deliberate interval.
- *
- * Deterministic time control cannot work here: the API computes `expires_at`
- * and PostgreSQL persists `write_hold_until` from the platform clock inside
- * code paths this suite cannot inject a clock into. A late signature must
- * therefore be genuinely late — the pause is what makes a relative-TTL mint
- * observably outlive the declared deadline instead of differing by an
- * unmeasurable millisecond.
- */
 function platformDelay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, milliseconds);
   });
 }
 
-/**
- * Reads the absolute expiry a real SigV4 URL commits to: the signature's own
- * timestamp plus its X-Amz-Expires seconds.
- */
 function signedUrlDeadlineMs(url: string): number {
   const params = new URL(url).searchParams;
   const stamped = params.get("X-Amz-Date");
@@ -272,30 +184,6 @@ function signedUrlDeadlineMs(url: string): number {
   return Date.parse(iso) + Number(expires) * 1_000;
 }
 
-/**
- * The absolute deadline a signed upload capability commits to, bounded on both
- * sides around the `expires_at` the API declared for that grant.
- *
- * SigV4 has no millisecond resolution, so a URL's deadline is quantized twice:
- * `X-Amz-Date` is truncated to whole seconds, and the signer floors
- * `X-Amz-Expires` against the deadline it was handed. Both quantizations only
- * ever move the URL's deadline *earlier*, so a URL can never outlive the
- * declared expiry — which is exactly what the durable write hold relies on.
- * Being earlier is not free, though: the gap between the two instants is the
- * two truncations plus whatever elapsed between recording the deadline and
- * running the signature, so it is bounded below by quantization and above by
- * quantization plus scheduling delay, never by zero.
- *
- * Asserting a signed deadline equal the declared expiry would therefore be
- * asserting that millisecond arithmetic survives a whole-second protocol. These
- * bounds keep the assertion meaningful in both directions: the grant must
- * never outlive the expiry the API persisted, and it must never be shortened
- * past the point where it can no longer represent the recorded window.
- *
- * @param url - Signed upload capability to parse.
- * @param declaredExpiresAtMs - `expires_at` the API declared for the grant.
- * @returns The deadline the URL commits to, in milliseconds.
- */
 function signedGrantDeadlineMs(url: string, declaredExpiresAtMs: number): number {
   const deadline = signedUrlDeadlineMs(url);
   expect(deadline).toBeLessThanOrEqual(declaredExpiresAtMs);
@@ -303,19 +191,6 @@ function signedGrantDeadlineMs(url: string, declaredExpiresAtMs: number): number
   return deadline;
 }
 
-/**
- * Runs one bucket-double operation behind the storage service, failing on the
- * typed channel the real storage service uses.
- *
- * The production driver maps every bucket rejection onto a typed
- * `StorageUnavailableError` — `wrapMultipartUpload` does exactly that for the
- * multipart operations — and the API branches on that type rather than on
- * "something went wrong": a multipart abort the bucket never confirmed is an
- * ambiguous outcome that keeps its writer hold and still answers 204, while
- * only a missing signer is a hard failure. Modelling an injected abort
- * rejection as a defect would instead let it escape as a 500 and misattribute
- * a deliberately injected, expected outcome to a crash.
- */
 function bucketOperation<A>(
   operation: () => Promise<A>,
 ): Effect.Effect<A, StorageUnavailableError> {
@@ -331,18 +206,9 @@ function bucketOperation<A>(
   });
 }
 
-/**
- * Storage layer shared by the API worker, backed by the same bucket double the
- * automation worker uses, so bytes written through one seam are immediately
- * observable through the other.
- */
 const storageServiceLayer = createStorageServiceTest({
   createMultipartUpload: (key, contentType) =>
     Effect.sync(() => {
-      // The native upload id must be the same one the part/abort closures
-      // address and the test injects failures for: the API persists this
-      // property as `multipart_upload_id`, so a missing or divergent value
-      // would leave the session row violating its own shape constraint.
       const uploadId = `upload-${key}`;
       return {
         abort: () => bucketOperation(() => multipartUpload(key, uploadId).abort()),
@@ -389,10 +255,6 @@ const storageServiceLayer = createStorageServiceTest({
         bucketOperation(() => multipartUpload(key, uploadId).uploadPart(partNumber, value)),
     })),
   signDownload: ({ key }) => Effect.succeed(`https://objects.test/download/${key}`),
-  // The write capabilities are minted by the real SigV4 signer so their
-  // X-Amz-Date/X-Amz-Expires deadline can be compared against the durable
-  // write hold; the latch can pause one mint to make a late signature
-  // genuinely late rather than a microsecond of scheduling noise.
   signMultipartPart: (request) => signedUploadCall(() => uploadSigner.signMultipartPart(request)),
   signUpload: (request) => signedUploadCall(() => uploadSigner.signUpload(request)),
 });
@@ -401,11 +263,6 @@ const assetService = createAssetApiService({ storageServiceLayer });
 const coreService = createCoreApiService(capabilities);
 const postService = createPostApiService(capabilities);
 
-// ---------------------------------------------------------------------------
-// Bucket double
-// ---------------------------------------------------------------------------
-
-/** One stored object: real bytes plus the media type a real HEAD would report. */
 interface StoredObject {
   bytes: Uint8Array;
   contentType: string;
@@ -415,25 +272,16 @@ const objects = new Map<string, StoredObject>();
 const deletedKeys: string[] = [];
 const abortedUploads: string[] = [];
 const deleteFailures = new Set<string>();
-/** Native upload ids whose abort call must fail, modelling an unconfirmed external abort. */
 const abortFailures = new Set<string>();
 
-/** Hex SHA-256 of stored bytes, the digest object storage reports for a write. */
 function digestOf(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-/** Deterministic ETag derived from the real payload identity. */
 function etagOf(bytes: Uint8Array): string {
   return `"${bytes.length.toString(16)}-${digestOf(bytes).slice(0, 16)}"`;
 }
 
-/**
- * Live metadata for one key, or null when the object is genuinely absent.
- *
- * Object availability is always answered from the byte map, so a claim that
- * bytes were reclaimed is checkable against the same map both workers write.
- */
 function metadataOf(key: string): ObjectMetadata | null {
   const object = objects.get(key);
   if (!object) return null;
@@ -448,19 +296,10 @@ function metadataOf(key: string): ObjectMetadata | null {
   };
 }
 
-/** Writes real bytes into the bucket double. */
 function putObject(key: string, bytes: Uint8Array, contentType: string): void {
   objects.set(key, { bytes, contentType });
 }
 
-/**
- * Conditional copy inside the bucket double.
- *
- * Both guards behave as object storage does: a source ETag that no longer
- * matches, and a destination that already exists, both decline the copy and
- * return null, which is what lets a replayed promotion adopt the existing object
- * instead of rewriting it.
- */
 function copyInBucket(
   sourceKey: string,
   destinationKey: string,
@@ -486,7 +325,6 @@ function copyInBucket(
   return metadataOf(destinationKey);
 }
 
-/** Removes an object, recording the attempt unless a failure is injected. */
 function removeObject(key: string): void {
   if (deleteFailures.has(key)) {
     throw new Error(`injected delete failure for ${key}`);
@@ -495,17 +333,8 @@ function removeObject(key: string): void {
   objects.delete(key);
 }
 
-/** Uploaded part ranges per staging key, shared across handles of one upload. */
 const multipartParts = new Map<string, Map<number, Uint8Array>>();
 
-/**
- * Multipart upload over the byte map. Parts are real byte ranges, `complete`
- * assembles them into one real object, and `abort` records that the parts were
- * reclaimed in the bucket rather than merely forgotten by the database. An
- * upload id listed in `abortFailures` rejects instead of confirming, so a
- * cancelled upload whose external abort never landed is observable as a
- * retained charge rather than a released one.
- */
 function multipartUpload(
   key: string,
   uploadId: string,
@@ -548,10 +377,6 @@ function multipartUpload(
   };
 }
 
-/**
- * Promise-shaped ObjectStore for the automation worker, sharing the byte map
- * with the API's storage layer.
- */
 const automationObjectStore: ObjectStore = {
   copyObject: async (sourceKey, destinationKey, options) =>
     copyInBucket(sourceKey, destinationKey, options),
@@ -569,38 +394,13 @@ const automationObjectStore: ObjectStore = {
   resumeMultipartUpload: (key, uploadId) => multipartUpload(key, uploadId),
 };
 
-// ---------------------------------------------------------------------------
-// Native processor boundary double
-// ---------------------------------------------------------------------------
-
-/**
- * How the engine boundary behaves for one case. `original_compatible` reports a
- * verified no-benefit verdict measured from the stored bytes, so no second copy
- * of the media is fabricated and nothing is stored; `retryable_failure` reports a
- * transient container failure, which leaves the reserved output capacity
- * inventoried so a competing claim can be observed against it.
- */
 type EngineMode = "original_compatible" | "retryable_failure";
 
 let engineMode: EngineMode = "original_compatible";
 const engineInvocations: string[] = [];
 
-/**
- * Absolute deadline each minted output capability committed to, parsed from the
- * URL the engine boundary actually received. The grant is what the inventory
- * row's `write_hold_until` must bound, so the case compares the real signed
- * deadline against the persisted hold rather than trusting a planned TTL.
- */
 const engineOutputDeadlines: number[] = [];
 
-/**
- * Native processor boundary double.
- *
- * It receives exactly the two signed capabilities the production adapter mints,
- * reads the input grant, and reports a verdict built from the bytes it actually
- * read. Real FFmpeg/libvips proof is a separate concern; nothing in this file
- * depends on an optimization claim.
- */
 async function runEngine(job: NativeProcessorJob) {
   engineInvocations.push(job.job_id);
   engineOutputDeadlines.push(signedUrlDeadlineMs(job.output_url));
@@ -656,21 +456,16 @@ async function runEngine(job: NativeProcessorJob) {
   };
 }
 
-const mediaProcessorNamespace = {
+const mediaProcessorNamespace: AutomationEnv["MEDIA_PROCESSOR"] = {
   get: () => ({ process: (job: NativeProcessorJob) => runEngine(job) }),
-  idFromName: (name: string) => name,
-} as unknown as AutomationEnv["MEDIA_PROCESSOR"];
+  idFromName: (name: string) => ({ name, toString: () => name, equals: () => false }),
+};
 
 const assetProcessor = createAssetJobProcessor(
   { ...automationEnv, MEDIA_PROCESSOR: mediaProcessorNamespace },
   automationObjectStore,
 );
 
-// ---------------------------------------------------------------------------
-// Workspaces owned by this file
-// ---------------------------------------------------------------------------
-
-/** One isolated workspace: identity, Brand Profile, Channel, and its app. */
 interface Studio {
   accountId: string;
   app: Hono<ApiWorkerEnvironment>;
@@ -686,13 +481,6 @@ const quotaIdentity: JwtIdentity = {
   subject: seededUserId,
 };
 
-/**
- * Builds one isolated workspace and the API app that authenticates as its admin.
- *
- * Each studio owns its durable identity, so no seeded organization is read or
- * written by these cases; the whole workspace (assets, reservations, usage rows,
- * posts) is removed again in `afterAll`.
- */
 function createStudio(options: { name: string; suffix: string }): Studio {
   const organizationId = `f5000000-0000-4000-8000-${options.suffix}`;
   const profileId = `f6000000-0000-4000-8000-${options.suffix}`;
@@ -732,11 +520,6 @@ function createStudio(options: { name: string; suffix: string }): Studio {
   };
 }
 
-/**
- * Durable rows that make a studio a real, usable workspace: the organization on
- * the plan under test, its admin membership, its Brand Profile, and (for the
- * lifecycle studio) one connected Channel to schedule at.
- */
 async function provisionStudio(studio: Studio, accountPlatform?: string): Promise<void> {
   await systemTransaction(async (client) => {
     await client.query(
@@ -767,8 +550,6 @@ async function provisionStudio(studio: Studio, accountPlatform?: string): Promis
         ],
       );
     }
-    // Usage reconciliation is driven by this table; starting it already due lets
-    // the maintenance sweep reconcile this workspace on demand.
     await client.query(
       `INSERT INTO usage_reconciliation_state (org_id, next_reconciliation_at)
        VALUES ($1, now() - INTERVAL '1 minute')
@@ -789,17 +570,6 @@ const lifecycleStudio = createStudio({
   suffix: "000000000002",
 });
 
-// ---------------------------------------------------------------------------
-// Database and HTTP helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Runs a Promise-style fixture body inside the Effect system transaction.
- *
- * The Effect client's `query` is unwrapped to a `Queryable` facade so bodies keep
- * their natural shape while the transaction lifecycle stays on
- * `withSystemTransactionEffect`.
- */
 function systemTransaction<T>(operation: (client: Queryable) => Promise<T>): Promise<T> {
   return Effect.runPromise(
     withSystemTransactionEffect(apiEnv, (client) =>
@@ -814,7 +584,6 @@ function systemTransaction<T>(operation: (client: Queryable) => Promise<T>): Pro
   );
 }
 
-/** One API call's observable outcome. */
 interface ApiResponse {
   body: unknown;
   replayed: boolean;
@@ -823,13 +592,11 @@ interface ApiResponse {
 
 let requestCounter = 0;
 
-/** Unique idempotency key so repeated cases never replay one another's response. */
 function nextKey(prefix: string): string {
   requestCounter += 1;
   return `upload-quota-${prefix}-${requestCounter}`;
 }
 
-/** Calls one studio as its actor; returns status/replay evidence and untrusted JSON, or null for a non-JSON body. */
 async function api(
   studio: Studio,
   path: string,
@@ -856,7 +623,6 @@ async function api(
   };
 }
 
-/** Reads the canonical error envelope's code and message. */
 function errorOf(body: unknown): { code: string; message: string } {
   if (!body || typeof body !== "object" || !("error" in body)) {
     throw new Error("response body carries no error envelope");
@@ -870,7 +636,6 @@ function errorOf(body: unknown): { code: string; message: string } {
   return { code, message };
 }
 
-/** Reads the ordered attachment ids out of a Post projection. */
 function attachmentIdsOf(body: unknown): string[] {
   if (!body || typeof body !== "object" || !("attachments" in body)) {
     throw new Error("response body has no attachments projection");
@@ -889,7 +654,6 @@ function attachmentIdsOf(body: unknown): string[] {
   return assetIds;
 }
 
-/** Reads the durable monthly storage counter; missing rows represent zero usage. */
 async function recordedUsage(studio: Studio): Promise<number> {
   return systemTransaction(async (client) => {
     const result = await client.query<{ storage_bytes: string }>(
@@ -901,30 +665,6 @@ async function recordedUsage(studio: Studio): Promise<number> {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Storage accounting observations
-// ---------------------------------------------------------------------------
-
-/**
- * Bytes a workspace currently owes storage for, using the same authoritative
- * rule the API charges, `reserveOutputs` reserves against, and the settlement
- * releases: every non-deleted object row contributes
- * `GREATEST(COALESCE(bytes, 0), COALESCE(reserved_bytes, 0))`, plus every live
- * upload reservation.
- *
- * GREATEST and not a sum because one physical key cannot hold its old and its
- * replacement bytes simultaneously: a row that recorded measured output while
- * still holding its planned reservation stays charged at the larger of the two
- * until promotion or settlement releases it.
- *
- * A cancelled, expired, or rejected upload therefore stays charged here until
- * its external delete settles — the bytes move from the reservation onto the
- * staged row rather than disappearing — which is exactly the continuity this
- * suite asserts.
- *
- * Read alongside a behavioral assertion (a refusal at a known boundary, or a
- * public counter transition) rather than instead of one.
- */
 async function chargedBytes(organizationId: string): Promise<bigint> {
   return systemTransaction(async (client) => {
     const result = await client.query<{ total: string | null }>(
@@ -944,7 +684,6 @@ async function chargedBytes(organizationId: string): Promise<bigint> {
   });
 }
 
-/** Live upload reservations of one workspace, oldest first. */
 async function liveReservations(organizationId: string) {
   return systemTransaction(async (client) => {
     const result = await client.query<{
@@ -962,7 +701,6 @@ async function liveReservations(organizationId: string) {
   });
 }
 
-/** Durable lifecycle facts of one Asset. */
 async function assetState(assetId: string) {
   return systemTransaction(async (client) => {
     const result = await client.query<{
@@ -973,7 +711,6 @@ async function assetState(assetId: string) {
   });
 }
 
-/** Every inventoried object row of one Asset, ordered for stable comparison. */
 async function objectRows(assetId: string) {
   return systemTransaction(async (client) => {
     const result = await client.query<{
@@ -995,15 +732,6 @@ async function objectRows(assetId: string) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
-/**
- * A genuine PNG payload of an exact byte length: signature, IHDR with real
- * dimensions, and filler, so a real decoder sees a valid image header and the
- * bucket reports the size the session reserved.
- */
 function pngPayload(size: number, width = 64, height = 64): Uint8Array {
   const bytes = new Uint8Array(size);
   bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -1017,20 +745,15 @@ function pngPayload(size: number, width = 64, height = 64): Uint8Array {
   return bytes;
 }
 
-/** Durable identities of one created upload session. */
 interface BegunUpload {
   assetId: string;
-  /** Deadline the API declared for the issued PUT grant; null for multipart. */
   grantExpiresAt: Date | null;
-  /** Real signed PUT URL returned to the client; null for multipart sessions. */
   grantUrl: string | null;
   objectKey: string;
   sessionId: string;
-  /** The strategy the route committed the session to, per UploadSession. */
   strategy: "single" | "multipart";
 }
 
-/** Body of one upload-session request, shaped as the public route accepts it. */
 function uploadSessionBody(
   studio: Studio,
   options: { contentType?: string; fileSize: number; title: string },
@@ -1047,7 +770,6 @@ function uploadSessionBody(
   };
 }
 
-/** Requests one upload session without asserting the outcome. */
 function requestUpload(
   studio: Studio,
   options: { contentType?: string; fileSize: number; title: string },
@@ -1059,11 +781,6 @@ function requestUpload(
   });
 }
 
-/**
- * Creates an upload session through the public route and returns its durable
- * identities. No bytes are written yet, so the case decides when (and whether)
- * the object lands.
- */
 async function beginUpload(
   studio: Studio,
   options: { contentType?: string; fileSize: number; title: string },
@@ -1094,12 +811,10 @@ async function beginUpload(
   };
 }
 
-/** Uploads real bytes at the session's staging key, exactly as a client would. */
 function landBytes(upload: BegunUpload, bytes: Uint8Array): void {
   putObject(upload.objectKey, bytes, "image/png");
 }
 
-/** Finalizes a session through the public route. */
 function finalizeUpload(studio: Studio, upload: BegunUpload): Promise<ApiResponse> {
   return api(studio, `/api/v1/asset-upload-sessions/${upload.sessionId}/complete`, {
     body: {},
@@ -1108,10 +823,6 @@ function finalizeUpload(studio: Studio, upload: BegunUpload): Promise<ApiRespons
   });
 }
 
-/**
- * Uploads, lands real bytes, and finalizes one image, so a case starts from an
- * Asset whose real storage is already charged.
- */
 async function uploadReadyImage(
   studio: Studio,
   title: string,
@@ -1124,7 +835,6 @@ async function uploadReadyImage(
   return upload;
 }
 
-/** Reads the durable outbox event id written for one Asset lifecycle transition. */
 async function lifecycleEventId(assetId: string, topic: string): Promise<string> {
   return systemTransaction(async (client) => {
     const result = await client.query<{ id: string }>(
@@ -1140,7 +850,6 @@ async function lifecycleEventId(assetId: string, topic: string): Promise<string>
   });
 }
 
-/** Builds the queue message the relay would deliver for one outbox event. */
 function outboxMessage(
   eventId: string,
   assetId: string,
@@ -1158,13 +867,11 @@ function outboxMessage(
   };
 }
 
-/** Delivers one Asset lifecycle event and reports how the delivery ended. */
 async function deliver(message: OutboxMessage): Promise<"failed" | "processed" | "skipped"> {
   const exit = await Effect.runPromiseExit(assetProcessor.process(message));
   return Exit.isSuccess(exit) ? exit.value : "failed";
 }
 
-/** Delivers the processing event the upload finalization enqueued. */
 async function deliverProcessing(studio: Studio, assetId: string) {
   const eventId = await lifecycleEventId(assetId, "asset.processing.requested");
   return deliver(
@@ -1172,7 +879,6 @@ async function deliverProcessing(studio: Studio, assetId: string) {
   );
 }
 
-/** Delivers the deletion event the ownership-aware sweep armed. */
 async function deliverDeletion(studio: Studio, assetId: string) {
   const eventId = await lifecycleEventId(assetId, "asset.deletion.requested");
   return deliver(
@@ -1180,32 +886,16 @@ async function deliverDeletion(studio: Studio, assetId: string) {
   );
 }
 
-/** Runs the automation maintenance sweep (orphan claim, reclamation, usage). */
 function runMaintenance() {
   return Effect.runPromise(assetProcessor.runMaintenance());
 }
 
-/** Resident bytes installed per object kind, so each kind's charge is checkable. */
 interface ResidentInventory {
   original: number;
   rendition: number;
   thumbnail: number;
 }
 
-/**
- * Fills a workspace's resident storage to an exact byte total.
- *
- * The rows are ordinary originals, thumbnails, and renditions on dedicated
- * fixture Assets: they are the durable inventory the Entitlement check reads, so
- * a case can place the workspace a known number of bytes below its plan limit
- * and observe exactly where the next reservation is refused. Seeded rows carry
- * no bucket bytes and no case here makes an object-availability claim about
- * them; every availability claim is about bytes this file uploaded itself.
- *
- * @param studio - Workspace to fill.
- * @param totalBytes - Exact number of resident bytes to install.
- * @returns Per-kind byte totals actually installed.
- */
 async function seedResidentInventory(
   studio: Studio,
   totalBytes: number,
@@ -1265,11 +955,6 @@ async function seedResidentInventory(
   return totals;
 }
 
-/**
- * Removes everything one studio owns and reinstalls an exact resident baseline,
- * so the next case starts from a known distance below the plan limit without
- * touching any other workspace.
- */
 async function resetStudio(studio: Studio, residentBytes: number): Promise<ResidentInventory> {
   await systemTransaction(async (client) => {
     await client.query("DELETE FROM posts WHERE org_id = $1", [studio.organizationId]);
@@ -1303,13 +988,6 @@ async function resetStudio(studio: Studio, residentBytes: number): Promise<Resid
   return seedResidentInventory(studio, residentBytes);
 }
 
-/**
- * Reclaims one seeded derived object and reports the bytes its removal released.
- *
- * A derived object is ordinary inventory, so reclaiming it must free exactly its
- * own size and nothing else: that is what distinguishes a real per-object charge
- * from a row that merely exists.
- */
 async function reclaimSeededObject(
   studio: Studio,
   kind: "rendition" | "thumbnail",
@@ -1331,10 +1009,6 @@ async function reclaimSeededObject(
   });
 }
 
-/**
- * Moves an Asset's seven-day orphan deadline into the past so the
- * ownership-aware sweep considers it, without waiting seven real days.
- */
 function makeOrphanDue(assetId: string): Promise<void> {
   return systemTransaction(async (client) => {
     await client.query(
@@ -1348,10 +1022,6 @@ function makeOrphanDue(assetId: string): Promise<void> {
   });
 }
 
-/**
- * Moves a session's expiry into the past. Expiry is the only clock the session
- * expiry sweep compares against, so this is its deterministic control.
- */
 function expireSession(sessionId: string): Promise<void> {
   return systemTransaction(async (client) => {
     await client.query(
@@ -1363,7 +1033,6 @@ function expireSession(sessionId: string): Promise<void> {
   });
 }
 
-/** Reads a session's own expiry: the deadline that is not a signed grant's. */
 async function sessionExpiry(sessionId: string): Promise<Date> {
   return systemTransaction(async (client) => {
     const result = await client.query<{ expires_at: Date }>(
@@ -1374,7 +1043,6 @@ async function sessionExpiry(sessionId: string): Promise<Date> {
   });
 }
 
-/** Makes a workspace due for usage reconciliation again. */
 function makeUsageReconciliationDue(organizationId: string): Promise<void> {
   return systemTransaction(async (client) => {
     await client.query(
@@ -1386,15 +1054,6 @@ function makeUsageReconciliationDue(organizationId: string): Promise<void> {
   });
 }
 
-/**
- * Closes the writer window a cancelled upload's still-valid signed grant has.
- *
- * Reclamation is deliberately not due while that window is open: the durable
- * hold an upload leaves behind runs to its session's own expiry, which is the
- * last instant a signed PUT can fire. Both durable markers of that hold are moved
- * into the past here, expressing "the writer window has closed" without
- * restating any specific grant lifetime.
- */
 function closeGrantWindow(assetId: string): Promise<void> {
   return systemTransaction(async (client) => {
     await client.query(
@@ -1407,8 +1066,6 @@ function closeGrantWindow(assetId: string): Promise<void> {
   });
 }
 
-// The seeded abandoned upload another suite leaves due for the orphan sweep. The
-// maintenance sweep is global, so its state is restored after this suite runs.
 const seededDueOrphanId = "d0000000-0000-4000-8000-000000000008";
 let seededDueOrphanBefore:
   | {
@@ -1434,8 +1091,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     });
   });
 
-  // Remove only this suite's workspaces and restore the seeded sweep candidate,
-  // binding the two organization ids as one PostgreSQL UUID-array parameter.
   afterAll(async () => {
     await resetStudio(reservationStudio, 0);
     await resetStudio(lifecycleStudio, 0);
@@ -1483,9 +1138,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
       title: "Reservation two",
     });
 
-    // Two reservations of one payload each reach the plan limit exactly. The
-    // staging inventory rows carry no bytes of their own, so the same two uploads
-    // would already have been refused had the reservation been charged twice.
     for (const upload of [first, second]) {
       const rows = await objectRows(upload.assetId);
       expect(rows).toHaveLength(1);
@@ -1502,7 +1154,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(refused.status).toBe(422);
     expect(errorOf(refused.body).code).toBe("quota_exceeded");
 
-    // The refusal is stable: repeating it grants nothing and changes nothing.
     const repeated = await requestUpload(reservationStudio, {
       fileSize: probeBytes,
       title: "One payload too many again",
@@ -1512,9 +1163,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(await chargedBytes(reservationStudio.organizationId)).toBe(BigInt(storageCap));
     expect((await liveReservations(reservationStudio.organizationId)).length).toBe(2);
 
-    // Derived objects are charged storage, not just inventory: reclaiming one
-    // thumbnail frees exactly its own bytes, which is precisely what turns a
-    // previously refused upload into an admitted one.
     const beyond = probeBytes + baseline.thumbnail;
     const beforeReclaim = await requestUpload(reservationStudio, {
       fileSize: beyond,
@@ -1526,8 +1174,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(await chargedBytes(reservationStudio.organizationId)).toBe(
       BigInt(storageCap - baseline.thumbnail),
     );
-    // Only the thumbnail's own bytes came back, so only a payload of that size
-    // fits again: the workspace returns to exactly the plan limit.
     const afterReclaim = await requestUpload(reservationStudio, {
       fileSize: baseline.thumbnail,
       title: "Fits once the thumbnail is reclaimed",
@@ -1539,9 +1185,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
   it("admits exactly one of two concurrent reservations at the plan limit", async () => {
     await resetStudio(reservationStudio, storageCap - probeBytes);
 
-    // Two creators racing for the last payload of the plan. Serialized accounting
-    // admits one; unsynchronized accounting would admit both and oversubscribe
-    // Entitlements by a whole payload.
     const attempts = await Promise.all([
       requestUpload(reservationStudio, {
         fileSize: probeBytes,
@@ -1557,15 +1200,11 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     const refusedAttempt = attempts.find((attempt) => attempt.status === 422)!;
     expect(errorOf(refusedAttempt.body).code).toBe("quota_exceeded");
 
-    // Exactly one claim survives: one live reservation, and the refused attempt
-    // inserted no Asset or session at all.
     const reservations = await liveReservations(reservationStudio.organizationId);
     expect(reservations).toHaveLength(1);
     expect(reservations[0]!.state).toBe("reserved");
     expect(await chargedBytes(reservationStudio.organizationId)).toBe(BigInt(storageCap));
 
-    // The admitted reservation is a real capacity claim: the winner can land and
-    // finalize its bytes.
     const winner = await systemTransaction(async (client) => {
       const result = await client.query<{ object_key: string }>(
         "SELECT object_key FROM asset_upload_sessions WHERE id = $1",
@@ -1581,12 +1220,9 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     );
     expect(finalized.status).toBe(202);
 
-    // Settlement moves the same bytes from reservation to resident storage: the
-    // charge is unchanged and never counted twice.
     expect(await chargedBytes(reservationStudio.organizationId)).toBe(BigInt(storageCap));
     expect((await liveReservations(reservationStudio.organizationId)).length).toBe(0);
 
-    // With the plan exactly full, the next payload is still refused.
     const afterFull = await requestUpload(reservationStudio, {
       fileSize: 1,
       title: "Nothing left",
@@ -1596,21 +1232,11 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
   });
 
   it("keeps a saved draft's ready media charged under the same plan limit", async () => {
-    // A processed Asset holds three charges for one uploaded file: the retired
-    // staging copy, the protected original copied out of it, and the media
-    // type's own upload ceiling, which the output reservation keeps charged for
-    // the window its create-only write grant is still live — normalization can
-    // legitimately produce more bytes than were uploaded, so the reservation is
-    // the ceiling rather than the payload. The baseline therefore leaves room
-    // for two payloads plus a full ceiling, and one extra payload is the
-    // headroom this case then spends to the byte: with the ceiling claimed
-    // exactly, what remains is what the creator can still store.
     await resetStudio(lifecycleStudio, storageCap - 3 * probeBytes - imageCeilingBytes);
 
     const usageBefore = await recordedUsage(lifecycleStudio);
     const ready = await uploadReadyImage(lifecycleStudio, "Draft attachment");
 
-    // Finalization counts verified bytes in the month they landed.
     const usageAfterUpload = await recordedUsage(lifecycleStudio);
     expect(usageAfterUpload).toBe(usageBefore + probeBytes);
 
@@ -1634,8 +1260,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(attachmentIdsOf(post.body)).toEqual([ready.assetId]);
     const postId = (post.body as Post).id;
 
-    // The draft retains the bytes, and a saved draft is not an exemption: an
-    // upload that only fits if the attachment were free is refused.
     expect(await chargedBytes(lifecycleStudio.organizationId)).toBe(chargedWithAttachment);
     const refused = await requestUpload(lifecycleStudio, {
       fileSize: headroom + 1,
@@ -1644,14 +1268,12 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(refused.status).toBe(422);
     expect(errorOf(refused.body).code).toBe("quota_exceeded");
 
-    // Exactly the remaining headroom fills the plan to the byte.
     const exactFit = await beginUpload(lifecycleStudio, {
       fileSize: headroom,
       title: "Draft exact fit",
     });
     expect(await chargedBytes(lifecycleStudio.organizationId)).toBe(BigInt(storageCap));
 
-    // The attachment survives a later save of the same draft and stays charged.
     const resaved = await api(lifecycleStudio, `/api/v1/posts/${postId}`, {
       body: {
         brand_profile_id: lifecycleStudio.profileId,
@@ -1664,8 +1286,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(attachmentIdsOf(resaved.body)).toEqual([ready.assetId]);
     expect(await chargedBytes(lifecycleStudio.organizationId)).toBe(BigInt(storageCap));
 
-    // Cancelling the reservation does not free capacity while the signed grant
-    // is still live: the bytes move onto the staged row's reclaim hold.
     const cancelled = await api(
       lifecycleStudio,
       `/api/v1/asset-upload-sessions/${exactFit.sessionId}`,
@@ -1677,8 +1297,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(cancelledRow.status).toBe("deleting");
     expect(cancelledRow.reserved_bytes).toBe(String(headroom));
 
-    // Only once the writer window has closed and the external delete settles is
-    // the charge released; the draft's media is charged throughout.
     await closeGrantWindow(exactFit.assetId);
     await makeOrphanDue(exactFit.assetId);
     await runMaintenance();
@@ -1688,30 +1306,13 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
   });
 
   it("reserves output capacity atomically for concurrent processors", async () => {
-    // Each processing run promotes its staged upload into the protected
-    // original key: the retired staging copy and the promoted original are both
-    // charged until the writer window closes, so a promoted upload costs two
-    // payloads. A run then reserves the media type's own upload ceiling —
-    // normalization can legitimately produce more bytes than were uploaded —
-    // which is exactly the capacity the baseline must leave free for one run
-    // and must withhold from the second. The baseline therefore covers those
-    // two promotions on top of the ceiling.
     await resetStudio(lifecycleStudio, storageCap - 4 * probeBytes - imageCeilingBytes);
     const left = await uploadReadyImage(lifecycleStudio, "Processing left");
     const right = await uploadReadyImage(lifecycleStudio, "Processing right");
-    // Promotion has not happened yet: finalization settles each upload's
-    // verified bytes onto its staging row, and that row is the only
-    // still-writable copy. Two finalized uploads are therefore charged exactly
-    // two payloads here, and the whole media ceiling is still free — which is
-    // what the first run will claim and the second must be refused for.
     expect(await chargedBytes(lifecycleStudio.organizationId)).toBe(
       BigInt(storageCap - 2 * probeBytes - imageCeilingBytes),
     );
 
-    // A transient engine failure keeps the reserved output capacity inventoried
-    // (the delivery ends "failed" and stays retryable), while the run that could
-    // not claim capacity ends durably "processed" with the asset marked failed:
-    // a permanent refusal is recorded, not retried forever.
     engineMode = "retryable_failure";
     engineInvocations.length = 0;
     const outcomes = await Promise.all([
@@ -1720,7 +1321,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     ]);
     expect([...outcomes].sort()).toEqual(["failed", "processed"]);
 
-    // Only the run that won the capacity claim invoked the engine.
     expect(engineInvocations).toHaveLength(1);
 
     const writingRows = await Promise.all(
@@ -1735,32 +1335,20 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     const refused = writingRows.filter((entry) => entry.rows.length === 0);
     expect(held).toHaveLength(1);
     expect(refused).toHaveLength(1);
-    // The held row is still purely a claim: nothing was produced, so it carries
-    // the reservation and no settled bytes. That is what makes the reservation
-    // the whole of the charge in this case — and what keeps the two charged-byte
-    // expressions in agreement here.
     const heldRow = held[0]!.rows[0]!;
     expect(BigInt(heldRow.reserved_bytes ?? "0")).toBe(BigInt(imageCeilingBytes));
     expect(heldRow.bytes).toBeNull();
-    // The output capability the engine actually received commits to the
-    // persisted write hold as its absolute deadline: the URL's own signature
-    // instant plus X-Amz-Expires can never outlive the window its bytes stay
-    // inventoried and charged for.
     expect(engineOutputDeadlines).toHaveLength(1);
     expect(heldRow.write_hold_until).not.toBeNull();
     const outputGrantDeadline = engineOutputDeadlines[0]!;
     expect(outputGrantDeadline).toBeLessThanOrEqual(heldRow.write_hold_until!.getTime());
     expect(heldRow.write_hold_until!.getTime() - outputGrantDeadline).toBeLessThan(10_000);
 
-    // The loser carries the creator-actionable reason instead of retrying
-    // forever, and no capacity beyond the plan was ever claimed.
     const loser = await assetState(refused[0]!.assetId);
     expect(loser.status).toBe("failed");
     expect(loser.failure_code).toBe("storage_limit_reached");
     expect(await chargedBytes(lifecycleStudio.organizationId)).toBe(BigInt(storageCap));
 
-    // Redelivering the refused event changes nothing: the failure is durable and
-    // the plan is never charged twice for the same output.
     expect(await deliverProcessing(lifecycleStudio, refused[0]!.assetId)).toBe("skipped");
     expect(await chargedBytes(lifecycleStudio.organizationId)).toBe(BigInt(storageCap));
   });
@@ -1796,8 +1384,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(before.status).toBe(200);
     const chargedBefore = await chargedBytes(lifecycleStudio.organizationId);
 
-    // A rejected save removes every content source, including the Channel
-    // caption; text held only in an override is still a real composition.
     const emptied = await api(lifecycleStudio, `/api/v1/posts/${postId}`, {
       body: {
         attachment_ids: [],
@@ -1812,10 +1398,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(errorOf(emptied.body).code).toBe("validation_error");
     expect(await chargedBytes(lifecycleStudio.organizationId)).toBe(chargedBefore);
 
-    // A rejected finalization: bytes that do not match the reserved size are
-    // not the approved media. The upload fails and its reservation moves onto
-    // the staged row's reclaim hold — the object may physically exist, so it
-    // stays charged until the external delete settles.
     const mismatched = await beginUpload(lifecycleStudio, {
       fileSize: probeBytes,
       title: "Rejected finalization",
@@ -1834,18 +1416,12 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(rejectedRow.status).toBe("deleting");
     expect(rejectedRow.bytes).toBeNull();
     expect(rejectedRow.reserved_bytes).toBe(String(probeBytes));
-    // The landed bytes are physically still in the bucket, which is exactly
-    // why their charge is held rather than released at refusal time. The hold
-    // is the deadline the issued PUT grant was signed with — the URL can still
-    // legally write until then — not the session's longer expiry.
     expect(objects.has(mismatched.objectKey)).toBe(true);
     expect(rejectedRow.write_hold_until).not.toBeNull();
     expect(
       Math.abs(rejectedRow.write_hold_until!.getTime() - mismatched.grantExpiresAt!.getTime()),
     ).toBeLessThanOrEqual(1_000);
 
-    // Reclamation after the writer window closes releases the held bytes, so a
-    // rejected upload ends charged nothing at all.
     await closeGrantWindow(mismatched.assetId);
     await makeOrphanDue(mismatched.assetId);
     await runMaintenance();
@@ -1853,8 +1429,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(await chargedBytes(lifecycleStudio.organizationId)).toBe(chargedBefore);
     expect(objects.has(mismatched.objectKey)).toBe(false);
 
-    // A rejected schedule: an attachment with no verified media ready cannot be
-    // published, and the refusal names the problem instead of half-scheduling.
     const unprocessed = await uploadReadyImage(lifecycleStudio, "Still processing");
     const secondDraft = await api(lifecycleStudio, "/api/v1/posts", {
       body: {
@@ -1881,8 +1455,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(errorOf(refusedSchedule.body).code).toBe("asset_not_ready");
     expect(await chargedBytes(lifecycleStudio.organizationId)).toBe(chargedBeforeSchedule);
 
-    // Every rejection left the stored composition, its attachment order, and its
-    // per-Channel settings exactly as they were.
     const after = await api(lifecycleStudio, `/api/v1/posts/${postId}`);
     expect(after.status).toBe(200);
     expect(attachmentIdsOf(after.body)).toEqual(attachmentIdsOf(before.body));
@@ -1895,9 +1467,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
   });
 
   it("cancels an upload, reclaims its staged bytes, and frees only its reservation", async () => {
-    // Two real uploads fill the plan exactly, so the held charge of a cancelled
-    // upload is observable as a refusal rather than an invisible reservation
-    // transfer.
     await resetStudio(lifecycleStudio, storageCap - 2 * probeBytes);
     const cancelled = await beginUpload(lifecycleStudio, {
       fileSize: probeBytes,
@@ -1917,10 +1486,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     );
     expect(abort.status).toBe(204);
 
-    // The bytes are really gone from the bucket, yet the capacity is not back:
-    // the signed PUT grant already minted can still recreate them until the
-    // deadline it was issued with, so the charge moves onto the staged row's
-    // hold. A payload that would only fit if cancelling freed quota is refused.
     expect(objects.has(cancelled.objectKey)).toBe(false);
     expect(deletedKeys).toContain(cancelled.objectKey);
     const blockedWhileHeld = await requestUpload(lifecycleStudio, {
@@ -1933,13 +1498,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(cancelledRow.status).toBe("deleting");
     expect(cancelledRow.reserved_bytes).toBe(String(probeBytes));
 
-    // Cancelling cannot revoke the minted URL: the hold is the deadline that
-    // was actually signed — the ~15-minute grant window the URL itself
-    // commits to — never the session's own day-long expiry. The signed deadline
-    // is bounded against the declared expiry rather than required to equal it,
-    // because SigV4 quantizes it to whole seconds: it may sit up to two seconds
-    // earlier, but it must never sit later, since a later deadline is a URL
-    // that can outlive the hold its bytes are inventoried under.
     expect(cancelled.grantUrl).not.toBeNull();
     expect(cancelled.grantExpiresAt).not.toBeNull();
     signedGrantDeadlineMs(cancelled.grantUrl!, cancelled.grantExpiresAt!.getTime());
@@ -1952,7 +1510,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
       (await sessionExpiry(cancelled.sessionId)).getTime() - 60_000,
     );
 
-    // Cancelling again with a fresh request releases nothing a second time.
     const duplicate = await api(
       lifecycleStudio,
       `/api/v1/asset-upload-sessions/${cancelled.sessionId}`,
@@ -1964,13 +1521,10 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     );
     expect(liveSessionIds).toEqual([kept.sessionId]);
 
-    // The cancelled Asset is durably failed with its actionable reason.
     const cancelledState = await assetState(cancelled.assetId);
     expect(cancelledState.status).toBe("failed");
     expect(cancelledState.failure_code).toBe("upload_aborted");
 
-    // Once the writer window is closed the sweep settles the hold exactly
-    // once: the capacity comes back and a new upload takes it.
     await closeGrantWindow(cancelled.assetId);
     await makeOrphanDue(cancelled.assetId);
     await runMaintenance();
@@ -1984,11 +1538,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     });
     expect(reused.sessionId).not.toBe(cancelled.sessionId);
 
-    // A failed remote delete keeps the bytes in the bucket, and the durable
-    // reclaim removes them after the writer window has closed — the sibling
-    // upload's own reservation is untouched throughout. The grant was minted
-    // and never revoked, so the failed cleanup retains the recorded ~15-minute
-    // deadline rather than parking the charge for the session's day.
     deleteFailures.add(kept.objectKey);
     const failingAbort = await api(
       lifecycleStudio,
@@ -2021,10 +1570,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     landBytes(upload, pngPayload(probeBytes));
     const sessionEnds = await sessionExpiry(upload.sessionId);
 
-    // The read refreshes the PUT grant: it finds the session active, decides a
-    // deadline, and then its signing pauses on the latch. The cancel commits in
-    // the gap — the exact race a relative TTL would resolve against the later
-    // clock — and a real platform-clock delay makes the mint observably late.
     const gate = pauseNextUploadSign();
     const read = api(lifecycleStudio, `/api/v1/asset-upload-sessions/${upload.sessionId}`);
     await gate.entered;
@@ -2039,14 +1584,8 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     const detail = (await read).body as Schemas["UploadSessionDetailResponse"];
     const refreshed = detail.upload_session.single_upload;
     if (detail.upload_session.status === "aborted") {
-      // The revalidation under the session lock saw the committed cancel, so
-      // the stale read reports the terminal state and exposes no grant at all.
       expect(refreshed).toBeNull();
     } else {
-      // The read's deadline was durably recorded before the cancel committed:
-      // its mint is bounded by that recorded instant, not extended by how long
-      // the signature took — a relative TTL computed at decision time would
-      // land ~1.2s beyond the declared expiry.
       expect(refreshed).not.toBeNull();
       expect(signedUrlDeadlineMs(refreshed!.url)).toBeLessThanOrEqual(
         Date.parse(refreshed!.expires_at),
@@ -2054,9 +1593,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
       expect(Date.parse(refreshed!.expires_at)).toBeLessThan(sessionEnds.getTime() - 60_000);
     }
 
-    // Whichever interleaving won, the cancelled upload stays charged for
-    // exactly the window of the latest recorded grant — not for the session's
-    // day-long expiry — and the sweep settles it exactly once.
     const stagedRow = (await objectRows(upload.assetId))[0]!;
     expect(stagedRow.status).toBe("deleting");
     expect(stagedRow.write_hold_until).not.toBeNull();
@@ -2076,8 +1612,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
   });
 
   it("expires an abandoned session, releases its reservation, and reclaims once", async () => {
-    // Two real uploads leave one payload of headroom, so the abandoned
-    // session's held charge is observable as a refusal, not just a transfer.
     await resetStudio(lifecycleStudio, storageCap - 3 * probeBytes);
     const abandoned = await beginUpload(lifecycleStudio, {
       fileSize: probeBytes,
@@ -2090,8 +1624,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     });
     landBytes(survivor, pngPayload(probeBytes));
 
-    // Time control: the session's own expiry is written into the past, which is
-    // the only clock the expiry sweep compares against.
     await expireSession(abandoned.sessionId);
     const next = await beginUpload(lifecycleStudio, {
       fileSize: probeBytes,
@@ -2099,9 +1631,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     });
     expect(next.sessionId).not.toBe(abandoned.sessionId);
 
-    // The expiry released the abandoned reservation — the new upload took its
-    // place — but its landed bytes stay charged on the staged row's hold until
-    // the external delete settles, so the workspace is still full.
     const sessions = (await liveReservations(lifecycleStudio.organizationId)).map(
       (reservation) => reservation.session_id,
     );
@@ -2122,16 +1651,11 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(expiredRow.status).toBe("deleting");
     expect(expiredRow.reserved_bytes).toBe(String(probeBytes));
     expect(objects.has(abandoned.objectKey)).toBe(true);
-    // Expiring the session does not revoke the PUT grant already signed: the
-    // staged row's hold is the recorded ~15-minute grant deadline, which still
-    // has minutes to run even though the session itself is overdue.
     expect(expiredRow.write_hold_until).not.toBeNull();
     expect(
       Math.abs(expiredRow.write_hold_until!.getTime() - abandoned.grantExpiresAt!.getTime()),
     ).toBeLessThanOrEqual(1_000);
 
-    // The orphan sweep plus the external delete release the held charge — but
-    // only once the issued grant's own window has lapsed.
     await closeGrantWindow(abandoned.assetId);
     await makeOrphanDue(abandoned.assetId);
     await runMaintenance();
@@ -2141,8 +1665,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     const chargedAfterReclaim = await chargedBytes(lifecycleStudio.organizationId);
     expect(chargedAfterReclaim).toBe(BigInt(storageCap - probeBytes));
 
-    // Duplicate cleanup releases nothing twice, and the workspace's other
-    // resident media is untouched.
     expect(await deliverDeletion(lifecycleStudio, abandoned.assetId)).toBe("skipped");
     await runMaintenance();
     expect(await chargedBytes(lifecycleStudio.organizationId)).toBe(chargedAfterReclaim);
@@ -2152,11 +1674,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
 
   it("reclaims a confirmed-abort multipart upload immediately while a failed abort retains the charge", async () => {
     await resetStudio(lifecycleStudio, 0);
-    // One part plan above the real multipart threshold, sized from the same
-    // policy the route consults rather than a number that could silently drift
-    // under it: if the API ever answered 'single' here the abort assertions
-    // below would be measuring single-PUT semantics while claiming to prove
-    // multipart abort, which is exactly what the strategy checks rule out.
     const multipartBytes = ASSET_UPLOAD_POLICY.multipartThresholdBytes + 1;
     const session = await beginUpload(lifecycleStudio, {
       contentType: "video/mp4",
@@ -2164,8 +1681,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
       title: "Abandoned multipart",
     });
     expect(session.strategy).toBe("multipart");
-    // Mint real part grants first: the staging row records their ~15-minute
-    // deadline, and that is the hold the confirmed abort gets to release.
     const parts = await api(
       lifecycleStudio,
       `/api/v1/asset-upload-sessions/${session.sessionId}/parts`,
@@ -2184,7 +1699,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
       expect(Date.parse(grant.expires_at)).toBe(partDeadline);
       expect(signedUrlDeadlineMs(grant.url)).toBeLessThanOrEqual(partDeadline + 1_000);
     }
-    // The recorded deadline is the minted grant window, not the session's day.
     expect(partDeadline).toBeLessThan((await sessionExpiry(session.sessionId)).getTime() - 60_000);
 
     const abort = await api(lifecycleStudio, `/api/v1/asset-upload-sessions/${session.sessionId}`, {
@@ -2193,9 +1707,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     });
     expect(abort.status).toBe(204);
 
-    // The external abort confirmed at the bucket boundary: the upload id is
-    // dead, so no signed part URL can write anymore and the writer window is
-    // already closed — the bytes stay charged only until the settled delete.
     expect(abortedUploads).toContain(`upload-${session.objectKey}`);
     expect(objects.has(session.objectKey)).toBe(false);
     expect(
@@ -2210,7 +1721,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(heldRow.write_hold_until!.getTime()).toBeLessThanOrEqual(Date.now() + 1_000);
     expect(await chargedBytes(lifecycleStudio.organizationId)).toBe(BigInt(multipartBytes));
 
-    // Repeating the cancel releases nothing a second time.
     const duplicate = await api(
       lifecycleStudio,
       `/api/v1/asset-upload-sessions/${session.sessionId}`,
@@ -2219,16 +1729,11 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(duplicate.status).toBe(204);
     expect(await chargedBytes(lifecycleStudio.organizationId)).toBe(BigInt(multipartBytes));
 
-    // Maintenance reclaims without waiting for the grant window: the confirmed
-    // abort already ended every part writer.
     await makeOrphanDue(session.assetId);
     await runMaintenance();
     expect(await deliverDeletion(lifecycleStudio, session.assetId)).toBe("processed");
     expect(await chargedBytes(lifecycleStudio.organizationId)).toBe(0n);
 
-    // The same cancel whose external abort never confirmed retains the charge
-    // for the last grant deadline: the upload id may still be live, so nothing
-    // is reclaimed yet.
     const failed = await beginUpload(lifecycleStudio, {
       contentType: "video/mp4",
       fileSize: multipartBytes,
@@ -2254,8 +1759,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
       { idempotencyKey: nextKey("multipart-abort-fails"), method: "DELETE" },
     );
     expect(failedAbort.status).toBe(204);
-    // The bucket never confirmed the abort, so the writer grant is still live
-    // and the hold is the recorded deadline rather than a released window.
     expect(abortedUploads).not.toContain(`upload-${failed.objectKey}`);
     const failedRow = (await objectRows(failed.assetId))[0]!;
     expect(failedRow.status).toBe("deleting");
@@ -2277,14 +1780,10 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
   it("keeps resident object bytes counted across a monthly period rollover", async () => {
     await resetStudio(lifecycleStudio, storageCap - probeBytes);
 
-    // The reconciler first describes the period by its resident inventory.
     await makeUsageReconciliationDue(lifecycleStudio.organizationId);
     await runMaintenance();
     expect(await recordedUsage(lifecycleStudio)).toBe(storageCap - probeBytes);
 
-    // Model a fresh period with no recorded usage. Reconciliation also counts
-    // seeded Assets as uploads when their dates fall in this month, so clear
-    // that independent quota to ensure only resident storage can refuse this probe.
     await systemTransaction(async (client) => {
       await client.query(
         `UPDATE usage_records SET storage_bytes = 0, uploads = 0
@@ -2294,8 +1793,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     });
     expect(await recordedUsage(lifecycleStudio)).toBe(0);
 
-    // Exceed the remaining storage by one byte: a request that merely fills the
-    // limit is valid and cannot prove resident inventory survives a rollover.
     const refused = await requestUpload(lifecycleStudio, {
       fileSize: probeBytes + 1,
       title: "Rollover attempt",
@@ -2303,8 +1800,6 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(refused.status).toBe(422);
     expect(errorOf(refused.body).code).toBe("quota_exceeded");
 
-    // Reconciliation repairs the materialized counter without allowing the
-    // monthly rollover to hide resident bytes from quota enforcement.
     await makeUsageReconciliationDue(lifecycleStudio.organizationId);
     await runMaintenance();
     const afterRollover = await recordedUsage(lifecycleStudio);

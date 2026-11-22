@@ -63,7 +63,6 @@ const defaultRequirements: ProviderPublicationRequirements = {
   stitchAllowed: true,
 };
 
-/** Builds a fully resolved actor with the given seeded claims. */
 function actorFor(claims: typeof alpha): ResolvedActor {
   return {
     authUserId: claims.subject,
@@ -81,7 +80,6 @@ function actorFor(claims: typeof alpha): ResolvedActor {
   };
 }
 
-/** Runs one system-pool transaction at the integration-test boundary. */
 function systemTransaction<A, E>(
   operation: (client: EffectTransactionClient) => Effect.Effect<A, E>,
 ): Promise<A> {
@@ -90,7 +88,6 @@ function systemTransaction<A, E>(
 
 type RequirementRead = NonNullable<ProviderAdapter["getPublicationRequirements"]>;
 
-/** Builds one publish-capable TikTok adapter whose requirement read the scenario controls. */
 function requirementAdapter(read: RequirementRead): ProviderAdapter {
   return {
     capability: {
@@ -116,22 +113,12 @@ function requirementAdapter(read: RequirementRead): ProviderAdapter {
   };
 }
 
-/** Creates one controlled Provider registry for a scenario's adapters. */
 function registryFor(read: RequirementRead) {
   const registry = new ProviderRegistry();
   registry.register("tiktok", requirementAdapter(read));
   return registry;
 }
 
-/**
- * Creates the production app with the controlled Provider registry and one actor.
- *
- * Injecting the verified identity and resolved actor keeps authentication
- * deterministic while the route still performs the real tenant-scoped RLS read
- * and credential decryption. Two identities in one scenario share the registry,
- * matching the production app's single registry, so identity isolation is
- * exercised inside one configuration namespace.
- */
 function appFor(actor: ResolvedActor, registry: ProviderRegistry) {
   const identity: JwtIdentity = {
     email: actor.email,
@@ -144,7 +131,6 @@ function appFor(actor: ResolvedActor, registry: ProviderRegistry) {
   });
 }
 
-/** Issues a correlated authenticated read; defaults to the seeded database but permits configuration-transition scenarios. */
 function requirementsRequest(
   app: Hono<ApiWorkerEnvironment>,
   requestId: string,
@@ -162,7 +148,6 @@ function requirementsRequest(
   );
 }
 
-/** Test-controlled Provider read settlement used to hold coalescing pending. */
 interface RequirementGate {
   readonly promise: Promise<ProviderPublicationRequirements>;
   reject(cause: unknown): void;
@@ -174,7 +159,6 @@ interface SignalGate {
   resolve(): void;
 }
 
-/** Creates a settlement gate; ES2023 has no `Promise.withResolvers`. */
 function pendingGate(): RequirementGate {
   let resolve!: RequirementGate["resolve"];
   let reject!: RequirementGate["reject"];
@@ -185,7 +169,6 @@ function pendingGate(): RequirementGate {
   return { promise, reject, resolve };
 }
 
-/** Creates a one-shot void signal; ES2023 has no `Promise.withResolvers`. */
 function signalGate(): SignalGate {
   let resolve!: () => void;
   const promise = new Promise<void>((onResolve) => {
@@ -282,7 +265,6 @@ describe("publishing-requirement coalescing with PostgreSQL RLS", () => {
     const app = appFor(actorFor(alpha), registryFor(read));
     const first = requirementsRequest(app, "source-before");
     await firstStarted.promise;
-    // Same persisted rows and registry deliberately maximize equivalence; only binding configuration differs.
     const replacement = {
       ...env,
       DB_AUTHENTICATED: {

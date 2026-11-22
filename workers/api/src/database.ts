@@ -15,50 +15,14 @@ import type { ApiWorkerEnv } from "./env";
 const resolveAuthenticatedPool = createHyperdrivePoolCache("authenticated");
 const resolveSystemPool = createHyperdrivePoolCache("system");
 
-/**
- * Returns the PostgreSQL pool for tenant-authenticated queries.
- *
- * Connects via `DB_AUTHENTICATED` where Row Level Security is enforced from
- * verified session claims.
- *
- * @param env - Worker environment bindings containing `DB_AUTHENTICATED`.
- * @returns Cached or request-owned Pool for authenticated transactions.
- */
 export function authenticatedPoolFor(env: ApiWorkerEnv): Pool {
   return resolveAuthenticatedPool(env.DB_AUTHENTICATED, env);
 }
 
-/**
- * Returns the PostgreSQL pool for system/administrative queries.
- *
- * Connects via `DB_SYSTEM` for privileged cross-tenant operations.
- *
- * @param env - Worker environment bindings containing `DB_SYSTEM`.
- * @returns Cached or request-owned Pool for system transactions.
- */
 export function systemPoolFor(env: ApiWorkerEnv): Pool {
   return resolveSystemPool(env.DB_SYSTEM, env);
 }
 
-/**
- * Executes an effectful callback within a tenant-scoped database transaction configured with actor claims.
- *
- * Delegates to `withAuthenticatedTransactionEffect`, which serializes verified claims into a single
- * transaction-local PostgreSQL setting (`request.jwt.claims`) via `set_config(..., true)`.
- * The `is_local=true` flag scopes the setting to the current transaction, so it is invisible
- * to other transactions sharing the same pooled connection. A 10-second `statement_timeout`
- * is applied in the same scope to protect against unbounded queries.
- *
- * The claims must come from `ResolvedActor.claims` produced by actor resolution: `sub` is the
- * Better Auth subject, `org_id` the internal workspace UUID, and `org_role` the authoritative
- * `org_members` role. Identity binding and personal-workspace provisioning happen during
- * actor resolution, never inside tenant transactions.
- *
- * @param env - Worker environment bindings.
- * @param claims - Verified actor claims carrying the auth subject and resolved workspace context.
- * @param operation - Function returning an Effect given the scoped `EffectTransactionClient`.
- * @returns Effect resolving to the operation result or failing with DatabaseError or operation error.
- */
 export function withTenantTransactionEffect<A, E, R>(
   env: ApiWorkerEnv,
   claims: SessionClaims,
@@ -87,16 +51,6 @@ export function withTenantTransactionEffect<A, E, R>(
   );
 }
 
-/**
- * Executes an effectful callback within an unconstrained system-level database transaction.
- *
- * Uses the privileged `DB_SYSTEM` pool to perform cross-tenant operations, webhook ingest,
- * or background processing without tenant RLS scoping.
- *
- * @param env - Worker environment bindings.
- * @param operation - Function returning an Effect given the privileged `EffectTransactionClient`.
- * @returns Effect resolving to the operation result or failing with DatabaseError.
- */
 export function withSystemTransactionEffect<A, E, R>(
   env: ApiWorkerEnv,
   operation: (client: EffectTransactionClient) => Effect.Effect<A, E, R>,
@@ -104,14 +58,6 @@ export function withSystemTransactionEffect<A, E, R>(
   return withTransactionEffect(systemPoolFor(env), operation);
 }
 
-/**
- * Resolve the RLS-active organization id inside an authenticated Effect transaction.
- *
- * Defense-in-depth check confirming the database agrees the caller is an active member.
- *
- * @param client - Active tenant-scoped EffectTransactionClient.
- * @returns Effect resolving to the active organization UUID string or failing with ActiveOrganizationRequiredError.
- */
 export function activeOrganizationIdEffect(
   client: EffectTransactionClient,
 ): Effect.Effect<string, ActiveOrganizationRequiredError | DatabaseError> {

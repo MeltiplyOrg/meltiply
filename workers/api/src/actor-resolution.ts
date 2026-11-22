@@ -10,18 +10,6 @@ import { lazyWithSystemTransactionEffect } from "./database-module";
 import type { ApiWorkerEnv } from "./env";
 import { requireSeatCapacityEffect } from "./seats";
 
-/**
- * Fully resolved request actor: the authenticated Better Auth subject bound to
- * the internal user row, the installation ownership flag, and an authoritative
- * membership in the single shared Workspace.
- *
- * `userId` is the internal `users.id` UUID; `authUserId` is the Better Auth
- * `"user".id` subject. `role` is read from `org_members` on every request, so a
- * role change applies to the member's next request without reissuing the JWT.
- * `claims` carries the same facts in the `SessionClaims` shape consumed by
- * tenant transactions (`sub` = auth subject, `org_id` = shared workspace UUID,
- * `org_role` = role).
- */
 export interface ResolvedActor {
   authUserId: string;
   claims: SessionClaims;
@@ -63,18 +51,6 @@ interface InvitationRow extends Record<string, unknown> {
   role: string;
 }
 
-/**
- * Narrows a verified Better Auth JWT identity to the fields the actor resolver
- * needs, rejecting malformed payloads instead of trusting them.
- *
- * The JWKS verifier already guarantees signature, issuer, and audience; this
- * structural check fails closed when a verified token still lacks a usable
- * subject or email (e.g. a non-identity token minted under the same key).
- *
- * @param identity - Verified JWT identity produced by the bearer verifier.
- * @returns The auth subject id, email, display name, and verification state.
- * @throws {CoreApiError} 401 when the identity is structurally invalid.
- */
 function verifiedIdentity(identity: JwtIdentity): {
   authUserId: string;
   email: string;
@@ -89,25 +65,11 @@ function verifiedIdentity(identity: JwtIdentity): {
   return {
     authUserId,
     email,
-    // Callers that already validated the live session set this explicitly.
     emailVerified: identity.emailVerified !== false,
     name: identity.name ?? null,
   };
 }
 
-/**
- * Binds the Better Auth subject to the internal `users` row, provisioning it on
- * first sign-in and rejecting email collisions.
- *
- * Runs inside the caller's system transaction so user creation and workspace
- * provisioning commit atomically. An existing row is refreshed when the auth
- * profile changed. A different internal user already owning the email is an
- * identity conflict — email alone never attaches a new auth subject.
- *
- * @param client - Active system EffectTransactionClient.
- * @param identity - Verified auth subject id, email, and display name.
- * @returns Effect resolving to the internal user row.
- */
 function ensureInternalUser(
   client: EffectTransactionClient,
   identity: { authUserId: string; email: string; name: string | null },
@@ -145,8 +107,6 @@ function ensureInternalUser(
     );
     const row = upserted.rows[0];
     if (row) return row;
-    // ON CONFLICT ... DO UPDATE with a no-change WHERE returns zero rows when the
-    // stored profile already matches; read the row back in that case.
     const existing = yield* client.query<InternalUserRow>(
       `SELECT id, auth_user_id, email, display_name, installation_owner, suspended_at
        FROM users WHERE auth_user_id = $1 LIMIT 1`,
@@ -166,20 +126,6 @@ function ensureInternalUser(
   });
 }
 
-/**
- * Resolves the setup form's chosen Workspace name for one account.
- *
- * The bootstrap row written after a successful sign-up is the primary record. A
- * sign-up whose response never arrived — the verification mail failed, or the
- * invocation ended between the account write and the follow-up — leaves only the
- * pre-account intent, so it is read here by the account's normalized email and
- * promoted into the durable bootstrap row. That is the recovery path: the name
- * survives without reopening registration, because the account already exists.
- *
- * @param client - Active system EffectTransactionClient.
- * @param user - Internal user row being resolved.
- * @returns Effect resolving the chosen name, or null when the form omitted it.
- */
 function bootstrapWorkspaceName(
   client: EffectTransactionClient,
   user: InternalUserRow,
@@ -209,33 +155,6 @@ function bootstrapWorkspaceName(
   });
 }
 
-/**
- * Claims Installation Ownership for the first bootstrapped account and ensures
- * the installation has exactly one shared Workspace.
- *
- * The partial unique index on `users.installation_owner` arbitrates concurrent
- * first sign-ins; the conditional update is a no-op once any owner exists, so
- * an invited account can never claim ownership. The shared Workspace insert is
- * idempotent through `one_shared_workspace`. The Owner always holds the Admin
- * membership in that Workspace.
- *
- * A chosen setup Workspace name recorded by the serialized first sign-up is
- * applied here, once: the insert uses it, the onboarding row records that the
- * name is settled, and a later Settings rename is therefore never overwritten.
- * Without a chosen name the historical `<display name>'s workspace` default
- * stands and the onboarding row keeps `workspace_named = FALSE`.
- *
- * The resumable first-run row is created only for an installation that actually
- * bootstrapped through the setup form. An upgraded installation has a shared
- * Workspace and an Owner but no bootstrap record, and must never be handed an
- * `in_progress` journey — its Owner keeps normal sign-in. An ownership transfer
- * on a genuinely started installation still resumes, because the row already
- * exists and is keyed by the Workspace rather than the account.
- *
- * @param client - Active system EffectTransactionClient.
- * @param user - Internal user row being resolved.
- * @returns Effect resolving void after ownership and workspace rows exist.
- */
 function ensureInstallation(
   client: EffectTransactionClient,
   user: InternalUserRow,
@@ -261,10 +180,6 @@ function ensureInstallation(
        ON CONFLICT DO NOTHING`,
       [chosenName ?? `${label}'s workspace`, `workspace-${user.id.replaceAll("-", "")}`],
     );
-    // A concurrent first sign-in may have won the Workspace insert with the
-    // derived default. Apply the chosen name while no onboarding progress
-    // exists yet, which is the only window where the name is still unsettled;
-    // after that a rename belongs to Settings and is never overwritten here.
     yield* client.query(
       `UPDATE organizations o
        SET name = $1, updated_at = now()
@@ -291,10 +206,6 @@ function ensureInstallation(
        SELECT id FROM organizations WHERE is_shared
        ON CONFLICT (org_id) DO NOTHING`,
     );
-    // The bootstrapped Owner gets a progress row so the wizard can resume
-    // across verification, sign-in, and browser restarts. Members never do, and
-    // neither does an installation that never entered the setup form: the
-    // bootstrap record is the durable provenance that distinguishes the two.
     yield* client.query(
       `INSERT INTO installation_onboarding (org_id, workspace_name, workspace_named)
        SELECT o.id, $2::text, $2::text IS NOT NULL
@@ -313,20 +224,6 @@ function ensureInstallation(
   });
 }
 
-/**
- * Accepts the caller's oldest pending invitation for their verified email.
- *
- * Invitation acceptance is automatic after email verification: the invitee
- * signs in normally and the next authenticated request becomes a membership.
- * Existing members are left untouched but the invitation is consumed. The
- * function locks the invitation and Workspace row so concurrent requests and
- * seat checks serialize.
- *
- * @param client - Active system EffectTransactionClient.
- * @param user - Internal user row (email must be verified by the caller).
- * @param requestId - Request identifier recorded on the Audit entry.
- * @returns Effect resolving whether an invitation was consumed.
- */
 function acceptPendingInvitationEffect(
   client: EffectTransactionClient,
   user: InternalUserRow,
@@ -385,20 +282,6 @@ function acceptPendingInvitationEffect(
   });
 }
 
-/**
- * Resolves the shared Workspace the actor belongs to and the authoritative
- * membership role.
- *
- * With `requestedWorkspaceId` (a validated `x-workspace-id` UUID) the workspace
- * must be the shared Workspace and the caller must belong to it; without it the
- * shared Workspace is selected directly. Returns null when the caller has no
- * membership.
- *
- * @param client - Active system EffectTransactionClient.
- * @param userId - Internal `users.id` UUID.
- * @param requestedWorkspaceId - Optional internal organization UUID selection.
- * @returns Effect resolving to the workspace row plus membership role, or null.
- */
 function resolveWorkspace(
   client: EffectTransactionClient,
   userId: string,
@@ -418,11 +301,6 @@ function resolveWorkspace(
     .pipe(Effect.map((result) => result.rows[0] ?? null));
 }
 
-/**
- * Projects freshly read user and membership facts into the request actor.
- * Installation ownership changes role only after a real Workspace membership
- * exists; this never manufactures membership from the ownership flag.
- */
 function resolvedActor(user: InternalUserRow, workspace: WorkspaceRow): ResolvedActor {
   const role = user.installation_owner
     ? "admin"
@@ -446,25 +324,6 @@ function resolvedActor(user: InternalUserRow, workspace: WorkspaceRow): Resolved
   };
 }
 
-/**
- * Resolves the authenticated request actor from a verified Better Auth JWT identity.
- *
- * The bearer JWT is verified upstream by the app middleware; this resolver binds
- * the verified subject to the internal user, claims first-boot installation
- * ownership, consumes a matching pending invitation after email verification,
- * then resolves the shared Workspace. Role changes are visible on the next
- * request. Already-provisioned members with unchanged identity data resolve
- * through one read-only join. Missing/changed records and ownership repairs
- * take the atomic provisioning path; no authorization facts are cached.
- *
- * @param env - Worker environment bindings.
- * @param identity - Verified JWT identity (subject, email, optional name).
- * @param request - Incoming HTTP request (optional x-workspace-id header).
- * @param requestId - Middleware-generated, length-validated request identifier.
- * @returns The ResolvedActor for the request.
- * @throws {CoreApiError} 401 invalid identity, 400 malformed workspace id,
- *   403 suspended account or missing workspace membership, 409 email conflict.
- */
 export async function resolveActor(
   env: ApiWorkerEnv,
   identity: JwtIdentity,
@@ -550,7 +409,6 @@ export async function resolveActor(
           );
         }
         const resolvedRole = isWorkspaceRole(workspace.role) ? workspace.role : "viewer";
-        // The Owner must remain Admin while owning the installation.
         if (isInstallationOwner && resolvedRole !== "admin") {
           yield* client.query(
             `UPDATE org_members SET role = 'admin', updated_at = now()

@@ -9,24 +9,12 @@ const { systemPoolFor } = vi.hoisted(() => ({
   }),
 }));
 
-// The boundary module resolves its reporting layer lazily per invocation. These
-// cases never inject one, so the layer construction reaches this helper; keeping
-// it a throwing stub proves the failure path cannot change an HTTP outcome.
 vi.mock("../src/database", () => ({ systemPoolFor, withSystemTransactionEffect: vi.fn() }));
 
 import { CoreApiError } from "../src/core-types";
 import { apiBoundaryReport, operationForPath } from "../src/diagnostic-reporting";
 import { runWorkerEffect } from "../src/effect/runtime";
-
-/**
- * API Worker failure-boundary cases.
- *
- * These pin the translation from a failed invocation to the approved report —
- * fixed operation grouping, expected Provider condition versus unexpected
- * exception — and prove the response the client receives is decided before any
- * reporting is attempted. Real PostgreSQL and a controlled capture receiver are
- * covered by `reporting.integration.test.ts`.
- */
+import { fakeHonoContext } from "../test-support/fakes";
 
 const identity = {
   email: "owner@meltiply.local",
@@ -34,32 +22,23 @@ const identity = {
   subject: "auth_user_boundary",
 };
 
-/** Minimal request context carrying the route and correlation the boundary reads. */
 function boundaryContext(path: string) {
-  const store = new Map<string, unknown>([
-    ["requestId", "request-boundary-1"],
-    ["traceId", "trace-boundary-1"],
-    [
-      "actor",
-      {
-        claims: {},
-        email: identity.email,
-        isInstallationOwner: true,
-        role: "owner",
-        userId: "user-boundary-1",
-        workspace: { id: "workspace-boundary-1", name: "Alpha", slug: "alpha" },
-      },
-    ],
-  ]);
-  return {
-    env: { ENVIRONMENT: "test", VERSION: "1.0.0-target.0" } as unknown,
-    get: (key: string) => store.get(key),
-    req: { path, raw: { signal: undefined } },
-    set: (key: string, value: unknown) => store.set(key, value),
-  } as unknown as Parameters<typeof runWorkerEffect>[0];
+  return fakeHonoContext({
+    actor: {
+      claims: {},
+      email: identity.email,
+      isInstallationOwner: true,
+      role: "owner",
+      userId: "user-boundary-1",
+      workspace: { id: "workspace-boundary-1", name: "Alpha", slug: "alpha" },
+    },
+    env: { VERSION: "1.0.0-target.0" },
+    path,
+    requestId: "request-boundary-1",
+    traceId: "trace-boundary-1",
+  });
 }
 
-/** Error document the API returns for a mapped failure. */
 interface ErrorBody {
   error: { code: string };
 }
@@ -107,11 +86,6 @@ describe("diagnostic boundary classification", () => {
       "/api/v1/posts/00000000-0000-4000-8000-000000000001",
     );
 
-    // The boundary report keeps the thrown value's bounded stack on purpose; the
-    // allowlist that removes the message runs downstream, in the payload the
-    // installation sends. So the privacy claim is proved where it is enforced:
-    // the assembled properties and the same `payloadViolation` gate the service
-    // applies before transport.
     const properties = diagnosticProperties(report, {
       appVersion: "1.0.0-target.0",
       deploymentCategory: "selfhosted",
@@ -122,12 +96,9 @@ describe("diagnostic boundary classification", () => {
     expect(sent).not.toContain("x.test");
     expect(sent).not.toContain("00000000-0000-4000-8000-000000000001");
     expect(payloadViolation(properties)).toBeUndefined();
-    // The exception value is the fixed category, not the message the boundary saw.
     const exception = (properties.$exception_list as Record<string, unknown>[])[0]!;
     expect(exception.value).toBe("unhandled_exception");
-    // The path is not part of the boundary report at all: only its operation group is.
     expect(JSON.stringify(report)).not.toContain("/api/v1/posts");
-    // The boundary carries a class name and its bounded stack, nothing more.
     expect(report.error).toEqual({
       name: "Error",
       stack: expect.stringContaining("diagnostic-reporting.test.ts"),
@@ -146,8 +117,6 @@ describe("failed invocation reporting", () => {
     expect(response.status).toBe(503);
     const body: ErrorBody = await response.json();
     expect(body.error.code).toBe("service_unavailable");
-    // The local operational log still records the failure; the reporting attempt
-    // is separate and cannot alter the response above.
     expect(response.headers.get("X-Request-ID")).toBe("request-boundary-1");
     logger.mockRestore();
   });
@@ -162,7 +131,6 @@ describe("failed invocation reporting", () => {
     );
 
     expect(response.status).toBe(400);
-    // Neither a report nor a reporting-failure log is emitted for a client error.
     expect(systemPoolFor).not.toHaveBeenCalled();
     warn.mockRestore();
     debug.mockRestore();

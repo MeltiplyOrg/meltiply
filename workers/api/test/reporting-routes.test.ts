@@ -8,13 +8,10 @@ const { systemPoolFor } = vi.hoisted(() => ({
   }),
 }));
 
-// Keep Node pg out of the workerd isolate. Refusals must precede all database access.
 vi.mock("../src/database", () => ({ systemPoolFor, withSystemTransactionEffect: vi.fn() }));
 
 import { createApiApp } from "../src/app";
 import type { ApiWorkerEnv } from "../src/env";
-
-// Guard precedence remains testable when reporting and the database are unavailable.
 
 const env = {
   ALLOWED_ORIGINS: "http://localhost:3000",
@@ -25,7 +22,6 @@ const env = {
   VERSION: "1.0.0-target.0",
 } as ApiWorkerEnv;
 
-/** Builds the app with unavailable reporting and the requested actor authority. */
 function appFor(role: "admin" | "viewer") {
   return createApiApp({
     verifyJwtToken: async () => ({
@@ -56,7 +52,6 @@ function appFor(role: "admin" | "viewer") {
   });
 }
 
-/** Sends one authenticated request through the real app. */
 function request(
   app: ReturnType<typeof createApiApp>,
   path: string,
@@ -131,8 +126,6 @@ describe("diagnostic ingestion route", () => {
     });
     expect(badPlatform.status).toBe(400);
 
-    // The Provider class is a fixed roster, not free text: a raw adapter message
-    // or an invented class must never become a countable category.
     const badProviderClass = await request(app, "/installation/reporting/diagnostics", {
       body: {
         category: "provider_failure",

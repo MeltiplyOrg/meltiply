@@ -15,7 +15,6 @@ import type { ApiWorkerEnv } from "./env";
 
 type Schemas = components["schemas"];
 
-/** Shared media read projection; PostgreSQL numeric columns may arrive as strings. */
 export interface AssetRow extends Record<string, unknown> {
   asset_type: Schemas["AssetType"];
   brand_profile_id: string;
@@ -37,16 +36,10 @@ export interface AssetRow extends Record<string, unknown> {
   width: number | string | null;
 }
 
-/** Converts PostgreSQL numeric values, preserving null for unmeasured media facts. */
 function number(value: number | string | null): number | null {
   return value === null ? null : Number(value);
 }
 
-/**
- * Projects stored media for both Asset reads and ordered Post attachments.
- * Numeric strings become numbers and timestamps become ISO dates; incomplete
- * failures remain null. Signed URLs stay absent until a scoped storage request.
- */
 export function mapAsset(row: AssetRow): Schemas["Asset"] {
   return {
     asset_type: row.asset_type,
@@ -77,7 +70,6 @@ export function mapAsset(row: AssetRow): Schemas["Asset"] {
   };
 }
 
-/** Completed-upload result: the Asset's new lifecycle state plus replay status. */
 interface AssetResult {
   replayed: boolean;
   value: Schemas["Asset"];
@@ -96,9 +88,6 @@ export type AssetServiceError =
   | InvalidRequestError
   | NotFoundError;
 
-/**
- * Effect-first application service interface managing tenant asset lifecycle, uploads, and presigned URLs.
- */
 export interface AssetApiService {
   abortUploadSession(
     env: ApiWorkerEnv,

@@ -77,8 +77,6 @@ const actor: ResolvedActor = {
   },
 };
 
-// Verified Better Auth JWT identity returned by the `verifyJwtToken` test
-// double; the bearer JWT is the only credential protected routes may accept.
 const jwtIdentity: JwtIdentity = {
   email: "alpha@example.com",
   name: "Alpha User",
@@ -89,10 +87,6 @@ const bearerAuthorization = "Bearer test-only.jwt";
 
 type UserProfile = components["schemas"]["UserProfile"];
 
-/**
- * Minimal contract-shaped profile returned by the `loadCurrentUser` test double
- * whenever a route must reach the current-user handler.
- */
 const userProfile: UserProfile = {
   active_organization: {
     id: actor.workspace.id,
@@ -599,8 +593,6 @@ describe("API Worker foundation", () => {
       } as Hyperdrive,
     };
 
-    // A successful probe caches ready components for this database pair; the
-    // next request under a different mail configuration must not reuse them.
     const ready = await app.request(
       "/api/v1/ready",
       {},
@@ -849,9 +841,6 @@ describe("API Worker foundation", () => {
   });
 
   it("exposes the Better Auth JWT header on credentialed cross-origin responses", async () => {
-    // The JWT plugin answers session reads with `set-auth-jwt`; browsers only
-    // let frontend code read response headers named by
-    // Access-Control-Expose-Headers, so the wrapper must list it.
     const jwtAuth = {
       ...fakeBetterAuth,
       handler: vi.fn(
@@ -978,8 +967,6 @@ describe("API Worker foundation", () => {
         resolveActor,
         verifyJwtToken,
       });
-      // A session cookie rides along on every row: it must never substitute
-      // for a missing or malformed bearer JWT.
       const response = await app.request(
         "/api/v1/users/me",
         {
@@ -1156,9 +1143,6 @@ describe("API Worker foundation", () => {
   });
 
   it("reads at most the 8 KiB probe cap when Content-Length is absent", async () => {
-    // A JSON error body larger than the probe cap must not be buffered whole:
-    // the stream read stops at errorBodyProbeBytes, so the truncated payload
-    // yields no code where an unbounded clone().json() would have found one.
     const oversized = Response.json(
       {
         error: { code: "internal_error", message: "x".repeat(16 * 1024) },

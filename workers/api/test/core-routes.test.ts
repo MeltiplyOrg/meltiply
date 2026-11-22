@@ -27,12 +27,15 @@ import { createApiApp, type ApiDependencies } from "../src/app";
 import type { AssetApiService } from "../src/asset-types";
 import type { BrandProfileApiService } from "../src/brand-profile-service";
 import { CoreApiError, type CoreApiService } from "../src/core-types";
-import type { ApiWorkerEnv, OAuthStateStub } from "../src/env";
+import type { ApiWorkerEnv } from "../src/env";
+import {
+  fakeBrandProfileService,
+  fakeOAuthStateNamespace,
+  fakeR2Bucket,
+} from "../test-support/fakes";
 import type { PostApiService } from "../src/post-types";
 import { logRecords } from "./log-records";
 
-// The route graph statically reaches ./database via workspace-lifecycle; an
-// empty mock keeps the `pg` client out of the workerd unit-test isolate.
 vi.mock("../src/database", () => ({}));
 
 afterEach(() => {
@@ -46,9 +49,6 @@ const env = {
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
 
-// Actor claims mirror the ResolvedActor contract produced by actor resolution:
-// subject is the Better Auth user id, userId the internal users.id UUID, and
-// organizationId the resolved workspace UUID with its org_members role.
 const session = {
   organizationId: "00000000-0000-4000-8000-000000000001",
   organizationRole: "admin",
@@ -71,16 +71,9 @@ const actor: ResolvedActor = {
   },
 };
 
-// Deterministic Brand Profile fixture id matching the contract examples; the
-// profile owns every asset, account, distribution, and comment fixture in
-// this suite so profile-owned mutations carry a consistent owner.
 const brandProfileId = "00000000-0000-4000-8000-000000000111";
-// Post identity shared by every composer fixture in this suite, matching the
-// contract examples so route paths stay contract-addressable.
 const postId = "00000000-0000-4000-8000-000000000701";
 
-// Golden BrandProfile row matching the contract examples; the profile belongs
-// to the session workspace so profile-scoped routes resolve it.
 const brandProfile: components["schemas"]["BrandProfile"] = {
   color: "#b91c1c",
   created_at: "2026-01-01T00:00:00Z",
@@ -114,16 +107,6 @@ function unavailableCapabilities(): ReturnType<ProviderRegistry["capabilities"]>
   }));
 }
 
-/**
- * Test helper creating a mock service conforming to CoreApiService.
- *
- * Defaults all Effect-returning methods to a defect so tests only succeed when
- * exercising explicitly mocked behavior; `platformCapabilities` stays
- * synchronous because the route boundary reads it directly.
- *
- * @param overrides - Optional method overrides for CoreApiService.
- * @returns Mock service accepted by createApiApp.
- */
 function service(overrides: Partial<CoreApiService> = {}): CoreApiService {
   const notImplemented = () => Effect.die(new Error("unexpected service call"));
   return {
@@ -147,9 +130,6 @@ function service(overrides: Partial<CoreApiService> = {}): CoreApiService {
   };
 }
 
-// Binary Asset fixture matching the contract examples. Signed URLs stay null
-// here: media capabilities are minted only by the scoped preview/download
-// routes, so a Post response never embeds one.
 const asset: components["schemas"]["Asset"] = {
   asset_type: "image",
   brand_profile_id: brandProfileId,
@@ -170,8 +150,6 @@ const asset: components["schemas"]["Asset"] = {
   width: null,
 };
 
-// Canonical Post fixture matching the contract examples: a draft with no
-// saved Channel yet, which is the state every composer route must support.
 const post: components["schemas"]["Post"] = {
   analytics: null,
   distribution_analytics: [],
@@ -190,15 +168,6 @@ const post: components["schemas"]["Post"] = {
   updated_at: "2026-07-18T00:00:00.000Z",
 };
 
-/**
- * Test helper creating a mock service conforming to AssetApiService.
- *
- * Defaults all methods to an Effect defect so tests only succeed when
- * exercising explicitly mocked behavior.
- *
- * @param overrides - Optional method overrides for AssetApiService.
- * @returns Mock asset service accepted by createApiApp.
- */
 function assetService(overrides: Partial<AssetApiService> = {}): AssetApiService {
   const notImplemented = () => Effect.die(new Error("unexpected asset service call"));
   return {
@@ -214,18 +183,6 @@ function assetService(overrides: Partial<AssetApiService> = {}): AssetApiService
   };
 }
 
-/**
- * Test helper creating a mock service conforming to BrandProfileApiService.
- *
- * Defaults all methods to an Effect defect so tests only succeed when
- * exercising explicitly mocked behavior, except `getBrandProfile` which
- * resolves the active workspace fixture: the OAuth connect route consults it
- * on every request, so connect tests share one sane default and override it
- * only when exercising the missing/deleted-profile guard.
- *
- * @param overrides - Optional method overrides for BrandProfileApiService.
- * @returns Mock brand profile service accepted by createApiApp.
- */
 function brandProfileService(
   overrides: Partial<BrandProfileApiService> = {},
 ): BrandProfileApiService {
@@ -242,15 +199,6 @@ function brandProfileService(
   };
 }
 
-/**
- * Test helper creating a mock service conforming to PostApiService.
- *
- * Defaults every method to an Effect defect so tests only succeed when
- * exercising explicitly mocked behavior.
- *
- * @param overrides - Optional method overrides for PostApiService.
- * @returns Mock Post service accepted by createApiApp.
- */
 function postService(overrides: Partial<PostApiService> = {}): PostApiService {
   const notImplemented = () => Effect.die(new Error("unexpected post service call"));
   return {
@@ -264,17 +212,6 @@ function postService(overrides: Partial<PostApiService> = {}): PostApiService {
   };
 }
 
-/**
- * Builds an authenticated API app instance configured with the provided core service and dependencies.
- *
- * Injects the fixed test actor through `resolveActor` and a fixed verified
- * identity through `verifyJwtToken`; requests authenticate by carrying the
- * JWT bearer Authorization header in `bearerHeaders`.
- *
- * @param coreService - Service instance conforming to CoreApiService.
- * @param dependencies - Optional additional API worker dependencies to inject.
- * @returns Configured Hono app instance ready for test requests.
- */
 function authenticatedApp(
   coreService: CoreApiService,
   dependencies: Omit<ApiDependencies, "coreService" | "resolveActor" | "verifyJwtToken"> = {},
@@ -287,16 +224,12 @@ function authenticatedApp(
   });
 }
 
-// Verified Better Auth JWT identity returned by the `verifyJwtToken` test
-// double; the bearer JWT is the only credential protected routes may accept.
 const jwtIdentity: JwtIdentity = {
   email: "alpha@example.test",
   name: "Alpha User",
   subject: session.subject,
 };
 
-// JWT bearer Authorization header standing in for the Better Auth session
-// cookie on every protected-route request.
 const bearerHeaders = {
   Authorization: "Bearer test-only.jwt",
 };
@@ -386,8 +319,6 @@ describe("core API routes", () => {
       body: { brand_profile_id: brandProfileId, default_text: 42 },
     },
     {
-      // A malformed field (file_size must be a positive safe integer) so the
-      // case fails on the typed boundary rather than on a merely absent field.
       path: "/api/v1/asset-upload-sessions",
       body: {
         asset_type: "image",
@@ -535,14 +466,9 @@ describe("core API routes", () => {
     }
   });
 
-  // The composer creates an authoritative draft without any Channel selection:
-  // a text-only Post is complete on its own and never schedules anything.
   it("creates a text-only Post draft with no Channel selection", async () => {
     const app = authenticatedApp(service(), {
       postService: postService({
-        // A first create is a fresh outcome. Replay is proven by the service's
-        // own idempotency ledger in the integration suites; asserting a header
-        // whose value this double supplies would prove nothing about replay.
         createPost: () =>
           Effect.succeed({
             replayed: false,
@@ -577,8 +503,6 @@ describe("core API routes", () => {
     });
   });
 
-  // Listing is an aggregate read across active Brand Profiles, so omitting the
-  // selector must stay valid while an unknown status is refused outright.
   it("validates the Post list selector and status enum", async () => {
     const listPosts = vi.fn(() =>
       Effect.succeed({ has_more: false, limit: 20, offset: 0, posts: [post] }),
@@ -655,10 +579,6 @@ describe("core API routes", () => {
     expect(calendar).toHaveBeenCalledTimes(2);
   });
 
-  // Explicit TikTok publishing choices are saved on a Post target before any
-  // scheduling. The boundary rule under test is the mandatory music-usage
-  // confirmation: it is the one field the negative case below leaves false, so
-  // a refusal there is attributable to that rule and not to an unrelated field.
   it("saves explicit TikTok publishing choices on a Post target", async () => {
     const saved: components["schemas"]["Post"] = {
       ...post,
@@ -766,8 +686,6 @@ describe("core API routes", () => {
     });
   });
 
-  // YouTube options must coexist with the required Brand Profile ownership
-  // boundary before the saved target reaches the service.
   it("saves YouTube publishing choices on a Post target", async () => {
     const app = authenticatedApp(service(), {
       postService: postService({
@@ -805,9 +723,6 @@ describe("core API routes", () => {
     expect(response.status).toBe(201);
   });
 
-  // The request boundary must retain the resolved signature snapshot and
-  // Instagram's post-type/trial choices verbatim; neither is reconstructed from
-  // a later template or Provider default.
   it("saves a signature snapshot and Instagram choices on a Post target", async () => {
     const createPost = vi.fn(() => Effect.succeed({ replayed: false as const, value: post }));
     const app = authenticatedApp(service(), {
@@ -865,8 +780,6 @@ describe("core API routes", () => {
     );
   });
 
-  // A text-only Channel is expressed by an empty attachment selection, which
-  // keeps the Post identity intact while publishing nothing on that Channel.
   it("accepts a text-only Channel selection alongside inherited media", async () => {
     const saved = {
       ...post,
@@ -914,8 +827,6 @@ describe("core API routes", () => {
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toEqual(saved);
   });
-  // Malformed composition input must never reach the service: every case here
-  // is a payload the composer itself could not have produced.
   const invalidCompositions: {
     attachmentIds?: string[];
     name: string;
@@ -1003,9 +914,6 @@ describe("core API routes", () => {
     expect(createPost).not.toHaveBeenCalled();
   });
 
-  // An explicit empty targets array is the composer's channel-less draft
-  // shape: it clears any saved Channel selection rather than violating the
-  // schema, so it must round-trip to the service like an omitted member.
   it("accepts an explicit empty target array as a channel-less draft", async () => {
     const createPost = vi.fn(() => Effect.succeed({ replayed: false, value: post }));
     const app = authenticatedApp(service(), {
@@ -1097,8 +1005,6 @@ describe("core API routes", () => {
     });
   });
 
-  // A save is a patch-style edit of the same Post: the scope proof is the
-  // owning Brand Profile, and omitted members keep their stored values.
   it("saves a draft without Channels and advances its revision", async () => {
     const saved = {
       ...post,
@@ -1131,8 +1037,6 @@ describe("core API routes", () => {
     await expect(response.json()).resolves.toEqual(saved);
   });
 
-  // Deletion is a scoped soft delete: the caller must name the owning Brand
-  // Profile, so a workspace-wide aggregate selection cannot delete anything.
   it("requires the owning Brand Profile before deleting a Post", async () => {
     const deletePost = vi.fn(() => Effect.succeed({ replayed: false, value: post }));
     const app = authenticatedApp(service(), {
@@ -1164,8 +1068,6 @@ describe("core API routes", () => {
     expect(deletePost).not.toHaveBeenCalled();
   });
 
-  // Scheduling always states an instant: null publishes now and a timestamp
-  // defers, but an omitted member can never fall back to an implicit default.
   it.each([
     {
       body: { brand_profile_id: brandProfileId },
@@ -1208,8 +1110,6 @@ describe("core API routes", () => {
     expect(schedulePost).not.toHaveBeenCalled();
   });
 
-  // Reading one Post is a conditional read, so a client holding an unchanged
-  // copy spends no bandwidth re-reading the same revision.
   it("returns a stable Post ETag and honors conditional reads", async () => {
     const getPost = vi.fn(() => Effect.succeed(post));
     const app = authenticatedApp(service(), {
@@ -1576,9 +1476,7 @@ describe("core API routes", () => {
       { headers: bearerHeaders },
       {
         ...env,
-        OAUTH_STATE: {
-          getByName: () => ({ create, consume: vi.fn() }),
-        } as unknown as DurableObjectNamespace<OAuthStateStub>,
+        OAUTH_STATE: fakeOAuthStateNamespace({ create, consume: vi.fn() }),
         TIKTOK_CLIENT_KEY: "tiktok-client",
         TIKTOK_CLIENT_SECRET: "tiktok-secret",
         TIKTOK_LIVE_ACCEPTED: "true",
@@ -1624,9 +1522,7 @@ describe("core API routes", () => {
       { headers: bearerHeaders },
       {
         ...env,
-        OAUTH_STATE: {
-          getByName: () => ({ create, consume: vi.fn() }),
-        } as unknown as DurableObjectNamespace<OAuthStateStub>,
+        OAUTH_STATE: fakeOAuthStateNamespace({ create, consume: vi.fn() }),
         THREADS_CLIENT_ID: "threads-client",
         THREADS_CLIENT_SECRET: "threads-secret",
         THREADS_LIVE_ACCEPTED: "true",
@@ -1674,9 +1570,7 @@ describe("core API routes", () => {
         FACEBOOK_CLIENT_ID: "facebook-client",
         FACEBOOK_CLIENT_SECRET: "facebook-secret",
         FACEBOOK_LIVE_ACCEPTED: "true",
-        OAUTH_STATE: {
-          getByName: () => ({ create, consume: vi.fn() }),
-        } as unknown as DurableObjectNamespace<OAuthStateStub>,
+        OAUTH_STATE: fakeOAuthStateNamespace({ create, consume: vi.fn() }),
       },
     );
     expect(response.status).toBe(307);
@@ -1718,9 +1612,7 @@ describe("core API routes", () => {
       { headers: bearerHeaders },
       {
         ...env,
-        OAUTH_STATE: {
-          getByName: () => ({ create, consume: vi.fn() }),
-        } as unknown as DurableObjectNamespace<OAuthStateStub>,
+        OAUTH_STATE: fakeOAuthStateNamespace({ create, consume: vi.fn() }),
         YOUTUBE_LIVE_ACCEPTED: "true",
         YOUTUBE_SHORTS_CLIENT_ID: "youtube-client",
         YOUTUBE_SHORTS_CLIENT_SECRET: "youtube-secret",
@@ -1984,9 +1876,6 @@ describe("core API routes", () => {
       synced_at: "2026-01-01T00:00:00.000Z",
       updated_at: "2026-01-01T00:00:00.000Z",
     };
-    // A fresh accepted reply, not a replay: the replayed flag is owned by the
-    // service's idempotency ledger, so a value supplied by this double would
-    // assert nothing about replay behavior.
     const replyToComment = vi.fn(() =>
       Effect.succeed({
         replayed: false,
@@ -2058,9 +1947,7 @@ describe("core API routes", () => {
     });
     const oauthEnv: ApiWorkerEnv = {
       ...env,
-      OAUTH_STATE: {
-        getByName: () => ({ create, consume: vi.fn() }),
-      } as unknown as DurableObjectNamespace<OAuthStateStub>,
+      OAUTH_STATE: fakeOAuthStateNamespace({ create, consume: vi.fn() }),
     };
     const response = await app.request(
       "/api/v1/platforms/threads/connect",
@@ -2075,9 +1962,9 @@ describe("core API routes", () => {
   it("lists the workspace brand profiles through the brand profile service", async () => {
     const listBrandProfiles = vi.fn(() => Effect.succeed([brandProfile]));
     const app = authenticatedApp(service(), {
-      brandProfileService: {
+      brandProfileService: fakeBrandProfileService({
         listBrandProfiles,
-      } as unknown as BrandProfileApiService,
+      }),
     });
     const response = await app.request("/api/v1/brand-profiles", { headers: bearerHeaders }, env);
     expect(response.status).toBe(200);
@@ -2087,11 +1974,6 @@ describe("core API routes", () => {
     expect(listBrandProfiles).toHaveBeenCalledWith(env, session);
   });
 
-  /**
-   * Proves the public create route accepts a short profile description and sends
-   * it unchanged to the lifecycle service. This boundary test protects the
-   * Channels board from losing its empty-state context before persistence.
-   */
   it("creates a Brand Profile with its optional short description", async () => {
     const description = "Editorial tools for independent publishers.";
     const createBrandProfile = vi.fn(() =>
@@ -2203,8 +2085,6 @@ describe("core API routes", () => {
       path: "/api/v1/asset-upload-sessions",
     },
     {
-      // asset_type is present so the earlier asset_type guard cannot satisfy
-      // this case; the missing brand_profile_id is the only remaining refusal.
       body: {
         asset_type: "image",
         content_type: "image/png",
@@ -2314,9 +2194,7 @@ describe("core API routes", () => {
           ...env,
           ENVIRONMENT,
           APP_URL: origin,
-          OAUTH_STATE: {
-            getByName: () => ({ create }),
-          } as unknown as DurableObjectNamespace<OAuthStateStub>,
+          OAUTH_STATE: fakeOAuthStateNamespace({ create }),
         },
       );
       expect(response.status).toBe(status);
@@ -2355,9 +2233,7 @@ describe("core API routes", () => {
     const getByName = vi.fn(() => ({ create, consume: vi.fn() }));
     const oauthEnv = {
       ...env,
-      OAUTH_STATE: {
-        getByName,
-      } as unknown as DurableObjectNamespace<OAuthStateStub>,
+      OAUTH_STATE: fakeOAuthStateNamespace(getByName),
     };
     const app = authenticatedApp(service({ platformCapabilities: () => registry.capabilities() }), {
       brandProfileService: brandProfileService(),
@@ -2383,10 +2259,6 @@ describe("core API routes", () => {
       redirect_path: "/channels",
       user_id: actor.userId,
     });
-    // The challenge must be the S256 digest of the verifier handed to the
-    // Provider, not just any 43-character string: recomputing it here rejects a
-    // mutant that mints an unrelated challenge, which would break the token
-    // exchange while two independent wildcards would still have passed.
     const verifierDigest = await crypto.subtle.digest(
       "SHA-256",
       new TextEncoder().encode(record.pkce_verifier),
@@ -2414,9 +2286,7 @@ describe("core API routes", () => {
       { headers: { ...bearerHeaders, Accept: "application/json" } },
       {
         ...env,
-        OAUTH_STATE: {
-          getByName: () => ({ create: vi.fn(), consume: vi.fn() }),
-        } as unknown as DurableObjectNamespace<OAuthStateStub>,
+        OAUTH_STATE: fakeOAuthStateNamespace({ create: vi.fn(), consume: vi.fn() }),
       },
     );
 
@@ -2447,14 +2317,12 @@ describe("core API routes", () => {
     const oauthEnv = {
       ...env,
       TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
-      OAUTH_STATE: {
-        getByName: () => ({
-          appendSelectionCandidates,
-          consume,
-          createSelection,
-          finalizeSelection,
-        }),
-      } as unknown as DurableObjectNamespace<OAuthStateStub>,
+      OAUTH_STATE: fakeOAuthStateNamespace({
+        appendSelectionCandidates,
+        consume,
+        createSelection,
+        finalizeSelection,
+      }),
     };
     const app = authenticatedApp(service(), {
       providerRegistry: registry,
@@ -2524,9 +2392,7 @@ describe("core API routes", () => {
     const oauthEnv = {
       ...env,
       TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
-      OAUTH_STATE: {
-        getByName: () => ({ consume, createSelection }),
-      } as unknown as DurableObjectNamespace<OAuthStateStub>,
+      OAUTH_STATE: fakeOAuthStateNamespace({ consume, createSelection }),
     };
     const app = authenticatedApp(service(), { providerRegistry: registry });
 
@@ -2555,8 +2421,6 @@ describe("core API routes", () => {
   it("logs a safe diagnostic when an OAuth provider exchange fails", async () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { exchangeAuthorizationCode, registry } = oauthRegistry();
-    // Mirror a hardened HTTP failure: a typed adapter error retaining the raw
-    // transport cause plus credential-free request facts only.
     exchangeAuthorizationCode.mockRejectedValueOnce(
       new ProviderAdapterError(
         classifyProviderFailure({ code: "provider_unexpected", status: 503 }),
@@ -2589,9 +2453,7 @@ describe("core API routes", () => {
       },
       {
         ...env,
-        OAUTH_STATE: {
-          getByName: () => ({ consume }),
-        } as unknown as DurableObjectNamespace<OAuthStateStub>,
+        OAUTH_STATE: fakeOAuthStateNamespace({ consume }),
       },
     );
 
@@ -2670,18 +2532,16 @@ describe("core API routes", () => {
         undefined,
         {
           ...env,
-          OAUTH_STATE: {
-            getByName: () => ({
-              consume: async () => ({
-                expires_at: Date.now() + 60_000,
-                organization_id: actor.workspace.id,
-                pkce_verifier: "pkce-verifier",
-                provider: "threads",
-                redirect_path: "/channels",
-                user_id: actor.userId,
-              }),
+          OAUTH_STATE: fakeOAuthStateNamespace({
+            consume: async () => ({
+              expires_at: Date.now() + 60_000,
+              organization_id: actor.workspace.id,
+              pkce_verifier: "pkce-verifier",
+              provider: "threads",
+              redirect_path: "/channels",
+              user_id: actor.userId,
             }),
-          } as unknown as DurableObjectNamespace<OAuthStateStub>,
+          }),
         },
       );
 
@@ -2716,18 +2576,16 @@ describe("core API routes", () => {
         undefined,
         {
           ...env,
-          OAUTH_STATE: {
-            getByName: () => ({
-              consume: async () => ({
-                expires_at: Date.now() + 60_000,
-                organization_id: actor.workspace.id,
-                pkce_verifier: "pkce-verifier",
-                provider: "threads",
-                redirect_path: "/channels",
-                user_id: actor.userId,
-              }),
+          OAUTH_STATE: fakeOAuthStateNamespace({
+            consume: async () => ({
+              expires_at: Date.now() + 60_000,
+              organization_id: actor.workspace.id,
+              pkce_verifier: "pkce-verifier",
+              provider: "threads",
+              redirect_path: "/channels",
+              user_id: actor.userId,
             }),
-          } as unknown as DurableObjectNamespace<OAuthStateStub>,
+          }),
         },
       );
 
@@ -2752,9 +2610,7 @@ describe("core API routes", () => {
         undefined,
         {
           ...env,
-          OAUTH_STATE: {
-            getByName,
-          } as unknown as DurableObjectNamespace<OAuthStateStub>,
+          OAUTH_STATE: fakeOAuthStateNamespace(getByName),
         },
       );
 
@@ -2776,9 +2632,7 @@ describe("core API routes", () => {
       undefined,
       {
         ...env,
-        OAUTH_STATE: {
-          getByName,
-        } as unknown as DurableObjectNamespace<OAuthStateStub>,
+        OAUTH_STATE: fakeOAuthStateNamespace(getByName),
       },
     );
 
@@ -2892,10 +2746,6 @@ describe("core API routes", () => {
 });
 
 describe("OAuth Page selection flow", () => {
-  /**
-   * Candidate exchange must persist sealed, owner-bound choices without saving a channel.
-   * Fixture callbacks isolate Graph and storage while real encryption protects each Page token.
-   */
   it("OAuth callback with candidate Pages creates selection, never connects Facebook, and redirects to select_account", async () => {
     const exchangeAuthorizationCode = vi.fn(async (): Promise<OAuthAccountSelection> => ({
       accounts: [
@@ -2965,14 +2815,12 @@ describe("OAuth Page selection flow", () => {
     const oauthEnv: ApiWorkerEnv = {
       ...env,
       TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
-      OAUTH_STATE: {
-        getByName: () => ({
-          appendSelectionCandidates,
-          consume,
-          createSelection,
-          finalizeSelection,
-        }),
-      } as unknown as DurableObjectNamespace<OAuthStateStub>,
+      OAUTH_STATE: fakeOAuthStateNamespace({
+        appendSelectionCandidates,
+        consume,
+        createSelection,
+        finalizeSelection,
+      }),
     };
     const app = authenticatedApp(service(), {
       providerRegistry: registry,
@@ -3029,13 +2877,11 @@ describe("OAuth Page selection flow", () => {
       ],
       expires_at: "2026-10-12T12:00:00.000Z",
       id: selectionId,
-      platform: "facebook",
+      platform: "facebook" as const,
     }));
     const oauthEnv: ApiWorkerEnv = {
       ...env,
-      OAUTH_STATE: {
-        getByName: () => ({ getSelection }),
-      } as unknown as DurableObjectNamespace<OAuthStateStub>,
+      OAUTH_STATE: fakeOAuthStateNamespace({ getSelection }),
     };
     const app = authenticatedApp(service());
 
@@ -3066,15 +2912,11 @@ describe("OAuth Page selection flow", () => {
 
   it("GET /api/v1/oauth-selections/:selectionId returns 404 for wrong, foreign, or expired tickets", async () => {
     const routingKey = await oauthStateRoutingKey(actor.workspace.id);
-    // Keep the foreign key canonical so syntax rejection cannot mask tenant
-    // isolation. A foreign ticket must be refused without reading the DO.
     const foreignKey = "foreign-routing-key-01";
     const getSelection = vi.fn(async () => null);
     const oauthEnv: ApiWorkerEnv = {
       ...env,
-      OAUTH_STATE: {
-        getByName: () => ({ getSelection }),
-      } as unknown as DurableObjectNamespace<OAuthStateStub>,
+      OAUTH_STATE: fakeOAuthStateNamespace({ getSelection }),
     };
     const app = authenticatedApp(service());
 
@@ -3125,9 +2967,7 @@ describe("OAuth Page selection flow", () => {
     const oauthEnv: ApiWorkerEnv = {
       ...env,
       TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
-      OAUTH_STATE: {
-        getByName: () => ({ claimSelection, completeSelection }),
-      } as unknown as DurableObjectNamespace<OAuthStateStub>,
+      OAUTH_STATE: fakeOAuthStateNamespace({ claimSelection, completeSelection }),
     };
     const app = authenticatedApp(service(), {
       brandProfileService: brandProfileService(),
@@ -3168,10 +3008,6 @@ describe("OAuth Page selection flow", () => {
     );
   });
 
-  // Replay is decided by the OAuth-state Durable Object, and it reports it by
-  // claiming without returning a connection. This route's own responsibility is
-  // the mapping: a replay claim must answer 204, mark the header, and never
-  // re-save. The DO's ledger itself is exercised in the automation suites.
   it("maps a replayed selection claim to 204 without re-saving the connection", async () => {
     const routingKey = await oauthStateRoutingKey(actor.workspace.id);
     const selectionId = `${routingKey}.validnonce1234567890`;
@@ -3181,9 +3017,7 @@ describe("OAuth Page selection flow", () => {
     const saveOAuthConnection = vi.fn(() => Effect.succeed(undefined));
     const oauthEnv: ApiWorkerEnv = {
       ...env,
-      OAUTH_STATE: {
-        getByName: () => ({ claimSelection }),
-      } as unknown as DurableObjectNamespace<OAuthStateStub>,
+      OAUTH_STATE: fakeOAuthStateNamespace({ claimSelection }),
     };
     const app = authenticatedApp(service(), {
       brandProfileService: brandProfileService(),
@@ -3239,9 +3073,7 @@ describe("OAuth Page selection flow", () => {
     const oauthEnv: ApiWorkerEnv = {
       ...env,
       TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
-      OAUTH_STATE: {
-        getByName: () => ({ claimSelection, releaseSelectionClaim }),
-      } as unknown as DurableObjectNamespace<OAuthStateStub>,
+      OAUTH_STATE: fakeOAuthStateNamespace({ claimSelection, releaseSelectionClaim }),
     };
     const app = authenticatedApp(service(), {
       brandProfileService: brandProfileService(),
@@ -3299,20 +3131,18 @@ describe("OAuth Page selection flow", () => {
       const oauthEnv: ApiWorkerEnv = {
         ...env,
         TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
-        OAUTH_STATE: {
-          getByName: () => ({
-            claimSelection: async () => ({
-              claimToken: "claim-database",
-              encryptedConnection: sealed,
-              organizationId: actor.workspace.id,
-              platform: "facebook",
-              status: "claimed" as const,
-              userId: actor.userId,
-            }),
-            completeSelection,
-            releaseSelectionClaim,
+        OAUTH_STATE: fakeOAuthStateNamespace({
+          claimSelection: async () => ({
+            claimToken: "claim-database",
+            encryptedConnection: sealed,
+            organizationId: actor.workspace.id,
+            platform: "facebook",
+            status: "claimed" as const,
+            userId: actor.userId,
           }),
-        } as unknown as DurableObjectNamespace<OAuthStateStub>,
+          completeSelection,
+          releaseSelectionClaim,
+        }),
       };
       const app = authenticatedApp(service(), {
         brandProfileService: brandProfileService(),
@@ -3366,9 +3196,7 @@ describe("OAuth Page selection flow", () => {
       });
     const oauthEnv: ApiWorkerEnv = {
       ...env,
-      OAUTH_STATE: {
-        getByName: () => ({ claimSelection }),
-      } as unknown as DurableObjectNamespace<OAuthStateStub>,
+      OAUTH_STATE: fakeOAuthStateNamespace({ claimSelection }),
     };
     const app = authenticatedApp(service(), { brandProfileService: brandProfileService() });
 
@@ -3416,9 +3244,7 @@ describe("OAuth Page selection flow", () => {
     const saveOAuthConnection = vi.fn(() => Effect.succeed(undefined));
     const oauthEnv: ApiWorkerEnv = {
       ...env,
-      OAUTH_STATE: {
-        getByName: () => ({ cancelSelection }),
-      } as unknown as DurableObjectNamespace<OAuthStateStub>,
+      OAUTH_STATE: fakeOAuthStateNamespace({ cancelSelection }),
     };
     const app = authenticatedApp(service(), { saveOAuthConnection });
 
@@ -3451,14 +3277,7 @@ describe("OAuth Page selection flow", () => {
   });
 });
 
-// The distribution service runs `validatePublishInput` before it persists the
-// distribution or emits the outbox event, so a provider-option/platform mismatch
-// rejected here can never reach scheduling.
 describe("provider publish option platform validation", () => {
-  /**
-   * Builds a publish-enabled video capability for one platform-specific validation case.
-   * The platform input is the only variable; fixed limits isolate option compatibility.
-   */
   function capability(platform: string): PlatformCapability {
     return {
       accepted_mime_types: ["video/mp4"],
@@ -3549,11 +3368,6 @@ describe("provider media delivery route", () => {
   const mediaSecret = "provider-media-test-key";
   const mediaKey = "org-1/asset-1/video.mp4";
 
-  /**
-   * Signs a provider-media URL exactly as the Automation Worker resolver does:
-   * HMAC-SHA256 over the canonical v1 payload keyed by TOKEN_ENCRYPTION_KEY, with the
-   * percent-encoded object key in the path and expiry/signature in the query.
-   */
   async function signedMediaUrl(
     key: string,
     expiresAt: number,
@@ -3580,14 +3394,10 @@ describe("provider media delivery route", () => {
     return `/api/v1/provider-media/${path}?expires=${expiresAt}&signature=${signature}`;
   }
 
-  /**
-   * Builds a test environment whose private ASSETS bucket delegates to the given
-   * `get` spy so tests can observe whether a request reached storage.
-   */
   function providerMediaEnv(get: (key: string) => Promise<unknown>): ApiWorkerEnv {
     return {
       ...env,
-      ASSETS: { get } as unknown as R2Bucket,
+      ASSETS: fakeR2Bucket({ get }),
       TOKEN_ENCRYPTION_KEY: mediaSecret,
     };
   }
@@ -3614,8 +3424,6 @@ describe("provider media delivery route", () => {
       size: 11,
     }));
     const app = createApiApp();
-    // Canonical storage keys are `<org-uuid>/<asset-uuid>/<file>`; hyphenated UUID
-    // segments must survive key-shape validation.
     const uuidKey =
       "3f6c9d2e-7a4b-4c1e-9f2a-5d8b0e1c2a3f/8a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/video.mp4";
     const url = await signedMediaUrl(uuidKey, Math.floor(Date.now() / 1000) + 3600);
@@ -3634,8 +3442,6 @@ describe("provider media delivery route", () => {
     const unsigned = `/api/v1/provider-media/${mediaKey}?expires=${future}`;
     for (const url of [tampered, expired, unsigned]) {
       const response = await app.request(url, {}, providerMediaEnv(get));
-      // Pinning the machine code keeps this insensitive to an unrelated 403
-      // (auth middleware, origin policy) standing in for signature rejection.
       expect(response.status).toBe(403);
       await expect(response.json()).resolves.toMatchObject({
         error: { code: "media_url_invalid" },
@@ -3648,11 +3454,6 @@ describe("provider media delivery route", () => {
     const get = vi.fn(async () => null);
     const app = createApiApp();
     const future = Math.floor(Date.now() / 1000) + 3600;
-    // Each signature is computed over the decoded key, so these URLs would verify;
-    // rejection must come from key-shape validation before any R2 access. For the
-    // encoded-slash and encoded-dot cases the path keeps the encoded segment while
-    // the signature covers the decoded key — a literal `/` or `..` segment would be
-    // normalized away by URL parsing before the route ever saw it.
     const encodedSlash = (await signedMediaUrl("org-1/asset-1/a/b", future)).replace(
       "/a/b?",
       "/a%2Fb?",
@@ -3683,12 +3484,6 @@ describe("provider media delivery route", () => {
     expect(get).toHaveBeenCalledWith(mediaKey);
   });
 
-  /**
-   * Delivery must follow the configured provider, not the R2 binding: an S3
-   * deployment relays the same bearer-authorized object from its own origin,
-   * and a deployment whose provider cannot be constructed still fails closed
-   * with 503 rather than serving bytes from an unintended store.
-   */
   it("relays the same signed object from an S3-compatible origin", async () => {
     const fetchMock = vi.fn(
       async () =>

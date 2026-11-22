@@ -13,15 +13,6 @@ const app = createApiApp();
 
 let deployedBindingsValidated = false;
 
-/**
- * Validates deployed Cloudflare bindings once per Worker isolate lifecycle.
- *
- * Local/test requests stay exempt. Successful deployed validation latches until
- * the isolate is replaced; failures remain retryable and never set the latch.
- *
- * @param env - Worker environment bindings.
- * @throws {Error} If any mandatory deployed binding is missing or malformed.
- */
 function validateDeployedBindingsOnce(env: ApiWorkerEnv): void {
   if (env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test" || deployedBindingsValidated)
     return;
@@ -30,19 +21,6 @@ function validateDeployedBindingsOnce(env: ApiWorkerEnv): void {
 }
 
 export default {
-  /**
-   * Cloudflare Workers HTTP entrypoint handling incoming fetch events for the API Worker.
-   *
-   * Configures observability log sampling rates, performs one-time environment binding validation,
-   * logs configuration failures with request tracing headers, and delegates execution to the Hono app.
-   * Copies bindings into an invocation-owned scope before database/auth adapters
-   * are created, so no driver socket or pending checkout crosses requests.
-   *
-   * @param request - Incoming HTTP request.
-   * @param env - Cloudflare Worker environment bindings.
-   * @param executionContext - Cloudflare ExecutionContext providing `waitUntil` and `passThroughOnException`.
-   * @returns Outgoing HTTP response.
-   */
   fetch(request, env, executionContext) {
     configureLogSampling(env.LOG_SAMPLE_RATE);
     try {

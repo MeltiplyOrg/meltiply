@@ -28,7 +28,6 @@ import {
 } from "./validation";
 import { idempotentInstallationMutation } from "./installation-mutation";
 
-/** Lifecycle state returned after suspend/reactivate/hard-delete administration. */
 interface AccountLifecycleBody {
   status: "active" | "suspended";
   suspended_at: string | null;
@@ -76,22 +75,10 @@ interface AuditRow extends Record<string, unknown> {
   target_type: string;
 }
 
-/**
- * Reads the request identifier from the Hono context.
- *
- * @param c - Hono request context.
- * @returns Unique request identifier.
- */
 function requestId(c: Context<ApiWorkerEnvironment>): string {
   return c.get("requestId");
 }
 
-/**
- * Asserts the caller is the Installation Owner.
- *
- * @param actor - Resolved request actor.
- * @returns Effect that fails with 403 `installation_owner_required`.
- */
 function requireInstallationOwner(actor: ResolvedActor): Effect.Effect<void, CoreApiError> {
   return actor.isInstallationOwner
     ? Effect.void
@@ -104,12 +91,6 @@ function requireInstallationOwner(actor: ResolvedActor): Effect.Effect<void, Cor
       );
 }
 
-/**
- * Asserts the caller may read installation settings and the Audit trail.
- *
- * @param actor - Resolved request actor.
- * @returns Effect that fails with 403 `workspace_admin_required`.
- */
 function requireWorkspaceAdmin(actor: ResolvedActor): Effect.Effect<void, CoreApiError> {
   return actor.role === "admin" || actor.isInstallationOwner
     ? Effect.void
@@ -118,16 +99,6 @@ function requireWorkspaceAdmin(actor: ResolvedActor): Effect.Effect<void, CoreAp
       );
 }
 
-/**
- * Loads one member of the shared Workspace with account lifecycle state inside
- * the caller's transaction.
- *
- * @param client - Active transaction client.
- * @param orgId - Shared Workspace UUID.
- * @param memberId - Internal user UUID.
- * @returns Effect resolving the member row.
- * @throws {CoreApiError} 404 `member_not_found` when the user is not a member.
- */
 function loadMemberEffect(
   client: EffectTransactionClient,
   orgId: string,
@@ -159,12 +130,6 @@ function loadMemberEffect(
     );
 }
 
-/**
- * Maps a member row to the account lifecycle response.
- *
- * @param row - Member row carrying suspension state.
- * @returns Lifecycle state for the member.
- */
 function lifecycleBody(row: InstallationMemberRow): AccountLifecycleBody {
   return {
     status: row.suspended_at === null ? "active" : "suspended",
@@ -179,12 +144,6 @@ function lifecycleBody(row: InstallationMemberRow): AccountLifecycleBody {
   };
 }
 
-/**
- * Extracts the fresh session token from a Better Auth sign-in response.
- *
- * @param value - Parsed JSON response body.
- * @returns The token string when present in either supported shape.
- */
 function sessionTokenFrom(value: unknown): string | undefined {
   if (!value || typeof value !== "object") return undefined;
   if ("token" in value && typeof value.token === "string") return value.token;
@@ -196,20 +155,6 @@ function sessionTokenFrom(value: unknown): string | undefined {
   return undefined;
 }
 
-/**
- * Verifies the caller's current password without keeping the session it mints.
- *
- * Better Auth remains the credential authority. Reauthentication signs in with
- * the caller's own email/password; the fresh session token is deleted before it
- * can be used, so the check proves the password without issuing new authority.
- *
- * @param env - Worker environment bindings.
- * @param actor - Resolved caller whose email is reauthenticated.
- * @param password - Submitted current password.
- * @returns Effect resolving void for a valid password.
- * @throws {CoreApiError} 401 `reauthentication_failed` for invalid credentials;
- *   429 `rate_limited` when the sign-in attempt budget is exhausted.
- */
 function reauthenticateEffect(
   env: ApiWorkerEnv,
   actor: ResolvedActor,
@@ -247,16 +192,6 @@ function reauthenticateEffect(
   });
 }
 
-/**
- * Registers installation administration routes.
- *
- * The surface is deliberately separate from Workspace content: the
- * Installation Owner controls account lifecycle and ownership, while Workspace
- * Admins read Seat usage and the Audit trail. Every mutation records an Audit
- * entry in the same transaction.
- *
- * @param app - Hono application instance.
- */
 export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): void {
   app.get("/api/v1/installation", (c) =>
     runRouteEffect(
@@ -316,8 +251,6 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
         yield* requireWorkspaceAdmin(actor);
-        // The Workspace is bounded to the active one; an arbitrary path id
-        // cannot read another tenant's audit trail.
         if (workspaceId !== actor.workspace.id) {
           return yield* Effect.fail(
             new CoreApiError(404, "workspace_not_found", "The workspace was not found."),
@@ -334,8 +267,6 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
           textParam(c.req.query("target_type"), "target_type", 64),
         );
         const search = yield* fromPromise(() => textParam(c.req.query("q"), "q", 100));
-        // Filter predicates reuse one parameter each; a NULL means "no filter".
-        // `q` uses strpos instead of LIKE so user text cannot act as wildcards.
         const entries = yield* withSystemTransactionEffect(c.env, (client) =>
           client
             .query<AuditRow>(
@@ -443,7 +374,6 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
                              (SELECT role FROM org_members WHERE org_id = $3 AND user_id = $1) AS role`,
                   [memberId, reason, actor.workspace.id],
                 );
-                // Suspension revokes every existing session immediately.
                 yield* client.query(`DELETE FROM "session" WHERE "userId" = $1`, [
                   member.auth_user_id,
                 ]);
@@ -663,9 +593,6 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
                 `SELECT id FROM users WHERE installation_owner FOR UPDATE`,
               );
               const currentOwnerId = owner.rows[0]?.id;
-              // Ownership may have moved while reauthentication was in flight.
-              // Only the account that still owns the installation may transfer
-              // it, so a stale request cannot overwrite a completed transfer.
               if (currentOwnerId !== actor.userId) {
                 return yield* Effect.fail(
                   new CoreApiError(

@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
-// Unit tests exercise resolveActor + loader seams only: the database module
-// pulls in `pg`, which cannot load in the workers vitest pool. Mocking it
-// keeps actor resolution's dynamic database import from evaluating pg.
 vi.mock("../src/database", () => ({}));
 
 import type { JwtIdentity } from "@meltiply/auth";
@@ -16,10 +13,6 @@ const env = {
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
 
-// Better Auth subject plus the internal Workspace membership the server
-// resolved from org_members, mirroring the confirmed actor claims contract:
-// subject = Better Auth user id, userId = internal users.id UUID,
-// organizationId = resolved workspace UUID, organizationRole = member role.
 const alphaActor: ResolvedActor = {
   authUserId: "auth_user_alpha",
   claims: {
@@ -78,13 +71,8 @@ function userProfileFor(actor: ResolvedActor) {
   };
 }
 
-// JWT bearer Authorization header standing in for the Better Auth session
-// cookie on protected-route requests.
 const bearerAuthorization = "Bearer test-only.jwt";
 
-// Builds the verified Better Auth JWT identity the `verifyJwtToken` test
-// double returns for the given actor; the bearer JWT is the only credential
-// protected routes may accept.
 function jwtIdentityFor(actor: ResolvedActor): JwtIdentity {
   return {
     email: `${actor.authUserId}@example.test`,
@@ -93,9 +81,6 @@ function jwtIdentityFor(actor: ResolvedActor): JwtIdentity {
   };
 }
 
-// Builds an app whose JWT bearer middleware resolves to the given actor without
-// a session cookie or database, and whose user loader asserts it receives the
-// actor's identity-bearing claims.
 function appForActor(actor: ResolvedActor) {
   return createApiApp({
     betterAuth: {

@@ -12,18 +12,9 @@ import { ProviderAdapterError } from "@meltiply/providers";
 
 import { CoreApiError, toCoreApiErrorOrRethrow } from "../src/core-types";
 import { runWorkerEffect } from "../src/effect/runtime";
+import { fakeHonoContext, fakeTransactionClient } from "../test-support/fakes";
 import { reserveIdempotencyEffect, type IdempotencyRecord } from "../src/idempotency";
 
-/**
- * Constructs a minimal mock Hono context for testing the Worker Effect runtime boundary.
- *
- * Provides a key-value store simulating Hono environment and request-level context
- * values such as correlation IDs, session claims, Worker executionCtx, and the
- * incoming request signal.
- *
- * @param options - Correlation identifiers, session attributes, execution context, and signal.
- * @returns A mocked HonoContext compatible with runWorkerEffect.
- */
 function createMockHonoContext(options: {
   readonly executionCtx?: {
     readonly waitUntil?: (p: Promise<unknown>) => void;
@@ -33,21 +24,13 @@ function createMockHonoContext(options: {
   readonly signal?: AbortSignal;
   readonly traceId?: string;
 }) {
-  const store = new Map<string, unknown>([
-    ["requestId", options.requestId ?? "test-req-id"],
-    ["traceId", options.traceId ?? "test-trace-id"],
-    ["session", options.session ?? { subject: "user_test", organizationId: "org_test" }],
-  ]);
-
-  return {
-    env: {
-      ENVIRONMENT: "test",
-    },
+  return fakeHonoContext({
     executionCtx: options.executionCtx,
-    get: (key: string) => store.get(key),
-    req: { raw: { signal: options.signal } },
-    set: (key: string, value: unknown) => store.set(key, value),
-  } as unknown as Parameters<typeof runWorkerEffect>[0];
+    requestId: options.requestId ?? "test-req-id",
+    session: options.session ?? { subject: "user_test", organizationId: "org_test" },
+    signal: options.signal,
+    traceId: options.traceId ?? "test-trace-id",
+  });
 }
 
 describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
@@ -381,12 +364,6 @@ describe("reserveIdempotencyEffect", () => {
   const idempotencyKey = "key-1";
   const requestHash = "hash-1";
 
-  /**
-   * Builds a scripted EffectTransactionClient whose query answers depend on
-   * the SQL text: INSERT reports whether a row was reserved, SELECT reports
-   * the currently committed idempotency record (empty when a rolled-back
-   * leader left nothing visible).
-   */
   function scriptedClient(script: {
     readonly insertRowCounts: readonly number[];
     readonly selectRows: readonly (readonly IdempotencyRecord[])[];
@@ -394,38 +371,25 @@ describe("reserveIdempotencyEffect", () => {
     const queries: string[] = [];
     let insertIndex = 0;
     let selectIndex = 0;
-    const client: EffectTransactionClient = {
-      query: <Row extends Record<string, unknown> = Record<string, unknown>>(
-        text: string,
-        _values?: readonly unknown[],
-      ) => {
-        queries.push(text);
-        if (text.includes("INSERT INTO idempotency_keys")) {
-          const inserted = (script.insertRowCounts[insertIndex++] ?? 0) === 1;
-          return Effect.succeed({
-            command: "INSERT",
-            fields: [],
-            oid: 0,
-            rowCount: inserted ? 1 : 0,
-            rows: (inserted ? [{ idempotency_key: idempotencyKey }] : []) as unknown as Row[],
-          });
-        }
-        const rows = (script.selectRows[selectIndex++] ?? []) as unknown as Row[];
+    const client = fakeTransactionClient((text) => {
+      queries.push(text);
+      if (text.includes("INSERT INTO idempotency_keys")) {
+        const inserted = (script.insertRowCounts[insertIndex++] ?? 0) === 1;
         return Effect.succeed({
-          command: "SELECT",
-          fields: [],
-          oid: 0,
-          rowCount: rows.length,
-          rows,
+          rowCount: inserted ? 1 : 0,
+          rows: inserted ? [{ idempotency_key: idempotencyKey }] : [],
         });
-      },
-    };
+      }
+      const rows = script.selectRows[selectIndex++] ?? [];
+      return Effect.succeed({
+        rowCount: rows.length,
+        rows,
+      });
+    });
     return { client, queries };
   }
 
   it("reserves cleanly when a rolled-back leader leaves no committed row", async () => {
-    // Attempt 1 conflicts with the uncommitted leader and its FOR UPDATE
-    // select sees nothing (leader rolled back). Attempt 2's insert succeeds.
     const { client, queries } = scriptedClient({
       insertRowCounts: [0, 1],
       selectRows: [[]],

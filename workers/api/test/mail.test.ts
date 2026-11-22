@@ -21,11 +21,6 @@ const message: MailMessage = {
 
 const sender = { email: "auth@meltiply.test", name: "Meltiply" };
 
-/**
- * Implements both generated binding overloads, narrowing to a structured
- * builder at the recording seam because this adapter never sends raw MIME.
- * Records dispatches and returns the supplied outcome to pin count/classification.
- */
 function bindingWith(outcome: { messageId: string } | Error) {
   const calls: EmailMessageBuilder[] = [];
   const binding: SendEmail = {
@@ -41,17 +36,12 @@ function bindingWith(outcome: { messageId: string } | Error) {
   return { binding, calls };
 }
 
-/** Builds a vendor-shaped rejection carrying a `code` property. */
 function vendorError(code: string): Error & { code: string } {
   return Object.assign(new Error("vendor detail <creator@example.com>"), {
     code,
   });
 }
 
-/**
- * Resolves the rejection reason of a `MailSender.send` promise. The contract
- * rejects only with `MailSubmissionError`, so tests assert the concrete error.
- */
 async function sendFailure(
   mailSender: MailSender,
   mail: MailMessage = message,
@@ -59,8 +49,6 @@ async function sendFailure(
   try {
     await mailSender.send(mail);
   } catch (error) {
-    // Contract promises MailSubmissionError rejections only; anything else is a
-    // contract violation and rethrows so the test fails with the real error.
     if (error instanceof MailSubmissionError) {
       return error;
     }
@@ -69,12 +57,6 @@ async function sendFailure(
   throw new Error("expected send to reject");
 }
 
-/**
- * Runs `MailService.send` under the given layer and returns the typed failure.
- * `Effect.match` keeps `MailSubmissionError` on the observed channel while an
- * unexpected success throws inside `onSuccess`, failing the test as a defect
- * rather than smuggling a receipt out as an error.
- */
 async function serviceFailure(
   layer: Layer.Layer<MailService, never, never>,
   mail: MailMessage = message,
@@ -111,8 +93,6 @@ describe("createCloudflareMailSender", () => {
       text: message.text,
     });
 
-    // Generated EmailAddress requires a name, so the nameless neutral sender
-    // reaches the binding as a bare string rather than an incomplete identity.
     const { binding: bareBinding, calls: bareCalls } = bindingWith({
       messageId: "cf-msg-2",
     });
@@ -197,8 +177,6 @@ describe("createCloudflareMailSender", () => {
     }
   });
 
-  // Unknown codes must not inherit Object.prototype classifications: retain a
-  // sanitized ambiguous result and dispatch once so callers never revoke on it.
   it("reports unknown and inherited post-dispatch codes as sanitized ambiguous errors", async () => {
     for (const code of ["E_FUTURE_UNDOCUMENTED", "constructor", "toString", "__proto__"]) {
       const { binding, calls } = bindingWith(vendorError(code));
@@ -225,9 +203,9 @@ describe("createCloudflareMailSender", () => {
   });
 
   it("reports a malformed resolved receipt as ambiguous, not accepted", async () => {
-    const malformed = {
-      send: async () => ({}),
-    } as unknown as SendEmail;
+    const malformed: SendEmail = {
+      send: async () => ({}) as EmailSendResult,
+    };
     const error = await sendFailure(createCloudflareMailSender(malformed, sender));
 
     expect(error).toMatchObject({ classification: "ambiguous" });
@@ -246,7 +224,7 @@ describe("createCloudflareMailSender", () => {
     await sendFailure(mailSender);
     await sendFailure(mailSender);
 
-    expect(calls).toHaveLength(2); // two calls, one binding hit each
+    expect(calls).toHaveLength(2);
   });
 
   it("sanitizes failures: no bodies, action links, or raw vendor errors", async () => {
@@ -352,8 +330,6 @@ describe("createMailServiceTest", () => {
     const failure = await serviceFailure(failing);
     expect(failure).toMatchObject({ classification: "rejected" });
 
-    // The failing layer's behavior must not bleed into an independent layer,
-    // and the failing layer itself stays deterministic on repeat invocation.
     const program = Effect.gen(function* () {
       const service = yield* MailService;
       return yield* service.send(message);

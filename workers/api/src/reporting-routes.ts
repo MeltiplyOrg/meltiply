@@ -30,10 +30,6 @@ import { reportingLayer, type ReportingDependencies } from "./reporting-layer";
 import { idempotencyKey, jsonBody, onlyKeys } from "./validation";
 import { idempotentInstallationMutation } from "./installation-mutation";
 
-// Members may read policy; only the live Installation Owner may mutate it.
-// Delivery status distinguishes local, queued, and capture-accepted feedback.
-
-/** Wire shape of one category, matching the OpenAPI `ReportingCategoryStatus`. */
 interface CategoryBody {
   decision_at: string | null;
   effective: boolean;
@@ -42,7 +38,6 @@ interface CategoryBody {
   requested: boolean;
 }
 
-/** Wire shape of the member-readable policy document. */
 interface PolicyBody {
   categories: { diagnostics: CategoryBody; usage: CategoryBody };
   destination_configured: boolean;
@@ -52,7 +47,6 @@ interface PolicyBody {
   owner_can_change: boolean;
 }
 
-/** Wire shape of the one-time attribution state. */
 interface FeedbackBody {
   delivery_status: ReportingFeedbackState["deliveryStatus"];
   discovery_source: ReportingFeedbackState["discoverySource"];
@@ -60,7 +54,6 @@ interface FeedbackBody {
   submitted_at: string | null;
 }
 
-/** Wire shape returned by diagnostic ingestion. */
 interface DiagnosticBody {
   accepted: boolean;
   reason: "category_disabled" | "queued";
@@ -70,7 +63,6 @@ function requestId(c: Context<ApiWorkerEnvironment>): string {
   return c.get("requestId");
 }
 
-/** Projects one category into the wire shape. */
 function categoryBody(status: ReportingCategoryStatus): CategoryBody {
   return {
     decision_at: status.decidedAt,
@@ -81,7 +73,6 @@ function categoryBody(status: ReportingCategoryStatus): CategoryBody {
   };
 }
 
-/** Projects the policy snapshot into the wire shape. */
 function policyBody(policy: ReportingPolicySnapshot, ownerCanChange: boolean): PolicyBody {
   return {
     categories: {
@@ -96,7 +87,6 @@ function policyBody(policy: ReportingPolicySnapshot, ownerCanChange: boolean): P
   };
 }
 
-/** Projects the attribution state into the wire shape. */
 function feedbackBody(state: ReportingFeedbackState): FeedbackBody {
   return {
     delivery_status: state.deliveryStatus,
@@ -106,7 +96,6 @@ function feedbackBody(state: ReportingFeedbackState): FeedbackBody {
   };
 }
 
-/** Runs one reporting service program against the current bindings. */
 function withReporting<A, E>(
   env: ApiWorkerEnv,
   dependencies: ReportingDependencies,
@@ -118,7 +107,6 @@ function withReporting<A, E>(
   );
 }
 
-/** Asserts the caller is the current Installation Owner. */
 function requireInstallationOwner(actor: ResolvedActor): Effect.Effect<void, CoreApiError> {
   return actor.isInstallationOwner
     ? Effect.void
@@ -131,7 +119,6 @@ function requireInstallationOwner(actor: ResolvedActor): Effect.Effect<void, Cor
       );
 }
 
-/** Reads a strictly boolean request field. */
 function booleanField(body: Record<string, unknown>, name: string): boolean {
   const value = body[name];
   if (typeof value !== "boolean") {
@@ -140,12 +127,6 @@ function booleanField(body: Record<string, unknown>, name: string): boolean {
   return value;
 }
 
-/**
- * Registers reporting preference, feedback and diagnostic ingestion routes.
- *
- * @param app - Hono application instance.
- * @param dependencies - Optional injected reporting service layer.
- */
 export function registerReportingRoutes(
   app: Hono<ApiWorkerEnvironment>,
   dependencies: ReportingDependencies = {},
@@ -183,8 +164,6 @@ export function registerReportingRoutes(
           requestHash,
           (client) =>
             Effect.gen(function* () {
-              // The preference write and its Audit entry share one transaction,
-              // so the trail can never disagree with the stored consent.
               const updated = yield* withReporting(
                 c.env,
                 dependencies,
@@ -199,8 +178,6 @@ export function registerReportingRoutes(
                     email: actor.email,
                     id: actor.userId,
                   }),
-                  // The decision and its effective consequence are audited; the
-                  // pseudonymous installation identifier never enters the trail.
                   after: {
                     diagnostics: updated.policy.categories.diagnostics.requested,
                     diagnostics_effective: updated.policy.categories.diagnostics.effective,
@@ -274,9 +251,6 @@ export function registerReportingRoutes(
                 (service) => service.submitFeedback(source),
                 client,
               );
-              // A submission that actually shares an answer is an administrative
-              // action; declining records the local choice without an event and
-              // without a trail entry.
               if (state.shared) {
                 yield* recordWorkspaceAuditEffect(client, {
                   action: "reporting.feedback_submitted",
@@ -346,9 +320,6 @@ export function registerReportingRoutes(
               "platform must be a supported Platform.",
             );
           }
-          // The Provider class is the countable fact an expected condition
-          // carries; an out-of-vocabulary value is a client bug, not something to
-          // silently coerce into a real class.
           const rawFailureClass = body.provider_failure_class;
           if (rawFailureClass !== undefined && !isProviderFailureClass(rawFailureClass)) {
             throw new CoreApiError(
@@ -364,9 +335,6 @@ export function registerReportingRoutes(
               name: typeof body.error_name === "string" ? body.error_name : "Error",
               stack: typeof body.error_stack === "string" ? body.error_stack : undefined,
             },
-            // A forwarded browser failure is already handled by the time the
-            // receiving server sees it; the decision that matters here is
-            // whether persisted diagnostics consent is effective.
             handled: true,
             occurredAt: new Date().toISOString(),
             operation,
@@ -390,16 +358,6 @@ export function registerReportingRoutes(
   );
 }
 
-/**
- * Drains the bounded pending queue on the request's background continuation.
- *
- * Diagnostic ingestion must not delay the response describing the failure, and
- * the delivery attempt has to outlive the handler returning. The continuation is
- * the Worker lifecycle hook for that: a transport failure inside it is logged
- * locally and never changes the HTTP outcome or the caller's error propagation.
- *
- * @param c - Hono request context providing the execution context.
- */
 function scheduleReportingDelivery(
   c: Context<ApiWorkerEnvironment>,
   dependencies: ReportingDependencies,
@@ -408,8 +366,6 @@ function scheduleReportingDelivery(
   runBackgroundContinuation(c, {
     errorCode: "reporting_delivery_failed",
     event: "reporting_delivery",
-    // The continuation is a Promise-facing boundary, so the Effect program is
-    // executed here exactly once, mirroring the flow recorder's adapter.
     perform: () =>
       Effect.runPromise(
         withReporting(c.env, dependencies, (service) =>

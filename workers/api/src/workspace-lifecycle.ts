@@ -35,17 +35,6 @@ import {
 
 const unsafeSubjectCharactersPattern = /[\p{Cc}\p{Cf}]+/gu;
 
-/**
- * Workspace lifecycle REST surface implemented natively on the resolved actor.
- *
- * There is exactly one shared Workspace per installation; administration is
- * scoped to its path id and re-checked inside the transaction against
- * `org_members`. The installation Owner is not a content superadmin: content
- * authority comes from the Workspace role, while owner-only actions live in
- * the installation routes. Every administrative mutation records an Audit
- * entry in the same transaction.
- */
-
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const INVITATION_TTL_DAYS = 7;
@@ -123,41 +112,20 @@ interface IdempotentResponse {
   body: unknown;
   replayed: boolean;
   status: number;
-  /** Workspace display name carried out of the transaction for invitation email copy. */
   workspaceName?: string;
-  /** Raw single-use token produced inside the transaction for email delivery. */
   token?: string;
 }
 
-/**
- * Optional `MailService` override mirroring the `storageServiceLayer` seam in
- * `CoreRouteDependencies`: tests inject `createMailServiceTest` doubles while
- * production resolves the live sender from the current invocation's `env` (see
- * `resolveMailServiceLayer`).
- */
 export interface WorkspaceLifecycleDependencies {
   mailServiceLayer?:
     | Layer.Layer<MailService, never, never>
     | ((env: ApiWorkerEnv) => Layer.Layer<MailService, never, never>);
 }
 
-/**
- * Converts a database timestamp into the contract's ISO 8601 date-time string.
- *
- * @param value - TIMESTAMPTZ value returned by the driver (Date or ISO string).
- * @returns ISO 8601 string for the API envelope.
- */
 function isoTimestamp(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
-/**
- * Maps an organizations row plus the caller's membership role to the Workspace schema.
- *
- * @param row - organizations table row.
- * @param role - Caller's org_members role.
- * @returns OpenAPI Workspace response body.
- */
 function workspaceBody(row: OrganizationRow, role: WorkspaceRole): WorkspaceBody {
   return {
     created_at: isoTimestamp(row.created_at),
@@ -169,16 +137,6 @@ function workspaceBody(row: OrganizationRow, role: WorkspaceRole): WorkspaceBody
   };
 }
 
-/**
- * Maps a joined org_members/users row to the WorkspaceMember schema.
- *
- * `status` reflects suspension, which is installation-level account state; a
- * suspended member keeps their membership and content attribution but releases
- * their Seat and cannot authenticate.
- *
- * @param row - Joined membership row.
- * @returns OpenAPI WorkspaceMember response body.
- */
 function memberBody(row: MemberRow): WorkspaceMemberBody {
   const suspended = row.suspended_at !== null;
   return {
@@ -195,15 +153,6 @@ function memberBody(row: MemberRow): WorkspaceMemberBody {
   };
 }
 
-/**
- * Derives the lifecycle status of an invitation row and maps it to the schema.
- *
- * Status order matters: an accepted or revoked timestamp wins over expiry so a
- * consumed invitation never flips to `expired` after the fact.
- *
- * @param row - workspace_invitations table row.
- * @returns OpenAPI WorkspaceInvitation response body.
- */
 function invitationBody(row: InvitationRow): WorkspaceInvitationBody {
   const status: InvitationStatus =
     row.accepted_at !== null
@@ -225,16 +174,6 @@ function invitationBody(row: InvitationRow): WorkspaceInvitationBody {
   };
 }
 
-/**
- * Normalizes and validates an invitation email address.
- *
- * Lowercases and trims so the partial unique index on (org_id, email) enforces
- * one open invitation per address regardless of client casing.
- *
- * @param value - Raw email field from the request body.
- * @returns Normalized lowercase email.
- * @throws {CoreApiError} 400 `validation_error` when the value is not a plausible email.
- */
 function normalizedEmail(value: unknown): string {
   const email = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (!email || email.length > 320 || !EMAIL_PATTERN.test(email)) {
@@ -243,14 +182,6 @@ function normalizedEmail(value: unknown): string {
   return email;
 }
 
-/**
- * Reads a required Workspace role from a request body.
- *
- * @param value - Untrusted role field.
- * @param field - Body field name used in the validation message.
- * @returns Validated Workspace role.
- * @throws {CoreApiError} 400 `validation_error` when the value is not a role.
- */
 function workspaceRoleField(value: unknown, field: string): WorkspaceRole {
   if (!isWorkspaceRole(value)) {
     throw new CoreApiError(400, "validation_error", `${field} must be admin, editor, or viewer.`);
@@ -258,18 +189,6 @@ function workspaceRoleField(value: unknown, field: string): WorkspaceRole {
   return value;
 }
 
-/**
- * Loads the caller's membership and the addressed Workspace inside one transaction.
- *
- * Membership is the authorization boundary for every lifecycle route: a
- * non-member gets 404 so Workspace existence is not leaked.
- *
- * @param client - Active Effect transaction client.
- * @param workspaceId - Workspace UUID from the path.
- * @param actor - Resolved request actor.
- * @returns Effect resolving to the Workspace row and the caller's role.
- * @throws {CoreApiError} 404 `workspace_not_found` when the Workspace is missing or inaccessible.
- */
 function requireMembership(
   client: EffectTransactionClient,
   workspaceId: string,
@@ -299,12 +218,6 @@ function requireMembership(
     );
 }
 
-/**
- * Asserts the caller holds the Workspace Admin role in the addressed Workspace.
- *
- * @param role - Caller's membership role resolved by requireMembership.
- * @returns Effect that fails with 403 `workspace_admin_required` for non-admins.
- */
 function requireAdmin(role: WorkspaceRole): Effect.Effect<void, CoreApiError> {
   return role === "admin"
     ? Effect.void
@@ -313,17 +226,6 @@ function requireAdmin(role: WorkspaceRole): Effect.Effect<void, CoreApiError> {
       );
 }
 
-/**
- * Asserts the resolved caller may assign a role to another person.
- *
- * Workspace Admins may invite and manage Editors and Viewers; only the
- * Installation Owner may assign Admin. The capability map is the authority so
- * the API and the frontend cannot disagree.
- *
- * @param actor - Resolved request actor.
- * @param role - Role being assigned.
- * @returns Effect that fails with 403 `forbidden_role_assignment`.
- */
 function requireAssignableRole(
   actor: ResolvedActor,
   role: WorkspaceRole,
@@ -341,16 +243,6 @@ function requireAssignableRole(
       );
 }
 
-/**
- * Asserts a Workspace Admin is not modifying another Admin.
- *
- * Installation Ownership is installation-level authority and is the only path
- * that may change an Admin's role or membership.
- *
- * @param actor - Resolved request actor.
- * @param targetRole - Target member's current role.
- * @returns Effect that fails with 403 `forbidden_role_assignment`.
- */
 function forbidAdminPeerMutation(
   actor: ResolvedActor,
   targetRole: WorkspaceRole,
@@ -366,21 +258,6 @@ function forbidAdminPeerMutation(
     : Effect.void;
 }
 
-/**
- * Runs one idempotent lifecycle mutation inside one system transaction.
- *
- * Wraps `withIdempotentMutationStatus` with the system pool: installation
- * lifecycle mutations do not carry tenant claims, and the organization id from
- * the route path is re-checked inside the transaction.
- *
- * @param env - Worker environment bindings.
- * @param organizationId - Workspace UUID scoping the idempotency key.
- * @param operation - Operation identifier (e.g. "workspace.update").
- * @param key - Validated Idempotency-Key header value.
- * @param requestHash - SHA-256 digest of the canonical request payload.
- * @param run - Transactional program producing the response status and body.
- * @returns Effect resolving to the fresh or replayed response.
- */
 function idempotentMutation(
   env: ApiWorkerEnv,
   organizationId: string,
@@ -396,17 +273,6 @@ function idempotentMutation(
   );
 }
 
-/**
- * Resolves the `MailService` Layer for invitation delivery.
- *
- * Injected dependencies (layers or env-derived layer factories, e.g. test
- * doubles) win; otherwise the layer is derived from the current invocation's
- * `env` so Worker bindings are never captured by a module-global Layer.
- *
- * @param env - Worker environment bindings of the current request.
- * @param dependencies - Route registration dependencies.
- * @returns Layer providing `MailService` for this request.
- */
 function resolveMailServiceLayer(
   env: ApiWorkerEnv,
   dependencies: WorkspaceLifecycleDependencies,
@@ -418,24 +284,11 @@ function resolveMailServiceLayer(
   return createMailServiceLive(createCloudflareMailSender(env.MAIL, mailSenderConfiguration(env)));
 }
 
-/**
- * Reduces a Workspace name to subject-line-safe text, collapsing control and
- * format characters so CRLF cannot split the mail header.
- *
- * @param name - Raw Workspace display name.
- * @returns Control-free name, or "your team" when nothing printable remains.
- */
 function invitationSubjectWorkspaceName(name: string): string {
   const sanitized = name.replace(unsafeSubjectCharactersPattern, " ").trim();
   return sanitized.length > 0 ? sanitized : "your team";
 }
 
-/**
- * Renders the neutral `MailMessage` for a Workspace invitation.
- *
- * @param message - Recipient, acceptance link, and Workspace display name.
- * @returns Provider-neutral message ready for `MailService.send`.
- */
 function renderInvitationMessage(message: {
   link: string;
   to: string;
@@ -451,14 +304,6 @@ function renderInvitationMessage(message: {
   };
 }
 
-/**
- * Builds the frontend acceptance URL for an invitation token.
- *
- * @param env - Worker environment bindings containing APP_URL.
- * @param token - Opaque invitation token (never stored server-side).
- * @returns Absolute acceptance link for the invitation email.
- * @throws {CoreApiError} 503 `service_unavailable` when APP_URL is unset.
- */
 function invitationLink(env: ApiWorkerEnv, token: string): string {
   const base = env.APP_URL?.trim();
   if (!base) {
@@ -469,29 +314,6 @@ function invitationLink(env: ApiWorkerEnv, token: string): string {
   return url.toString();
 }
 
-/**
- * Submits one invitation email and owns the shared delivery-failure policy.
- *
- * Creation and resend both rotate or mint a single-use token before sending.
- * A `rejected` or `unavailable` submission is definitive, so the committed
- * idempotency record is removed: a client retry with the same key must execute
- * again rather than replay a response whose message was never delivered. A
- * created invitation is also revoked so its undelivered token cannot hold a
- * Seat; a resent invitation stays pending so the retry can rotate and resend.
- * An `ambiguous` outcome keeps both records because the provider may have
- * accepted the message. The caller's request fails with the typed mail error so
- * the API never reports an undelivered invitation as successful.
- *
- * @param env - Worker environment bindings used for the repair transaction.
- * @param invitation - Invitation whose id, Workspace, and recipient identify the message.
- * @param link - Absolute acceptance link carrying the raw token.
- * @param workspaceName - Workspace display name for the message copy.
- * @param operation - Idempotent operation whose record may be invalidated.
- * @param idempotencyKey - Client key committed by the invitation mutation.
- * @param revokeOnDefinitiveFailure - Whether a definitive failure releases the Seat.
- * @returns Effect resolving after the mail service accepts the submission.
- * @throws {CoreApiError} 503 `email_unavailable` or 502 `email_delivery_failed`.
- */
 function submitInvitationEffect(
   env: ApiWorkerEnv,
   invitation: Pick<WorkspaceInvitationBody, "email" | "id" | "org_id">,
@@ -553,12 +375,6 @@ function submitInvitationEffect(
   });
 }
 
-/**
- * Registers the native Workspace lifecycle routes on the API router.
- *
- * @param app - Hono application instance.
- * @param dependencies - Optional `MailService` Layer override for tests.
- */
 export function registerWorkspaceLifecycleRoutes(
   app: Hono<ApiWorkerEnvironment>,
   dependencies: WorkspaceLifecycleDependencies = {},
@@ -767,8 +583,6 @@ export function registerWorkspaceLifecycleRoutes(
                   ),
                 );
               }
-              // Expired-but-unmarked rows still hold the (org_id, email) slot
-              // in the pending unique index; clear them before inserting.
               yield* client.query(
                 `UPDATE workspace_invitations
                  SET revoked_at = now(), updated_at = now()
@@ -890,9 +704,6 @@ export function registerWorkspaceLifecycleRoutes(
                   new CoreApiError(410, "invitation_revoked", "The invitation has been revoked."),
                 );
               }
-              // An expired invitation no longer reserves a Seat. Renewing it
-              // consumes capacity again, so serialize with the Workspace lock
-              // and re-check under the same rule used at creation.
               if (new Date(invitation.expires_at).getTime() <= Date.now()) {
                 yield* client.query("SELECT id FROM organizations WHERE id = $1 FOR UPDATE", [
                   workspaceId,
@@ -1095,8 +906,6 @@ export function registerWorkspaceLifecycleRoutes(
           );
         }
         const tokenHash = yield* Effect.promise(() => sha256Hex(token));
-        // The token is the idempotency credential: a consumed or replayed
-        // acceptance resolves to the same membership row.
         const outcome = yield* withSystemTransactionEffect(c.env, (client) =>
           Effect.gen(function* () {
             const invitation = yield* client.query<InvitationRow>(
@@ -1114,9 +923,6 @@ export function registerWorkspaceLifecycleRoutes(
               );
             }
             if (row.accepted_at !== null) {
-              // Actor resolution activates a verified invitation automatically.
-              // Replaying the link for the same account returns that membership;
-              // any other caller still sees the used-invitation error.
               const existing = yield* client.query<{
                 avatar_url: string | null;
                 created_at: Date | string;
@@ -1503,12 +1309,6 @@ export function registerWorkspaceLifecycleRoutes(
   );
 }
 
-/**
- * Retrieves the unique request identifier stored on the Hono execution context.
- *
- * @param c - Hono request context.
- * @returns Request ID string (from `X-Request-ID` or generated).
- */
 function requestId(c: Context<ApiWorkerEnvironment>): string {
   return c.get("requestId");
 }

@@ -17,13 +17,11 @@ import {
   uuidParam,
 } from "./validation";
 
-/** Registers the strict Queue HTTP seam. Schema validation precedes tenant writes; the route-local service is initialized once on first use, matching the Post service boundary without capturing request state. */
 export function registerPublishingQueueRoutes(
   app: Hono<ApiWorkerEnvironment>,
   configured?: PublishingQueueApiService,
 ): void {
   let servicePromise: Promise<PublishingQueueApiService> | undefined;
-  /** Keeps the SQL/Post projection graph off unrelated routes; injected contracts never construct real data access. A failed initialization remains a request failure, not a fallback. */
   const queues = async (): Promise<PublishingQueueApiService> => {
     if (configured) return configured;
     servicePromise ??= import("./publishing-queue-service").then((module) =>

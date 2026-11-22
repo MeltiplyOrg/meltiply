@@ -1,21 +1,11 @@
 import { Context, Effect, Layer } from "effect";
 import { MailSubmissionError, type MailSubmissionClassification } from "@meltiply/domain";
 
-/**
- * Structured sender or recipient identity. `email` is a bare address and
- * `name` an optional display name — never a combined `"Name <a@b>"` string, so
- * callers cannot smuggle header syntax through the sender field.
- */
 export interface MailAddress {
   readonly email: string;
   readonly name?: string;
 }
 
-/**
- * Provider-neutral outbound transactional message. One recipient with subject,
- * HTML, and plain-text bodies; the sender identity is configured separately via
- * `mailSenderConfiguration`, not carried per message.
- */
 export interface MailMessage {
   readonly to: string;
   readonly subject: string;
@@ -23,33 +13,14 @@ export interface MailMessage {
   readonly text: string;
 }
 
-/**
- * Neutral acknowledgement that the provider accepted a submission. It is
- * acceptance for delivery, not proof of inbox placement, and carries no
- * vendor-shaped fields beyond the submission identifier.
- */
 interface MailReceipt {
   readonly submissionId: string;
 }
 
-/**
- * Promise-native mail capability consumed by Better Auth callbacks. Rejects
- * only with `MailSubmissionError`; implementations submit exactly once and
- * never retry, so an `ambiguous` failure may already have been accepted
- * remotely and must not be resubmitted by callers.
- */
 export interface MailSender {
   readonly send: (message: MailMessage) => Promise<MailReceipt>;
 }
 
-/**
- * Deterministic Cloudflare `send()` error codes mapped to the neutral failure
- * taxonomy. Submission-shape errors (validation, headers, size, sender and
- * recipient policy, definitive delivery failure) are `rejected`; throttling and
- * daily quota stay distinct from the provider's internal service failure.
- * Codes absent from this table fall through to `ambiguous` because an
- * unrecognized post-dispatch error cannot prove the write did not happen.
- */
 const cloudflareSendErrorClassifications: Readonly<Record<string, MailSubmissionClassification>> = {
   E_CONTENT_TOO_LARGE: "rejected",
   E_DELIVERY_FAILED: "rejected",
@@ -84,13 +55,6 @@ const classificationMessages: Readonly<Record<MailSubmissionClassification, stri
     "The mail submission outcome is uncertain; the message may already have been accepted.",
 };
 
-/**
- * Maps a native `send()` rejection to a sanitized `MailSubmissionError`. Only
- * own vendor `code` entries influence the classification, and the code (never
- * the vendor message, which may echo submitted content) is appended to the
- * fixed per-classification message for operators. Unknown strings, including
- * inherited object keys, and missing codes or transport failures are `ambiguous`.
- */
 function classifySendFailure(cause: unknown): MailSubmissionError {
   if (cause instanceof MailSubmissionError) {
     return cause;
@@ -115,23 +79,6 @@ function classifySendFailure(cause: unknown): MailSubmissionError {
   });
 }
 
-/**
- * Creates the single `MailSender` implementation backed by the generated
- * `SendEmail` contract. Named senders use a structured identity; nameless
- * senders use a bare address because generated `EmailAddress` requires a name.
- *
- * Configuration is checked before any dispatch: a missing binding, a binding
- * whose `send` is not callable (for example an absent or wrongly-shaped
- * binding, which would otherwise surface as a TypeError), or a missing sender
- * rejects `unavailable` and the binding is never invoked. Each call submits
- * exactly once — no retry, no resubmission — and a resolved promise whose
- * receipt lacks a non-empty `messageId` is reported `ambiguous` rather than
- * trusted as acceptance.
- *
- * @param binding - The `send_email` Worker binding (`env.MAIL`), or undefined.
- * @param sender - Configured sender identity from `mailSenderConfiguration`.
- * @returns Promise-native sender rejecting only with `MailSubmissionError`.
- */
 export function createCloudflareMailSender(
   binding: SendEmail | undefined,
   sender: MailAddress | undefined,
@@ -177,35 +124,12 @@ export function createCloudflareMailSender(
   };
 }
 
-/**
- * Effect service shape for outbound mail. `send` has no unresolved
- * requirements and fails only with the typed `MailSubmissionError` contract.
- */
 export interface MailServiceShape {
   readonly send: (message: MailMessage) => Effect.Effect<MailReceipt, MailSubmissionError, never>;
 }
 
-/**
- * Effect service tag for transactional mail submission.
- */
 export class MailService extends Context.Service<MailService, MailServiceShape>()("MailService") {}
 
-/**
- * Creates the live `MailService` Layer over a `MailSender`, sharing one
- * submission implementation between the Promise-native and Effect surfaces.
- *
- * `Effect.tryPromise` maps rejections explicitly: typed `MailSubmissionError`
- * pass through untouched while foreign rejections become `ambiguous` — the
- * safe default for an unknown post-dispatch outcome. Effect interruption
- * cannot cancel the in-flight native `send()` and cannot prove the write did
- * not happen; the host retains the interrupt `Cause`, and neither this Layer
- * nor the adapter ever resubmits after an uncertain outcome. Each send is
- * recorded as a `mail.send` span; no message fields become span attributes so
- * bodies, links, and recipients never reach trace exports.
- *
- * @param sender - Submission implementation (e.g. `createCloudflareMailSender`).
- * @returns Layer providing `MailService` built from the current invocation's sender.
- */
 export function createMailServiceLive(sender: MailSender): Layer.Layer<MailService, never, never> {
   const service: MailServiceShape = {
     send: (message) =>
@@ -223,15 +147,6 @@ export function createMailServiceLive(sender: MailSender): Layer.Layer<MailServi
   return Layer.succeed(MailService, service);
 }
 
-/**
- * Creates an isolated test Layer for `MailService`. Default behavior is a
- * deterministic accepted submission so workflow tests exercise the mail seam
- * without a binding; each call site gets its own service instance via `impl`,
- * keeping doubles isolated per test.
- *
- * @param impl - Optional `send` override for failure/success scenarios.
- * @returns Layer providing the stubbed `MailService`.
- */
 export function createMailServiceTest(
   impl?: Partial<MailServiceShape>,
 ): Layer.Layer<MailService, never, never> {

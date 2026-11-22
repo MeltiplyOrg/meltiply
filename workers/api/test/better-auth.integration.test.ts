@@ -12,29 +12,11 @@ import { sha256Hex } from "../src/crypto";
 import { systemPoolFor } from "../src/database";
 import type { ApiWorkerEnv } from "../src/env";
 
-/**
- * These tests drive the real `betterAuthFor` → `createBetterAuth` →
- * `createCloudflareMailSender` stack against the local PostgreSQL database —
- * no auth internals are mocked. Mail capture happens at the `send_email`
- * binding seam: the recording binding exercises the same adapter mapping,
- * sender normalization, and receipt contract the real binding uses, and the
- * assertion target is the message Better Auth actually submitted (never HTTP
- * success alone, which Better Auth does not treat as delivery evidence).
- */
-
 const connectionString = process.env.MELTIPLY_DATABASE_TEST_URL;
 if (!connectionString) {
   throw new Error("MELTIPLY_DATABASE_TEST_URL is required for PostgreSQL integration suites");
 }
 
-/**
- * System-pool connection string for the auth lifecycle fixtures, mirroring
- * `core-service.integration.test.ts`: Better Auth's `user`/`session`/
- * `account`/`verification`/`jwks` tables are revoked from the RLS role the
- * runner exports via `MELTIPLY_DATABASE_TEST_URL` (migration 001 keeps them
- * system-only), so `DB_SYSTEM` must reach the privileged local role rather
- * than the authenticated fixture URL.
- */
 const baseSystemConnectionString = integrationDatabaseUrl(
   process.env.MELTIPLY_DATABASE_TEST_URL,
   "system",
@@ -50,8 +32,6 @@ const adminConnectionString = integrationDatabaseUrl(
 );
 const adminPool = createHyperdrivePool({ connectionString: adminConnectionString });
 
-// Exercise the actual migrated auth tables and indexes without taking ownership
-// of the shared RLS fixtures. No production or external database is accepted.
 beforeAll(async () => {
   for (const connection of [systemConnectionString, adminConnectionString]) {
     const url = new URL(connection);
@@ -90,29 +70,13 @@ beforeEach(async () => {
   );
 });
 
-/**
- * One fixture secret for every environment this suite builds. Better Auth
- * stores JWKS private keys in the shared `jwks` table encrypted with the auth
- * secret, and this database is the same one the local development stack seeds
- * its keys with — using the local fallback secret keeps those rows readable.
- * Mixing a second secret in makes whichever instance reads the existing row
- * fail to decrypt it (HTTP 500 on sign-in and `/api/auth/token`). Production
- * behavior is untouched: outside local/test `BETTER_AUTH_SECRET` stays a
- * required binding with no fallback.
- */
 const authSecret = "meltiply-local-auth-secret-32-chars-long";
 
-/** Binding double plus the messages dispatched through it. */
 interface RecordingMail {
   binding: SendEmail;
   sent: EmailMessageBuilder[];
 }
 
-/**
- * Implements both generated send overloads, rejecting raw MIME at the recording
- * seam because the adapter only composes builders. Captures the real payload
- * (`to`/`from`/subject/html/text) instead of a mocked option echo.
- */
 function recordingMailBinding(): RecordingMail {
   const sent: EmailMessageBuilder[] = [];
   const binding: SendEmail = {
@@ -127,11 +91,6 @@ function recordingMailBinding(): RecordingMail {
   return { binding, sent };
 }
 
-/**
- * Builds a Worker env bound to the integration database. `test` environment
- * keeps the explicit local policy — unverified sign-in allowed — while the
- * recording binding still captures every dispatched message.
- */
 function localTestEnv(mail: RecordingMail) {
   return {
     ALLOWED_ORIGINS: "https://app.test",
@@ -147,10 +106,6 @@ function localTestEnv(mail: RecordingMail) {
   } satisfies ApiWorkerEnv;
 }
 
-/**
- * Builds the deployed-environment env: verification is mandatory and the
- * `MAIL` binding/sender must be usable or `betterAuthFor` fails closed.
- */
 function stagingEnv(mail: RecordingMail) {
   return {
     ALLOWED_ORIGINS: "https://app.test",
@@ -166,11 +121,6 @@ function stagingEnv(mail: RecordingMail) {
   } satisfies ApiWorkerEnv;
 }
 
-/**
- * Minimal env used for direct database assertions. `systemPoolFor` caches per
- * connection string, so this resolves the same isolate-cached pool the auth
- * instances use.
- */
 function systemEnv() {
   return {
     ALLOWED_ORIGINS: "https://app.test",
@@ -181,10 +131,8 @@ function systemEnv() {
 }
 
 const baseURL = "https://auth.test";
-/** Staging fixtures use HTTPS so the installation-origin guard stays exercised. */
 const stagingOrigin = "https://auth.test";
 
-/** Sends a JSON POST to a Better Auth endpoint path under `/api/auth`. */
 function authPost(
   auth: { handler: (request: Request) => Promise<Response> },
   path: string,
@@ -200,7 +148,6 @@ function authPost(
   );
 }
 
-/** Calls a Better Auth endpoint with the session cookie attached. */
 function authGetWithCookie(
   auth: { handler: (request: Request) => Promise<Response> },
   path: string,
@@ -209,22 +156,12 @@ function authGetWithCookie(
   return auth.handler(new Request(`${baseURL}${path}`, { headers: { Cookie: cookie } }));
 }
 
-/**
- * Extracts the session cookie pair (`name=value`) Better Auth set on a
- * sign-in/sign-up response. `getSetCookie` keeps multiple Set-Cookie headers
- * separate so the pick is deterministic.
- */
 function sessionCookiePair(response: Response): string {
   const header = response.headers.getSetCookie().find((entry) => entry.includes("session_token="));
   expect(header, "response must set the session cookie").toBeTruthy();
   return header!.split(";")[0]!;
 }
 
-/**
- * Narrows a decoded JSON value (untrusted `Response.json()`/`JSON.parse`
- * output) to a plain record so property reads stay typed `unknown` instead of
- * flowing as `any` through unchecked assertions.
- */
 function recordOf(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`expected JSON object, received ${typeof value}`);
@@ -232,11 +169,6 @@ function recordOf(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-/**
- * Pulls the single action URL a verification/reset email carries, requiring
- * both bodies despite their optional platform types. `text` holds the raw URL;
- * `html` holds it HTML-escaped inside the `href`; missing bodies fail the test.
- */
 function actionLink(message: EmailMessageBuilder): string {
   if (message.text === undefined || message.html === undefined) {
     throw new Error("expected both email text and HTML bodies");
@@ -248,12 +180,6 @@ function actionLink(message: EmailMessageBuilder): string {
   return link;
 }
 
-/**
- * Signs an HS256 verification JWT exactly as Better Auth's
- * `createEmailVerificationToken` does (algorithm-only header, secret-keyed,
- * `exp` claim), so tests can mint an already-expired link deterministically
- * instead of waiting out the one-hour default.
- */
 function verificationJwt(email: string, expiresAtSeconds: number, secret: string): string {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
   const header = encode({ alg: "HS256" });
@@ -266,12 +192,6 @@ function verificationJwt(email: string, expiresAtSeconds: number, secret: string
   return `${header}.${payload}.${signature}`;
 }
 
-/**
- * Counts durable session rows for a Better Auth subject, so sign-out
- * revocation is observed against stored state instead of the session cookie
- * (the JWT cookie cache legitimately keeps `get-session` valid for five
- * minutes after a row is deleted).
- */
 async function sessionRowsFor(userId: string): Promise<number> {
   const pool = systemPoolFor(systemEnv());
   const result = await pool.query<{ count: string }>(
@@ -292,16 +212,6 @@ const emails = {
   stagingVerified: "auth-it-staging@example.test",
 };
 
-/**
- * Removes every row this suite created, scoped to the fixture emails: Better
- * Auth stores a password-reset token with the target user id in
- * `verification.value`, and `"user"` cascades to `account`/`session`.
- *
- * JWKS rows are deliberately left alone. They are keyed by the shared auth
- * secret rather than by this suite, other suites and the local stack read the
- * same table, and deleting a key another isolate is mid-use turns the next
- * `/api/auth/token` into a decrypt failure.
- */
 async function cleanupDatabase() {
   const pool = systemPoolFor(systemEnv());
   const emailList = Object.values(emails);
@@ -333,8 +243,6 @@ describe("betterAuthFor local/test policy", () => {
     });
     expect(signUp.status).toBe(200);
 
-    // Local policy does not require verification — but delivery is wired, so
-    // sign-up emits a verification message through the shared sender.
     const verificationMail = mail.sent.find(
       (message) => message.subject === "Verify your Meltiply email",
     );
@@ -510,7 +418,6 @@ describe("password recovery through the shared sender", () => {
     });
     expect(newPassword.status).toBe(200);
 
-    // The consumed token cannot be replayed.
     const replay = await authPost(auth, "/api/auth/reset-password", {
       newPassword: "third password value",
       token,
@@ -545,8 +452,6 @@ describe("password recovery through the shared sender", () => {
     expect(resetMail).toBeTruthy();
     const token = new URL(actionLink(resetMail!)).pathname.split("/").pop()!;
 
-    // Force the stored expiry into the past: the adapter's consume path must
-    // treat an elapsed token as absent rather than honouring it.
     await systemPoolFor(systemEnv()).query(
       `UPDATE "verification" SET "expiresAt" = $1 WHERE identifier = $2`,
       [new Date(Date.now() - 60_000), `reset-password:${token}`],
@@ -563,8 +468,6 @@ describe("password recovery through the shared sender", () => {
     const mail = recordingMailBinding();
     const auth = await betterAuthFor(localTestEnv(mail));
     const unknown = "nobody-here@example.test";
-    // Sign-up legitimately emits a verification message, so recovery
-    // submissions are counted by subject rather than by recipient alone.
     const resetSubmissions = () =>
       mail.sent.filter((message) => message.subject === "Reset your Meltiply password");
 
@@ -578,8 +481,6 @@ describe("password recovery through the shared sender", () => {
     );
     const beforeReset = resetSubmissions().length;
 
-    // An unknown address answers exactly like a registered one and submits
-    // nothing, while a registered address submits exactly one recovery message.
     const missing = await authPost(auth, "/api/auth/request-password-reset", {
       email: unknown,
       redirectTo: "https://app.test/reset",
@@ -673,10 +574,6 @@ describe("session cookie, bearer JWT, and sign-out", () => {
     );
     expect(signOut.status).toBe(200);
 
-    // Revocation is observed on both cookie reads and the protected API's
-    // authoritative session lookup, including the already-minted bearer JWT.
-    // Auto-sign-in after verification may leave another browser session, so
-    // assert the signed-out session itself is gone rather than every session.
     expect(await sessionRowsFor(sessionUserId)).toBe(sessionsBeforeSignOut - 1);
     expect(
       (await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null,
@@ -746,11 +643,6 @@ describe("bootstrap and invite-only sign-up", () => {
     const first = await authPost(auth, "/api/auth/sign-up/email", body);
     expect(first.status).toBe(200);
 
-    // Once actor resolution has claimed the first account, public sign-up is
-    // closed. That gate reads `EXISTS (SELECT 1 FROM "user")` — the Better Auth
-    // identity table — which `first` above already populated. The internal
-    // owner row below is irrelevant to the gate; it is inserted so later
-    // invitation assertions run against a realistic installation owner.
     await systemPoolFor(systemEnv()).query(
       `INSERT INTO users (id, auth_user_id, email, display_name, installation_owner)
        VALUES ($1, $2, $3, 'Owner', TRUE)`,
@@ -820,8 +712,6 @@ describe("bootstrap and invite-only sign-up", () => {
     const subject = recordOf(recordOf(await created.json()).user).id;
     if (typeof subject !== "string") throw new Error("sign-up must return a user id");
 
-    // The setup name is trimmed and stored as bootstrap data, not as a Better
-    // Auth user field, so the library's user record stays exactly name/email.
     const bootstrap = await systemPoolFor(systemEnv()).query<{ workspace_name: string }>(
       "SELECT workspace_name FROM installation_bootstrap WHERE auth_user_id = $1",
       [subject],
@@ -892,8 +782,6 @@ describe("bootstrap and invite-only sign-up", () => {
     const user = recordOf(await signUp.json()).user;
     const authUserId = recordOf(user).id;
     expect(typeof authUserId).toBe("string");
-    // The successful sign-up established a session; clear it so this test
-    // observes only the suspended sign-in attempt.
     await systemPoolFor(systemEnv()).query(`DELETE FROM "session" WHERE "userId" = $1`, [
       authUserId,
     ]);
@@ -903,9 +791,6 @@ describe("bootstrap and invite-only sign-up", () => {
       [authUserId, email],
     );
     const signIn = await authPost(auth, "/api/auth/sign-in/email", { email, password });
-    // The session hook refuses creation, so Better Auth reports 401. A loose
-    // >= 400 would also accept a 500 crash in the suspension lookup, which must
-    // never look like a policy denial.
     expect(signIn.status).toBe(401);
     const sessions = await systemPoolFor(systemEnv()).query<{ count: string }>(
       `SELECT count(*)::text AS count FROM "session" WHERE "userId" = $1`,
@@ -977,7 +862,6 @@ describe("bootstrap and invite-only sign-up", () => {
   });
 });
 
-/** Computes the current six-digit TOTP from a real enrollment URI without logging its secret. */
 function enrollmentCode(uri: string): string {
   const secret = new URL(uri).searchParams.get("secret");
   if (!secret) throw new Error("Enrollment secret is missing");
@@ -1047,7 +931,6 @@ describe("optional authenticator lifecycle", () => {
     expect(
       (await post("reset-password", { token: resetToken, newPassword: password })).status,
     ).toBe(200);
-    // A challenge issued before recovery cannot be upgraded into a fresh session.
     expect(
       (await post("two-factor/verify-backup-code", { code: backups[0], trustDevice: false }))
         .status,
@@ -1074,8 +957,6 @@ describe("optional authenticator lifecycle", () => {
     const invalidPassword = await post("two-factor/generate-backup-codes", {
       password: crypto.randomUUID(),
     });
-    // Password reauthentication is rejected with 400 INVALID_PASSWORD; a loose
-    // >= 400 would also accept a 500 from the code-generation boundary.
     expect(invalidPassword.status).toBe(400);
     expect(await invalidPassword.json()).toMatchObject({ code: "INVALID_PASSWORD" });
     jar.clear();
@@ -1084,8 +965,6 @@ describe("optional authenticator lifecycle", () => {
       code: backups[0],
       trustDevice: false,
     });
-    // A consumed code is refused as an invalid backup code (401), not by an
-    // arbitrary server failure that a loose >= 400 would also accept.
     expect(consumedReplay.status).toBe(401);
     expect(await consumedReplay.json()).toMatchObject({ code: "INVALID_BACKUP_CODE" });
     expect(
@@ -1105,8 +984,6 @@ describe("optional authenticator lifecycle", () => {
       code: backups[2],
       trustDevice: false,
     });
-    // Regeneration replaced the set, so a code from the previous set is
-    // specifically an invalid backup code (401), never a generic failure.
     expect(supersededReplay.status).toBe(401);
     expect(await supersededReplay.json()).toMatchObject({ code: "INVALID_BACKUP_CODE" });
     const replacement = recordOf(await regenerated.json()).backupCodes;

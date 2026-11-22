@@ -7,10 +7,8 @@ import { mailSenderConfiguration } from "@meltiply/domain/mail-content";
 
 import type { OAuthStateCoordinatorStub } from "@meltiply/contracts";
 
-/** RPC contract of the OAuthStateCoordinator Durable Object (meltiply-state). */
 export interface OAuthStateStub extends Rpc.DurableObjectBranded, OAuthStateCoordinatorStub {}
 
-/** RPC contract of the Automation Worker entrypoint (meltiply-automation). */
 export interface AutomationRelayStub {
   relayOutbox(): Promise<{
     claimed: number;
@@ -24,20 +22,14 @@ export interface AutomationRelayStub {
 export interface ApiWorkerEnv {
   ACCESS_POLICY_AUD?: string;
   ACCESS_TEAM_DOMAIN?: string;
-  /** Optional additional browser origins; the canonical APP_URL is always trusted. */
   ALLOWED_ORIGINS?: string;
   ASSETS?: R2Bucket;
   AUTOMATION?: AutomationRelayStub;
   BETTER_AUTH_SECRET?: string;
-  /** Private deployment bootstrap secret, at least 32 random characters; required before first signup. */
   AUTH_SETUP_SECRET?: string;
-  /** Canonical public dashboard/API origin, also used for auth, OAuth and provider media. */
   APP_URL?: string;
-  /** Trusted signing-key endpoint override; issuer/audience still use the public auth URL. */
   BETTER_AUTH_JWKS_URL?: string;
-  /** Standalone workerd owns sockets per request; omitted keeps managed pool reuse. */
   DATABASE_POOL_MODE?: "request";
-  /** Coarse deployment category reported with opt-in improvement events. */
   DEPLOYMENT_CATEGORY?: string;
   DB_AUTHENTICATED?: Hyperdrive;
   DB_SYSTEM?: Hyperdrive;
@@ -49,49 +41,28 @@ export interface ApiWorkerEnv {
   MAIL?: SendEmail;
   MAIL_FROM_ADDRESS?: string;
   MAIL_FROM_NAME?: string;
-  /** Only self-hosted installs may set `"false"` to allow sign-in without verification mail. */
   REQUIRE_EMAIL_VERIFICATION?: string;
-  /** Operator force-off for optional improvement reporting; `"true"` outranks a saved choice. */
   REPORTING_FORCED_OFF?: string;
-  /** Maintainer PostHog ingestion origin; absent or unusable disables optional reporting. */
   REPORTING_POSTHOG_HOST?: string;
-  /** Maintainer PostHog publishable project token; ingestion needs no personal API key. */
   REPORTING_POSTHOG_PROJECT_TOKEN?: string;
   INSTAGRAM_CLIENT_ID?: string;
   INSTAGRAM_CLIENT_SECRET?: string;
   INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED?: string;
   INSTAGRAM_LIVE_ACCEPTED?: string;
   OAUTH_STATE?: DurableObjectNamespace<OAuthStateStub>;
-  /** Object storage backend: `r2` (default) or `s3`. Selects which bindings below apply. */
   OBJECT_STORAGE_PROVIDER?: string;
   OPERATOR_HOSTNAME?: string;
   R2_ACCESS_KEY_ID?: string;
   R2_ACCOUNT_ID?: string;
   R2_BUCKET_NAME?: string;
   R2_SECRET_ACCESS_KEY?: string;
-  /**
-   * Trusted S3-compatible R2 origin. Origin-only (no path); set only to point signed
-   * URLs at a local signed S3 route fronting the same ASSETS bucket. Plain HTTP is
-   * accepted only for loopback hosts or when `ENVIRONMENT` is `local`/`test`.
-   */
   R2_ENDPOINT?: string;
-  /**
-   * Path prefix prepended to `/<bucket>/<key>` in signed URLs, for origins that serve
-   * the bucket under a route (a local runtime serves it at `/cdn-cgi/local/r2/s3`).
-   * Ignored unless `R2_ENDPOINT` is set.
-   */
   R2_ENDPOINT_PATH_PREFIX?: string;
-  /** Access key for the `s3` object storage provider; unused when the provider is `r2`. */
   S3_ACCESS_KEY_ID?: string;
-  /** Bucket name for the `s3` object storage provider; unused when the provider is `r2`. */
   S3_BUCKET?: string;
-  /** Origin only (no path) of the S3-compatible service, e.g. `https://minio.internal:9000`. */
   S3_ENDPOINT?: string;
-  /** `true` (default) addresses the bucket in the path, `false` in the host. */
   S3_FORCE_PATH_STYLE?: string;
-  /** S3 signing region; defaults to `us-east-1`. */
   S3_REGION?: string;
-  /** Secret access key for the `s3` object storage provider; unused when the provider is `r2`. */
   S3_SECRET_ACCESS_KEY?: string;
   TOKEN_ENCRYPTION_KEY?: string;
   TIKTOK_CLIENT_KEY?: string;
@@ -125,35 +96,12 @@ const deployedAutomationBindings: (keyof ApiWorkerEnv)[] = ["AUTOMATION"];
 
 const deployedAuthBindings: (keyof ApiWorkerEnv)[] = ["BETTER_AUTH_SECRET", "AUTH_SETUP_SECRET"];
 
-/**
- * Reports whether a deployed session must prove email ownership.
- *
- * Local and test environments never enforce verification. Managed deployments
- * always enforce it. Only the self-hosted runtime may explicitly opt out with
- * `REQUIRE_EMAIL_VERIFICATION=false` when no SMTP transport is configured.
- *
- * @param env - Worker environment bindings.
- * @returns True when email verification gates sign-in and owner authorization.
- */
 export function requiresEmailVerification(env: ApiWorkerEnv): boolean {
   if (env.ENVIRONMENT === "selfhost" && env.REQUIRE_EMAIL_VERIFICATION?.trim() === "false")
     return false;
   return env.ENVIRONMENT !== "local" && env.ENVIRONMENT !== "test";
 }
 
-/**
- * Resolves and validates the installation application origin.
- *
- * The application origin is the single trusted origin for browser sign-in,
- * device verification links, and auth callbacks. It must be a canonical
- * absolute origin (no credentials, path, query, or fragment). HTTP is allowed
- * only for loopback hosts in local/test; the environment label alone never
- * permits plaintext traffic to a remote host.
- *
- * @param env - Worker environment bindings.
- * @returns Canonical application origin without a trailing slash.
- * @throws {Error} When APP_URL is missing, malformed, non-canonical, or insecure.
- */
 export function applicationOrigin(env: ApiWorkerEnv): string {
   const configured = env.APP_URL?.trim();
   if (!configured) {
@@ -165,9 +113,6 @@ export function applicationOrigin(env: ApiWorkerEnv): string {
   } catch {
     throw new Error("APP_URL must be an absolute installation origin");
   }
-  // Compare against the parsed origin without a trailing-slash regex: the
-  // value is deployment input, so a linear string comparison avoids a
-  // polynomial scan on pathological slash runs.
   const canonicalOrigin = url.origin;
   const configuredOrigin =
     configured === canonicalOrigin
@@ -183,11 +128,6 @@ export function applicationOrigin(env: ApiWorkerEnv): string {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("APP_URL must use HTTP or HTTPS");
   }
-  // Browsers and DNS resolvers treat localhost and *.localhost as loopback.
-  // Plain HTTP is a loopback-only affordance: it must never carry credentials
-  // or consent links over a network, so a non-loopback origin always requires
-  // HTTPS regardless of the environment label. Loopback stays usable for
-  // self-hosted local installs that terminate TLS at their own gateway.
   const loopback =
     url.hostname === "localhost" ||
     url.hostname.endsWith(".localhost") ||
@@ -200,21 +140,8 @@ export function applicationOrigin(env: ApiWorkerEnv): string {
   return url.origin;
 }
 
-// Check mail capability and normalized sender configuration, not mere presence.
 const deployedMailBindings: (keyof ApiWorkerEnv)[] = ["MAIL", "MAIL_FROM_ADDRESS"];
 
-/**
- * Reports the object-storage bindings the configured provider actually needs.
- *
- * Storage requirements come from the shared provider resolution rather than a
- * fixed list, so an S3 deployment is told about its own `S3_*` settings instead
- * of R2 names it does not have. An unparseable `OBJECT_STORAGE_PROVIDER` is
- * reported as a single unavailable component instead of throwing, so the probe
- * still answers with a usable diagnosis.
- *
- * @param env - Worker environment bindings.
- * @returns Readiness entries for the selected provider's bindings.
- */
 function objectStorageStatuses(env: ApiWorkerEnv): BindingStatus[] {
   try {
     return objectStorageBindings(env).map((binding) => ({
@@ -226,16 +153,6 @@ function objectStorageStatuses(env: ApiWorkerEnv): BindingStatus[] {
   }
 }
 
-/**
- * Reports readiness status for required and environment-specific Worker bindings.
- *
- * Evaluates core bindings for all environments, plus auth, mail delivery, and
- * Automation RPC bindings outside local/test, plus the object-storage bindings
- * the configured provider requires. Used by the `/api/v1/ready` probe.
- *
- * @param env - Worker environment bindings.
- * @returns Array of `BindingStatus` entries with name and "ready" | "unavailable" status.
- */
 export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
   const requiresMail = requiresEmailVerification(env);
   const bindings =
@@ -249,11 +166,6 @@ export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
       : requiredBindings;
   return [
     ...bindings.map((name) => {
-      // `MAIL` is only ready when the Email Sending binding exposes a callable
-      // `send`; `MAIL_FROM_ADDRESS` only when `mailSenderConfiguration` can
-      // normalize a valid sender. Presence alone must not report ready — an
-      // unusable binding or malformed sender fails closed. No send occurs: this
-      // is a local capability check, not a DNS/deliverability probe.
       const ready =
         name === "MAIL"
           ? typeof env.MAIL?.send === "function"
@@ -268,20 +180,6 @@ export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
   ];
 }
 
-/**
- * Validates mandatory deployed Worker bindings, credentials, and provider configurations.
- *
- * Outside local/test, requires auth, databases, object storage, Automation RPC,
- * and credentials for live-accepted providers. Managed deployments additionally
- * require usable Email Sending; self-hosted installations may opt out of verification.
- * TikTok's media prefix is optional: the provider registry derives it from APP_URL.
- *
- * The mail checks run before the presence list so a malformed sender or
- * unusable binding reports a precise cause instead of a bare missing name.
- *
- * @param env - Worker environment bindings to validate.
- * @throws {Error} If any required binding is missing or provider credential configuration is inconsistent.
- */
 export function validateProductionBindings(env: ApiWorkerEnv): void {
   if (env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test") return;
   applicationOrigin(env);
@@ -356,10 +254,6 @@ export function validateProductionBindings(env: ApiWorkerEnv): void {
   }
 }
 
-/**
- * Hono environment type that binds the Worker's env and request-scoped
- * variables. Shared across route modules and the validation layer.
- */
 export type ApiWorkerEnvironment = {
   Bindings: ApiWorkerEnv;
   Variables: {

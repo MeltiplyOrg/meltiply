@@ -1,9 +1,3 @@
-// Pins AUD-037: verifier/origin caches must be keyed on configuration, not
-// on the per-request bindings object. The runtime hands every request a
-// fresh env, so an env-keyed cache misses and rebuilds verifiers on
-// every request; identical config must return the same instance.
-// Better Auth tenant JWT verification also caches its public issuer and trusted
-// signing-key endpoint independently of the per-request bindings object.
 import { Buffer } from "node:buffer";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -50,8 +44,6 @@ describe("verifier cache", () => {
     );
   });
 
-  // Exercise signature verification against internal keys while public issuer
-  // and audience remain mandatory, even behind browser-only Access ingress.
   it("verifies internal JWKS tokens without weakening public issuer or audience", async () => {
     const origin = "https://protected.example.test";
     const jwksUrl = "http://127.0.0.1:9876/api/auth/jwks";

@@ -8,16 +8,6 @@ import { systemPoolFor } from "../src/database";
 import type { ApiWorkerEnv, ApiWorkerEnvironment } from "../src/env";
 import { sha256Hex } from "../src/crypto";
 
-/**
- * First-run bootstrap and onboarding against real PostgreSQL through the real
- * Worker HTTP entrypoints.
- *
- * The suite owns an isolated schema (like the auth lifecycle suite) so it can
- * truncate freely without disturbing the shared seeded Workspace that other
- * integration suites rely on, while still exercising the production sign-up
- * policy, actor resolution, route handlers, transactions, and Audit writes.
- */
-
 const baseSystemConnectionString =
   "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
 const adminConnectionString =
@@ -29,7 +19,6 @@ isolatedDatabase.searchParams.set("options", `-c search_path=${schema},public`);
 const systemConnectionString = isolatedDatabase.href;
 const adminPool = createHyperdrivePool({ connectionString: adminConnectionString });
 
-/** Tables this suite reads or writes, copied from the migrated public schema. */
 const copiedTables = [
   "user",
   "session",
@@ -53,7 +42,6 @@ const copiedTables = [
   "reporting_delivery_receipts",
 ];
 
-/** Truncated before each case so every test starts from an uninitialized installation. */
 const truncatedTables = [
   "user",
   "session",
@@ -112,22 +100,12 @@ afterAll(async () => {
   await adminPool.end();
 });
 
-/**
- * Worker environment bound to the isolated schema.
- *
- * `test` policy keeps sign-in possible without verification while sign-up still
- * dispatches verification mail, matching the local deployment story this
- * feature targets.
- */
 function env(): ApiWorkerEnv {
   return {
     ALLOWED_ORIGINS: authOrigin,
     APP_URL: authOrigin,
     AUTH_SETUP_SECRET: setupSecret,
     BETTER_AUTH_SECRET: authSecret,
-    // The copied schema carries no RLS policies, so tenant reads use the same
-    // privileged role here. Tenant isolation is covered by the database RLS
-    // suite; this suite scopes the bootstrap/onboarding HTTP behavior.
     DB_AUTHENTICATED: { connectionString: systemConnectionString } as Hyperdrive,
     DB_SYSTEM: { connectionString: systemConnectionString } as Hyperdrive,
     ENVIRONMENT: "test",
@@ -135,16 +113,6 @@ function env(): ApiWorkerEnv {
   } satisfies ApiWorkerEnv;
 }
 
-/**
- * Builds the API app whose bearer verifier maps a token directly to an identity.
- *
- * Bearer verification is the one seam replaced: every other layer — the auth
- * policy, actor resolution, onboarding routes, transactions, and Audit — is the
- * production implementation against the real database.
- *
- * @param identities - Bearer token to verified identity map.
- * @returns The API application under test.
- */
 function appWith(identities: Record<string, JwtIdentity>) {
   return createApiApp({
     authRateLimiter: async () => ({ status: "ok" }),
@@ -156,7 +124,6 @@ function appWith(identities: Record<string, JwtIdentity>) {
   });
 }
 
-/** Owner credentials used by the first-run form. */
 const owner = {
   email: "first-owner@onboarding.test",
   name: "First Owner",
@@ -164,14 +131,6 @@ const owner = {
   workspaceName: "Acme Studio",
 };
 
-/**
- * Submits the first-run setup form through the app's auth surface.
- *
- * @param app - API application under test.
- * @param body - Sign-up body, including the chosen `workspace_name`.
- * @param headers - Additional headers such as the setup secret override.
- * @returns The HTTP response.
- */
 function signUp(
   app: Hono<ApiWorkerEnvironment>,
   body: Record<string, unknown>,
@@ -188,12 +147,6 @@ function signUp(
   );
 }
 
-/**
- * Narrows a sign-up response to the created Better Auth subject.
- *
- * @param response - Sign-up response.
- * @returns The created account id.
- */
 async function signedUpSubject(response: Response): Promise<string> {
   const body: unknown = await response.json();
   if (
@@ -210,15 +163,6 @@ async function signedUpSubject(response: Response): Promise<string> {
   return body.user.id;
 }
 
-/**
- * Sends an authenticated request to the onboarding surface.
- *
- * @param app - API application under test.
- * @param token - Bearer token resolved by the app's verifier.
- * @param path - Onboarding path below `/api/v1/onboarding`.
- * @param init - Method, body, and headers.
- * @returns The HTTP response.
- */
 function onboardingRequest(
   app: Hono<ApiWorkerEnvironment>,
   token: string,
@@ -240,12 +184,10 @@ function onboardingRequest(
   );
 }
 
-/** Requested bits of the reporting policy, as the durable-progress case reads them. */
 interface ReportingRequestedBody {
   categories: { diagnostics: { requested: boolean }; usage: { requested: boolean } };
 }
 
-/** Wire shape of the onboarding progress document this suite asserts against. */
 interface OnboardingProgressBody {
   completed_at: string | null;
   status: string;
@@ -254,22 +196,11 @@ interface OnboardingProgressBody {
   workspace_named: boolean;
 }
 
-/**
- * Reads a JSON response body as an onboarding progress record.
- *
- * @param response - Onboarding response.
- * @returns The parsed progress payload.
- */
 async function progressOf(response: Response): Promise<OnboardingProgressBody> {
   const body: OnboardingProgressBody = await response.json();
   return body;
 }
 
-/**
- * Reads the canonical shared Workspace row for the isolated installation.
- *
- * @returns The shared Workspace name and id, or undefined when none exists.
- */
 async function sharedWorkspace(): Promise<{ id: string; name: string } | undefined> {
   const result = await systemPoolFor(env()).query<{ id: string; name: string }>(
     "SELECT id, name FROM organizations WHERE is_shared",
@@ -277,15 +208,6 @@ async function sharedWorkspace(): Promise<{ id: string; name: string } | undefin
   return result.rows[0];
 }
 
-/**
- * Runs the full first-run flow and returns the bearer token plus its identity.
- *
- * The first authenticated request performs installation finalization, which is
- * where the chosen Workspace name reaches the canonical Workspace, so the
- * harness resolves that request before returning.
- *
- * @returns The owner's app and bearer token.
- */
 async function bootstrapOwner(): Promise<{ app: Hono<ApiWorkerEnvironment>; token: string }> {
   const app = appWith({});
   const signUpResponse = await signUp(app, {
@@ -308,8 +230,6 @@ describe("first-run bootstrap through the auth surface", () => {
   it("applies the chosen Workspace name to the single canonical Workspace and resumes onboarding", async () => {
     const { app, token } = await bootstrapOwner();
 
-    // The setup name is durable installation data, not an auth user field, so
-    // it must not leak into the Better Auth record.
     const authUser = await systemPoolFor(env()).query<{ name: string }>(
       `SELECT name FROM "user" WHERE email = $1`,
       [owner.email],
@@ -402,8 +322,6 @@ describe("first-run bootstrap through the auth surface", () => {
     );
     expect(accounts.rows[0]?.count).toBe("1");
 
-    // Whichever submission won owns the installation; exactly one shared
-    // Workspace exists and it carries that submission's chosen name.
     const app2 = appWith({ [subject]: { email: created.rows[0]!.email, subject } });
     const progress = await progressOf(
       await onboardingRequest(app2, subject, "", { method: "GET" }),
@@ -426,8 +344,6 @@ describe("first-run bootstrap through the auth surface", () => {
     expect(closed.status).toBe(403);
     await expect(closed.json()).resolves.toMatchObject({ code: "INVITATION_REQUIRED" });
 
-    // The unfinished journey is still in progress, so the closure is not a
-    // side effect of completion.
     expect(
       (await progressOf(await onboardingRequest(app, token, "", { method: "GET" }))).status,
     ).toBe("in_progress");
@@ -458,16 +374,12 @@ describe("first-run bootstrap through the auth surface", () => {
       [subject]: { email: invitedEmail, name: "Invited Editor", subject },
     });
 
-    // Resolving the member's actor activates membership; onboarding is Owner
-    // administration, so the member is refused rather than given a progress row.
     const denied = await onboardingRequest(memberApp, subject, "", { method: "GET" });
     expect(denied.status).toBe(403);
     await expect(denied.json()).resolves.toMatchObject({
       error: { code: "installation_owner_required" },
     });
 
-    // The member's authenticated request did reach actor resolution: the
-    // pending invitation became a membership.
     const membership = await systemPoolFor(env()).query<{ role: string }>(
       `SELECT om.role FROM org_members om
        JOIN users u ON u.id = om.user_id
@@ -476,14 +388,11 @@ describe("first-run bootstrap through the auth surface", () => {
     );
     expect(membership.rows).toEqual([{ role: "editor" }]);
 
-    // No onboarding progress exists for the invited member's installation
-    // beyond the Owner's single record.
     const progressRows = await systemPoolFor(env()).query<{ count: string }>(
       "SELECT count(*)::text AS count FROM installation_onboarding",
     );
     expect(progressRows.rows[0]?.count).toBe("1");
 
-    // The Owner's own journey is unaffected by the member's arrival.
     expect(
       (await progressOf(await onboardingRequest(app, token, "", { method: "GET" }))).status,
     ).toBe("in_progress");
@@ -525,7 +434,6 @@ describe("onboarding save and completion", () => {
     );
     expect(renamed.status).toBe(200);
 
-    // Finalization is terminal: onboarding cannot clobber the Settings rename.
     const refused = await onboardingRequest(app, token, "", {
       body: JSON.stringify({ step: "ready" }),
       headers: { "Idempotency-Key": crypto.randomUUID() },
@@ -540,7 +448,6 @@ describe("onboarding save and completion", () => {
     expect(
       (await progressOf(await onboardingRequest(app, token, "", { method: "GET" }))).workspace_name,
     ).toBe("Settings Rename");
-    // Completion itself stays idempotent after the rename.
     expect((await progressOf(await complete(crypto.randomUUID()))).status).toBe("completed");
   });
 
@@ -579,8 +486,6 @@ describe("onboarding save and completion", () => {
     expect(successorProgress.status).toBe(200);
     expect((await progressOf(successorProgress)).status).toBe("in_progress");
 
-    // The previous Owner keeps Workspace Admin authority but loses the
-    // installation-level onboarding authority.
     const formerOwner = await onboardingRequest(app, token, "", {
       body: JSON.stringify({ workspace_name: "Former Owner Rename" }),
       headers: { "Idempotency-Key": crypto.randomUUID() },
@@ -591,8 +496,6 @@ describe("onboarding save and completion", () => {
   });
 
   it("reports an upgraded installation as not applicable instead of resuming setup", async () => {
-    // Simulate an installation provisioned before onboarding existed: owner,
-    // Workspace, and membership exist, but no bootstrap or progress record.
     const subject = "legacy-owner-subject";
     const legacyEmail = "legacy-owner@onboarding.test";
     await systemPoolFor(env()).query(
@@ -626,7 +529,6 @@ describe("onboarding save and completion", () => {
       workspace_named: false,
     });
 
-    // An upgrade has no optional journey to complete or advance.
     const completed = await onboardingRequest(app, subject, "/complete", {
       headers: { "Idempotency-Key": crypto.randomUUID() },
       method: "POST",
@@ -665,11 +567,6 @@ describe("onboarding save and completion", () => {
 });
 
 describe("durable setup progress", () => {
-  /**
-   * The optional screen the Owner reached is its own fact. A restart after
-   * skipping or after opting in must resume at the same screen, and neither
-   * consent nor attribution may stand in for it.
-   */
   it("remembers the reached optional screen across a restart after a skip", async () => {
     const { app, token } = await bootstrapOwner();
     const read = async () => progressOf(await onboardingRequest(app, token, "", { method: "GET" }));
@@ -687,8 +584,6 @@ describe("durable setup progress", () => {
       workspace_name: owner.workspaceName,
     });
 
-    // A later authenticated read — the shape a browser restart performs — still
-    // reports the reached screen, with both categories untouched.
     expect((await read()).step).toBe("ready");
     const reporting = await app.request(
       "/api/v1/installation/reporting",
@@ -710,7 +605,6 @@ describe("durable setup progress", () => {
       });
 
     expect(await progressOf(await save("ready"))).toMatchObject({ step: "ready" });
-    // A late write from an older tab cannot rewind the journey.
     expect(await progressOf(await save("improvement"))).toMatchObject({ step: "ready" });
   });
 
@@ -738,11 +632,6 @@ describe("durable setup progress", () => {
 });
 
 describe("recoverable setup-name handoff", () => {
-  /**
-   * A sign-up whose chosen name never reached the bootstrap row — the account was
-   * created but the follow-up write never ran — must still apply the name from
-   * durable pre-account intent. Registration stays closed throughout.
-   */
   it("applies a name recorded only as pre-account intent", async () => {
     const app = appWith({});
     const signUpResponse = await signUp(app, {
@@ -754,11 +643,6 @@ describe("recoverable setup-name handoff", () => {
     expect(signUpResponse.status).toBe(200);
     const subject = await signedUpSubject(signUpResponse);
 
-    // Simulate the lost follow-up: the account exists, the bootstrap row does
-    // not, and only the intent the sign-up wrote before creating the account
-    // remains. An interrupted handoff never ran either follow-up write, so the
-    // intent is also still unbound — deleting only the bootstrap row would
-    // leave a state the real interruption cannot produce.
     await systemPoolFor(env()).query("DELETE FROM installation_bootstrap");
     await systemPoolFor(env()).query(
       "UPDATE installation_bootstrap_intent SET auth_user_id = NULL WHERE lower(email) = lower($1)",
@@ -782,15 +666,12 @@ describe("recoverable setup-name handoff", () => {
     });
     expect((await sharedWorkspace())?.name).toBe(owner.workspaceName);
 
-    // Recovery promoted the intent into the durable bootstrap row rather than
-    // leaving the name only in the handoff table.
     const bootstrap = await systemPoolFor(env()).query<{ workspace_name: string | null }>(
       "SELECT workspace_name FROM installation_bootstrap WHERE auth_user_id = $1",
       [subject],
     );
     expect(bootstrap.rows[0]?.workspace_name).toBe(owner.workspaceName);
 
-    // Registration is still closed: the recovery never reopened sign-up.
     const closed = await signUp(app, {
       email: "another-owner@onboarding.test",
       name: "Another",
@@ -800,10 +681,6 @@ describe("recoverable setup-name handoff", () => {
     expect(closed.status).toBe(403);
   });
 
-  /**
-   * A rejected sign-up proves nothing was written, so its intent must not become
-   * a permanent name for an address that never signed up.
-   */
   it("discards the intent when the account was definitively not created", async () => {
     const app = appWith({});
     const rejected = await signUp(app, {
@@ -822,11 +699,6 @@ describe("recoverable setup-name handoff", () => {
     expect(intent.rows).toHaveLength(0);
   });
 
-  /**
-   * An installation that never entered the setup form must not be handed an
-   * `in_progress` journey when an Owner reaches the slow provisioning path with a
-   * changed profile — the bootstrap record is the durable provenance.
-   */
   it("never manufactures onboarding for a slow-path upgraded Owner", async () => {
     const subject = "upgraded-slow-path-subject";
     const email = "upgraded-slow@onboarding.test";
@@ -849,8 +721,6 @@ describe("recoverable setup-name handoff", () => {
       ["20000000-0000-4000-8000-000000009921", "10000000-0000-4000-8000-000000009921"],
     );
 
-    // The profile differs from the stored display name, so actor resolution
-    // misses the fast path and runs provisioning.
     const app = appWith({ [subject]: { email, name: "Changed Name", subject } });
     const progress = await onboardingRequest(app, subject, "", { method: "GET" });
 
@@ -868,10 +738,6 @@ describe("recoverable setup-name handoff", () => {
 });
 
 describe("onboarding completion and save ordering", () => {
-  /**
-   * Completion must not be lost to a concurrent screen advance: both take the
-   * onboarding row lock, so the terminal state always lands.
-   */
   it("serializes a concurrent save against completion", async () => {
     const { app, token } = await bootstrapOwner();
     const [saved, completed] = await Promise.all([
@@ -886,8 +752,6 @@ describe("onboarding completion and save ordering", () => {
       }),
     ]);
 
-    // Both orders are legal: a save that commits first is accepted, and one that
-    // commits second is refused. Either way completion is terminal.
     expect([200, 409]).toContain(saved.status);
     expect(completed.status).toBe(200);
     const progress = await progressOf(await onboardingRequest(app, token, "", { method: "GET" }));

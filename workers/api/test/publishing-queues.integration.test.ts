@@ -47,8 +47,6 @@ registry.register(
 const app = createApiApp({
   verifyJwtToken: async (_env, token) => identities[token]!,
   providerRegistry: registry,
-  // Only identity resolution is a fixture. Real memberships, tenant claims,
-  // route authorization, RLS and quota accounting use this isolated Workspace.
   resolveActor: async (_env, identity, httpRequest) => {
     const member = members[identity.subject]!;
     const tenantId = httpRequest.headers.get("X-Workspace-ID") ?? organizationId;
@@ -71,7 +69,6 @@ const app = createApiApp({
 });
 
 let channelId: string;
-/** Sends an authenticated HTTP request; every mutation receives a fresh key unless replay is under test. */
 function request(path: string, method = "GET", body?: unknown, key = randomUUID(), role = "owner") {
   return app.request(
     `/api/v1${path}`,
@@ -134,7 +131,6 @@ afterAll(async () => {
 });
 afterEach(() => vi.useRealTimers());
 
-/** Creates a distinct durable plan through the HTTP seam, with independently chosen timezone examples. */
 async function createPlan(
   slots: Schemas["QueueSlot"][],
   timezone = "UTC",
@@ -149,7 +145,6 @@ async function createPlan(
   return response.json();
 }
 
-/** Saves a real text Post and a Channel-specific caption; no scheduling implementation is replaced. */
 async function createPost(): Promise<Schemas["Post"]> {
   const response = await request("/posts", "POST", {
     brand_profile_id: profileId,
@@ -166,7 +161,6 @@ async function createPost(): Promise<Schemas["Post"]> {
   return response.json();
 }
 
-/** Enqueues one existing Post with its saved targets, retaining a supplied key for replay scenarios. */
 async function enqueue(
   postId: string,
   queueId: string,
@@ -302,7 +296,6 @@ describe("durable publishing Queues through authenticated HTTP", () => {
       const process = await locker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
       await locker.query("SELECT id FROM distributions WHERE post_id = $1 FOR UPDATE", [post.id]);
       assignment = enqueue(post.id, plan.id);
-      // Observe a real waiter on this connection, not a delay tied to CPU speed.
       await vi.waitFor(async () => {
         const waiting = await systemPoolFor(env).query<{ blocked: boolean }>(
           "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))) AS blocked",

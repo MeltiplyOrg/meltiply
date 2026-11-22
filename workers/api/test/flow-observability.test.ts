@@ -75,8 +75,6 @@ describe("pending span pruning", () => {
     trackPendingSpan("run-abandoned", span("abandoned"));
     expect(pendingSpans.has("run-abandoned")).toBe(true);
 
-    // An aborted flow never calls finishRun; once the TTL lapses the next
-    // tracked insert evicts the stale entry rather than accumulating it.
     vi.setSystemTime(new Date("2026-01-01T00:11:00Z"));
     trackPendingSpan("run-live", span("live"));
     expect(pendingSpans.has("run-abandoned")).toBe(false);

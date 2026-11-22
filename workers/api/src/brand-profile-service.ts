@@ -9,19 +9,14 @@ import type { components } from "@meltiply/contracts/schema";
 import type { EffectTransactionClient } from "@meltiply/database";
 
 import { CoreApiError, type IdempotentResult } from "./core-types";
-import { activeOrganizationIdEffect, withTenantTransactionEffect } from "./database";
+import { withTenantTransactionEffect } from "./database";
 import type { ApiWorkerEnv } from "./env";
-import {
-  completeIdempotencyEffect,
-  hashIdempotencyRequestEffect,
-  reserveIdempotencyEffect,
-} from "./idempotency";
+import { withTenantIdempotentMutation } from "./idempotent-mutation";
 import { lockOrganizationEffect } from "./organization-lock";
 
 type Schemas = components["schemas"];
 export type BrandProfile = Schemas["BrandProfile"];
 
-/** Row shape returned by brand_profiles queries inside tenant transactions. */
 interface BrandProfileRow extends Record<string, unknown> {
   color: string;
   created_at: Date | string;
@@ -34,7 +29,6 @@ interface BrandProfileRow extends Record<string, unknown> {
   updated_at: Date | string;
 }
 
-/** Account row consumed by the channel local-disconnect cutover. */
 interface DisconnectableAccountRow extends Record<string, unknown> {
   access_token: string;
   brand_profile_id: string;
@@ -42,20 +36,12 @@ interface DisconnectableAccountRow extends Record<string, unknown> {
   platform: string;
 }
 
-/**
- * Input for creating a Brand Profile with an optional 280-character plain-text
- * description. Undefined and null both persist as no description on creation.
- */
 export interface CreateBrandProfileInput {
   color: string;
   description?: string | null;
   name: string;
 }
 
-/**
- * Input for patching a Brand Profile. `description: null` clears the saved
- * summary, while omission preserves the current description.
- */
 export interface UpdateBrandProfileInput {
   color?: string;
   description?: string | null;
@@ -67,14 +53,6 @@ export type BrandProfileServiceError =
   | ActiveOrganizationRequiredError
   | DatabaseError;
 
-/**
- * Effect-first application service managing the Brand Profile lifecycle.
- *
- * Brand Profiles are the mandatory ownership boundary for assets, platform
- * accounts, and distributions inside a workspace. Reads are member-scoped and
- * mutations are admin-only; both run inside tenant transactions so RLS stays
- * the second enforcement layer behind the explicit role check.
- */
 export interface BrandProfileApiService {
   listBrandProfiles(
     env: ApiWorkerEnv,
@@ -116,12 +94,6 @@ export interface BrandProfileApiService {
   ): Effect.Effect<IdempotentResult<BrandProfile>, BrandProfileServiceError>;
 }
 
-/**
- * Maps a brand_profiles row to the contract BrandProfile shape.
- *
- * Lifecycle timestamps serialize as ISO-8601 or null, while the nullable
- * description stays explicit so clients can distinguish an absent summary.
- */
 function mapBrandProfile(row: BrandProfileRow): BrandProfile {
   return {
     color: row.color as BrandProfile["color"],
@@ -136,18 +108,6 @@ function mapBrandProfile(row: BrandProfileRow): BrandProfile {
   };
 }
 
-/**
- * Asserts the caller holds the workspace admin role inside a tenant transaction.
- *
- * Resolves the role through `public.auth_active_org_role()` (org_members) rather
- * than the session claim so a stale or downgraded claim cannot authorize a
- * management mutation; RLS policies on brand_profiles enforce the same rule.
- *
- * @param client - Active tenant-scoped Effect transaction client.
- * @returns Effect resolving void for admins.
- * @throws {CoreApiError} 403 `workspace_admin_required` for members or
- *   non-members (the role function returns NULL for both).
- */
 function requireWorkspaceAdminEffect(
   client: EffectTransactionClient,
 ): Effect.Effect<void, CoreApiError | DatabaseError> {
@@ -170,96 +130,11 @@ function requireWorkspaceAdminEffect(
     );
 }
 
-/**
- * Detects a PostgreSQL unique-violation error wrapped in a DatabaseError.
- *
- * The unique (org_id, normalized_name) index is the authoritative name
- * reservation; a raced duplicate insert surfaces as SQLSTATE 23505 on the
- * wrapped pg error rather than a typed domain error.
- */
 function isUniqueViolation(error: DatabaseError): boolean {
   const cause = error.cause;
   return typeof cause === "object" && cause !== null && "code" in cause && cause.code === "23505";
 }
 
-/**
- * Runs one Brand Profile mutation under the shared idempotency protocol.
- *
- * Reserves the (org, operation, key) slot, replays the stored response on a
- * matching request hash, and records the produced profile before commit so a
- * retried request returns the original outcome. The request hash covers the
- * profile id and input so a reused key with a different payload fails 409.
- *
- * @param env - Worker environment bindings.
- * @param session - Authenticated session claims scoping the tenant transaction.
- * @param operation - Idempotency operation identifier (e.g. "brand-profile.create").
- * @param idempotencyKey - Client-provided Idempotency-Key header value.
- * @param requestPayload - Canonical request fields folded into the hash.
- * @param status - HTTP status recorded with the completed response.
- * @param run - Transactional program producing the Brand Profile response.
- * @returns Effect resolving to the fresh or replayed profile result.
- */
-function idempotentProfileMutation(
-  env: ApiWorkerEnv,
-  session: SessionClaims,
-  operation: string,
-  idempotencyKey: string,
-  requestPayload: string,
-  status: number,
-  run: (
-    client: EffectTransactionClient,
-    organizationId: string,
-  ) => Effect.Effect<BrandProfile, BrandProfileServiceError>,
-): Effect.Effect<IdempotentResult<BrandProfile>, BrandProfileServiceError> {
-  return Effect.gen(function* () {
-    const requestHash = yield* hashIdempotencyRequestEffect(requestPayload);
-    return yield* withTenantTransactionEffect(env, session, (client) =>
-      Effect.gen(function* () {
-        const organizationId = yield* activeOrganizationIdEffect(client);
-        const replay = yield* reserveIdempotencyEffect(
-          client,
-          organizationId,
-          operation,
-          idempotencyKey,
-          requestHash,
-        );
-        if (replay) {
-          return {
-            replayed: true,
-            value: replay.response_body as BrandProfile,
-          };
-        }
-        const profile = yield* run(client, organizationId);
-        yield* completeIdempotencyEffect(
-          client,
-          organizationId,
-          operation,
-          idempotencyKey,
-          status,
-          profile,
-        );
-        return { replayed: false, value: profile };
-      }),
-    );
-  });
-}
-
-/**
- * Locally disconnects one platform account inside the caller's transaction.
- *
- * Shared by single-Channel disconnect and Brand Profile deletion: cancels the
- * account's scheduled/queued distributions, deletes the account row (which
- * frees the global (platform, platform_user_id) identity for reconnect), and
- * enqueues a durable `channel.revocation.requested` outbox event carrying the
- * still-encrypted access token so the automation worker can retry remote
- * provider revocation after the local row is gone. The outbox insert is
- * deduplicated on the account id so repeated deletes never double-enqueue.
- *
- * @param client - Active Effect transaction client.
- * @param organizationId - Workspace UUID owning the account.
- * @param account - Account row including its encrypted access token.
- * @returns Effect resolving void after the local cutover commits.
- */
 export function disconnectPlatformAccountEffect(
   client: EffectTransactionClient,
   organizationId: string,
@@ -297,22 +172,8 @@ export function disconnectPlatformAccountEffect(
   });
 }
 
-/**
- * Factory creating the Brand Profile lifecycle service.
- *
- * @returns BrandProfileApiService bound to tenant transactions and the shared
- *   idempotency protocol.
- */
 export function createBrandProfileService(): BrandProfileApiService {
   return {
-    /**
-     * Lists every active Brand Profile in the caller's workspace, including its
-     * nullable Channels-board summary, ordered by name.
-     *
-     * RLS hides soft-deleted rows from members; the explicit predicate keeps
-     * them out of the admin's normal list too — admins use
-     * listDeletedBrandProfiles for the retention view.
-     */
     listBrandProfiles(env, session) {
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.map(
@@ -329,13 +190,6 @@ export function createBrandProfileService(): BrandProfileApiService {
       );
     },
 
-    /**
-     * Lists soft-deleted Brand Profiles and their retained descriptions inside
-     * the retention window.
-     *
-     * Admin-only: the explicit role check produces the contract 403 before RLS
-     * would silently return an empty list for members.
-     */
     listDeletedBrandProfiles(env, session) {
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.gen(function* () {
@@ -353,13 +207,6 @@ export function createBrandProfileService(): BrandProfileApiService {
       );
     },
 
-    /**
-     * Returns one Brand Profile and its nullable description by id within the
-     * caller's workspace.
-     *
-     * Members receive 404 for soft-deleted profiles because RLS hides the row;
-     * admins resolve it so the deleted lifecycle state stays inspectable.
-     */
     getBrandProfile(env, session, profileId) {
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.gen(function* () {
@@ -382,16 +229,8 @@ export function createBrandProfileService(): BrandProfileApiService {
       );
     },
 
-    /**
-     * Creates an active Brand Profile with a workspace-unique normalized name
-     * and optional short description.
-     *
-     * The unconditional UNIQUE(org_id, normalized_name) index reserves names
-     * of soft-deleted profiles too, so a duplicate surfaces as 409 whether the
-     * conflicting profile is active or awaiting purge.
-     */
     createBrandProfile(env, session, input, idempotencyKey) {
-      return idempotentProfileMutation(
+      return withTenantIdempotentMutation<BrandProfile, BrandProfileServiceError>(
         env,
         session,
         "brand-profile.create",
@@ -429,16 +268,8 @@ export function createBrandProfileService(): BrandProfileApiService {
       );
     },
 
-    /**
-     * Renames, recolors, or changes the short description of an active Brand
-     * Profile. An explicit null description clears it; omission preserves it.
-     *
-     * Soft-deleted profiles must be restored first: the UPDATE targets only
-     * active rows so a deleted id resolves as 404 rather than mutating a
-     * profile in its retention window.
-     */
     updateBrandProfile(env, session, profileId, input, idempotencyKey) {
-      return idempotentProfileMutation(
+      return withTenantIdempotentMutation<BrandProfile, BrandProfileServiceError>(
         env,
         session,
         "brand-profile.update",
@@ -497,16 +328,8 @@ export function createBrandProfileService(): BrandProfileApiService {
       );
     },
 
-    /**
-     * Permanently deletes a Brand Profile and all ownership-scoped data.
-     *
-     * The organization lock prevents a concurrent OAuth connection from attaching
-     * during deletion. Accounts are locally disconnected first so their encrypted
-     * tokens enter the revocation outbox; the final DELETE relies on cascading
-     * foreign keys to remove the profile's assets and distributions atomically.
-     */
     deleteBrandProfile(env, session, profileId, idempotencyKey) {
-      return idempotentProfileMutation(
+      return withTenantIdempotentMutation<BrandProfile, BrandProfileServiceError>(
         env,
         session,
         "brand-profile.delete",
@@ -550,17 +373,8 @@ export function createBrandProfileService(): BrandProfileApiService {
       );
     },
 
-    /**
-     * Restores a soft-deleted Brand Profile with its original description
-     * inside the retention window.
-     *
-     * Clears deleted_at/purge_at so the profile and its retained assets and
-     * distributions return to normal views. Channels stay disconnected and
-     * cancelled distributions stay cancelled — restore never produces
-     * unreviewed external side effects. Profiles past purge_at fail 409.
-     */
     restoreBrandProfile(env, session, profileId, idempotencyKey) {
-      return idempotentProfileMutation(
+      return withTenantIdempotentMutation<BrandProfile, BrandProfileServiceError>(
         env,
         session,
         "brand-profile.restore",

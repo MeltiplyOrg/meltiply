@@ -17,6 +17,7 @@ import {
 } from "@meltiply/providers";
 import type { JwtIdentity } from "@meltiply/auth";
 import type { TransactionClient } from "@meltiply/database";
+import { wrapPoolConnect } from "../test-support/fakes";
 import { Effect } from "effect";
 import {
   createStorageServiceTest,
@@ -28,8 +29,6 @@ import {
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import type * as Domain from "@meltiply/domain";
 
-// Exercise finite-policy boundaries even though community deployments are
-// unrestricted. Individual scenarios also load the real community policy.
 vi.mock("@meltiply/domain", async (importOriginal) => ({
   ...(await importOriginal<typeof Domain>()),
   COMMUNITY_LIMITS: {
@@ -66,23 +65,10 @@ import { createOperatorReconciliationService } from "../src/operator-reconciliat
 import { tokenCipherFor } from "../src/token-credentials";
 import { isoPeriodKey } from "../src/time";
 
-/**
- * Runs saveOAuthConnectionEffect to completion at the test boundary.
- *
- * Integration callers assert on the resolved value, so each call executes the
- * identical Effect program the routes compose via Effect.runPromise.
- */
 function saveOAuthConnection(...args: Parameters<typeof saveOAuthConnectionEffect>): Promise<void> {
   return Effect.runPromise(saveOAuthConnectionEffect(...args));
 }
 
-/**
- * Runs revokeOAuthConnectionEffect with the live provider layer at the test boundary.
- *
- * Routes compose the Effect inside runRouteEffect; integration callers execute it
- * here via Effect.runPromise so tenant-isolation assertions observe identical
- * typed failures.
- */
 function revokeOAuthConnection(
   ...args: Parameters<typeof revokeOAuthConnectionEffect>
 ): Promise<void> {
@@ -95,12 +81,6 @@ function revokeOAuthConnection(
   );
 }
 
-/**
- * Runs getPublicationRequirementsEffect with the live provider layer at the test boundary.
- *
- * Preserves the optional reference timestamp argument so tenant-isolation
- * assertions observe identical typed failures to the routed operation.
- */
 function getPublicationRequirements(...args: Parameters<typeof getPublicationRequirementsEffect>) {
   const [env, session, accountId, requestId, registry, now] = args;
   return Effect.runPromise(
@@ -111,13 +91,6 @@ function getPublicationRequirements(...args: Parameters<typeof getPublicationReq
   );
 }
 
-/**
- * Executes a system-pool Effect transaction at the test boundary.
- *
- * Integration fixtures and assertions share the same privileged, non-RLS
- * connection the worker uses for provisioning and reconciliation, so each
- * callback composes plain client.query Effects inside one commit scope.
- */
 function systemTransaction<A, E>(
   env: ApiWorkerEnv,
   operation: (client: EffectTransactionClient) => Effect.Effect<A, E>,
@@ -125,13 +98,6 @@ function systemTransaction<A, E>(
   return Effect.runPromise(withSystemTransactionEffect(env, operation));
 }
 
-/**
- * Narrows an API error-envelope body to its machine-readable code. Returns
- * undefined for any non-conforming payload instead of trusting a cast.
- *
- * @param value - Decoded JSON error response.
- * @returns The `error.code` string when present and well-shaped.
- */
 function errorCodeFrom(value: unknown): string | undefined {
   if (
     value !== null &&
@@ -147,11 +113,6 @@ function errorCodeFrom(value: unknown): string | undefined {
   return undefined;
 }
 
-/**
- * Builds the verified Better Auth JWT identity the bearer middleware hands to
- * resolveActor, so the integration suite exercises its real provisioning path
- * against the database without a Better Auth session lookup.
- */
 function jwtIdentity(user: { email: string; id: string; name?: string | null }): JwtIdentity {
   return {
     email: user.email,
@@ -160,18 +121,12 @@ function jwtIdentity(user: { email: string; id: string; name?: string | null }):
   };
 }
 
-/**
- * Issues an actor-resolution request; the bearer JWT is already verified by
- * the tenant middleware, so the request only carries routing headers such as
- * the x-workspace-id selection.
- */
 function actorRequest(headers: Record<string, string> = {}): Request {
   return new Request("https://api.meltiply.local/api/v1/platforms", {
     headers,
   });
 }
 
-/** Resolves an actor with the middleware request id the app supplies. */
 function resolveActor(
   env: ApiWorkerEnv,
   identity: JwtIdentity,
@@ -198,8 +153,6 @@ const env = {
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
 
-// Fixed bearer JWT credential for HTTP-level requests; the `verifyJwtToken`
-// test double maps it to the seeded identity under test.
 const bearerAuthorization = "Bearer test-only.jwt";
 const personalActorUserId = "auth_user_worker_actor_personal_test";
 const organizationActorUserId = "auth_user_worker_actor_org_test";
@@ -210,10 +163,6 @@ const lifecycleUserId = "auth_user_worker_lifecycle_test";
 const lifecycleMemberId = "auth_user_worker_lifecycle_member_test";
 const lifecycleWorkspaceSlug = "worker-lifecycle-test";
 
-// Seeded Better Auth subjects and internal IDs from
-// scripts/cloudflare-local/postgres/seed.sql: claims carry the auth subject,
-// the internal users.id, and the resolved workspace UUID so tenant
-// transactions resolve through public.auth_active_org_id().
 const alpha = {
   organizationId: "20000000-0000-4000-8000-000000000001",
   organizationRole: "admin",
@@ -228,17 +177,9 @@ const beta = {
   userId: "10000000-0000-4000-8000-000000000002",
 };
 
-// Seeded Brand Profiles from scripts/cloudflare-local/postgres/seed.sql: each
-// workspace owns exactly one active profile, and every asset, platform account,
-// distribution, OAuth connection, and reply fixture must name the profile that
-// belongs to its tenant.
 const alphaBrandProfileId = "a0000000-0000-4000-8000-000000000001";
 const betaBrandProfileId = "a0000000-0000-4000-8000-000000000002";
 
-// Fixture Post identities created directly so a Distribution fixture can point
-// at real composition rows. The 4e00… range is disjoint from the seeded 4800…
-// team posts and the e100… personal posts, so deleting one never touches
-// seeded composition that other specs read.
 const fixturePostIds = {
   auditPublished: "4e000000-0000-4000-8000-000000000020",
   auditFailed: "4e000000-0000-4000-8000-000000000021",
@@ -248,21 +189,6 @@ const fixturePostIds = {
   disconnectInFlight: "4e000000-0000-4000-8000-000000000010",
 } as const;
 
-/**
- * Inserts the Post, attachment, and target rows a Distribution fixture must own.
- *
- * Migration 003 made composition Post-owned: a Distribution references
- * `posts.post_id`, and the ordered media and the per-Channel selection live on
- * `post_attachments` / `post_targets`. Fixture Distributions therefore cannot
- * be inserted as bare rows; they need the same composition a scheduled Post
- * would have. Rows land at position 0 in attachment order, matching a
- * single-media Post, and `attachment_ids` snapshots that order on the target
- * exactly as `post-service` does when it writes a schedule.
- *
- * @param client - Transaction client shared with the calling fixture block.
- * @param input - Post identity, optional attachment/Channel, and an optional owner pair; defaults to Alpha's RLS fixture scope.
- * @returns Effect inserting the Post and, when supplied, its children.
- */
 function insertFixturePost(
   client: EffectTransactionClient,
   input: {
@@ -303,7 +229,6 @@ function insertFixturePost(
   });
 }
 
-/** Minimal shape of a scheduled Post read used to key outcomes by Channel. */
 interface PostWithDistributions {
   distributions: readonly {
     id: string;
@@ -311,21 +236,6 @@ interface PostWithDistributions {
   }[];
 }
 
-/**
- * Resolves one scheduled Distribution by the Channel it publishes to.
- *
- * `Post.distributions` is an unordered collection in the contract, and the read
- * orders rows by `event_at DESC, id DESC` over random Distribution ids, so a
- * positional index does not identify a Channel. Scenarios that act on one
- * Channel's outcome look it up by `platform_account_id`, which is the key the
- * composer actually chose.
- *
- * @param post - Scheduled Post read model carrying its Distribution rows.
- * @param platformAccountId - Channel the wanted Distribution publishes to.
- * @returns Id of that Channel's Distribution row.
- * @throws {Error} When no row targets the Channel, which fails the scenario
- * instead of silently asserting against another Channel's outcome.
- */
 function distributionIdForChannel(post: PostWithDistributions, platformAccountId: string): string {
   const row = post.distributions.find(
     (distribution) => distribution.platform_account_id === platformAccountId,
@@ -338,9 +248,6 @@ function distributionIdForChannel(post: PostWithDistributions, platformAccountId
   return row.id;
 }
 
-// Extra Alpha Channel the TikTok publishing-options scenario schedules to. It
-// is seeded here because the scenario asserts on TikTok-specific provider
-// options, which only a real connected TikTok Channel can accept.
 const alphaTiktokAccountId = "94000000-0000-4000-8000-000000000203";
 
 const alphaActor: ResolvedActor = {
@@ -358,9 +265,6 @@ const alphaActor: ResolvedActor = {
   },
 };
 
-// Verified JWT identity for the seeded Alpha user; `verifyJwtToken` doubles
-// return it so HTTP-level tests authenticate as the same subject the seeded
-// users row binds.
 const alphaIdentity: JwtIdentity = {
   email: "alpha@meltiply.local",
   name: "Alpha Creator",
@@ -368,36 +272,11 @@ const alphaIdentity: JwtIdentity = {
 };
 
 const service = createCoreApiService();
-/**
- * The `usage_records.period` key distribution acceptance charges.
- * `usageGuardEffect` derives the key from `new Date()`,
- * so they read the real calendar month — the same row `seed.sql` writes. A
- * fixture that seeded a publication counter under any other key would leave
- * the gate reading an untouched counter and admitting work the workspace has
- * no room for.
- */
 const currentUsagePeriod = isoPeriodKey(new Date());
 
-/**
- * The `usage_records.period` key the upload gates charge. `assetServiceHarness`
- * injects a fixed clock at 2026-07-18 and `createUploadSession` derives its
- * period from that clock, so the upload and storage counters it reads live in
- * 2026-07 no matter which month the suite actually runs in. The seeded row is
- * irrelevant to these scenarios: it is keyed to the real month.
- */
 const assetTestPeriod = "2026-07";
 let usageBeforeAssetTests: { storage_bytes: string; uploads: string } | undefined;
 
-/**
- * Seeds a Better Auth subject ("user" row) for invitation-lifecycle scenarios.
- *
- * `resolveActor` binds the internal `users` identity lazily on the first
- * authenticated request, so scenarios only need the auth row up front.
- *
- * @param subject - Better Auth subject id; must be unique per test.
- * @param email - Subject email; doubles as the invitation recipient.
- * @param name - Display name used for the provisioned identity.
- */
 function seedLifecycleUser(subject: string, email: string, name: string): Promise<unknown> {
   return systemTransaction(env, (client) =>
     client.query(
@@ -409,14 +288,6 @@ function seedLifecycleUser(subject: string, email: string, name: string): Promis
   );
 }
 
-/**
- * Extracts the invitation acceptance token from the captured `MailMessage`.
- * The link is rendered identically in the HTML `href` and the text body;
- * this helper reads the text body's `Accept the invitation:` line.
- *
- * @param message - Message captured through the injected mail service.
- * @returns Raw invitation token for the accept route.
- */
 function invitationTokenFrom(message: MailMessage): string {
   const match = /Accept the invitation: (\S+)/.exec(message.text);
   const link = match?.[1];
@@ -430,31 +301,10 @@ function invitationTokenFrom(message: MailMessage): string {
   return token;
 }
 
-/**
- * Produces the per-run token that scopes invitation-scenario workspace slugs
- * and `Idempotency-Key` values. Seeded subjects and their personal workspaces
- * persist across local suite runs, so a fixed key would replay a stored
- * response (or conflict) instead of exercising the fresh request path.
- *
- * @returns 8-character lowercase hex token unique to this invocation.
- */
 function lifecycleRunToken(): string {
   return crypto.randomUUID().replace(/-/g, "").slice(0, 8);
 }
 
-/**
- * Builds an API app wired for invitation-lifecycle scenarios: the real
- * `resolveActor`/`verifyJwtToken` seam authenticates bearer identities, and
- * the shared `MailService` seam is provided through a `createMailServiceTest`
- * Layer that captures the neutral `MailMessage` per send. `useLiveMail`
- * exercises the production path, where the test env's missing `MAIL` binding
- * and sender configuration surface as `email_unavailable`.
- *
- * @param options.identities - Bearer token suffix to verified JWT identity.
- * @param options.send - Optional send override run after capture.
- * @param options.useLiveMail - Resolve the live sender instead of a test Layer.
- * @returns App, request helper, and the captured outbound messages.
- */
 function lifecycleInvitationHarness(options: {
   identities: Readonly<Record<string, JwtIdentity>>;
   send?: MailServiceShape["send"];
@@ -502,18 +352,6 @@ function lifecycleInvitationHarness(options: {
   return { app, request, sent };
 }
 
-/**
- * Capability list with the requested Platforms opted into publishing.
- *
- * The registry ships every adapter as explicitly unavailable, so a scheduling
- * scenario opts one or more Platforms into publishing with the media limits its
- * fixture uses. Both the Post scheduler and the per-Distribution operations
- * validate against the same list, which is why the builder is shared.
- *
- * @param platform - Platform(s) to enable for publishing.
- * @param patch - Extra capability fields overriding the defaults.
- * @returns Registry capabilities with the requested publish override.
- */
 function publishableCapabilities(
   platform: Platform | readonly Platform[],
   patch: Partial<PlatformCapability> = {},
@@ -537,7 +375,6 @@ function publishableCapabilities(
   );
 }
 
-/** Core service for per-Distribution operations against publish-enabled Platforms. */
 function distributionServiceWith(
   platform: Platform | readonly Platform[] = "youtube",
   patch: Partial<PlatformCapability> = {},
@@ -545,18 +382,6 @@ function distributionServiceWith(
   return createCoreApiService(publishableCapabilities(platform, patch));
 }
 
-/**
- * Post composition service for the Platforms that can publish.
- *
- * Scheduling validates the resolved caption, media, and provider options
- * against the platform capability before any Distribution is accepted, so
- * every scheduling scenario must build the service with the platform(s) it
- * intends to publish to.
- *
- * @param platform - Platform(s) the scenario schedules against.
- * @param patch - Extra capability fields overriding the defaults.
- * @returns Post service whose scheduler accepts those platforms.
- */
 function postServiceWith(
   platform: Platform | readonly Platform[],
   patch: Partial<PlatformCapability> = {},
@@ -564,13 +389,6 @@ function postServiceWith(
   return createPostApiService(publishableCapabilities(platform, patch));
 }
 
-/**
- * Builds deterministic Effect-native storage, signing, clock and UUID fixtures.
- * Storage mocks stay mutable for failure/race injection; side effects run only
- * when their Effects execute. The returned `service` is the Effect-native
- * AssetApiService: HTTP callers inject it into createApiApp, while direct test
- * calls execute each operation via Effect.runPromise at the call boundary.
- */
 function assetServiceHarness(ids: string[]) {
   let currentTime = new Date("2026-07-18T12:00:00.000Z");
   const objects = new Map<string, ObjectMetadata>();
@@ -671,14 +489,6 @@ const analyticsCacheDistributionId = "96000000-0000-4000-8000-000000000090";
 const analyticsCacheStart = new Date("2031-05-01T00:00:00Z");
 const analyticsCacheEnd = new Date("2031-05-31T23:59:59Z");
 
-/**
- * Seeds the published Distribution and first snapshot used by every analytics
- * cache scenario. The 2031 window is disjoint from seeded and other fixture
- * data, so a warm or expired result can only come from these rows.
- *
- * @param owner - Owning scope; defaults to Alpha's database-only RLS Workspace, while HTTP tests pass the resolved shared Workspace.
- * @returns Resolves after the Post, Distribution, and snapshot commit.
- */
 async function seedAnalyticsCacheFixture(
   owner = { organizationId: alpha.organizationId, brandProfileId: alphaBrandProfileId },
 ): Promise<void> {
@@ -712,15 +522,6 @@ async function seedAnalyticsCacheFixture(
   );
 }
 
-/**
- * Appends a later snapshot inside the cache fixture's reporting window.
- *
- * A retained summary keeps the earlier totals until its absolute expiration,
- * while a canonical recomputation reads this newest snapshot.
- *
- * @param values - Metric values for the new snapshot; defaults to the 400-view change.
- * @returns Resolves after the snapshot commits.
- */
 async function addAnalyticsCacheSnapshot(values: {
   comments: number;
   likes: number;
@@ -744,7 +545,6 @@ async function addAnalyticsCacheSnapshot(values: {
   );
 }
 
-/** Removes the analytics cache fixture rows without touching seeded data. */
 async function removeAnalyticsCacheFixture(): Promise<void> {
   await systemTransaction(env, (client) =>
     Effect.gen(function* () {
@@ -885,10 +685,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         yield* client.query("DELETE FROM assets WHERE id = ANY($1::uuid[])", [
           [alphaSecondAssetId, alphaProcessingAssetId, alphaFailedAssetId],
         ]);
-        // Composition fixtures are Post-owned, so the Posts are removed after
-        // the rows that reference them: the cascade clears each attachment and
-        // target. The seeded canonical Post still holds the shared Asset, so its
-        // orphan clock stays clear.
         yield* client.query("DELETE FROM posts WHERE id = ANY($1::uuid[])", [
           Object.values(fixturePostIds),
         ]);
@@ -899,12 +695,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   });
 
   it("rolls back provisioning when a first identity has no workspace membership", async () => {
-    // Better Auth owns the identity row. Resolution provisions the internal
-    // user and installation inside one transaction, then fails when no shared
-    // Workspace membership exists (`workspace_membership_required`). The whole
-    // transaction rolls back, so a refused first sign-in must leave neither an
-    // internal user nor a membership behind: a partially committed bind would
-    // let a denied request occupy the email and the owner slot.
     await systemTransaction(env, (client) =>
       client.query(
         `INSERT INTO "user" (id, name, email, "emailVerified")
@@ -934,7 +724,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         [personalActorUserId],
       ),
     );
-    // Rolled back: the refused identity left no internal user and no membership.
     expect(identity.rows).toEqual([{ membership_count: "0", user_count: "0" }]);
   });
 
@@ -1129,10 +918,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
 
   it("lists platform accounts only for the authenticated tenant", async () => {
     const alphaAccounts = await Effect.runPromise(service.listPlatformAccounts(env, alpha));
-    // The Post scenarios seed three extra Channels into the same workspace, so
-    // isolation is asserted by the exact set Alpha owns plus tenant scoping on
-    // every row, rather than by a row total that only held before composition
-    // fixtures existed. Beta still sees nothing.
     expect(
       alphaAccounts
         .map((account) => account.platform_user_id)
@@ -1365,10 +1150,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       );
       expect(betaPost.value.org_id).toBe("20000000-0000-4000-8000-000000000002");
 
-      // A registry with a real revoke adapter is required here: with an empty
-      // registry the function returns before any tenant decision, so a broken
-      // RLS predicate would look identical to correct isolation. The spy makes
-      // "beta could not reach alpha's account" observable.
       const revoke = vi.fn(async () => undefined);
       const revokeRegistry = new ProviderRegistry();
       revokeRegistry.register("youtube", {
@@ -1388,7 +1169,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       await expect(
         revokeOAuthConnection(env, beta, alphaAccountId, revokeRegistry),
       ).resolves.toBeUndefined();
-      // Beta's tenant transaction finds no row, so the provider is never called.
       expect(revoke).not.toHaveBeenCalled();
 
       const rows = await systemTransaction(env, (client) =>
@@ -1435,10 +1215,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const cancelledId = "93000000-0000-4000-8000-000000000022";
     await systemTransaction(env, (client) =>
       Effect.gen(function* () {
-        // One Post/account pair owns exactly one Distribution row, so each
-        // ambiguous outcome this spec reconciles needs its own Post. They share
-        // the seeded Asset the way real Posts do; the seeded canonical Post still
-        // retains that Asset, so no orphan clock is started.
         yield* insertFixturePost(client, {
           accountId: alphaYoutubeAccountId,
           assetId: alphaAssetId,
@@ -1912,8 +1688,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
 
     const alphaCalendar = await Effect.runPromise(service.calendar(env, alpha, start, end));
     expect(alphaCalendar).toHaveLength(1);
-    // The calendar row carries the owning Post's identity and title, not the
-    // legacy Asset fields, so the projection is asserted on post_id/post_title.
     expect(alphaCalendar[0]).toMatchObject({
       platform: "youtube",
       post_id: "48000000-0000-4000-8000-000000000001",
@@ -1941,9 +1715,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       views: 1200,
     });
     expect(analytics.partial).toBe(true);
-    // Coverage is derived from the Platforms actually published in scope, not
-    // from every registered Platform. Alpha's only in-range publication is on
-    // YouTube, which this fixture deliberately marks analytics-unsupported.
     expect(analytics.unsupported_platforms).toEqual(["youtube"]);
     expect(analytics.by_platform).toEqual([
       expect.objectContaining({
@@ -1976,8 +1747,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     for (const distribution of alphaDistributions.distributions) {
       expect(distribution.org_id).toBe("20000000-0000-4000-8000-000000000001");
     }
-    // Reading outcomes stays Post-scoped: one Post, one Brand Profile, and the
-    // workspace aggregate are three different selections.
     const forPost = await Effect.runPromise(
       service.listDistributions(env, alpha, {
         limit: 20,
@@ -2029,9 +1798,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
 
     await systemTransaction(env, (client) =>
       Effect.gen(function* () {
-        // The snapshotless Post is a second retained Post for the seeded Asset,
-        // which is exactly the shape that makes post_count rise while the
-        // snapshot totals stay put.
         yield* insertFixturePost(client, {
           accountId: alphaYoutubeAccountId,
           assetId: alphaAssetId,
@@ -2070,8 +1836,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     );
 
     try {
-      // A snapshot beyond the range end stays invisible, while a published
-      // post without any snapshot still counts toward post_count only.
       const july = await Effect.runPromise(
         service.summaryAnalytics(env, alpha, {
           end: julyEnd,
@@ -2087,7 +1851,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       });
       expect(july.last_synced_at).toBe("2026-07-18T13:00:00.000Z");
 
-      // Widening the range past the late snapshot admits exactly that one.
       const throughAugust = await Effect.runPromise(
         service.summaryAnalytics(env, alpha, {
           end: augustEnd,
@@ -2115,8 +1878,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   it("ranks the analytics Post cohort by stored metrics with honest coverage", async () => {
     const start = new Date("2026-10-01T00:00:00Z");
     const end = new Date("2026-10-31T23:59:59Z");
-    // Mark only Instagram analytics-capable so coverage must exclude the
-    // YouTube destination even though the shipped registry declares support.
     const analyticsService = createCoreApiService(
       new ProviderRegistry().capabilities().map((capability) => ({
         ...capability,
@@ -2151,9 +1912,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
             postIds.mixed,
             excerptText,
           ]);
-          // `event_at` prefers `scheduled_at`, so the mixed and unsupported rows
-          // would fall outside the calendar window while publishing inside it;
-          // the outside row is the inverse. published_at must decide both.
           yield* client.query(
             `INSERT INTO distributions
                (id, org_id, brand_profile_id, post_id, platform, status,
@@ -2282,7 +2040,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         views: 0,
       });
 
-      // Equal likes fall back to latest publication first, then Post id.
       const byLikes = await Effect.runPromise(
         analyticsService.analyticsPosts(env, alpha, {
           end,
@@ -2520,9 +2277,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       });
       expect(first.last_synced_at).toBe("2031-05-06T12:00:00.000Z");
 
-      // A newer persisted snapshot must stay invisible inside the absolute
-      // window: the second request returns the retained successful summary
-      // instead of repeating the latest-snapshot aggregation.
       await addAnalyticsCacheSnapshot({ comments: 4, likes: 40, shares: 8, views: 400 });
       clock.current = new Date("2031-06-01T00:00:10.000Z");
       const retained = await Effect.runPromise(
@@ -2531,7 +2285,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(retained.totals.views).toBe(100);
       expect(retained.last_synced_at).toBe("2031-05-06T12:00:00.000Z");
 
-      // A hit at 29 seconds does not extend the 30-second absolute lifetime.
       clock.current = new Date("2031-06-01T00:00:29.000Z");
       await expect(
         Effect.runPromise(analyticsService.summaryAnalytics(env, alpha, range)),
@@ -2557,9 +2310,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   it("shares a cold authorized summary and releases follower transactions before waiting", async () => {
     const service = createCoreApiService();
     const pool = authenticatedPoolFor(env);
-    // Observe only the Promise checkout used by authenticated transactions.
-    const mutablePool = pool as unknown as { connect: () => Promise<TransactionClient> };
-    const connect = mutablePool.connect;
+    let restoreConnect: (() => void) | undefined;
     let releaseAggregation!: () => void;
     let aggregationStarted!: () => void;
     let followerCommitted!: () => void;
@@ -2576,8 +2327,8 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const running: Promise<unknown>[] = [];
     try {
       await seedAnalyticsCacheFixture();
-      mutablePool.connect = async () => {
-        const client = await connect.call(pool);
+      restoreConnect = wrapPoolConnect(pool, (connect) => async () => {
+        const client = await connect();
         const query: TransactionClient["query"] = async <
           Row extends Record<string, unknown> = Record<string, unknown>,
         >(
@@ -2594,7 +2345,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           return result;
         };
         return { query, release: () => client.release() };
-      };
+      });
       const range = { start: analyticsCacheStart, end: analyticsCacheEnd };
       const first = Effect.runPromise(service.summaryAnalytics(env, alpha, range));
       running.push(first);
@@ -2612,7 +2363,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     } finally {
       releaseAggregation();
       await Promise.allSettled(running);
-      mutablePool.connect = connect;
+      restoreConnect?.();
       await removeAnalyticsCacheFixture();
     }
   });
@@ -2666,8 +2417,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       );
       expect(accountScoped.by_platform).toEqual([]);
 
-      // Another authorized identity in another Workspace must never inherit
-      // Alpha's warm entry even with identical filters.
       const betaScoped = await Effect.runPromise(
         analyticsService.summaryAnalytics(env, beta, range),
       );
@@ -2707,8 +2456,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(warm.totals.views).toBe(100);
       await addAnalyticsCacheSnapshot({ comments: 4, likes: 40, shares: 8, views: 400 });
 
-      // Persisted lifecycle changes handled by any instance must alter the
-      // applicable identity, even without deleting the profile.
       await systemTransaction(env, (client) =>
         client.query("UPDATE brand_profiles SET updated_at = now() WHERE id = $1", [
           alphaBrandProfileId,
@@ -2744,7 +2491,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(warmExplicit.totals.views).toBe(100);
       expect(warmSecondInstance.totals.views).toBe(100);
 
-      // Simulate another API instance retiring the Profile after caches warmed.
       await systemTransaction(env, (client) =>
         client.query(
           `UPDATE brand_profiles
@@ -2769,8 +2515,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         );
         expect(hiddenSecondInstance.by_platform).toEqual([]);
       } finally {
-        // Restoring elsewhere advances the persisted lifecycle generation, so
-        // neither the pre-delete nor the hidden key can satisfy the next read.
         await systemTransaction(env, (client) =>
           client.query(
             `UPDATE brand_profiles
@@ -2795,8 +2539,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(restoredExplicit.totals.views).toBe(100);
       expect(restoredSecondInstance.totals.views).toBe(100);
 
-      // Removing membership must fail even with every cache warm, and the
-      // failure must not be retained or overwrite the successful entry.
       await systemTransaction(env, (client) =>
         client.query("DELETE FROM org_members WHERE org_id = $1 AND user_id = $2", [
           alpha.organizationId,
@@ -2860,8 +2602,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         await Effect.runPromise(analyticsService.summaryAnalytics(env, alpha, { end, start }));
       }
 
-      // The 65th distinct entry evicted the warm fixture key, so the next read
-      // must recompute instead of serving the pre-eviction value.
       const recomputed = await Effect.runPromise(
         analyticsService.summaryAnalytics(env, alpha, range),
       );
@@ -2881,16 +2621,12 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(warm.totals.views).toBe(100);
       await addAnalyticsCacheSnapshot({ comments: 4, likes: 40, shares: 8, views: 400 });
 
-      // A different deployment configuration replaces the namespace and
-      // recomputes from the authoritative rows instead of reusing the entry.
       const variantEnv = { ...env, VERSION: "1.0.0-target.1" };
       const variant = await Effect.runPromise(
         analyticsService.summaryAnalytics(variantEnv, alpha, range),
       );
       expect(variant.totals.views).toBe(400);
 
-      // Returning to the original configuration replaces (not restores) the
-      // previous namespace, so its old entry cannot reappear from the past.
       const replaced = await Effect.runPromise(
         analyticsService.summaryAnalytics(env, alpha, range),
       );
@@ -2937,8 +2673,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(warm.status).toBe(200);
       expect(await warm.json()).toMatchObject({ totals: { views: 100 } });
 
-      // Actor resolution runs on every request, so a warm cache cannot be
-      // reached while the account is suspended.
       await systemTransaction(env, (client) =>
         client.query("UPDATE users SET suspended_at = now() WHERE id = $1", [alpha.userId]),
       );
@@ -3051,40 +2785,15 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // Second Alpha Asset used by multi-attachment composition scenarios. It is a
-  // verified image with its own ready original object, so a Post attaching both
-  // Assets can be scheduled once processing has produced publishable media.
   const alphaSecondAssetId = "94000000-0000-4000-8000-000000000001";
-  // Alpha Assets that exist only in the scenarios that insert them, each pinned
-  // to one lifecycle state so drafts and schedules can be told apart.
   const alphaProcessingAssetId = "94000000-0000-4000-8000-000000000002";
   const alphaFailedAssetId = "94000000-0000-4000-8000-000000000003";
-  // Alpha Asset that exists only to carry the storage-quota padding object. It is
-  // dedicated rather than reused because `idx_asset_objects_live_original` allows
-  // at most one live original per Asset, and every shared fixture Asset already
-  // owns its verified original.
   const alphaStoragePaddingAssetId = "94000000-0000-4000-8000-000000000004";
   const alphaSecondAccountId = "94000000-0000-4000-8000-000000000201";
   const alphaThirdAccountId = "94000000-0000-4000-8000-000000000202";
   const alphaYoutubeAccountId = "50000000-0000-4000-8000-000000000001";
   const alphaAssetId = "40000000-0000-4000-8000-000000000001";
 
-  /**
-   * Inserts the Assets, verified media, and Channels the Post scenarios share.
-   *
-   * The fixture state is the precondition each scenario asserts against: one
-   * publishable image, one second publishable image for ordered multi-attachment
-   * work, one Asset still processing with no verified media, one failed Asset,
-   * two extra connected Channels beyond the seeded canonical YouTube
-   * account — one Instagram and one Facebook, because a Brand Profile owns at
-   * most one Channel per Provider — and one connected TikTok Channel. The
-   * TikTok Channel exists because scheduling a
-   * Post that carries TikTok provider options must resolve a real Channel of that
-   * platform first; without it the scenario would stop at a 404 account lookup
-   * instead of reaching the provider-option validation it is asserting. Inserting
-   * them once keeps every scenario's own transaction focused on the composition
-   * behavior it proves.
-   */
   async function seedPostCompositionFixtures(): Promise<void> {
     await systemTransaction(env, (client) =>
       Effect.gen(function* () {
@@ -3148,14 +2857,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     );
   }
 
-  /**
-   * Reads the Alpha workspace's current monthly publication count.
-   *
-   * Quota scenarios manipulate the counter directly, so each one restores this
-   * captured value afterwards instead of guessing at a fixture total.
-   *
-   * @returns Distributions recorded for the current usage period.
-   */
   async function currentUsageCount(): Promise<number> {
     const rows = await systemTransaction(env, (client) =>
       client.query<{ distributions: string }>(
@@ -3168,12 +2869,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     return Number(rows.rows[0]?.distributions ?? 0);
   }
 
-  /**
- * Restores the Alpha monthly publication counter.
- *
- * @param value - Distribution count captured before the scenario reserved work.
- @returns Resolves once the counter is written back.
- */
   function restoreUsageCount(value: number) {
     return systemTransaction(env, (client) =>
       client.query(
@@ -3185,17 +2880,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     );
   }
 
-  /**
- * Removes the durable traces one Post scenario left behind.
- *
- * Publications, outbox commands, saved targets, and attachments are removed in
- * dependency order so the scenario's Posts disappear from every read surface,
- * and the idempotency records that reserved them go with them.
- *
- * @param postIds - Post identifiers the scenario created.
- @param keys - Idempotency keys the scenario used.
- @returns Resolves once the scenario left no durable state.
- */
   async function purgeIntegrationPosts(postIds: string[], keys: string[]): Promise<void> {
     await systemTransaction(env, (client) =>
       Effect.gen(function* () {
@@ -3225,18 +2909,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     );
   }
 
-  /**
- * Creates an Alpha Post draft with the requested composition.
- *
- * Scenarios differ only in what they attach, what text they carry, and which
- * Channels they save, so the Brand Profile scope and a nonempty default body
- * are supplied here and only overridden where a scenario needs otherwise.
- *
- * @param posts - Post service driving the scenario.
- * @param input - Composition members the scenario wants stored.
- @param key - Idempotency key reserving this create.
- * @returns Effect resolving to the service's stored-response result.
- */
   function createAlphaPost(
     posts: PostApiService,
     input: {
@@ -3261,18 +2933,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     );
   }
 
-  /**
-   * Schedules an Alpha Post against the supplied Channels.
-   * Supplies explicit public visibility and a not-made-for-kids fixture answer
-   * for unrelated scenarios. Missing-answer cases call the service directly.
-   *
-   * @param posts - Post service driving the scenario.
-   * @param postId - Post being scheduled.
-   * @param targets - Channel targets the scenario publishes to.
-   * @param scheduledAt - Deferred instant, or null to publish immediately.
-   * @param key - Idempotency key reserving this schedule.
-   * @returns Effect resolving to the service's stored-response result.
-   */
   function scheduleAlphaPost(
     posts: PostApiService,
     postId: string,
@@ -3301,9 +2961,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       ),
     );
   }
-  // The composer owns one Post identity per composition: a text-only draft is
-  // complete without any Channel, replaying the same key returns that same
-  // identity, and reloading it returns the stored composition unchanged.
   it("creates a draft without Channels and reads it back after reload", async () => {
     const posts = postServiceWith("youtube");
     const created = await createAlphaPost(
@@ -3322,23 +2979,17 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         brand_profile_id: alphaBrandProfileId,
         default_text: "Reloadable draft",
         distributions: [],
-        // `revision` counts accepted edits, not the creation that produced the
-        // row: `updatePostRowEffect` is the only writer that advances it (the
-        // soft-delete path being the other), so a draft nobody has edited
-        // reads back as 0 — the default `posts.revision` carries.
         revision: 0,
         status: "draft",
         targets: [],
       });
 
-      // The same key replays the stored response instead of inserting again.
       const replay = await createAlphaPost(
         posts,
         { defaultText: "Reloadable draft", title: "Integration draft" },
         "integration-post-create",
       );
       expect(replay).toEqual({ ...created, replayed: true });
-      // A distinct key is a genuinely distinct composition.
       const second = await createAlphaPost(
         posts,
         { defaultText: "Reloadable draft", title: "Integration draft" },
@@ -3375,9 +3026,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // Authoring needs neither text nor media alone to be complete: media-only,
-  // text-only, and multi-attachment Posts are all valid, and neither text nor
-  // media together is not a Post at all.
   it("composes text-only, media-only, and ordered multi-attachment Posts", async () => {
     const posts = postServiceWith("youtube");
     const mediaOnly = await createAlphaPost(
@@ -3401,8 +3049,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(textOnly.value.attachments).toEqual([]);
       expect(textOnly.value.default_text).toBe("Words only");
 
-      // A save replaces the whole ordered set, so reorder and removal are one
-      // atomic edit that never disturbs the caption.
       const reordered = await Effect.runPromise(
         posts.updatePost(
           env,
@@ -3420,8 +3066,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         alphaAssetId,
       ]);
       expect(reordered.value.attachments.map(({ position }) => position)).toEqual([0, 1]);
-      // Creation is not an edit, so the reorder save is this Post's first
-      // accepted edit: revision moves 0 -> 1 rather than 1 -> 2.
       expect(reordered.value.revision).toBe(1);
       expect(reordered.value.default_text).toBe("");
 
@@ -3439,7 +3083,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       );
       expect(trimmed.value.attachments.map(({ asset_id }) => asset_id)).toEqual([alphaAssetId]);
 
-      // The reload proves the stored order, not the response being echoed.
       await expect(
         Effect.runPromise(posts.getPost(env, alpha, mediaOnly.value.id)),
       ).resolves.toEqual(trimmed.value);
@@ -3477,8 +3120,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // Media still being prepared is a legitimate draft reference: the composer
-  // saves it so the creator can keep writing, and only scheduling refuses it.
   it("keeps processing and failed media as drafts but blocks publishing them", async () => {
     const posts = postServiceWith("youtube");
     const draft = await createAlphaPost(
@@ -3520,9 +3161,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // Scheduling validates every affected Channel against the resolved caption,
-  // media, and provider options before accepting anything, so a rejected
-  // schedule reserves nothing and leaves the draft exactly as it was.
   it("rejects a schedule the platform capability cannot publish", async () => {
     const posts = postServiceWith("youtube", {
       max_caption_length: 4,
@@ -3557,8 +3195,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         ],
         status: 422,
       });
-      // The rejection rolls its transaction back, so nothing was reserved or
-      // inserted and the same key stays usable.
       const reserved = await systemTransaction(env, (client) =>
         client.query<{ reservations: number }>(
           `SELECT COUNT(*)::int AS reservations
@@ -3573,13 +3209,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // One Post identity fans out to one Distribution per Channel, and only the
-  // Channels that are still editable are created, updated, or cancelled.
   it("schedules many Channels once with atomic usage and outbox state", async () => {
     const posts = postServiceWith(["youtube", "instagram", "facebook"]);
     const period = currentUsagePeriod;
     const usageBefore = await currentUsageCount();
-    // Exhaust a finite test allowance to prove quota refusal remains atomic.
     const distributionAllowance = COMMUNITY_LIMITS.max_distributions ?? 0;
     const draft = await createAlphaPost(
       posts,
@@ -3608,8 +3241,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       );
       expect(scheduled.replayed).toBe(false);
       expect(scheduled.value.status).toBe("active");
-      // `distributions` is unordered and its row ids are generated, so the rows
-      // are keyed by the Channel that owns them before being compared.
       expect(
         scheduled.value.distributions
           .map(({ hashtags, platform_account_id }) => ({
@@ -3625,7 +3256,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       ]);
       expect(scheduled.value.distributions.every(({ post_id }) => post_id === postId)).toBe(true);
 
-      // Replaying the same key returns the stored response and creates nothing.
       await expect(
         scheduleAlphaPost(
           posts,
@@ -3675,8 +3305,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         status: 422,
       });
 
-      // One Post/account pair carries one Distribution row: rescheduling the
-      // same Channels edits those rows instead of adding duplicates.
       const distributionIds = scheduled.value.distributions.map(({ id }) => id);
       const durable = await systemTransaction(env, (client) =>
         client.query<{
@@ -3777,9 +3405,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // Removing a Channel from a schedule cancels only the work that has not been
-  // claimed, while an outcome a provider already owns keeps its own lifecycle
-  // and its published copy is never un-published locally.
   it("edits pending targets in place while leaving published history immutable", async () => {
     const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
@@ -3811,8 +3436,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         ),
       );
 
-      // The already-published Channel is left untouched while a new Channel is
-      // added and a previously pending Channel would have been edited.
       const second = await scheduleAlphaPost(
         posts,
         postId,
@@ -3820,9 +3443,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         null,
         "integration-post-history-second",
       );
-      // `distributions` is unordered: rows are keyed by their Channel, because
-      // read order follows `event_at`, and the freshly added row is newer than
-      // the published row it now sits beside.
       expect(
         second.value.distributions
           .map(({ platform_account_id, status, title_override }) => ({
@@ -3848,9 +3468,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       const addedId = second.value.distributions.find(
         ({ platform_account_id }) => platform_account_id === alphaSecondAccountId,
       )!.id;
-      // The same dropped Distribution can have retryable and leased delivery
-      // attempts. Remove only pending/failed publish commands, never the
-      // consumer-owned lease or a command for another topic.
       await systemTransaction(env, (client) =>
         client.query(
           `INSERT INTO outbox_events
@@ -3869,11 +3486,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         ),
       );
 
-      // Dropping a Channel that is still queued cancels it and releases its
-      // command, while the published row survives the same edit. A cancelled
-      // outcome is a durable row, not a deletion: the Post keeps exactly one
-      // Distribution per Channel, and the dropped Channel is never replaced by a
-      // second row.
       const third = await scheduleAlphaPost(
         posts,
         postId,
@@ -3906,12 +3518,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           [publishedId, addedId],
         ),
       );
-      // Only the *dropped* Channel released its command. The published row's
-      // original `distribution.publish.requested` command is still `pending`:
-      // this fixture forces the publication with a direct UPDATE and no
-      // consumer ever drains the outbox, so nothing deleted that command and
-      // the count is 1 for it and 0 for the cancelled one. Keyed by aggregate
-      // id, not sorted counts: sorting would accept the inverse defect.
       expect(
         new Map(commands.rows.map(({ aggregate_id, commands: count }) => [aggregate_id, count])),
       ).toEqual(
@@ -3945,10 +3551,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // A settled outcome is never revalidated: a published Channel whose
-  // credential has since been revoked stays untouched while the still-pending
-  // Channel reschedules, instead of the revoked Channel failing the whole
-  // schedule.
   it("reschedules pending Channels when a settled Channel's credential lapsed", async () => {
     const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
@@ -3971,9 +3573,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         "integration-post-settled-first",
       );
       const publishedId = distributionIdForChannel(first.value, alphaYoutubeAccountId);
-      // The Channel's outcome is settled exactly the way a drained publish
-      // command leaves it: a provider attempt exists, the row is published,
-      // and only then does the credential lapse.
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
           yield* client.query(
@@ -4049,10 +3648,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // Once an attempt has claimed a Channel its frozen snapshot is the only
-  // answer to what that Channel published: editing the Post's text and
-  // attachments afterwards changes neither the Post read nor the Distribution
-  // read, and both surfaces expose the identical frozen publication.
   it("reads the frozen publication identically on Post and Distribution after edits", async () => {
     const posts = postServiceWith("youtube");
     const distributionService = distributionServiceWith();
@@ -4077,8 +3672,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         "integration-post-frozen-schedule",
       );
       const publishedId = distributionIdForChannel(scheduled.value, alphaYoutubeAccountId);
-      // The snapshot is seeded the way a claimed attempt persists it: storage
-      // internals ride along in the stored JSON but never reach the wire.
       const snapshot = {
         version: 1,
         post_id: postId,
@@ -4127,7 +3720,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         }),
       );
 
-      // Live composition state drifts away from the frozen copy on purpose.
       await Effect.runPromise(
         posts.updatePost(
           env,
@@ -4189,14 +3781,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // Rescheduling several Channels at once rewrites rows whose ordered
-  // selections and hashtag sets all differ, so each row keeps its own values
-  // and its own identity instead of a value borrowed from another Channel's
-  // array position.
   it("reschedules Channels whose ordered selections and hashtags differ", async () => {
-    // The fixture Platform publishes one attachment at a time by default, so
-    // the capability is widened to accept a text-only target and a
-    // multi-attachment one side by side.
     const posts = postServiceWith(["youtube", "instagram"], {
       max_media_count: 3,
       min_media_count: 0,
@@ -4220,9 +3805,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           platform_account_id,
           status,
         }))
-        // `distributions` is unordered and its row ids are generated, so rows are
-        // keyed by the Channel that owns them; a nullable account sorts first and
-        // only appears once a Channel-less row is in play.
         .sort((left, right) =>
           (left.platform_account_id ?? "").localeCompare(right.platform_account_id ?? ""),
         );
@@ -4261,10 +3843,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         { hashtags: ["secondary"], platform_account_id: alphaSecondAccountId },
       ]);
 
-      // Both rows are pending, so the second schedule edits them in place. The
-      // first Channel becomes a deliberate text-only target and the second
-      // narrows its selection, which is the reverse length order of the first
-      // schedule.
       const second = await scheduleAlphaPost(
         posts,
         postId,
@@ -4301,8 +3879,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(second.value.id).toBe(postId);
       expect(second.value.status).toBe("active");
 
-      // The ordered selections reach the durable rows as written: an empty
-      // array stays an empty array instead of collapsing to inherited media.
       const stored = await systemTransaction(env, (client) =>
         client.query<{
           attachment_ids: string[] | null;
@@ -4329,8 +3905,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         },
       ]);
 
-      // The saved target set carries the same per-Channel choices, so a later
-      // schedule that omits targets repeats this composition.
       const saved = await systemTransaction(env, (client) =>
         client.query<{
           attachment_ids: string[] | null;
@@ -4357,8 +3931,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         },
       ]);
 
-      // Each row keeps exactly one live command: the reschedule replaced the
-      // previous intent instead of stacking a second command beside it.
       const commands = await systemTransaction(env, (client) =>
         client.query<{ commands: string; distribution_id: string }>(
           `SELECT distribution.id AS distribution_id,
@@ -4389,10 +3961,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // Re-adding a Channel that an earlier schedule dropped reuses the row local
-  // cancellation left behind: `(post_id, platform_account_id)` is unique, so
-  // without revival the request would succeed while publishing nothing. A
-  // Channel whose outcome a provider already owns keeps that outcome instead.
   it("revives a dropped Channel instead of succeeding without publishing", async () => {
     const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
@@ -4414,8 +3982,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           scheduled_at,
           status,
         }))
-        // `distributions` is unordered and its row ids are generated, so rows are
-        // keyed by the Channel that owns them instead of by their own identity.
         .sort((left, right) =>
           (left.platform_account_id ?? "").localeCompare(right.platform_account_id ?? ""),
         );
@@ -4444,8 +4010,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         ]),
       );
       const secondId = ids.get(alphaSecondAccountId)!;
-      // One Channel reaches a provider, so the re-add that follows must leave
-      // its published outcome alone.
       await systemTransaction(env, (client) =>
         client.query(
           `UPDATE distributions
@@ -4459,8 +4023,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         ),
       );
 
-      // Dropping the second Channel cancels its unclaimed row and releases its
-      // command; the published row survives the same edit.
       await scheduleAlphaPost(
         posts,
         postId,
@@ -4487,8 +4049,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         { platform_account_id: alphaSecondAccountId, status: "cancelled" },
       ]);
 
-      // Adding the Channel back queues that same row again instead of leaving
-      // an accepted schedule with nothing left to publish.
       const readded = await scheduleAlphaPost(
         posts,
         postId,
@@ -4520,8 +4080,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         },
       ]);
 
-      // The revived row carries a fresh command, and the Post still holds
-      // exactly one row per Channel.
       const durable = await systemTransaction(env, (client) =>
         client.query<{ commands: string; rows: string }>(
           `SELECT
@@ -4535,8 +4093,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       );
       expect(durable.rows[0]).toEqual({ commands: "1", rows: "2" });
 
-      // Deferring the revived Channel moves the same row to the new instant and
-      // re-keys its single command to that instant.
       const deferred = await scheduleAlphaPost(
         posts,
         postId,
@@ -4595,9 +4151,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // A draft is complete without any Channel: an explicit empty selection
-  // persists, saving a target and then clearing it again is authoritative for
-  // every later session, and only scheduling still requires a Channel.
   it("saves and clears a Channel-less draft while scheduling requires one", async () => {
     const posts = postServiceWith("youtube");
     const created = await createAlphaPost(
@@ -4610,15 +4163,11 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     try {
       expect(created.value).toMatchObject({
         default_text: "Channel-less draft",
-        // A freshly created Post has not been edited, so its revision is still
-        // the `posts.revision` default; only an accepted save advances it.
         revision: 0,
         status: "draft",
         targets: [],
       });
 
-      // An empty target set is a composition choice, not an empty Post: a
-      // composition carrying neither text nor media is still refused.
       await expect(
         createAlphaPost(posts, { defaultText: "   ", targets: [] }, "integration-post-empty-blank"),
       ).rejects.toMatchObject({
@@ -4651,8 +4200,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       );
       expect(cleared.value.targets).toEqual([]);
 
-      // A later session reads the cleared composition from the database rather
-      // than from anything the saving request held.
       const reloaded = await Effect.runPromise(posts.getPost(env, { ...alpha }, postId));
       expect(reloaded.targets).toEqual([]);
       const saved = await systemTransaction(env, (client) =>
@@ -4663,8 +4210,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       );
       expect(saved.rows[0]?.targets).toBe("0");
 
-      // Scheduling remains the operation that requires a Channel, whether the
-      // request names none or the saved set is empty.
       await expect(
         scheduleAlphaPost(posts, postId, [], null, "integration-post-empty-schedule"),
       ).rejects.toMatchObject({
@@ -4702,8 +4247,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // A local deletion never un-publishes a live Platform copy and never
-  // releases media another retained Post still holds.
   it("deletes a Post by cancelling only its pending work", async () => {
     const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
@@ -4722,14 +4265,8 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         null,
         "integration-post-delete-schedule",
       );
-      // `distributions` is unordered, so each row is keyed by its Channel: the
-      // first scheduled Channel is the one published, the second is cancelled.
       const publishedId = distributionIdForChannel(scheduled.value, alphaYoutubeAccountId);
       const queuedId = distributionIdForChannel(scheduled.value, alphaSecondAccountId);
-      // A Distribution only reaches 'published' after its command has been
-      // delivered, so the command is marked published alongside the status. That
-      // is what lets the outcome read below distinguish "no pending work left"
-      // from "the delete cancelled this row's command".
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
           yield* client.query(
@@ -4760,8 +4297,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(deleted.replayed).toBe(false);
       expect(deleted.value.id).toBe(postId);
 
-      // Rows are read in the order the two Channels were scheduled, not UUID
-      // order, so the assertion names which Channel ended where.
       const outcomes = await systemTransaction(env, (client) =>
         client.query<{ pending_commands: string; status: string }>(
           `SELECT distribution.status,
@@ -4780,7 +4315,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         { pending_commands: "0", status: "cancelled" },
       ]);
 
-      // The identity is retired: no read surface still serves it.
       await expect(Effect.runPromise(posts.getPost(env, alpha, postId))).rejects.toMatchObject({
         code: "post_not_found",
         status: 404,
@@ -4798,8 +4332,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         ),
       );
       expect(attachments.rows[0]).toEqual({ attachments: "0", targets: "0" });
-      // The seeded Asset is still retained by the seeded published Post, so the
-      // deletion must not have started its reclamation clock.
       const assetState = await systemTransaction(env, (client) =>
         client.query<{
           orphan_delete_after: Date | null;
@@ -4834,8 +4366,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // Cancelling one Channel outcome removes only its own unleased command, so a
-  // leased command stays with the consumer that already owns the attempt.
   it("accepts an idempotent schedule and removes its unpublished work on cancel", async () => {
     const distributionService = distributionServiceWith();
     const posts = postServiceWith("youtube");
@@ -4930,8 +4460,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const distributionId = scheduled.value.distributions[0]!.id;
 
     try {
-      // A leased row belongs to a running consumer; cancellation must leave it
-      // alone so the consumer observes the terminal cancelled state.
       await systemTransaction(env, (client) =>
         client.query(
           `UPDATE outbox_events
@@ -4974,9 +4502,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // A creator still drives one Channel outcome directly: pending work stays
-  // editable, in-flight work is only asked to stop, and anything that already
-  // published or failed permanently is refused instead of silently rewritten.
   it("keeps per-Channel outcomes editable only while they are pending", async () => {
     const distributionService = distributionServiceWith(["youtube", "instagram", "facebook"]);
     const posts = postServiceWith(["youtube", "instagram", "facebook"]);
@@ -5122,9 +4647,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       const posts = postServiceWith("youtube");
       const usageBefore = await currentUsageCount();
       const prefix = `integration-post-absent-youtube-${source}-${missingChoice}`;
-      // Each case omits exactly one required choice and supplies the other, so
-      // the 422 is attributable to the named field. Omitting both would also
-      // pass through whichever check runs first.
       const target: PostTargetInput = {
         platformAccountId: alphaYoutubeAccountId,
         ...(missingChoice === "visibility"
@@ -5237,12 +4759,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     },
   );
 
-  // TikTok requires explicit creator choices on every publish, so a Channel
-  // that omits them or states a contradictory combination is refused before any
-  // work is created, and typed accepted choices survive into the durable row.
-  // The Channel is the one seeded by seedPostCompositionFixtures: this scenario
-  // asserts provider-option validation, which only runs after the Channel
-  // lookup succeeds, so it must resolve a real connected TikTok Channel.
   it("requires and persists explicit TikTok publishing choices", async () => {
     const posts = postServiceWith("tiktok");
     const usageBefore = await currentUsageCount();
@@ -5335,9 +4851,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // Every accepted retry intent is its own durable command: the retry reuses
-  // the same Distribution and adds a distinct command rather than reviving the
-  // one that already ran.
   it("emits one distinct outbox command for every accepted distribution retry intent", async () => {
     const distributionService = distributionServiceWith();
     const posts = postServiceWith("youtube");
@@ -5438,9 +4951,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // A deferred publication is represented by one pending command keyed to the
-  // chosen instant, and its payload stays identifiers-only so the durable row
-  // remains the single source of the schedule.
   it("creates a deferred publication with one pending publish command", async () => {
     const posts = postServiceWith("youtube");
     const usageBefore = await currentUsageCount();
@@ -5483,8 +4993,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         dedupe_key: `distribution:${distributionId}:distribution.publish.requested:at:${scheduledAt.getTime()}`,
         state: "pending",
       });
-      // The queue body stays identifiers/correlation only; the schedule lives
-      // in the durable distribution row.
       expect(outbox.rows[0]!.payload).toEqual({
         distribution_id: distributionId,
         version: 1,
@@ -5498,9 +5006,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // Rescheduling one outcome mints a command for the new instant, never beyond
-  // the delivery horizon, and cancelling drops every unpublished command so a
-  // stale delayed message cannot resurrect the publication.
   it("re-keys deferred commands on reschedule and stops emitting beyond the delivery horizon", async () => {
     const distributionService = distributionServiceWith();
     const posts = postServiceWith("youtube");
@@ -5537,8 +5042,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       ).rows.map((row) => row.dedupe_key);
 
     try {
-      // Rescheduling keeps earlier commands but adds one scoped to the new
-      // instant; the consumer re-checks durable state so stale messages no-op.
       await expect(
         Effect.runPromise(
           distributionService.updateDistribution(
@@ -5555,7 +5058,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         commandKey(new Date(start + 10_800_000)),
       ]);
 
-      // A schedule exactly at the horizon still fits the maximum delay.
       await expect(
         Effect.runPromise(
           distributionService.updateDistribution(
@@ -5569,8 +5071,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       ).resolves.toMatchObject({ replayed: false });
       expect(await pendingKeys()).toContain(commandKey(new Date(start + 86_400_000)));
 
-      // Beyond the horizon no new command is enqueued while the durable
-      // schedule still moves.
       await expect(
         Effect.runPromise(
           distributionService.updateDistribution(
@@ -5619,8 +5119,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // Each target of one deferred schedule carries its own command at the shared
-  // instant, and a schedule past the horizon is durable without commands.
   it("emits per-target deferred commands inside the horizon and none beyond it", async () => {
     const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
@@ -5662,7 +5160,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           [inHorizonIds],
         ),
       );
-      // One unique deferred command per target at the shared instant.
       expect(inHorizonRows.rows.map((row) => row.aggregate_id).sort()).toEqual(
         [...inHorizonIds].sort(),
       );
@@ -5692,7 +5189,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           [beyondIds],
         ),
       );
-      // Beyond the horizon the durable schedules persist without commands.
       expect(beyondCommands.rows[0]?.count).toBe("0");
     } finally {
       await purgeIntegrationPosts(
@@ -5708,8 +5204,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // The monthly allowance is the last contended slot, so exactly one of two
-  // simultaneous schedules is admitted and the loser reserves nothing.
   it("admits only one schedule at the final concurrent quota slot", async () => {
     const posts = postServiceWith(["youtube", "instagram"]);
     const period = currentUsagePeriod;
@@ -5725,9 +5219,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
            WHERE organization.id = '20000000-0000-4000-8000-000000000001'`,
           [period],
         );
-        // The period is bound as an untyped placeholder inside the INSERT's
-        // SELECT list, where no column comparison supplies its type, so the
-        // cast is what lets PostgreSQL infer `usage_records.period`'s TEXT.
         yield* client.query(
           `INSERT INTO usage_records (org_id, period, distributions)
            SELECT id, $1::text, 29 FROM organizations
@@ -5802,9 +5293,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       );
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
-          // The counter was pinned at the last free slot to force contention;
-          // leaving it saturated would charge phantom usage against every later
-          // schedule on this workspace's seeded 30-distribution allowance.
           yield* client.query(
             `UPDATE usage_records
            SET distributions = $2, updated_at = now()
@@ -5816,12 +5304,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // A plan change racing an in-flight schedule is serialized behind it, so the
-  // admitted command sees one consistent entitlement decision.
-
-  // Creator text is stored verbatim and parameterized, so SQL-shaped and
-  // markup-shaped content is inert text that survives reloads, stays invisible
-  // to another workspace, and disappears with the Post that owns it.
   it("stores injection-shaped Post text inertly before isolation and deletion", async () => {
     const posts = postServiceWith("youtube");
     const injectionTitle = "Integration post text '); DROP TABLE posts; --";
@@ -5875,7 +5357,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           [postId],
         ),
       );
-      // The row survives as a soft delete so its identity is never reused.
       expect(rows.rows[0]).toEqual({ deleted: true });
     } finally {
       await purgeIntegrationPosts(
@@ -5884,9 +5365,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       );
     }
   });
-  // A publication a consumer already claimed keeps its own lifecycle: deleting
-  // the Post retires the identity and cancels what is still pending, but work
-  // in flight stays with the consumer that owns the attempt.
   it("keeps claimed publication work alive when its Post is deleted", async () => {
     const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
@@ -5902,8 +5380,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       null,
       "integration-post-claim-schedule",
     );
-    // Keyed by Channel, not by position: the canonical Channel's row is the one
-    // leased to a consumer and therefore protected from the cancellation.
     const claimedId = distributionIdForChannel(scheduled.value, alphaYoutubeAccountId);
     const pendingId = distributionIdForChannel(scheduled.value, alphaSecondAccountId);
 
@@ -5962,9 +5438,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // Retention is decided by references, not by edits: an unchanged selection is
-  // a no-op, and only media that truly loses its last retained reference
-  // starts the reclamation window.
   it("arms the reclamation clock only for media that loses its last reference", async () => {
     const posts = postServiceWith("youtube");
     const draft = await createAlphaPost(
@@ -6041,9 +5514,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  // Media inventory reads stay single-Asset and Brand Profile scoped: the read
-  // returns current processing state, media URLs are minted only for verified
-  // media, and a Profile that is gone or retired refuses every read.
   it("scopes single-Asset reads and signs media only for verified bytes", async () => {
     const harness = assetServiceHarness([]);
     const asset = harness.service;
@@ -6053,13 +5523,9 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       asset_type: "image",
       brand_profile_id: alphaBrandProfileId,
       id: alphaSecondAssetId,
-      // Text composition lives on Post rows, so an Asset never carries a body
-      // and never embeds a signed capability.
       status: "ready",
     });
 
-    // Signing reads the verified publishable shape this spec owns: a ready
-    // object on the Asset's protected key plus its ready 'original' rendition.
     const preview = await Effect.runPromise(
       asset.getAssetPreviewUrl(env, alpha, alphaSecondAssetId),
     );
@@ -6073,7 +5539,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       downloadFilename: "second.png",
     });
 
-    // Media still preparing has nothing verified to sign yet.
     await expect(
       Effect.runPromise(asset.getAssetPreviewUrl(env, alpha, alphaProcessingAssetId)),
     ).rejects.toMatchObject({ code: "invalid_state", status: 409 });
@@ -6084,12 +5549,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
          WHERE id = '${alphaBrandProfileId}'`,
       ),
     );
-    // A read against a retired Profile is refused the same way a read of a row
-    // that does not exist is: `getAssetRowEffect` filters soft-deleted Profiles
-    // out with `activeBrandProfilePredicate` instead of loading the row and
-    // reporting `brand_profile_deleted`, which is the 409 only a *mutation*
-    // raises (via `requireActiveBrandProfileEffect`). So a caller sees 404 for
-    // both a missing Asset and one whose Profile was retired.
     try {
       await expect(
         Effect.runPromise(asset.getAsset(env, alpha, alphaSecondAssetId)),
@@ -6278,9 +5737,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const uploadTitle = "Integration asset concurrent quota uploads";
     const storageTitle = "Integration asset concurrent quota storage";
     try {
-      // The upload gate charges `usage_records.uploads` plus every reservation
-      // the workspace still holds, so the baseline is one admission below the
-      // free allowance: the winner fills the last slot and the loser is refused.
       const beforeUploads = await quotaState();
       const uploadBaseline =
         (COMMUNITY_LIMITS.max_uploads ?? 0) - Number(beforeUploads.reservation_count) - 1;
@@ -6298,14 +5754,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       );
       await cleanupRace("integration-upload-quota", uploadTitle);
 
-      // Storage is charged from the live inventory, never from
-      // `usage_records.storage_bytes` (asset-service.ts:657): the gate sums
-      // GREATEST(object.bytes, object.reserved_bytes) over every non-deleted
-      // object plus live reservations. So the padding must be a real inventoried
-      // object on a real ready Asset — writing the counter leaves the gate with
-      // a full 1 GiB of headroom and admits both racers. The padding leaves room
-      // for exactly this race's own 1 KiB upload, so the winner fills the last
-      // slot and the loser is refused.
       const beforeStorage = await quotaState();
       const storageAllowance = COMMUNITY_LIMITS.max_storage_bytes ?? 0;
       const storagePadding =
@@ -6317,9 +5765,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       await setUsage(0, 0);
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
-          // The Asset must exist before its object: the composite foreign key
-          // (asset_id, brand_profile_id) is what makes the padding a real
-          // inventoried byte count the storage gate actually reads.
           yield* client.query(
             `INSERT INTO assets
                (id, org_id, brand_profile_id, uploaded_by, asset_type, title,
@@ -6362,11 +5807,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     } finally {
       await cleanupRace("integration-upload-quota", uploadTitle);
       await cleanupRace("integration-storage-quota", storageTitle);
-      // The padding object is not owned by either race's assets, so it has to
-      // be removed explicitly or every later quota spec sees 1 GiB already
-      // held. Its Asset goes with it: `asset_objects_asset_brand_profile_fkey`
-      // cascades the object on Asset deletion, so deleting the Asset alone
-      // would suffice, but both rows are named so the intent is explicit.
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
           yield* client.query("DELETE FROM asset_objects WHERE asset_id = $1", [
@@ -6957,12 +6397,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       ),
     ).resolves.toEqual({ ...completed, replayed: true });
 
-    // Completion settles the upload: the Asset is `processing` and its verified
-    // bytes live on the staging object. Signing media for a browser requires the
-    // publishable shape instead — a ready Asset, a ready object on the canonical
-    // protected key, and the ready `original` rendition that references it — so
-    // the two statements below stand in for the promotion and approval the
-    // automation processor commits for this upload.
     const promotedKey = readyObjectKey(alpha.organizationId, assetId, "original");
     await systemTransaction(env, (client) =>
       Effect.gen(function* () {
@@ -7012,8 +6446,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expires_at: "2026-07-18T12:15:00.000Z",
       url: expect.stringMatching(/^https:\/\/r2\.example\/download\//),
     });
-    // Signing reads the promoted object, so the capability never names the
-    // upload-writable staging key.
     expect(harness.signedGets).toEqual([
       {
         expiresInSeconds: 900,
@@ -7632,9 +7064,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
          )`,
           [accountId],
         );
-        // Scheduled and already-processing work belong to two different Posts,
-        // because one Post/account pair owns exactly one Distribution row and
-        // the same Channel cannot appear twice on a Post.
         yield* insertFixturePost(client, {
           accountId,
           assetId: alphaAssetId,
@@ -7664,7 +7093,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
          )`,
           [distributionId, accountId, fixturePostIds.disconnectScheduled, alphaAssetId],
         );
-        // In-flight work is not future work; disconnecting must leave it alone.
         yield* client.query(
           `INSERT INTO distributions
            (id, org_id, brand_profile_id, post_id, platform_account_id,
@@ -7733,8 +7161,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       { length: allowance - 1 },
       (_, index) => `integration-quota-baseline-${index}`,
     );
-    // One Channel per Provider per Brand Profile: the concurrent candidates use
-    // distinct Providers so the quota, not provider uniqueness, decides them.
     const candidates = [
       { id: "integration-quota-a", platform: "youtube" as const },
       { id: "integration-quota-b", platform: "tiktok" as const },
@@ -7906,15 +7332,11 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         },
       );
     try {
-      // The seeded Beta profile owns no Threads Channel yet, so the first
-      // external identity fills the single Provider slot.
       await expect(connection(acceptedId)).resolves.toBeUndefined();
       await expect(connection(rejectedId)).rejects.toMatchObject({
         code: "invalid_state",
         status: 409,
       });
-      // Reconnecting the accepted external identity refreshes its own Channel
-      // rather than competing for the slot.
       await expect(connection(acceptedId)).resolves.toBeUndefined();
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
@@ -7959,8 +7381,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
 
   it("reveals publication credentials only after an owning-tenant read", async () => {
     const accountId = "50000000-0000-4000-8000-000000000008";
-    // A dedicated Brand Profile keeps the TikTok fixture free of the seeded
-    // YouTube Channel and the composition fixtures' Provider slots.
     const credentialProfileId = "a0000000-0000-4000-8000-0000000000c1";
     const readRequirements = vi.fn(
       async (_context: ProviderRequestContext, providerCredentials: ProviderCredentials) => {
@@ -8156,7 +7576,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       ]),
     );
 
-    // A Workspace Admin may invite an Editor but never another Admin.
     const forbiddenAdminInvite = await request(
       `/api/v1/workspaces/${sharedWorkspaceId}/invitations`,
       {
@@ -8198,7 +7617,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     );
     expect(revoked.status).toBe(204);
 
-    // A role change applies to the next request and is audited.
     const roleChange = await request(
       `/api/v1/workspaces/${sharedWorkspaceId}/members/10000000-0000-4000-8000-000000000003`,
       {
@@ -8270,8 +7688,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const emailFor = (index: number) => `seat-limit-${run}-${index}@meltiply.local`;
     const created: { id: string; email: string }[] = [];
     try {
-      // Start from the seeded Seat usage minus any pending invitations so the
-      // ten-Seat arithmetic is independent of fixture invitations.
       await systemTransaction(env, (client) =>
         client.query(
           `DELETE FROM workspace_invitations
@@ -8298,9 +7714,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(overflow.status).toBe(409);
       expect(errorCodeFrom(await overflow.json())).toBe("seat_limit_reached");
 
-      // Expiring one invitation releases its reservation; a new invitation may
-      // consume that Seat. Renewing the expired row must then fail rather than
-      // pushing usage above the limit.
       await systemTransaction(env, (client) =>
         client.query(
           `UPDATE workspace_invitations SET expires_at = now() - interval '1 day'
@@ -8380,8 +7793,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(errorCodeFrom(await resend.json())).toBe("email_delivery_failed");
       expect(sent).toHaveLength(2);
 
-      // The failed resend keeps the invitation pending and drops its committed
-      // idempotency record, so reusing the key can rotate and resend.
       const pending = await systemTransaction(env, (client) =>
         client.query<{ revoked_at: Date | string | null }>(
           "SELECT revoked_at FROM workspace_invitations WHERE id = $1",
@@ -8545,7 +7956,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     expect(dashboard.unavailable_metrics).toContain("saves");
     expect(dashboard.unavailable_metrics).toContain("clicks");
 
-    // Format filtering narrows the cohort to matching attachment configurations.
     const videosOnly = await Effect.runPromise(
       service.dashboardAnalytics(env, alpha, { end, format: "video", start }),
     );

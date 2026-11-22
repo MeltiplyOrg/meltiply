@@ -6,14 +6,12 @@ import { withSystemTransactionEffect } from "./database";
 import { sha256Hex } from "./crypto";
 import type { ApiWorkerEnv } from "./env";
 
-/** Actor identity snapshot persisted on every Workspace Audit entry. */
 export interface AuditActor {
   displayName: string | null;
   email: string;
   userId: string;
 }
 
-/** One administrative action to append to the workspace audit trail. */
 export interface WorkspaceAuditEntry {
   action: string;
   actor: AuditActor;
@@ -25,17 +23,6 @@ export interface WorkspaceAuditEntry {
   targetType: string;
 }
 
-/**
- * Appends one Workspace Audit entry inside the caller's transaction.
- *
- * The actor identity is snapshotted so later renames and account deletion do
- * not rewrite history. A missing actor user row is permitted for system
- * actions; `actor_email` stays the durable attribution.
- *
- * @param client - Active transaction client (system scope for administration).
- * @param entry - Action, actor snapshot, target, optional state, and request id.
- * @returns Effect resolving after the audit row is written.
- */
 export function recordWorkspaceAuditEffect(
   client: EffectTransactionClient,
   entry: WorkspaceAuditEntry,
@@ -63,7 +50,6 @@ export function recordWorkspaceAuditEffect(
     .pipe(Effect.asVoid);
 }
 
-/** Narrow internal user fields shared by actor resolution and lifecycle routes. */
 export interface InternalActorRow extends Record<string, unknown> {
   display_name: string | null;
   email: string;
@@ -72,31 +58,12 @@ export interface InternalActorRow extends Record<string, unknown> {
   suspended_at: Date | string | null;
 }
 
-/**
- * Maps a database user row to the audit actor snapshot.
- *
- * @param row - Internal users row carrying identity and display fields.
- * @returns Snapshot suitable for `recordWorkspaceAuditEffect`.
- */
 export function auditActorFrom(
   row: Pick<InternalActorRow, "display_name" | "email" | "id">,
 ): AuditActor {
   return { displayName: row.display_name, email: row.email, userId: row.id };
 }
 
-/**
- * Appends one Workspace Audit entry in its own system transaction.
- *
- * Services that commit their own tenant transaction (Brand Profiles and
- * Channels) call this after success. The entry is best-effort relative to the
- * caller's route: a failure fails the request, matching the administration
- * contract that an unaudited administrative action must not be reported as
- * successful.
- *
- * @param env - Worker environment bindings.
- * @param entry - Action, actor snapshot, target, optional state, and request id.
- * @returns Effect resolving after the audit row is written.
- */
 function recordWorkspaceAudit(
   env: ApiWorkerEnv,
   entry: WorkspaceAuditEntry,
@@ -104,16 +71,6 @@ function recordWorkspaceAudit(
   return withSystemTransactionEffect(env, (client) => recordWorkspaceAuditEffect(client, entry));
 }
 
-/**
- * Records an Audit entry when the invocation has a system database; otherwise
- * skips it for unit-test isolates that never touch PostgreSQL. With a database
- * present the write is strict: a failed audit insert fails the request instead
- * of silently reporting an unaudited administrative action.
- *
- * @param env - Worker environment bindings.
- * @param entry - Audit fields.
- * @returns Effect resolving after the audit row is written or skipped.
- */
 export function recordWorkspaceAuditBestEffort(
   env: ApiWorkerEnv,
   entry: WorkspaceAuditEntry,
@@ -122,22 +79,6 @@ export function recordWorkspaceAuditBestEffort(
   return recordWorkspaceAudit(env, entry);
 }
 
-/**
- * Records an Audit entry for a service-owned idempotent mutation.
- *
- * The entry is keyed by the operation and Idempotency-Key, so an earlier
- * committed mutation whose Audit insert failed can be repaired by replaying the
- * request. Concurrent retries serialize on a transaction-scoped advisory lock
- * and the second sees the existing row. The deterministic request id is
- * distinct from the transport request id because retries legitimately carry a
- * new one.
- *
- * @param env - Worker environment bindings.
- * @param entry - Audit fields without a request id.
- * @param operation - Stable idempotent operation name.
- * @param idempotencyKey - Client-supplied Idempotency-Key.
- * @returns Effect resolving after the audit row exists or the write is skipped.
- */
 export function recordWorkspaceAuditOnceBestEffort(
   env: ApiWorkerEnv,
   entry: Omit<WorkspaceAuditEntry, "requestId">,

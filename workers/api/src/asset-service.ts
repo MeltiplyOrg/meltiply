@@ -99,23 +99,75 @@ const assetColumns = `
   failure_message, failure_retryable, failure_at, created_at, updated_at
 `;
 
-/**
- * Elapsed grace period before a completed upload with no retained attachment
- * becomes eligible for reclamation.
- *
- * The deadline itself is persisted by this worker (upload finalization and
- * last-detachment), so the automation sweep never re-derives the policy from a
- * request timestamp; this constant only starts the clock.
- */
 const orphanGraceDays = assetOrphanGraceSeconds / (24 * 60 * 60);
 
-/**
- * Maps a database upload session row to the public `UploadSession` schema object.
- *
- * @param row - Database row from `asset_upload_sessions` table.
- * @param singleUpload - Optional signed single upload descriptor.
- * @returns Formatted `UploadSession` schema representation.
- */
+const stillUploading = "status IN ('pending_upload', 'uploading')";
+const notBeingDeleted = "status NOT IN ('deleting', 'deleted')";
+
+function orphanClockAssignments(assetId: string, graceDays: string): string {
+  const retained = `EXISTS (SELECT 1 FROM post_attachments WHERE asset_id = ${assetId})`;
+  return `orphaned_at = CASE WHEN ${retained} THEN NULL ELSE now() END,
+          orphan_delete_after = CASE
+            WHEN ${retained} THEN NULL
+            ELSE now() + make_interval(days => ${graceDays})
+          END`;
+}
+
+function failAssetEffect(
+  client: EffectTransactionClient,
+  assetId: string,
+  failure: { code: string; message: string; retryable: boolean },
+  eligibleStatus: typeof stillUploading | typeof notBeingDeleted,
+): Effect.Effect<boolean, DatabaseError> {
+  return client
+    .query(
+      `UPDATE assets
+       SET status = 'failed',
+           failure_code = $2,
+           failure_message = $3,
+           failure_retryable = $4,
+           failure_at = now(),
+           ${orphanClockAssignments("$1", "$5")},
+           updated_at = now()
+       WHERE id = $1 AND ${eligibleStatus}`,
+      [assetId, failure.code, failure.message, failure.retryable, orphanGraceDays],
+    )
+    .pipe(Effect.map((result) => result.rowCount === 1));
+}
+
+function markSessionAbortedEffect(
+  client: EffectTransactionClient,
+  sessionId: string,
+): Effect.Effect<void, DatabaseError> {
+  return client
+    .query(
+      `UPDATE asset_upload_sessions
+       SET status = 'aborted', aborted_at = now(), updated_at = now()
+       WHERE id = $1`,
+      [sessionId],
+    )
+    .pipe(Effect.asVoid);
+}
+
+function recordCompletionFailureEffect(
+  client: EffectTransactionClient,
+  row: UploadSessionRow,
+  idempotencyKey: string,
+  error: CoreApiError,
+): Effect.Effect<void, DatabaseError> {
+  return completeIdempotencyEffect(
+    client,
+    row.org_id,
+    "completeUploadSession",
+    idempotencyKey,
+    error.status,
+    {
+      asset_id: row.asset_id,
+      error: { code: error.code, message: error.message, status: error.status },
+    },
+  );
+}
+
 function mapUploadSession(
   row: UploadSessionRow,
   singleUpload: UploadSession["single_upload"] = null,
@@ -140,14 +192,6 @@ function mapUploadSession(
   };
 }
 
-/**
- * Translates domain `AssetPolicyError` into corresponding HTTP `CoreApiError`.
- *
- * Maps `payload_too_large` to 413, `unsupported_media_type` to 415, and others to 400.
- *
- * @param cause - Error thrown during upload validation.
- * @throws {CoreApiError} Always throws.
- */
 function policyError(cause: unknown): never {
   if (!(cause instanceof AssetPolicyError)) throw cause;
   const status =
@@ -155,15 +199,6 @@ function policyError(cause: unknown): never {
   throw new CoreApiError(status, cause.code, cause.message);
 }
 
-/**
- * Validates that a required text field is non-empty and does not exceed maximum character length.
- *
- * @param value - Candidate input string.
- * @param field - Field name for error message.
- * @param maximum - Maximum allowed length.
- * @returns Normalized trimmed string.
- * @throws {CoreApiError} 400 `validation_error` if empty or too long.
- */
 function requiredText(value: string, field: string, maximum: number): string {
   const normalized = value.trim();
   if (!normalized || normalized.length > maximum) {
@@ -176,41 +211,9 @@ function requiredText(value: string, field: string, maximum: number): string {
   return normalized;
 }
 
-// ---------------------------------------------------------------------------
-// Session expiry — shared logic
-// ---------------------------------------------------------------------------
-
 const SESSION_EXPIRY_FAILURE_CODE = "upload_session_expired";
 const SESSION_EXPIRY_FAILURE_MESSAGE = "The upload session expired before completion.";
 
-/**
- * Expires an individual overdue upload session via Effect, handing its staged
- * bytes to the maintenance sweep.
- *
- * Transitions the upload session to `'expired'`, moves the reserved bytes out of
- * `asset_quota_reservations` and onto the staged `asset_objects` row in the same
- * statement, and marks that row `'deleting'`. Every signed grant the session
- * issued was clamped to the session's own `expires_at`, so once the session is
- * overdue no writer capability survives and the hold can close immediately —
- * this is the `writersClosed` path of `markStagedObjectDeletingEffect`.
- *
- * Transferring rather than simply releasing matters: the staged object can
- * physically exist, and releasing its reservation while the bytes are still in
- * the bucket would understate live storage and let a concurrent upload
- * oversubscribe Entitlements. The bytes stay charged on the inventoried row
- * until the sweep's external delete completes and flips it to `'deleted'`.
- *
- * The Asset fails with that same actionable reason whether or not a Post still
- * retains it — a draft whose attachment never finished uploading must show why
- * — and only the seven-day orphan clock is conditional, so an abandoned upload
- * is reclaimed after the grace period while a draft's failed attachment
- * survives.
- *
- * @param client - Active PostgreSQL EffectTransactionClient scoped to the tenant.
- * @param sessionId - Unique identifier of the upload session to expire.
- * @param assetId - Unique identifier of the associated asset to fail.
- * @returns Effect resolving when database updates complete or failing with DatabaseError.
- */
 function expireSingleSessionEffect(
   client: EffectTransactionClient,
   sessionId: string,
@@ -223,83 +226,23 @@ function expireSingleSessionEffect(
        WHERE id = $1`,
       [sessionId],
     );
-    // Hand the reserved bytes to the staged object before releasing the
-    // reservation, so an object that physically exists is never momentarily
-    // unaccounted and cannot let a concurrent upload oversubscribe.
     yield* releaseReservationToStagingEffect(client, sessionId, assetId);
     yield* markStagedObjectDeletingEffect(client, assetId, {
       writersClosed: true,
     });
-    yield* client.query(
-      `UPDATE assets
-       SET status = 'failed',
-           failure_code = $2,
-           failure_message = $3,
-           failure_retryable = true,
-           failure_at = now(),
-           -- The failure is creator-actionable whether or not a Post retains
-           -- the Asset; only the reclaim clock is conditional on that
-           -- retention, so a saved draft's attachment reports why its upload
-           -- never finished instead of remaining an unexplained pending
-           -- upload forever.
-           orphaned_at = CASE
-             WHEN EXISTS (
-               SELECT 1 FROM post_attachments WHERE asset_id = $1
-             ) THEN NULL
-             ELSE now()
-           END,
-           orphan_delete_after = CASE
-             WHEN EXISTS (
-               SELECT 1 FROM post_attachments WHERE asset_id = $1
-             ) THEN NULL
-             ELSE now() + make_interval(days => $4)
-           END,
-           updated_at = now()
-       WHERE id = $1
-         AND status IN ('pending_upload', 'uploading')`,
-      [assetId, SESSION_EXPIRY_FAILURE_CODE, SESSION_EXPIRY_FAILURE_MESSAGE, orphanGraceDays],
+    yield* failAssetEffect(
+      client,
+      assetId,
+      {
+        code: SESSION_EXPIRY_FAILURE_CODE,
+        message: SESSION_EXPIRY_FAILURE_MESSAGE,
+        retryable: true,
+      },
+      stillUploading,
     );
   });
 }
 
-/**
- * Hands every live staging object of an asset to the maintenance sweep, holding
- * it until the last possible write against the staging key has expired.
- *
- * A signed staging PUT stays usable for the whole grant window, so deleting the
- * object at abort time would leave a live grant able to recreate real bytes
- * behind the cleanup. `write_hold_until` records that deadline in a dedicated
- * column rather than overloading `updated_at`: `updated_at` is the audit
- * timestamp that promotion and settlement keep rewriting, so a reclaim hold
- * stored there would be silently erased by the next UPDATE. In its own nullable
- * column the hold can only be cleared by the sweep that is actually respecting
- * it, and the hold is never extended by an unrelated row touch.
- *
- * The hold bound is the object's own recorded writer deadline, not the
- * session's 24-hour expiry: every minted upload capability is clamped to a
- * deadline that was persisted on this row under the session lock before the
- * URL was exposed, so the column already names the last instant a writer can
- * fire. `writersClosed` is set only when the caller confirmed to object
- * storage that no grant remains — a completed or aborted multipart upload's
- * dead `uploadId`, or a session past expiry — in which case the hold closes
- * immediately and the sweep may reclaim without waiting out a grant window.
- * Anything else (a single PUT whose URL stays live, a multipart abort that
- * could not be confirmed, a failed completion) keeps the recorded deadline.
- * Rows written before per-grant recording carry the conservative
- * session-expiry hold the write-hold migration backfilled, which this
- * function simply preserves.
- *
- * Marking never gates on the current hold: a row already inside its window is
- * still handed to the sweep so the claim — not the delete — waits out the
- * hold. The bytes are only *marked* here: removing them from the bucket
- * happens outside the request transaction, and the durable `asset_objects`
- * row is what makes that removal replayable and accounting-exactly-once.
- *
- * @param client - Active PostgreSQL EffectTransactionClient.
- * @param assetId - Asset whose staged object should be reclaimed.
- * @param options - `writersClosed` confirms no signed capability can still write the key.
- * @returns Effect resolving when the object rows are marked `'deleting'` with the writer-window hold.
- */
 function markStagedObjectDeletingEffect(
   client: EffectTransactionClient,
   assetId: string,
@@ -309,9 +252,6 @@ function markStagedObjectDeletingEffect(
     .query(
       `UPDATE asset_objects
        SET status = 'deleting',
-           -- Confirmed dead writers close the hold now; anything ambiguous
-           -- keeps the recorded grant deadline (PostgreSQL's GREATEST ignores
-           -- the NULL of an object that never recorded one).
            write_hold_until = CASE
              WHEN $2 THEN now()
              ELSE GREATEST(write_hold_until, now())
@@ -325,32 +265,6 @@ function markStagedObjectDeletingEffect(
     .pipe(Effect.asVoid);
 }
 
-/**
- * Hands an upload session's reserved bytes to its staging object row and then
- * releases the reservation, so reclaiming the staged object can never leave
- * those bytes unaccounted.
- *
- * While an upload is in flight the bytes live only in
- * `asset_quota_reservations`. Releasing that reservation while the staged
- * object still physically exists — which is what abort and expiry do — would
- * make the workspace appear to have freed storage it is still occupying, so a
- * concurrent upload could pass the limit check and oversubscribe Entitlements.
- * Moving the bytes onto `reserved_bytes` first hands the accounting to the
- * single inventoried row the maintenance sweep already settles, keeping the
- * bytes charged continuously from reservation, through the reclaim hold, until
- * the external delete completes and the sweep releases them exactly once.
- *
- * Transfer and release are one statement, so there is no instant in which the
- * bytes are charged by neither source nor by both. The transfer is guarded on
- * `bytes IS NULL`, so an object that already settled its verified size never
- * picks up a second charge on top of it, and the size is read from the
- * reservation itself rather than from a caller-supplied value.
- *
- * @param client - Active PostgreSQL EffectTransactionClient.
- * @param sessionId - Session whose reservation is handed over; its own staged object is the only possible recipient.
- * @param assetId - Asset owning that session's staging object.
- * @returns Effect resolving when the bytes are inventoried and the reservation released.
- */
 function releaseReservationToStagingEffect(
   client: EffectTransactionClient,
   sessionId: string,
@@ -379,31 +293,6 @@ function releaseReservationToStagingEffect(
     .pipe(Effect.asVoid);
 }
 
-/**
- * Durably records the planned deadline of a staging write capability on the
- * inventoried object, inside the same transaction that locked the session.
- *
- * `write_hold_until` is the sweep's only evidence of how long a signed PUT can
- * still recreate this key, so the deadline must be durable *before* the URL
- * that carries it is exposed: recording happens here, the session transaction
- * commits, and only then does the caller sign with `expiresAt` equal to the
- * recorded instant. Because abort/complete and this path both take the session
- * row lock, whichever commits first decides: a mint that commits first is
- * covered by the hold the abort then retains; an abort that commits first is
- * observed by the locked revalidation and no URL is minted behind it.
- *
- * `GREATEST` never shortens an earlier deadline: a re-sign may only extend the
- * window while the session stays active, never claw back a capability that was
- * already issued. A missing or already-settled staging row means there is
- * nothing left to write into — the caller must treat a zero row count as "no
- * grant may be minted".
- *
- * @param client - Active PostgreSQL EffectTransactionClient holding the session lock.
- * @param assetId - Asset whose staging object carries the hold.
- * @param objectKey - The session's own staging key, so a retired staging row from an earlier session on the same asset can never suppress or absorb the record.
- * @param deadline - Planned expiry instant of the capability about to be signed.
- * @returns Effect resolving to true when the deadline was recorded, false when no live staging row exists.
- */
 function recordStagingWriteDeadlineEffect(
   client: EffectTransactionClient,
   assetId: string,
@@ -424,50 +313,6 @@ function recordStagingWriteDeadlineEffect(
     .pipe(Effect.map((result) => result.rowCount === 1));
 }
 
-/**
- * Locks active organization and retrieves current usage metrics and quota reservations via Effect.
- *
- * Enforces serial execution within the tenant via `lockActiveOrganizationEffect`, so
- * two concurrent upload-session creations cannot both observe the same headroom and
- * oversubscribe the storage limit. Overdue sessions are swept and expired in the same
- * transaction before the numbers are read, which also keeps an abandoned session
- * from holding its reservation against the workspace that just released it and
- * gives the swept Asset its actionable failure — only its seven-day reclaim
- * clock depends on whether a Post still retains it.
- *
- * `storage_bytes` is derived from the authoritative object inventory
- * (`asset_objects`) rather than the period counter, and deliberately separates the
- * two sources so a caller adds each exactly once:
- * - `storage_bytes` — capacity that is really committed. Every inventoried row that
- *   is not `'deleted'` contributes
- *   `GREATEST(COALESCE(bytes, 0), COALESCE(reserved_bytes, 0))`, so verified
- *   originals, renditions and thumbnails, an in-flight write's reservation, and a
- *   reclaiming row's held capacity are all charged by one rule. A single physical
- *   key can never hold its old and replacement bytes at the same instant, so the
- *   row's charge is the larger of the two — never their sum. An interrupted output
- *   that already recorded its measured bytes while still holding its full planned
- *   reservation therefore stays charged at that maximum until promotion or
- *   settlement releases it exactly once. Deriving this from the inventory is what
- *   stops a monthly rollover or a lag in `usage_records` from making resident
- *   stored bytes disappear from accounting.
- * - `active_reservation_bytes` — bytes held by upload sessions that have not yet
- *   produced an inventoried object. This is the one charge kept separate, because
- *   those bytes belong to no inventory row yet.
- *
- * There is exactly one charge per byte at every instant. While an upload is in
- * flight the bytes live only in `asset_quota_reservations` and the staging row
- * carries neither field. When a session is aborted, expires, or fails
- * verification, the reservation is transferred onto that row's `reserved_bytes`
- * in the same statement that releases it, so the handover is atomic and those
- * bytes are never charged by neither source nor by both. The transfer is guarded
- * on `bytes IS NULL`, so a row that already settled its verified size is charged
- * once by its own bytes and never picks up a second charge.
- *
- * @param client - Active PostgreSQL EffectTransactionClient scoped to the tenant.
- * @param periodKey - ISO usage month (e.g. `2026-03`), used for the period-scoped upload counter.
- * @param currentInstant - Reference timestamp for expiry comparison (defaults to now).
- * @returns Effect resolving to aggregated organization usage, or failing with ActiveOrganizationRequiredError/DatabaseError.
- */
 function organizationUsageEffect(
   client: EffectTransactionClient,
   periodKey: string,
@@ -500,17 +345,8 @@ function organizationUsageEffect(
          WHERE session.id = due.id
          RETURNING session.id, session.asset_id, session.expires_at
        ), staged AS (
-         /* Mark the reclaim and hand the session's reserved bytes to the staged
-            object in one statement, so an object that physically exists is never
-            momentarily unaccounted and cannot let a concurrent upload
-            oversubscribe. The transfer is guarded on bytes IS NULL so a settled
-            object is never charged twice. */
          UPDATE asset_objects AS object
          SET status = 'deleting',
-             -- Every grant this session issued was clamped to its expires_at,
-             -- so an expired session has no surviving writer; the existing
-             -- hold is kept as the bound for objects whose recorded deadline
-             -- (or conservative migrated hold) already covers it.
              write_hold_until = GREATEST(
                object.write_hold_until, expired.expires_at, now()
              ),
@@ -528,8 +364,6 @@ function organizationUsageEffect(
            AND object.kind = 'staging'
            AND object.status IN ('writing', 'ready')
        ), released AS (
-         /* Only after the bytes are inventoried above; both run in this single
-            statement so there is no window charged by neither source. */
          UPDATE asset_quota_reservations AS reservation
          SET state = 'released', released_at = now()
          FROM expired
@@ -542,21 +376,7 @@ function organizationUsageEffect(
           failure_message = $3,
           failure_retryable = true,
           failure_at = now(),
-          -- Retention decides the reclaim clock only. The failure itself is
-          -- what the creator sees, so it is recorded even for an Asset a
-          -- saved draft still holds.
-          orphaned_at = CASE
-            WHEN EXISTS (
-              SELECT 1 FROM post_attachments WHERE asset_id = asset.id
-            ) THEN NULL
-            ELSE now()
-          END,
-          orphan_delete_after = CASE
-            WHEN EXISTS (
-              SELECT 1 FROM post_attachments WHERE asset_id = asset.id
-            ) THEN NULL
-            ELSE now() + make_interval(days => $4)
-          END,
+          ${orphanClockAssignments("asset.id", "$4")},
           updated_at = now()
       FROM expired
       WHERE asset.id = expired.asset_id
@@ -580,16 +400,6 @@ function organizationUsageEffect(
        LEFT JOIN usage_records u
          ON u.org_id = o.id AND u.period = $1
        LEFT JOIN LATERAL (
-         -- One inventory rule for every row that is not durably removed.
-         -- Verified originals, renditions and thumbnails charge their real
-         -- bytes; an in-flight write charges the reservation it still holds;
-         -- and a row claimed for deletion keeps charging either way, because its
-         -- bytes survive in the bucket until the external delete completes and
-         -- so survive a period rollover that resets the usage_records counter.
-         -- GREATEST, not a sum: one physical key cannot hold its old and its
-         -- replacement bytes simultaneously, so a row that recorded measured
-         -- output while still holding the planned reservation is charged the
-         -- larger of the two exactly once.
          SELECT COALESCE(
                   SUM(
                     GREATEST(
@@ -629,17 +439,6 @@ function organizationUsageEffect(
     return row;
   });
 }
-/**
- * Retrieves a single asset database record scoped to the active tenant organization via Effect.
- *
- * Enforces tenant isolation and excludes deleted Assets. Public reads also
- * require an active Brand Profile.
- *
- * @param client - Active tenant transaction client.
- * @param assetId - Asset identifier.
- * @param options - `requireActiveProfile` excludes soft-deleted Brand Profiles.
- * @returns Effect resolving to the asset row or failing with 404 CoreApiError / DatabaseError.
- */
 function getAssetRowEffect(
   client: EffectTransactionClient,
   assetId: string,
@@ -665,7 +464,6 @@ function getAssetRowEffect(
   });
 }
 
-/** Locks a tenant Asset without loading its read model; completion also requires an active Brand Profile. Missing/deleted Assets fail with 404. */
 function lockAssetStatusEffect(
   client: EffectTransactionClient,
   assetId: string,
@@ -687,20 +485,6 @@ function lockAssetStatusEffect(
   });
 }
 
-/**
- * Resolves a fully materialized image or video asset within a tenant transaction via Effect.
- *
- * Downloads preserve the protected original; previews require a ready normalized
- * full rendition so accepted camera codecs can play in the browser. Neither path
- * signs upload-writable staging or thumbnails. A verified original referenced by
- * a ready rendition remains eligible without creating or charging another copy.
- *
- * @param env - Worker environment bindings for database and storage access.
- * @param session - Authenticated user session claims providing tenant context.
- * @param assetId - Unique identifier of the target media asset.
- * @param download - Selects the original rather than a browser-compatible rendition.
- * @returns The tenant asset and selected protected object key; unfinished media fails with 409.
- */
 function getReadyMediaAssetRowEffect(
   env: ApiWorkerEnv,
   session: SessionClaims,
@@ -772,17 +556,6 @@ function getReadyMediaAssetRowEffect(
   );
 }
 
-/**
- * Retrieves an upload session record scoped to the active tenant organization via Effect.
- *
- * Enforces RLS via `public.auth_active_org_id()`, optionally locking the row
- * for upload finalization or state mutation.
- *
- * @param client - Active PostgreSQL EffectTransactionClient scoped to the tenant.
- * @param sessionId - Unique identifier of the upload session.
- * @param lock - Whether to acquire a `FOR UPDATE` row lock.
- * @returns Effect resolving to the upload session row or failing with 404 CoreApiError / DatabaseError.
- */
 function getSessionRowEffect(
   client: EffectTransactionClient,
   sessionId: string,
@@ -809,17 +582,6 @@ function getSessionRowEffect(
   });
 }
 
-/**
- * Asserts that an upload session is neither expired nor in a terminal state.
- *
- * Validates that current timestamp has not exceeded `expires_at` and that session
- * status is either `'created'` or `'uploading'`.
- *
- * @param row - Upload session database record to inspect.
- * @param now - Current timestamp against which to verify session expiration.
- * @throws {CoreApiError} 409 `upload_session_expired` if the session deadline has elapsed.
- * @throws {CoreApiError} 409 `invalid_state` if session status is not active.
- */
 function ensureActiveSession(row: UploadSessionRow, now: Date): void {
   if (new Date(row.expires_at).getTime() <= now.getTime()) {
     throw new CoreApiError(409, "upload_session_expired", "The upload session has expired.");
@@ -829,17 +591,6 @@ function ensureActiveSession(row: UploadSessionRow, now: Date): void {
   }
 }
 
-/**
- * Computes the expiration timestamp for a presigned upload or download URL.
- *
- * Returns the earlier of the upload session's expiration timestamp or current
- * time plus the configured signed URL TTL (900s), ensuring presigned URLs never
- * outlive their parent upload session.
- *
- * @param now - Current reference timestamp.
- * @param sessionExpiry - Expiration date of the upload session.
- * @returns Expiration date for the presigned URL.
- */
 function signedExpiry(now: Date, sessionExpiry: Date): Date {
   return new Date(
     Math.min(
@@ -849,16 +600,6 @@ function signedExpiry(now: Date, sessionExpiry: Date): Date {
   );
 }
 
-/**
- * Calculates the expected byte size for a specific multipart upload chunk.
- *
- * Returns the uniform `part_size` for intermediate chunks, or the remaining byte
- * remainder for the final part number (`part_count`).
- *
- * @param row - Upload session database record containing file and part sizing.
- * @param partNumber - 1-based index of the target multipart chunk.
- * @returns Expected size in bytes for the specified part.
- */
 function partSize(row: UploadSessionRow, partNumber: number): number {
   const configured = Number(row.part_size);
   return partNumber === row.part_count
@@ -866,18 +607,6 @@ function partSize(row: UploadSessionRow, partNumber: number): number {
     : configured;
 }
 
-/**
- * Validates and normalizes the list of completed parts for multipart upload finalization.
- *
- * Enforces that single uploads provide no part array, and that multipart uploads
- * supply contiguous, 1-indexed parts matching `row.part_count` with valid ETag strings.
- *
- * @param row - Upload session configuration row.
- * @param parts - Optional candidate list of completed part descriptors.
- * @returns Sorted array of validated completed parts.
- * @throws {CoreApiError} 400 `validation_error` if parts are supplied for a single upload.
- * @throws {CoreApiError} 422 `invalid_part_list` if part count is wrong or parts are non-contiguous/malformed.
- */
 function validateCompletedParts(
   row: UploadSessionRow,
   parts: CompletedPart[] | undefined,
@@ -918,24 +647,6 @@ function validateCompletedParts(
   return sorted;
 }
 
-/**
- * Transitions an asset and upload session to non-retryable failure upon verification failure via Effect.
- *
- * Marks asset status as `'failed'` with `failure_retryable = false`, completes the
- * upload session record, releases reserved storage quota, and hands the staged
- * object to the maintenance sweep. A size or content-type mismatch means the
- * bytes that landed are not the approved media, so they must be reclaimed
- * instead of staying charged as resident storage. The failure itself is
- * recorded whether or not a Post retains the Asset — a draft's attachment
- * must say why it was rejected — while only the seven-day orphan clock waits
- * on that retention.
- *
- * @param client - Active PostgreSQL EffectTransactionClient.
- * @param row - Upload session row whose asset failed verification.
- * @param code - Machine-readable error code (e.g. `'metadata_mismatch'`).
- * @param message - Human-readable explanation of the mismatch.
- * @returns Effect resolving when database updates complete or failing with DatabaseError.
- */
 function failMetadataMismatchEffect(
   client: EffectTransactionClient,
   row: UploadSessionRow,
@@ -943,29 +654,11 @@ function failMetadataMismatchEffect(
   message: string,
 ): Effect.Effect<void, DatabaseError> {
   return Effect.gen(function* () {
-    yield* client.query(
-      `UPDATE assets
-       SET status = 'failed',
-           failure_code = $2,
-           failure_message = $3,
-           failure_retryable = false,
-           failure_at = now(),
-           orphaned_at = CASE
-             WHEN EXISTS (
-               SELECT 1 FROM post_attachments WHERE asset_id = $1
-             ) THEN NULL
-             ELSE now()
-           END,
-           orphan_delete_after = CASE
-             WHEN EXISTS (
-               SELECT 1 FROM post_attachments WHERE asset_id = $1
-             ) THEN NULL
-             ELSE now() + make_interval(days => $4)
-           END,
-           updated_at = now()
-       WHERE id = $1
-         AND status NOT IN ('deleting', 'deleted')`,
-      [row.asset_id, code, message, orphanGraceDays],
+    yield* failAssetEffect(
+      client,
+      row.asset_id,
+      { code, message, retryable: false },
+      notBeingDeleted,
     );
     yield* client.query(
       `UPDATE asset_upload_sessions
@@ -973,12 +666,6 @@ function failMetadataMismatchEffect(
        WHERE id = $1`,
       [row.id],
     );
-    // The landed bytes are not the approved media, so they are handed to the
-    // sweep rather than dropped: transferring the reservation first keeps them
-    // charged until the external delete actually completes. A multipart
-    // session reached this point only after its `complete` succeeded, so its
-    // uploadId is dead and the hold can close now; a single upload's issued
-    // PUT URL stays live and the recorded grant deadline must stand.
     yield* releaseReservationToStagingEffect(client, row.id, row.asset_id);
     yield* markStagedObjectDeletingEffect(client, row.asset_id, {
       writersClosed: row.strategy === "multipart",
@@ -986,17 +673,6 @@ function failMetadataMismatchEffect(
   });
 }
 
-/**
- * Validates uploaded R2 object metadata against registered session parameters via Effect.
- *
- * Compares actual object byte size and Content-Type against `row.file_size` and
- * `row.content_type`. If a mismatch is detected, triggers `failMetadataMismatchEffect`.
- *
- * @param client - Active PostgreSQL EffectTransactionClient.
- * @param row - Upload session row defining expected dimensions.
- * @param metadata - Object metadata retrieved from storage, or null if missing.
- * @returns Effect resolving to `null` if valid, or a `CoreApiError` (415 or 422) if invalid.
- */
 function verifyMetadataEffect(
   client: EffectTransactionClient,
   row: UploadSessionRow,
@@ -1036,20 +712,6 @@ function verifyMetadataEffect(
   });
 }
 
-/**
- * Instantiates the core asset management service with R2 storage and signer integration.
- *
- * Manages the tenant- and Brand-Profile-scoped upload lifecycle: single and multipart
- * R2 uploads written only to staging keys, quota reservation against the authoritative
- * object inventory, real size/content-type verification at finalization, presigned
- * upload/preview/download URL signing, and durable reclamation hand-off on abort, expiry,
- * or verification failure. There is no library surface: assets exist only as internal
- * infrastructure for the composer's uploads. Uses contextual storage first, then an
- * injected Effect layer or live environment composition.
- *
- * @param options - Configuration options allowing injection of clocks, UUID generators, or mock storage.
- * @returns Configured `AssetApiService` implementation instance.
- */
 export function createAssetApiService(options: AssetServiceOptions = {}): AssetApiService {
   const now = options.now ?? (() => new Date());
   const randomUUID = options.randomUUID ?? (() => crypto.randomUUID());
@@ -1057,18 +719,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
     options.storageServiceLayer ??
     (options.storageService ? Layer.succeed(StorageService, options.storageService) : undefined);
 
-  /**
-   * Dispatches an Effect program requiring StorageService, using contextual storage or options fallback.
-   *
-   * If StorageService is already present in the Effect context (e.g. provided at route boundary
-   * or test harness), executes directly. Otherwise provides the options layer or live environment layer.
-   * Missing API bindings become the public 503 error; configured operation failures retain
-   * their typed cause so each workflow can apply its existing failure semantics.
-   *
-   * @param env - Worker environment bindings.
-   * @param program - Effect program consuming StorageService.
-   * @returns Effect with StorageService dependency satisfied.
-   */
   function withStorage<A, E>(
     env: ApiWorkerEnv,
     program: Effect.Effect<A, E, StorageService>,
@@ -1091,18 +741,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
     );
   }
 
-  /**
-   * Signs a ready tenant-scoped media asset for inline preview or forced download.
-   *
-   * Resolves a browser-compatible protected rendition for preview and preserves
-   * original bytes/filename for downloads. Both use the fixed signed URL TTL.
-   *
-   * @param env - Worker environment bindings used for tenant asset lookup.
-   * @param session - Authenticated session that scopes the asset lookup.
-   * @param assetId - Unique identifier of the ready media asset.
-   * @param download - Whether to force browser download instead of inline rendering.
-   * @returns Effect resolving to the signed URL plus its ISO expiry timestamp.
-   */
   function signReadyMediaAssetUrlEffect(
     env: ApiWorkerEnv,
     session: SessionClaims,
@@ -1128,24 +766,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
     });
   }
 
-  /**
-   * Plans a fresh single-PUT grant for an active session inside the session's
-   * own transaction.
-   *
-   * Existing session rows are read under `FOR UPDATE` to serialize minting
-   * against abort and completion: whichever transaction commits first decides.
-   * Callers that already hold the row lock or just inserted the row pass it in;
-   * others read it here. The planned deadline is persisted on the staging row
-   * as `write_hold_until` before this transaction ends, so every URL exposed
-   * afterwards has its writer window durably inventoried — the sweep can never
-   * reclaim underneath a live grant.
-   *
-   * @param client - Active PostgreSQL EffectTransactionClient owning the session row lock.
-   * @param sessionId - Upload session to plan a grant for.
-   * @param current - Reference timestamp; the planned deadline is `signedExpiry(current, expires_at)`.
-   * @param lockedRow - Session row locked or inserted by this transaction, if any.
-   * @returns The locked row plus the deadline to sign with; `grantDeadline` is null when the session mints no single-PUT grant.
-   */
   function planSingleUploadGrantEffect(
     client: EffectTransactionClient,
     sessionId: string,
@@ -1153,8 +773,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
     lockedRow?: UploadSessionRow,
   ): Effect.Effect<{ grantDeadline: Date | null; row: UploadSessionRow }, AssetServiceError> {
     return Effect.gen(function* () {
-      // An inserted row is also owned by this transaction and cannot be
-      // concurrently aborted or completed before commit.
       const row = lockedRow ?? (yield* getSessionRowEffect(client, sessionId, true));
       if (
         row.strategy !== "single" ||
@@ -1170,29 +788,10 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
         row.object_key,
         grantDeadline,
       );
-      // No live staging row means no inventoried key can carry the grant, so
-      // no deadline is handed out and nothing is minted; the locked session
-      // row is still returned so the response reflects the latest state.
       return { grantDeadline: recorded ? grantDeadline : null, row };
     });
   }
 
-  /**
-   * Materializes an asset and upload session into an API response via Effect,
-   * signing a single-PUT URL only for a deadline already persisted.
-   *
-   * The grant deadline must come from `planSingleUploadGrantEffect` — recorded
-   * on the staging row under the session lock before this runs — and the signer
-   * is given that absolute deadline rather than a relative TTL computed before
-   * an async sign. A paused or delayed signature therefore clamps to the
-   * persisted hold instead of outliving it; a deadline that already elapsed
-   * (e.g. a session that expired between planning and signing) mints no URL.
-   *
-   * @param asset - Domain asset entity.
-   * @param row - Upload session database record used for the response shape.
-   * @param grantDeadline - Persisted grant deadline from the planning transaction; null mints no URL.
-   * @returns Effect resolving to formatted API upload session response.
-   */
   function materializeUploadEffect(
     asset: Asset,
     row: UploadSessionRow,
@@ -1223,18 +822,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
     });
   }
   const service: AssetApiService = {
-    /**
-     * Retrieves an individual asset by ID for the authenticated organization via Effect.
-     *
-     * Ensures tenant isolation via `public.auth_active_org_id()` and converts the
-     * database record to the domain `Asset` schema. Assets whose Brand Profile is
-     * soft-deleted resolve as not found so deleted-profile data leaves normal views.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param assetId - Unique identifier of the requested asset.
-     * @returns Effect resolving to the domain `Asset` entity or failing with 404 CoreApiError.
-     */
     getAsset(env, session, assetId) {
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.gen(function* () {
@@ -1246,22 +833,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
       );
     },
 
-    /**
-     * Initiates a single-part or multipart upload session for image/video media via Effect.
-     *
-     * Validates upload parameters against mime policy, reserves upload quota,
-     * provisions R2 multipart upload state if file size exceeds threshold (100MB),
-     * and returns the initialized upload session with signed URL for single uploads.
-     * Reuses the inserted session row for grant planning; replays still lock and
-     * read the existing session before persisting a fresh writer deadline.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param input - Upload session parameters (asset_type, brand_profile_id, filename, file_size, content_type, etc.).
-     * @param idempotencyKey - Client-provided idempotency key.
-     * @param _requestId - Optional request tracking identifier.
-     * @returns Effect resolving to object containing the created or replayed asset and upload session metadata.
-     */
     createUploadSession(env, session, input, idempotencyKey, _requestId) {
       return withStorage(
         env,
@@ -1297,11 +868,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
             const organization = yield* withTenantTransactionEffect(env, session, (client) =>
               activeOrganizationIdEffect(client),
             );
-            // The identifiers and therefore the staging key must exist before
-            // R2 sees the multipart upload: the key encodes both, so they
-            // cannot be minted later inside the database transaction. They are
-            // reused verbatim below, so a rejected quota check never leaves an
-            // orphaned multipart upload bound to a key no row references.
             preparedAssetId = randomUUID();
             preparedSessionId = randomUUID();
             preparedObjectKey = stagingObjectKey(
@@ -1385,9 +951,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
 
                 const assetId = preparedAssetId ?? randomUUID();
                 const sessionId = preparedSessionId ?? randomUUID();
-                // Uploads are only ever writable in the staging namespace; the
-                // protected ready key is minted later, once processing promotes
-                // verified bytes, so a still-valid grant cannot mutate them.
                 const key =
                   preparedObjectKey ??
                   stagingObjectKey(usage.id, assetId, sessionId, normalized.filename);
@@ -1408,16 +971,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                     normalized.filename,
                   ],
                 );
-                // The staging row is the durable per-object inventory, not a
-                // second reservation: `asset_quota_reservations` already
-                // holds these bytes for the lifetime of the upload, and the
-                // authoritative usage formula charges a `writing` object's
-                // `reserved_bytes`. Recording the size here too would count
-                // the same bytes twice and let the storage limit be met only
-                // after reconciliation corrected it. The row therefore starts
-                // with neither `bytes` nor `reserved_bytes` — nothing is
-                // resident until the object is verified at finalization,
-                // which is the single settle point that charges real bytes.
                 yield* client.query(
                   `INSERT INTO asset_objects
                        (org_id, asset_id, brand_profile_id, kind, r2_key,
@@ -1519,19 +1072,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
       );
     },
 
-    /**
-     * Retrieves status and progress details of an existing upload session via Effect.
-     *
-     * Automatically sweeps and marks the session as expired if its deadline has passed.
-     * Lists recorded parts only for multipart sessions and signs fresh single upload URLs if applicable.
-     * Sessions whose asset sits under a soft-deleted Brand Profile resolve as not found.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param sessionId - Unique identifier of the upload session.
-     * @returns Effect resolving to upload session detail response including asset metadata and uploaded parts.
-     * @throws {CoreApiError} 404 `not_found` if the session is unknown or its asset's Brand Profile is deleted.
-     */
     getUploadSession(env, session, sessionId) {
       return withStorage(
         env,
@@ -1547,8 +1087,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                 row.status = "expired";
                 yield* expireSingleSessionEffect(client, row.id, row.asset_id);
               }
-              // The held session lock serializes grant planning with abort and
-              // completion; persist the deadline before exposing a signed URL.
               const plan = yield* planSingleUploadGrantEffect(client, row.id, current, row);
               const parts =
                 row.strategy === "multipart"
@@ -1588,19 +1126,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
       );
     },
 
-    /**
-     * Generates presigned PUT URLs for uploading specified chunks of a multipart session via Effect.
-     *
-     * Validates that requested part numbers fall within valid range `[1, part_count]`,
-     * transitions session to `'uploading'`, and generates S3-compatible presigned URLs.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param sessionId - Target multipart upload session ID.
-     * @param input - Object containing array of integer `part_numbers` to sign.
-     * @param idempotencyKey - Client-provided idempotency key.
-     * @returns Effect resolving to array of signed part upload URLs with headers and expiration timestamps.
-     */
     createUploadPartUrls(env, session, sessionId, input, idempotencyKey) {
       return withStorage(
         env,
@@ -1677,12 +1202,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                   { session_id: upload.id },
                 );
               }
-              // The deadline the part grants will be signed against is
-              // persisted on the staging row before this transaction commits
-              // — and therefore before any URL leaves this worker — so a
-              // paused or delayed sign can never outlive the hold the sweep
-              // respects. A missing staging row means nothing inventoried
-              // can carry the write, so no capability may be minted.
               const grantDeadline = signedExpiry(current, new Date(upload.expires_at));
               const recorded = yield* recordStagingWriteDeadlineEffect(
                 client,
@@ -1732,23 +1251,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
       );
     },
 
-    /**
-     * Finalizes an upload session via Effect, verifying storage contents and transitioning asset to processing.
-     *
-     * Verifies completed parts for multipart uploads or object presence for single uploads,
-     * validates stored byte length and MIME type, commits usage records, transitions asset
-     * status to `'processing'`, and emits an `asset.processing.requested` outbox event.
-     * Missing storage configuration returns 503 service_unavailable; configured R2
-     * finalization failures return 502 storage_unavailable. Both release reservations.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param sessionId - Upload session ID being finalized.
-     * @param input - List of completed multipart parts with ETags (empty for single uploads).
-     * @param idempotencyKey - Client-provided idempotency key.
-     * @param requestId - Optional request ID for outbox event tracing.
-     * @returns Effect resolving to object containing the `Asset` entity and replay status.
-     */
     completeUploadSession(env, session, sessionId, input, idempotencyKey, requestId) {
       return withStorage(
         env,
@@ -1874,52 +1376,18 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                 yield* withTenantTransactionEffect(env, session, (client) =>
                   Effect.gen(function* () {
                     const row = yield* getSessionRowEffect(client, sessionId, true);
-                    yield* client.query(
-                      `UPDATE asset_upload_sessions
-                     SET status = 'aborted', aborted_at = now(), updated_at = now()
-                     WHERE id = $1`,
-                      [row.id],
-                    );
-                    // The object may or may not have landed (a completed
-                    // multipart whose subsequent HEAD failed, for example), so
-                    // the reserved bytes are transferred to the staged object
-                    // and held rather than released: an object that physically
-                    // exists must stay charged until the sweep deletes it.
+                    yield* markSessionAbortedEffect(client, row.id);
                     yield* releaseReservationToStagingEffect(client, row.id, row.asset_id);
-                    // The storage outcome is ambiguous — a multipart complete
-                    // could have committed server-side or a single PUT could
-                    // still hold a live URL — so the recorded grant deadline
-                    // stays in force rather than closing the hold early.
                     yield* markStagedObjectDeletingEffect(client, row.asset_id, {
                       writersClosed: false,
                     });
-                    yield* client.query(
-                      `UPDATE assets
-                     SET status = 'failed',
-                         failure_code = $2,
-                         failure_message = $3,
-                         failure_retryable = true,
-                         failure_at = now(),
-                         updated_at = now()
-                     WHERE id = $1
-                       AND status NOT IN ('deleting', 'deleted')`,
-                      [row.asset_id, storageError.code, storageError.message],
-                    );
-                    yield* completeIdempotencyEffect(
+                    yield* failAssetEffect(
                       client,
-                      row.org_id,
-                      "completeUploadSession",
-                      idempotencyKey,
-                      storageError.status,
-                      {
-                        asset_id: row.asset_id,
-                        error: {
-                          code: storageError.code,
-                          message: storageError.message,
-                          status: storageError.status,
-                        },
-                      },
+                      row.asset_id,
+                      { code: storageError.code, message: storageError.message, retryable: true },
+                      notBeingDeleted,
                     );
+                    yield* recordCompletionFailureEffect(client, row, idempotencyKey, storageError);
                   }),
                 );
                 return yield* Effect.fail(storageError);
@@ -1940,21 +1408,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                     [row.id],
                   );
                 } else {
-                  yield* completeIdempotencyEffect(
-                    client,
-                    row.org_id,
-                    "completeUploadSession",
-                    idempotencyKey,
-                    metadataError.status,
-                    {
-                      asset_id: row.asset_id,
-                      error: {
-                        code: metadataError.code,
-                        message: metadataError.message,
-                        status: metadataError.status,
-                      },
-                    },
-                  );
+                  yield* recordCompletionFailureEffect(client, row, idempotencyKey, metadataError);
                 }
                 return {
                   asset: null,
@@ -1971,25 +1425,21 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                      source_etag = $4,
                      source_sha256 = $5,
                      finalized_at = now(),
-                     orphaned_at = CASE
-                       WHEN EXISTS (
-                         SELECT 1 FROM post_attachments WHERE asset_id = $1
-                       ) THEN NULL
-                       ELSE now()
-                     END,
-                     orphan_delete_after = CASE
-                       WHEN EXISTS (
-                         SELECT 1 FROM post_attachments WHERE asset_id = $1
-                       ) THEN NULL
-                       ELSE now() + make_interval(days => $6)
-                     END,
+                     ${orphanClockAssignments("$1", "$6")},
                      failure_code = NULL,
                      failure_message = NULL,
                      failure_retryable = NULL,
                      failure_at = NULL,
                      updated_at = now()
                  WHERE id = $1
-                   AND status NOT IN ('deleting', 'deleted')
+                   AND ${notBeingDeleted}
+                   AND EXISTS (
+                     SELECT 1 FROM asset_objects
+                      WHERE asset_id = $1
+                        AND kind = 'staging'
+                        AND status = 'writing'
+                        AND bytes IS NULL
+                   )
                  RETURNING ${assetColumns}`,
                 [
                   row.asset_id,
@@ -2001,54 +1451,34 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                 ],
               );
               if (assetResult.rowCount !== 1) {
-                const deletionError = new CoreApiError(
-                  409,
-                  "invalid_state",
-                  "The asset is being deleted.",
-                );
-                yield* client.query(
-                  `UPDATE asset_upload_sessions
-                   SET status = 'aborted', aborted_at = now(), updated_at = now()
-                   WHERE id = $1`,
-                  [row.id],
-                );
-                // The verified object exists but the asset was claimed for
-                // deletion concurrently, so its bytes are transferred to the
-                // staged row and released from the sweep that deletes it —
-                // never simply dropped, which would understate live storage.
-                yield* releaseReservationToStagingEffect(client, row.id, row.asset_id);
-                yield* completeIdempotencyEffect(
+                const stagingLost = yield* failAssetEffect(
                   client,
-                  row.org_id,
-                  "completeUploadSession",
-                  idempotencyKey,
-                  deletionError.status,
+                  row.asset_id,
                   {
-                    asset_id: row.asset_id,
-                    error: {
-                      code: deletionError.code,
-                      message: deletionError.message,
-                      status: deletionError.status,
-                    },
+                    code: "missing_object",
+                    message: "The staged upload record is no longer reclaimable.",
+                    retryable: false,
                   },
+                  notBeingDeleted,
                 );
+                const terminalError = stagingLost
+                  ? new CoreApiError(
+                      422,
+                      "missing_object",
+                      "The staged upload record is no longer reclaimable.",
+                    )
+                  : new CoreApiError(409, "invalid_state", "The asset is being deleted.");
+                yield* markSessionAbortedEffect(client, row.id);
+                yield* releaseReservationToStagingEffect(client, row.id, row.asset_id);
+                yield* recordCompletionFailureEffect(client, row, idempotencyKey, terminalError);
                 return {
                   asset: null,
-                  error: deletionError,
+                  error: terminalError,
                   replayed: false,
                   retryable: false,
                 };
               }
-              // The staging row is the single settle point that turns reserved
-              // intent into charged bytes, and it is the verified source of
-              // truth for promotion: its ETag and version pin which bytes may
-              // become the protected original, so a still-valid upload grant
-              // cannot swap the source afterwards. `status` moves to 'ready'
-              // because the bytes are now real and resident, which is what the
-              // authoritative usage formula charges; the upload reservation is
-              // committed below and stops counting, so the same bytes are
-              // never charged twice.
-              const stagedObject = yield* client.query(
+              yield* client.query(
                 `UPDATE asset_objects
                  SET bytes = $1,
                      etag = $2,
@@ -2056,10 +1486,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                      sha256 = $4,
                      content_type = $5,
                      status = 'ready',
-                     -- A confirmed multipart complete kills the uploadId, so no
-                     -- part grant can write again and the writer hold closes
-                     -- immediately. A single PUT URL stays live for its
-                     -- recorded window, so its hold is left untouched.
                      write_hold_until = CASE
                        WHEN $7 THEN now()
                        ELSE write_hold_until
@@ -2068,8 +1494,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                  WHERE asset_id = $6
                    AND kind = 'staging'
                    AND status = 'writing'
-                   AND bytes IS NULL
-                 RETURNING id`,
+                   AND bytes IS NULL`,
                 [
                   metadata!.size,
                   metadata!.etag,
@@ -2080,18 +1505,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                   row.strategy === "multipart",
                 ],
               );
-              if (stagedObject.rowCount !== 1) {
-                return {
-                  asset: null,
-                  error: new CoreApiError(
-                    422,
-                    "missing_object",
-                    "The staged upload record is no longer reclaimable.",
-                  ),
-                  replayed: false,
-                  retryable: false,
-                };
-              }
               const parts = preparation.parts;
               if (row.strategy === "multipart") {
                 yield* client.query(
@@ -2187,36 +1600,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
       );
     },
 
-    /**
-     * Cancels an in-progress upload session via Effect, releasing reserved quotas and cleaning storage.
-     *
-     * Aborts R2 multipart uploads or deletes a partially written single object,
-     * marks the session `'aborted'`, transfers the quota reservation onto any
-     * landed staging object, and moves that `asset_objects` row to `'deleting'`.
-     * The writer hold afterwards depends on what the external cleanup proved:
-     * a confirmed multipart abort ends every part grant at once, so
-     * `write_hold_until` closes immediately; a single PUT cannot revoke an
-     * already-signed URL, and an abort whose outcome is unknown cannot prove
-     * the uploadId dead, so both keep the last grant deadline minted and
-     * recorded under the session lock — the real writer window rather than
-     * the 24-hour session expiry. Marking the row durably is what makes the
-     * cleanup replayable: the sweep reclaims the bytes and releases their
-     * accounting exactly once even if this worker dies between committing and
-     * issuing the remote delete, so a cancelled upload cannot leak storage.
-     * The reservation is transferred rather than dropped, so a staged object
-     * that physically exists stays charged until it is actually deleted and
-     * cannot let a concurrent upload oversubscribe Entitlements. Cancelling is
-     * not a deletion: no delete claim is taken, the Asset fails as retryable
-     * with the reason its upload ended whether or not a Post retains it, and
-     * only an unretained Asset starts the seven-day orphan clock. Remote cleanup
-     * is best-effort so infrastructure failures cannot strand quota or logical
-     * cancellation.
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param sessionId - Upload session ID to cancel.
-     * @param idempotencyKey - Client-provided idempotency key.
-     * @returns Effect resolving to object indicating whether the operation was replayed.
-     */
     abortUploadSession(env, session, sessionId, idempotencyKey) {
       return withStorage(
         env,
@@ -2249,13 +1632,8 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                 );
                 return { replayed: true as const };
               }
-              // The Asset row is locked but never claimed: cancelling an
-              // upload must not move a saved Post's attachment into
-              // 'deleting', whose reclamation the stuck-job sweep can arm
-              // for a deletion nobody asked for. The lock still serializes
-              // against a concurrent completion, which is what decides this
-              // session's fate.
               yield* lockAssetStatusEffect(client, row.asset_id);
+              yield* markSessionAbortedEffect(client, row.id);
               return { replayed: false as const, row };
             }),
           );
@@ -2272,10 +1650,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
               .pipe(
                 Effect.flatMap((upload) => upload.abort()),
                 Effect.as(true),
-                // A missing signer stays a hard configuration failure while
-                // every other abort failure is ambiguous: the uploadId may
-                // still accept parts, so the recorded grant deadline must
-                // stand and the sweep retains the charge until it lapses.
                 Effect.catch((cause) =>
                   cause instanceof StorageConfigurationError
                     ? Effect.fail(cause)
@@ -2283,9 +1657,6 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                 ),
               );
           } else {
-            // A single PUT URL cannot be revoked by deleting the object: the
-            // grant stays live for its signed window either way, so the
-            // recorded deadline is retained regardless of this call's outcome.
             yield* storage
               .delete(preparation.row.object_key)
               .pipe(
@@ -2298,68 +1669,18 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
           return yield* withTenantTransactionEffect(env, session, (client) =>
             Effect.gen(function* () {
               const row = yield* getSessionRowEffect(client, sessionId, true);
-              if (row.status !== "aborted") {
-                yield* client.query(
-                  `UPDATE asset_upload_sessions
-                   SET status = 'aborted', aborted_at = now(), updated_at = now()
-                   WHERE id = $1`,
-                  [row.id],
-                );
-                // Hand the session's reserved bytes to the staged object and
-                // release the reservation in one statement. Releasing first
-                // would briefly unaccount bytes that physically exist, letting a
-                // concurrent upload pass the limit check and oversubscribe.
-                yield* releaseReservationToStagingEffect(client, row.id, row.asset_id);
-                // Bytes already landed under the staging key (a cancelled
-                // single upload, or a multipart whose parts were already
-                // committed) are handed to the maintenance sweep by durable
-                // state, so a crash between this commit and the remote delete
-                // cannot strand them. A confirmed multipart abort kills every
-                // part grant at once, so the writer hold closes now and the
-                // staged bytes reclaim without waiting out a grant window. A
-                // single PUT is different: cancelling cannot revoke a URL
-                // that was already signed, so the recorded grant deadline
-                // stands — as it does for a multipart abort whose outcome
-                // could not be confirmed. The accounting release happens in
-                // the sweep exactly once, on the deleting→deleted transition.
-                yield* markStagedObjectDeletingEffect(client, row.asset_id, {
-                  writersClosed,
-                });
-                // Cancelling ends the upload, not the Asset a creator may
-                // still own: it becomes durably failed with the reason,
-                // whether or not a Post retains it, and only an unretained
-                // Asset starts the seven-day orphan clock. What the sweep
-                // reclaims is the abandoned upload's staged bytes, which were
-                // handed over above.
-                yield* client.query(
-                  `UPDATE assets
-                   SET status = 'failed',
-                       failure_code = 'upload_aborted',
-                       failure_message = 'The upload was cancelled.',
-                       failure_retryable = true,
-                       failure_at = now(),
-                       orphaned_at = CASE
-                         WHEN EXISTS (
-                           SELECT 1
-                             FROM post_attachments
-                            WHERE asset_id = $1
-                         ) THEN NULL
-                         ELSE now()
-                       END,
-                       orphan_delete_after = CASE
-                         WHEN EXISTS (
-                           SELECT 1
-                             FROM post_attachments
-                            WHERE asset_id = $1
-                         ) THEN NULL
-                         ELSE now() + make_interval(days => $2)
-                       END,
-                       updated_at = now()
-                   WHERE id = $1
-                     AND status IN ('pending_upload', 'uploading')`,
-                  [row.asset_id, orphanGraceDays],
-                );
-              }
+              yield* releaseReservationToStagingEffect(client, row.id, row.asset_id);
+              yield* markStagedObjectDeletingEffect(client, row.asset_id, { writersClosed });
+              yield* failAssetEffect(
+                client,
+                row.asset_id,
+                {
+                  code: "upload_aborted",
+                  message: "The upload was cancelled.",
+                  retryable: true,
+                },
+                stillUploading,
+              );
               yield* completeIdempotencyEffect(
                 client,
                 row.org_id,
@@ -2375,32 +1696,10 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
       );
     },
 
-    /**
-     * Generates a presigned GET URL for downloading ready media assets with Content-Disposition via Effect.
-     *
-     * Delegates the common ready-media validation and signing path while selecting
-     * the asset's original filename to force browser download.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param assetId - Unique identifier of the ready media asset.
-     * @returns Effect resolving to presigned download URL and expiration timestamp.
-     */
     getAssetDownloadUrl(env, session, assetId) {
       return withStorage(env, signReadyMediaAssetUrlEffect(env, session, assetId, true));
     },
 
-    /**
-     * Generates a presigned GET URL for inline browser previewing of ready media assets via Effect.
-     *
-     * Delegates the common ready-media validation and signing path without a
-     * content-disposition filename, preserving inline browser rendering.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param assetId - Unique identifier of the ready media asset.
-     * @returns Effect resolving to presigned preview URL and expiration timestamp.
-     */
     getAssetPreviewUrl(env, session, assetId) {
       return withStorage(env, signReadyMediaAssetUrlEffect(env, session, assetId, false));
     },

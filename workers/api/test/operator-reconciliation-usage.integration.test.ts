@@ -8,32 +8,10 @@ import type { ApiWorkerEnv } from "../src/env";
 import { createOperatorReconciliationService } from "../src/operator-reconciliation";
 import type { OperatorResolutionInput } from "../src/operator-resolution";
 
-/**
- * Operator-confirmed publication measurement against real PostgreSQL.
- *
- * An operator resolving an ambiguous Distribution to `published` is a confirmed
- * success, and the automation worker never observes it: the queue message that
- * follows finds the row already published. The measurement therefore has to
- * happen inside the resolving transaction, which is what this suite exercises —
- * through the real service, the real database and the real aggregates.
- *
- * The transport is not involved: `enqueueDailyUsageReport`'s enqueue path is
- * covered by the automation suite, and this case asserts the *counter*, which is
- * the fact an operator confirmation has to contribute.
- */
-
 const connectionString =
   process.env.MELTIPLY_DATABASE_TEST_URL ??
   "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
 
-/**
- * Privileged fixture connection, used only to reset rows before a case.
- *
- * `MELTIPLY_DATABASE_TEST_URL` authenticates as `meltiply_rls`, and the reporting
- * migrations deliberately revoke the RLS role from their tables — the runtime
- * writes them through the system connection. Seeding therefore has to use the
- * admin credentials rather than widening runtime grants for a test.
- */
 const adminConnectionString =
   process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
   "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
@@ -61,7 +39,6 @@ const env = {
   VERSION: "1.0.0-target.0",
 } as ApiWorkerEnv;
 
-/** Creates the minimum domain rows an operator reconciliation reads. */
 async function seedDomain(): Promise<void> {
   const database = adminPool;
   await database.query("DELETE FROM reporting_publication_daily WHERE TRUE");
@@ -75,9 +52,6 @@ async function seedDomain(): Promise<void> {
   await database.query("DELETE FROM brand_profiles WHERE id = $1", [profileId]);
   await database.query("DELETE FROM organizations WHERE id = $1", [organizationId]);
 
-  // Not a shared Workspace: the canonical installation already owns that
-  // singleton, and this suite drives the operator service directly rather than
-  // through actor resolution, so it needs an ordinary tenant of its own.
   await database.query(
     `INSERT INTO organizations (id, name, slug, is_shared) VALUES ($1, 'Ops Usage', 'ops-usage', FALSE)`,
     [organizationId],
@@ -109,7 +83,6 @@ async function seedDomain(): Promise<void> {
   );
 }
 
-/** Enables usage reporting with a live interval, as an opted-in Owner would. */
 async function enableUsage(intervalStartedAt: Date): Promise<void> {
   await systemPoolFor(env).query(
     `INSERT INTO reporting_preferences (
@@ -127,7 +100,6 @@ async function enableUsage(intervalStartedAt: Date): Promise<void> {
   );
 }
 
-/** Runs one operator resolution through the production service. */
 function resolvePublished() {
   const service = createOperatorReconciliationService();
   const input: OperatorResolutionInput = {
@@ -150,7 +122,6 @@ function resolvePublished() {
   );
 }
 
-/** Reads the stored per-Platform Distribution counter for today's UTC bucket. */
 async function dailyDistributions(): Promise<number> {
   const result = await systemPoolFor(env).query<{ distributions: number }>(
     `SELECT distributions FROM reporting_publication_daily
@@ -191,13 +162,10 @@ describe("operator-confirmed publication measurement", () => {
   });
 
   it("counts nothing while usage is not enabled, and never backfills later", async () => {
-    // No preference row at all: the resolution still commits, but no aggregate moves.
     const result = await resolvePublished();
     expect(result.status).toBe("published");
     expect(await dailyDistributions()).toBe(0);
 
-    // The Post mark records the pre-consent first success as uncounted, so a
-    // later opt-in cannot present this Post as a new one.
     const marks = await systemPoolFor(env).query<{ counted: boolean }>(
       "SELECT counted FROM reporting_post_marks",
     );
@@ -206,13 +174,11 @@ describe("operator-confirmed publication measurement", () => {
 
   it("keeps the domain resolution committed when reporting is unavailable", async () => {
     await enableUsage(new Date(Date.now() - 60 * 60 * 1_000));
-    // Hide the aggregate table so the measurement's savepoint rolls back.
     await adminPool.query(
       "ALTER TABLE reporting_publication_daily RENAME TO reporting_publication_daily_hidden",
     );
     try {
       const result = await resolvePublished();
-      // The publication is a real domain outcome; reporting never rolls it back.
       expect(result.status).toBe("published");
       const distribution = await systemPoolFor(env).query<{ status: string }>(
         "SELECT status FROM distributions WHERE id = $1",

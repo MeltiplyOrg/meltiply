@@ -10,17 +10,13 @@ import {
 import type { ApiWorkerEnv } from "./env";
 import { RFC4122_UUID_PATTERN } from "./crypto";
 import { CoreApiError, type IdempotentResult } from "./core-types";
-import {
-  completeIdempotencyEffect,
-  hashIdempotencyRequestEffect,
-  reserveIdempotencyEffect,
-} from "./idempotency";
+import { hashIdempotencyRequestEffect } from "./idempotency";
+import { withIdempotentMutation } from "./idempotent-mutation";
 import { isMailSenderAddress, mailSenderConfiguration } from "@meltiply/domain/mail-content";
 import type { PostServiceError } from "./post-types";
 
 type Schemas = components["schemas"];
 
-/** Placeholders a signature body may resolve; anything else is rejected. */
 const signaturePlaceholderPattern = /\{([^{}]+)\}/g;
 const supportedSignaturePlaceholders: Readonly<Record<string, true>> = {
   brand_profile: true,
@@ -35,23 +31,12 @@ interface PreferenceRow extends Record<string, unknown> {
   updated_at: Date | string;
 }
 
-/** Input accepted by the replacement write; capability fields are server-owned. */
 type PublishingPreferencesUpdate = Schemas["PublishingPreferencesUpdate"];
 
-/**
- * Reports whether this installation can actually deliver mail. A binding that
- * exists but whose sender is invalid is not available, because the composer
- * must never offer a channel that cannot deliver.
- */
 function emailDeliveryAvailable(env: ApiWorkerEnv): boolean {
   return typeof env.MAIL?.send === "function" && mailSenderConfiguration(env) !== undefined;
 }
 
-/**
- * Rejects a timezone identifier the database does not recognize. Validating
- * against PostgreSQL's `pg_timezone_names` matches the authority used by Queue
- * scheduling, so a preference that saves is always one the scheduler accepts.
- */
 function validateTimezoneEffect(
   client: EffectTransactionClient,
   timezone: string | null,
@@ -73,18 +58,6 @@ function validateTimezoneEffect(
     );
 }
 
-/**
- * Validates and normalizes the complete signature list.
- *
- * Positions are rewritten to the array order so reordering is expressed by the
- * submitted list rather than by trusting client arithmetic. IDs are supplied by
- * the client so renaming a template does not create a new identity. Exactly one
- * template must be the default whenever the list is non-empty.
- *
- * @param templates - Requested templates in display order.
- * @returns Normalized templates with contiguous zero-based positions.
- * @throws {CoreApiError} 422 when an id, name, body, placeholder, or default is invalid.
- */
 function normalizeSignatureTemplates(
   templates: readonly Schemas["SignatureTemplate"][],
 ): Schemas["SignatureTemplate"][] {
@@ -101,18 +74,15 @@ function normalizeSignatureTemplates(
     );
   }
   return templates.map((template, position) => {
-    if (
-      typeof template.id !== "string" ||
-      !RFC4122_UUID_PATTERN.test(template.id) ||
-      ids.has(template.id)
-    ) {
+    const id = typeof template.id === "string" ? template.id.toLowerCase() : "";
+    if (!RFC4122_UUID_PATTERN.test(id) || ids.has(id)) {
       throw new CoreApiError(
         422,
         "validation_error",
         "Signature template ids must be unique UUIDs.",
       );
     }
-    ids.add(template.id);
+    ids.add(id);
     const name = template.name.trim();
     const body = template.body.trim();
     if (name.length === 0 || name.length > 80) {
@@ -140,7 +110,7 @@ function normalizeSignatureTemplates(
     }
     return {
       body,
-      id: template.id.toLowerCase(),
+      id,
       is_default: template.is_default,
       name,
       position,
@@ -148,20 +118,8 @@ function normalizeSignatureTemplates(
   });
 }
 
-/** Maximum number of explicit email recipients stored for one Workspace. */
 const maximumNotificationRecipients = 20;
 
-/**
- * Normalizes the submitted recipient list before persistence.
- *
- * Addresses are trimmed and lowercased so the saved list is deterministic and
- * duplicate submissions cannot send the same alert twice. Local single-label
- * domains are rejected because a real delivery address needs a DNS domain.
- *
- * @param recipients - Raw addresses from the replacement document.
- * @returns Unique normalized addresses in submission order.
- * @throws {CoreApiError} 422 when the list is oversized or an address is invalid.
- */
 function normalizeNotificationRecipients(recipients: readonly string[]): string[] {
   if (recipients.length > maximumNotificationRecipients) {
     throw new CoreApiError(
@@ -185,13 +143,6 @@ function normalizeNotificationRecipients(recipients: readonly string[]): string[
   return normalized;
 }
 
-/**
- * Validates notification choices against the events and channels the product
- * actually supports. An unconfigured mail sender cannot be enabled, because
- * accepting that choice would promise delivery that cannot happen. Enabled
- * email also requires at least one recipient, while a disabled channel may keep
- * its saved addresses for a later re-enable.
- */
 function validateNotifications(
   notifications: Schemas["NotificationPreferences"],
   emailAvailable: boolean,
@@ -229,19 +180,6 @@ function validateNotifications(
   };
 }
 
-/**
- * Projects a stored preference row onto the contract response.
- *
- * An untouched Workspace has no row; it reports the documented defaults
- * (browser timezone, no templates, both events disabled, and email disabled
- * with no recipients) and the epoch as `updated_at` rather than inventing a
- * write. `email_available` is always the current installation capability, not
- * persisted state.
- *
- * @param row - Stored row, or undefined before the first save.
- * @param emailAvailable - Whether this installation can actually deliver mail.
- * @returns The current preferences document.
- */
 function mapPreferences(
   row: PreferenceRow | undefined,
   emailAvailable: boolean,
@@ -268,7 +206,6 @@ function mapPreferences(
   };
 }
 
-/** Reads and replaces the shared Workspace's publishing preferences. */
 export interface PublishingPreferencesApiService {
   get(
     env: ApiWorkerEnv,
@@ -282,10 +219,8 @@ export interface PublishingPreferencesApiService {
   ): Effect.Effect<IdempotentResult<Schemas["PublishingPreferences"]>, PostServiceError>;
 }
 
-/** Creates the tenant-backed preference service; writes require the Admin role. */
 export function createPublishingPreferencesApiService(): PublishingPreferencesApiService {
   return {
-    /** Reads the row without creating one; an absent row reports documented defaults. */
     get(env, session) {
       return withTenantTransactionEffect(env, session, (client) =>
         client
@@ -299,7 +234,6 @@ export function createPublishingPreferencesApiService(): PublishingPreferencesAp
       );
     },
 
-    /** Atomically replaces the complete preference document with idempotent replay. */
     replace(env, session, input, idempotencyKey) {
       return Effect.gen(function* () {
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify(input));
@@ -318,64 +252,54 @@ export function createPublishingPreferencesApiService(): PublishingPreferencesAp
                 ),
               );
             }
-            const replay = yield* reserveIdempotencyEffect(
+            return yield* withIdempotentMutation<
+              Schemas["PublishingPreferences"],
+              PostServiceError
+            >(
               client,
               organizationId,
               "publishing-preferences",
               idempotencyKey,
               requestHash,
-            );
-            if (replay) {
-              return {
-                replayed: true,
-                value: replay.response_body as Schemas["PublishingPreferences"],
-              };
-            }
-            yield* validateTimezoneEffect(client, input.timezone);
-            const emailAvailable = emailDeliveryAvailable(env);
-            const validated = yield* Effect.try({
-              catch: (cause) =>
-                cause instanceof CoreApiError
-                  ? cause
-                  : new CoreApiError(
-                      422,
-                      "validation_error",
-                      "Publishing preferences are invalid.",
-                    ),
-              try: () => ({
-                notifications: validateNotifications(input.notifications, emailAvailable),
-                signatures: normalizeSignatureTemplates(input.signature_templates ?? []),
-              }),
-            });
-            const notifications = validated.notifications;
-            const signatures = validated.signatures;
-            const result = yield* client.query<PreferenceRow>(
-              `INSERT INTO publishing_preferences
-                 (org_id, timezone, signature_templates, notification_preferences)
-               VALUES ($1, $2, $3::jsonb, $4::jsonb)
-               ON CONFLICT (org_id) DO UPDATE SET
-                 timezone = EXCLUDED.timezone,
-                 signature_templates = EXCLUDED.signature_templates,
-                 notification_preferences = EXCLUDED.notification_preferences,
-                 updated_at = now()
-               RETURNING timezone, signature_templates, notification_preferences, updated_at`,
-              [
-                organizationId,
-                input.timezone,
-                JSON.stringify(signatures),
-                JSON.stringify(notifications),
-              ],
-            );
-            const value = mapPreferences(result.rows[0], emailAvailable);
-            yield* completeIdempotencyEffect(
-              client,
-              organizationId,
-              "publishing-preferences",
-              idempotencyKey,
               200,
-              value,
+              (tx) =>
+                Effect.gen(function* () {
+                  yield* validateTimezoneEffect(tx, input.timezone);
+                  const emailAvailable = emailDeliveryAvailable(env);
+                  const validated = yield* Effect.try({
+                    catch: (cause) =>
+                      cause instanceof CoreApiError
+                        ? cause
+                        : new CoreApiError(
+                            422,
+                            "validation_error",
+                            "Publishing preferences are invalid.",
+                          ),
+                    try: () => ({
+                      notifications: validateNotifications(input.notifications, emailAvailable),
+                      signatures: normalizeSignatureTemplates(input.signature_templates ?? []),
+                    }),
+                  });
+                  const result = yield* tx.query<PreferenceRow>(
+                    `INSERT INTO publishing_preferences
+                       (org_id, timezone, signature_templates, notification_preferences)
+                     VALUES ($1, $2, $3::jsonb, $4::jsonb)
+                     ON CONFLICT (org_id) DO UPDATE SET
+                       timezone = EXCLUDED.timezone,
+                       signature_templates = EXCLUDED.signature_templates,
+                       notification_preferences = EXCLUDED.notification_preferences,
+                       updated_at = now()
+                     RETURNING timezone, signature_templates, notification_preferences, updated_at`,
+                    [
+                      organizationId,
+                      input.timezone,
+                      JSON.stringify(validated.signatures),
+                      JSON.stringify(validated.notifications),
+                    ],
+                  );
+                  return mapPreferences(result.rows[0], emailAvailable);
+                }),
             );
-            return { replayed: false, value };
           }),
         );
       });

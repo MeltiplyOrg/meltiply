@@ -16,13 +16,6 @@ export interface OAuthConnectionOwner {
   userId: string;
 }
 
-/**
- * Parses an optional RFC 3339 timestamp string into a JavaScript `Date`.
- *
- * @param value - Optional RFC 3339 ISO date-time string.
- * @returns Parsed `Date` object, or `null` if value is empty/undefined.
- * @throws {TypeError} If `value` is provided but represents an invalid timestamp.
- */
 function expiresAt(value: string | undefined): Date | null {
   if (!value) return null;
   const parsed = new Date(value);
@@ -32,27 +25,6 @@ function expiresAt(value: string | undefined): Date | null {
   return parsed;
 }
 
-/**
- * Persists an authenticated OAuth provider connection into `platform_accounts` as an Effect.
- *
- * Encrypts provider access and refresh tokens using AES-GCM envelope encryption, verifies the
- * Brand Profile pinned in durable OAuth state is still active in the recorded workspace, locks the
- * organization to prevent concurrent limit oversubscription, enforces platform account limits
- * from the community resource policy, and atomically upserts the connection record.
- * Effect transactions retain locking, quota checks and the upsert in one scope.
- * Only encryption crosses Promise boundaries; validation is narrowed before writes.
- * The external (platform, platform_user_id) identity is globally unique: a reconnect to the same
- * Brand Profile refreshes tokens, while an account already attached to another profile or
- * workspace fails 409 until it is locally disconnected. A Brand Profile owns at most one
- * Channel per Provider, so a second account of an already-connected Platform is refused
- * until the existing Channel is disconnected.
- *
- * @param env - Worker environment bindings containing token encryption key.
- * @param platform - Target social provider platform identifier (e.g. `"instagram"`, `"youtube"`).
- * @param owner - Identifiers of the connecting organization, user, and chosen Brand Profile.
- * @param connection - Normalized OAuth credentials and account profile returned by the provider.
- * @returns Effect resolving undefined on upsert, e.g. `Effect<void, CoreApiError | DatabaseError>`.
- */
 export function saveOAuthConnectionEffect(
   env: ApiWorkerEnv,
   platform: Platform,
@@ -126,9 +98,6 @@ export function saveOAuthConnectionEffect(
             ),
           );
         }
-        // The OAuth state record carries the actor-resolved workspace id, but the
-        // persistence path re-verifies membership so a replayed or forged state
-        // cannot write a connection into a workspace the user does not belong to.
         const membership = yield* client.query<{ role: string }>(
           `SELECT om.role
          FROM org_members om
@@ -166,14 +135,8 @@ export function saveOAuthConnectionEffect(
           );
         }
 
-        // The Brand Profile chosen at assignment time must still exist and be
-        // active in the workspace at persistence time: a profile deleted
-        // mid-handoff must not receive the new Channel.
         yield* requireActiveBrandProfileEffect(client, organizationRow.id, owner.brandProfileId);
 
-        // The external (platform, platform_user_id) identity is globally
-        // unique: the same social account cannot attach to another Brand
-        // Profile or Workspace until it is locally disconnected.
         const existing = yield* client.query<{
           brand_profile_id: string;
           id: string;
@@ -194,10 +157,6 @@ export function saveOAuthConnectionEffect(
           );
         }
         if (!existingRow) {
-          // One Brand Profile owns at most one Channel per Provider: the
-          // profile-scoped index from `017_one_channel_per_provider.sql` is the
-          // final arbiter, and this read turns the expected conflict into the
-          // same actionable 409 instead of a constraint error.
           const profileChannel = yield* client.query<{ id: string }>(
             `SELECT id
          FROM platform_accounts
@@ -235,12 +194,6 @@ export function saveOAuthConnectionEffect(
           }
         }
 
-        // Arm the background token-refresh schedule whenever the provider
-        // reported an expiry: `max(now + 1h, expiresAt - 7d)` matches the
-        // cadence the refresh worker arms after a successful rotation, and the
-        // Due-work sweep claims the row once it enters the delivery horizon
-        // (#256). A fresh grant also resets the refresh attempt state so a
-        // reconnected account is not throttled by the prior grant's failures.
         const tokenRefreshNextAttemptAt =
           tokenExpiresAt === null
             ? null
@@ -295,9 +248,6 @@ export function saveOAuthConnectionEffect(
             connection.account.username?.trim() || null,
           ],
         );
-        // A raced insert on the same external identity lands here as a
-        // no-row upsert when the winner belongs to another profile; the
-        // conflict is the same one the pre-check reports.
         if (result.rowCount !== 1)
           return yield* Effect.fail(
             new CoreApiError(

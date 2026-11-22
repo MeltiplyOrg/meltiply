@@ -5,21 +5,11 @@ import { errorDiagnostic, exportOtlpSpan, log } from "@meltiply/observability";
 
 export { exportOtlpSpan };
 
+import { RFC4122_UUID_PATTERN } from "./crypto";
 import { lazyWithSystemTransactionEffect } from "./database-module";
 import type { ApiWorkerEnvironment, ApiWorkerEnv } from "./env";
 import { errorResponse, jsonResponse } from "./responses";
 
-/**
- * Executes an Effect callback within a system database transaction with dynamic database module import.
- *
- * Dynamically imports `./database` to prevent premature `pg` client evaluation in unit
- * tests that lack real Hyperdrive bindings, then runs the transaction at this
- * Promise-facing boundary via `Effect.runPromise`.
- *
- * @param env - Worker environment containing the system database Hyperdrive binding.
- * @param operation - Database transaction callback receiving a system EffectTransactionClient.
- * @returns The resolved outcome of the database operation.
- */
 async function runWithSystemTransaction<T, E>(
   env: ApiWorkerEnv,
   operation: (client: EffectTransactionClient) => Effect.Effect<T, E>,
@@ -27,29 +17,9 @@ async function runWithSystemTransaction<T, E>(
   return Effect.runPromise(lazyWithSystemTransactionEffect(env, operation));
 }
 
-/**
- * Non-production flow explorer.
- *
- * A sanitized execution ledger (flow_runs / flow_steps) plus a static flow
- * graph. Traces an operation end to end across the browser, API Worker,
- * queue / workflow, cache and database. Tenant payloads, credentials and
- * provider tokens never enter this schema: steps record node, service,
- * operation, status, durations and small whitelisted metadata only.
- *
- * Enabled only for local and test environments. Staging and production keep
- * the flag off so no write path and no route exists there.
- */
-
 export const flowExplorerEnabled = (env: ApiWorkerEnv): boolean =>
   env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test";
 
-/**
- * True when the system Hyperdrive binding is actually usable. The unit-test
- * pool passes `{} as Hyperdrive`, which is truthy but has no
- * `connectionString`; reaching `systemPoolFor()` with that would build a real
- * pg pool with an undefined connection string and throw. Mirrors the
- * middleware guard in app.ts.
- */
 export const flowDatabaseAvailable = (env: ApiWorkerEnv): boolean => {
   const binding = env.DB_SYSTEM as { connectionString?: string } | undefined;
   return Boolean(binding?.connectionString);
@@ -75,7 +45,6 @@ interface FlowEdgeDefinition {
   from: string;
   to: string;
   label: string;
-  /** Contexts this edge is part of, e.g. "publish", "assets", "auth". */
   flows: string[];
 }
 
@@ -161,14 +130,6 @@ export const flowGraph = (): FlowGraph => ({
 
 const FLOW_NODE_KINDS = new Map(FLOW_NODES.map((node) => [node.key, node.kind]));
 
-/**
- * Resolves the architectural node kind (e.g. `'client'`, `'api'`, `'database'`) for a node key.
- *
- * Falls back to `'service'` if the node key is not in the predefined `FLOW_NODES` inventory.
- *
- * @param nodeKey - Unique node identifier string.
- * @returns Corresponding architectural node kind.
- */
 function nodeTypeFor(nodeKey: string): string {
   return FLOW_NODE_KINDS.get(nodeKey) ?? "service";
 }
@@ -257,34 +218,16 @@ interface FlowStepRow {
   workflow_id: string | null;
 }
 
-/**
- * Normalizes a Date object or timestamp string into an ISO-8601 formatted string.
- *
- * @param value - Date instance or parsable date string.
- * @returns ISO-8601 formatted string.
- */
 function iso(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
-/**
- * Coerces a numeric or string value to a finite number, returning null for empty or non-finite inputs.
- *
- * @param value - Candidate numeric value, string, or null.
- * @returns Finite number, or `null` if invalid or empty.
- */
 function numberOrNull(value: string | number | null): number | null {
   if (value === null) return null;
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-/**
- * Validates and casts an unknown value to a non-array metadata record.
- *
- * @param value - Unknown candidate metadata value.
- * @returns Key-value metadata record, or empty object `{}` if invalid.
- */
 function metadataObject(value: unknown): Record<string, unknown> {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;
@@ -292,14 +235,6 @@ function metadataObject(value: unknown): Record<string, unknown> {
   return {};
 }
 
-/**
- * Converts a database `flow_runs` row into an API `FlowRunRecord`.
- *
- * Formats timestamps, duration numbers, and metadata JSON objects.
- *
- * @param row - Raw database row from `flow_runs`.
- * @returns Sanitized API `FlowRunRecord` entity.
- */
 function runRowToRecord(row: FlowRunRow): FlowRunRecord {
   return {
     created_at: iso(row.created_at),
@@ -319,14 +254,6 @@ function runRowToRecord(row: FlowRunRow): FlowRunRecord {
   };
 }
 
-/**
- * Converts a database `flow_steps` row into an API `FlowStepRecord`.
- *
- * Formats duration numbers, timestamps, and sanitizes metadata attributes.
- *
- * @param row - Raw database row from `flow_steps`.
- * @returns Sanitized API `FlowStepRecord` entity.
- */
 function stepRowToRecord(row: FlowStepRow): FlowStepRecord {
   return {
     attempt: row.attempt,
@@ -353,10 +280,6 @@ function stepRowToRecord(row: FlowStepRow): FlowStepRecord {
   };
 }
 
-/**
- * Non-production recorder bound to the API Worker system database.
- * Every write is best-effort and never fails the operation it observes.
- */
 export interface FlowRecorder {
   finishStep(
     stepId: string,
@@ -403,7 +326,6 @@ const recorderCache = new WeakMap<ApiWorkerEnv, FlowRecorder>();
 
 interface PendingSpan {
   attributes: Record<string, unknown>;
-  /** Absolute expiry for TTL pruning; spans abandoned by aborted flows must not accumulate. */
   expiresAt: number;
   name: string;
   parentSpanId?: string;
@@ -412,23 +334,11 @@ interface PendingSpan {
   traceId: string;
 }
 
-/**
- * Spans recorded between `startRun`/`recordStep` and their matching finish
- * call. Exported for tests; production code only adds and deletes entries.
- * Entries older than the TTL or beyond the capacity are pruned on insert so
- * aborted flows cannot leak memory for the isolate's lifetime.
- */
 export const pendingSpans = new Map<string, PendingSpan>();
 
 const pendingSpanTimeToLiveMilliseconds = 10 * 60 * 1_000;
 const pendingSpanMaximumEntries = 256;
 
-/**
- * Drops expired pending spans and, when the ledger still exceeds its entry
- * cap, evicts the oldest insertions first (Map iteration is insertion order).
- * Called before every insert so the map stays bounded even when finish calls
- * never arrive.
- */
 function prunePendingSpans(now: number): void {
   for (const [key, span] of pendingSpans) {
     if (span.expiresAt <= now) pendingSpans.delete(key);
@@ -440,14 +350,6 @@ function prunePendingSpans(now: number): void {
   }
 }
 
-/**
- * Registers one pending span under a run or step id, first pruning expired
- * and excess entries so aborted flows cannot grow the map without bound.
- * Exported for tests; production callers go through `flowRecorderFor`.
- *
- * @param id - Flow run or step identifier the span finishes under.
- * @param span - Span payload minus its expiry timestamp.
- */
 export function trackPendingSpan(id: string, span: Omit<PendingSpan, "expiresAt">): void {
   const now = Date.now();
   prunePendingSpans(now);
@@ -457,26 +359,10 @@ export function trackPendingSpan(id: string, span: Omit<PendingSpan, "expiresAt"
   });
 }
 
-/**
- * Factory returning a cached, best-effort `FlowRecorder` instance for the worker environment.
- *
- * Caches recorder instances per `ApiWorkerEnv` using a WeakMap. All persistence writes
- * are executed best-effort so ledger failures never break observed user operations.
- *
- * @param env - Worker environment bindings.
- * @returns Configured `FlowRecorder` instance.
- */
 export function flowRecorderFor(env: ApiWorkerEnv): FlowRecorder {
   const cached = recorderCache.get(env);
   if (cached) return cached;
   const recorder: FlowRecorder = {
-    /**
-     * Finalizes an active flow run, recording final status, error codes, and flushing OTLP spans.
-     *
-     * @param runId - Unique identifier of the flow run to finish.
-     * @param outcome - Final execution outcome containing status, errorCode, and retryable flag.
-     * @returns Resolves when ledger update completes or fails silently.
-     */
     async finishRun(runId, outcome) {
       const pending = pendingSpans.get(runId);
       if (pending) {
@@ -507,13 +393,6 @@ export function flowRecorderFor(env: ApiWorkerEnv): FlowRecorder {
           .pipe(Effect.asVoid),
       );
     },
-    /**
-     * Completes a recorded step within a flow run, updating duration and outcome status.
-     *
-     * @param stepId - Unique step ID to complete.
-     * @param outcome - Step outcome containing status (`failed`, `succeeded`, or `skipped`).
-     * @returns Resolves when database update completes or fails silently.
-     */
     async finishStep(stepId, outcome) {
       const pending = pendingSpans.get(stepId);
       if (pending) {
@@ -545,15 +424,6 @@ export function flowRecorderFor(env: ApiWorkerEnv): FlowRecorder {
           .pipe(Effect.asVoid),
       );
     },
-    /**
-     * Records an execution step within a flow run ledger and exports an OTLP trace span.
-     *
-     * The `orgId` input is the internal workspace UUID supplied by actor resolution;
-     * it is stored verbatim because the ledger only records resolved tenant scope.
-     *
-     * @param input - Step parameters (runId, nodeKey, service, operation, metadata, etc.).
-     * @returns Created step UUID or `null` if ledger recording is skipped or failed.
-     */
     async recordStep(input) {
       const id = await bestEffort(env, (client) =>
         client
@@ -603,14 +473,6 @@ export function flowRecorderFor(env: ApiWorkerEnv): FlowRecorder {
       }
       return id ?? null;
     },
-    /**
-     * Initiates a new flow run ledger entry and tracks an active pending span.
-     *
-     * The `orgId` input is the internal workspace UUID supplied by actor resolution.
-     *
-     * @param input - Flow run parameters (entrypoint, requestId, traceId, orgId, metadata).
-     * @returns Created run UUID or `null` if recording is skipped or failed.
-     */
     async startRun(input) {
       const id = await bestEffort(env, (client) =>
         client
@@ -652,15 +514,6 @@ export function flowRecorderFor(env: ApiWorkerEnv): FlowRecorder {
   return recorder;
 }
 
-/**
- * Executes a database callback swallowing and logging any thrown errors.
- *
- * Guarantees that diagnostic and observability writes never fail the parent request.
- *
- * @param env - Worker environment bindings.
- * @param operation - Database callback receiving an Effect transaction client.
- * @returns Result of the operation, or `null` if execution encountered an error.
- */
 async function bestEffort<T, E>(
   env: ApiWorkerEnv,
   operation: (client: EffectTransactionClient) => Effect.Effect<T, E>,
@@ -688,16 +541,6 @@ async function bestEffort<T, E>(
   }
 }
 
-/**
- * Mounts non-production flow explorer HTTP endpoints onto the Hono application router.
- *
- * Registers `/api/v1/flows/graph`, `/api/v1/flows/runs`, `/api/v1/flows/runs/:runId`,
- * and `/api/v1/flows/runs/:runId/steps`. All routes return 404 in production/staging
- * environments. Reads are scoped to the resolved actor's workspace because the
- * system pool bypasses RLS.
- *
- * @param app - Root or sub-router Hono application instance.
- */
 export function registerFlowRoutes(app: Hono<ApiWorkerEnvironment>): void {
   app.get("/api/v1/flows/graph", (c) => {
     if (!flowExplorerEnabled(c.env)) {
@@ -713,7 +556,10 @@ export function registerFlowRoutes(app: Hono<ApiWorkerEnvironment>): void {
     if (!flowDatabaseAvailable(c.env)) {
       return jsonResponse({ runs: [] }, 200, c.get("requestId"));
     }
-    const limit = Math.min(Math.max(Number(c.req.query("limit") ?? "50") || 50, 1), 200);
+    const limit = Math.min(
+      Math.max(Math.trunc(Number(c.req.query("limit") ?? "50")) || 50, 1),
+      200,
+    );
     const environment = c.req.query("environment");
     const status = c.req.query("status");
     const orgId = c.get("actor").workspace.id;
@@ -753,6 +599,9 @@ export function registerFlowRoutes(app: Hono<ApiWorkerEnvironment>): void {
       return errorResponse(c.get("requestId"), 404, "not_found", "The route was not found.");
     }
     const runId = c.req.param("runId");
+    if (!RFC4122_UUID_PATTERN.test(runId)) {
+      return errorResponse(c.get("requestId"), 404, "not_found", "The route was not found.");
+    }
     const orgId = c.get("actor").workspace.id;
     const run = await runWithSystemTransaction(c.env, (client) =>
       client
@@ -780,6 +629,9 @@ export function registerFlowRoutes(app: Hono<ApiWorkerEnvironment>): void {
       return jsonResponse({ steps: [] }, 200, c.get("requestId"));
     }
     const runId = c.req.param("runId");
+    if (!RFC4122_UUID_PATTERN.test(runId)) {
+      return jsonResponse({ steps: [] }, 200, c.get("requestId"));
+    }
     const orgId = c.get("actor").workspace.id;
     const steps = await runWithSystemTransaction(c.env, (client) =>
       client

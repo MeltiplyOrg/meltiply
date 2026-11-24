@@ -26,7 +26,8 @@ baseline; the fixes describe the current ownership.
   skills from the pinned pack rather than changing the checker or pin.
   - The English spelling checker rejects the German month names asserted by two
     localization regressions. Keep those assertions and recognize each month only
-    in its owning test file.
+    in its owning test file. Its type globs match basenames, not paths; verify the
+    real checker accepts those names while rejecting unrelated misspellings.
   - Several pack-managed skills are missing or differ from the pinned source.
     Restore them through `skills:sync`, retaining repository-owned adaptations.
   - Include managed-skill verification in the focused guardrail lane.
@@ -181,6 +182,11 @@ further actionable defect. Review coverage remains sampled across large frontend
 Worker, and tooling modules; this is not a claim that the entire repository has
 no other worthwhile issues.
 
-The latest completed self-hosted image smoke passes on both architectures.
-Full-history secret detection and its live canary remain enabled. No failing rule,
-test, or CI check is disabled to make this change pass.
+[Automatic CI](https://github.com/MeltiplyOrg/meltiply/actions/runs/45414392875)
+passes every selected lane and the final gate, including full-history secret
+scanning, real-scanner exception controls, spelling, integration tests, and
+self-hosted image smoke on both architectures.
+[The managed-skill check](https://github.com/MeltiplyOrg/meltiply/actions/runs/45413411151)
+confirms the committed skills match the pinned pack. Full-history detection and
+its live canary remain enabled. No failing rule, test, or CI check is disabled
+to make this change pass.

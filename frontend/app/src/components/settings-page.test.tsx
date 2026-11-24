@@ -166,6 +166,12 @@ vi.mock("@/lib/queries", () => ({
 }));
 
 import SettingsPage from "@/app/(dashboard)/settings/page";
+import { I18nProvider, useI18n } from "@/lib/i18n";
+
+function LanguageProbe() {
+  const { setLanguage } = useI18n();
+  return <button onClick={() => setLanguage("es")}>Use Spanish</button>;
+}
 
 afterEach(cleanup);
 
@@ -181,6 +187,22 @@ function renderSettings() {
 }
 
 describe("settings administration surface", () => {
+  it("formats invitation expiry dates in the selected application language", () => {
+    const { container } = render(
+      <I18nProvider>
+        <LanguageProbe />
+        <MemoryRouter>
+          <SettingsPage />
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Use Spanish" }));
+    const expiry = container.querySelector('time[datetime="2026-01-08T00:00:00.000Z"]');
+    expect(expiry).toHaveTextContent(
+      new Intl.DateTimeFormat("es").format(new Date("2026-01-08T00:00:00.000Z")),
+    );
+  });
+
   it("renders members, seats, and owner-only administration controls", () => {
     renderSettings();
 

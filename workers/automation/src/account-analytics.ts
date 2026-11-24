@@ -9,6 +9,7 @@ import {
 } from "@meltiply/providers";
 
 import { withSystemTransactionEffect } from "./database";
+import { classifyJobError, type AutomationJobError } from "./effect/index";
 import { decryptStoredToken } from "./provider-credentials";
 import { executeProviderAccountAnalyticsEffect } from "./provider-sync-provider";
 import type { AutomationEnv } from "./env";
@@ -35,7 +36,7 @@ const sweepIntervalHours = 6;
 export function sweepAccountAnalytics(
   env: AutomationEnv,
   dependencies: { providerRegistry?: ProviderRegistry } = {},
-): Effect.Effect<AccountAnalyticsSweepResult, never> {
+): Effect.Effect<AccountAnalyticsSweepResult, AutomationJobError> {
   return Effect.gen(function* () {
     const registry = dependencies.providerRegistry ?? cachedProviderRegistryFromEnvironment(env);
     const decryptToken = decryptStoredToken(env);
@@ -136,5 +137,5 @@ export function sweepAccountAnalytics(
       recorded: results.filter((result) => result === "recorded").length,
       scanned: rows.length,
     };
-  }).pipe(Effect.catch(() => Effect.succeed({ failed: 0, recorded: 0, scanned: 0 })));
+  }).pipe(Effect.mapError(classifyJobError));
 }

@@ -482,7 +482,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const composerIdentityRef = useRef("");
   const dirtyRef = useRef(false);
   const postIdRef = useRef<string | null>(null);
-  const persistedOwnershipRef = useRef(new Set<string>());
+  const ownershipSyncAttemptedRef = useRef(new Set<string>());
   const removedAssetIdsRef = useRef<Set<string>>(new Set());
 
   const composerIdentity = `${scope.workspaceId ?? "personal"}::${ownerProfileId ?? "all"}::${initialPostId ?? "new"}`;
@@ -594,7 +594,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     setPendingOwnershipAssetIds(null);
     dirtyRef.current = false;
     removedAssetIdsRef.current = new Set();
-    persistedOwnershipRef.current = new Set();
+    ownershipSyncAttemptedRef.current = new Set();
     setIsDirty(false);
   }, [setSelectedChannelIds]);
 
@@ -875,10 +875,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     if (profileId === null || !selectedProfileIds.includes(profileId)) return;
     const fresh = assetIds.filter(
       (assetId) =>
-        !persistedOwnershipRef.current.has(assetId) && !removedAssetIdsRef.current.has(assetId),
+        !ownershipSyncAttemptedRef.current.has(assetId) && !removedAssetIdsRef.current.has(assetId),
     );
     if (fresh.length === 0) return;
-    for (const assetId of fresh) persistedOwnershipRef.current.add(assetId);
+    for (const assetId of fresh) ownershipSyncAttemptedRef.current.add(assetId);
+    const identityAtStart = composerIdentityRef.current;
     const attachmentIds = [...orderedAssetIds()];
     const claimed = new Set(attachmentIds);
     for (const assetId of fresh) {
@@ -891,8 +892,14 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         id: postId,
         input: { brand_profile_id: profileId, attachment_ids: attachmentIds },
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        if (composerIdentityRef.current !== identityAtStart) return;
+        markDirty();
+        setErrorMessage(userFacingErrorMessage(error, language));
+      });
   }, [
+    language,
+    markDirty,
     orderedAssetIds,
     pendingOwnershipAssetIds,
     postId,

@@ -81,9 +81,13 @@ describe("cookie notification", () => {
       expect(readCookieConsent()).toEqual({ functional: true });
       document.body.appendChild(elsewhere);
       elsewhere.focus();
-      act(() => vi.advanceTimersByTime(1800));
+      act(() => {
+        vi.advanceTimersByTime(1800);
+      });
       expect(screen.getByRole("status")).toBeInTheDocument();
-      act(() => vi.advanceTimersByTime(400));
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
       expect(screen.queryByRole("status")).not.toBeInTheDocument();
       expect(document.activeElement).toBe(elsewhere);
       expect(screen.getAllByRole("button")).toEqual([elsewhere]);

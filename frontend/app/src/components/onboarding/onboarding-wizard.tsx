@@ -317,7 +317,7 @@ export function OnboardingWizard({
     setError(null);
     try {
       await complete.mutateAsync({});
-      navigate(destination, { replace: true });
+      void navigate(destination, { replace: true });
     } catch (cause) {
       setError(errorMessage(cause, t("Setup could not be finished. Try again.")));
     }

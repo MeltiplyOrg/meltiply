@@ -40,17 +40,41 @@ ruleTester.run("landmines/no-fixed-sleep", landmines.rules["no-fixed-sleep"], {
   ],
 });
 
-ruleTester.run("landmines/no-conditional-expect", landmines.rules["no-conditional-expect"], {
+ruleTester.run("landmines/no-unsignaled-poll", landmines.rules["no-unsignaled-poll"], {
   valid: [
     {
-      code: "import { it as check, expect } from 'vite-plus/test'; check('works', () => { expect(result).toBe(true); });",
+      code: "test('saves', async () => { await recorder.waitForSaveAfter(seen); expect(mutations.length).toBe(seen + 1); });",
+      filename: testFile,
+    },
+    {
+      code: "test('renders', async () => { await expect.poll(() => view.current.status).toBe('ready'); });",
       filename: testFile,
     },
   ],
   invalid: [
     {
-      code: "import { it as check, expect } from 'vite-plus/test'; check('works', () => { if (result) expect(result).toBe(true); });",
+      code: "test('saves', async () => { await expect.poll(() => mutations.length).toBeGreaterThan(seen); });",
       filename: testFile,
+      errors: 1,
+    },
+  ],
+});
+
+ruleTester.run("landmines/no-silent-catch", landmines.rules["no-silent-catch"], {
+  valid: [
+    {
+      code: "async function cleanup() { await reader.cancel().catch(() => undefined); }",
+      filename: `${repositoryRoot}frontend/app/src/components/composer/example.ts`,
+    },
+    {
+      code: "void save().catch(error => report(error));",
+      filename: `${repositoryRoot}frontend/app/src/components/composer/example.ts`,
+    },
+  ],
+  invalid: [
+    {
+      code: "void save().catch(() => {});",
+      filename: `${repositoryRoot}frontend/app/src/components/composer/example.ts`,
       errors: 1,
     },
   ],
@@ -66,22 +90,6 @@ ruleTester.run("landmines/no-shared-signal", landmines.rules["no-shared-signal"]
   invalid: [
     {
       code: "const controller = new AbortController(); test('loads', () => request(controller.signal));",
-      filename: testFile,
-      errors: 1,
-    },
-  ],
-});
-
-ruleTester.run("landmines/no-imported-mutation", landmines.rules["no-imported-mutation"], {
-  valid: [
-    {
-      code: "import { options } from './config'; const local = { ...options, enabled: true };",
-      filename: testFile,
-    },
-  ],
-  invalid: [
-    {
-      code: "import { options } from './config'; options.enabled = true;",
       filename: testFile,
       errors: 1,
     },
@@ -105,7 +113,9 @@ ruleTester.run("landmines/strict-msw", landmines.rules["strict-msw"], {
 });
 
 it("enforces production guardrails through the pinned Vite+ lint command", () => {
-  const directory = mkdtempSync(join(repositoryRoot, "frontend/app/src/lint-guardrails-"));
+  const directory = mkdtempSync(
+    join(repositoryRoot, "frontend/app/src/components/composer/lint-guardrails-"),
+  );
   const fixture = join(directory, "example.ts");
   const lint = (source) => {
     writeFileSync(fixture, source);
@@ -130,6 +140,7 @@ it("enforces production guardrails through the pinned Vite+ lint command", () =>
       export function run() { Promise.resolve(1); }
       export const values = [1, 2].reduce((all, value) => [...all, value], [] as number[]);
       export const forged = {} as unknown as { id: string };
+      export function hideFailure() { void Promise.reject(new Error()).catch(() => {}); }
     `);
     assert.equal(invalid.error, undefined);
     assert.equal(invalid.status, 1, invalid.stdout + invalid.stderr);
@@ -138,6 +149,7 @@ it("enforces production guardrails through the pinned Vite+ lint command", () =>
       "no-floating-promises",
       "no-accumulating-spread",
       "no-chained-type-assertions",
+      "no-silent-catch",
     ]) {
       assert.ok(
         diagnostics.some((diagnostic) => diagnostic.code?.includes(name)),

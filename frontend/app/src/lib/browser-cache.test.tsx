@@ -31,6 +31,15 @@ import {
 const scope = { isSignedIn: true, workspaceId: "workspace-a", brandProfileId: null };
 let client: QueryClient;
 
+async function waitForCache(assertion: () => void): Promise<void> {
+  await vi.waitFor(async () => {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    assertion();
+  });
+}
+
 function Wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
@@ -199,7 +208,7 @@ describe("private browser read cache", () => {
   });
 
   it("updates in-flight Posts without refetching loaded pages or disturbing settled rows", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const fixture = contractSuccessBody<Post>("getPost");
     const distribution = contractSuccessBody<Post["distributions"][number]>("getDistribution");
     const pending: Post = {
@@ -230,17 +239,17 @@ describe("private browser read cache", () => {
       }),
     );
     const view = renderHook(() => usePosts(scope), { wrapper: Wrapper });
-    await waitFor(() => expect(view.result.current.data?.[0]?.id).toBe("pending-post"));
+    await waitForCache(() => expect(view.result.current.data?.[0]?.id).toBe("pending-post"));
     await act(async () => {
       await view.result.current.fetchNextPage();
     });
-    await waitFor(() =>
+    await waitForCache(() =>
       expect(view.result.current.data?.map((post) => post.id)).toEqual([
         "pending-post",
         "settled-post",
       ]),
     );
-    await waitFor(() =>
+    await waitForCache(() =>
       expect(view.result.current.data?.[0]?.distributions[0]?.status).toBe("published"),
     );
     expect(view.result.current.data?.[1]).toEqual(settled);
@@ -376,7 +385,7 @@ describe("private browser read cache", () => {
   });
 
   it("refreshes only active and newly due Calendar details, preserving settled events", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const fixture = contractSuccessBody<Post["distributions"][number]>("getDistribution");
     const startedAt = Date.now();
     const clock = vi.spyOn(Date, "now").mockReturnValue(startedAt);
@@ -434,14 +443,14 @@ describe("private browser read cache", () => {
         }),
       { wrapper: Wrapper },
     );
-    await waitFor(() => expect(view.result.current.data?.[0]?.status).toBe("published"));
+    await waitForCache(() => expect(view.result.current.data?.[0]?.status).toBe("published"));
     expect(paths.some((path) => path.endsWith("/future-outcome"))).toBe(false);
     expect(view.result.current.data?.[2]).toEqual(settled);
     clock.mockReturnValue(startedAt + 61_000);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
-    await waitFor(() => expect(view.result.current.data?.[1]?.status).toBe("published"));
+    await waitForCache(() => expect(view.result.current.data?.[1]?.status).toBe("published"));
     expect(paths.filter((path) => path.endsWith("/calendar"))).toHaveLength(1);
     expect(paths.some((path) => path.endsWith("/settled-outcome"))).toBe(false);
     const completedReads = paths.length;

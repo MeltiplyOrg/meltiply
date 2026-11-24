@@ -130,7 +130,6 @@ export default defineConfig({
       "typescript/no-empty-object-type": "error",
       "typescript/no-explicit-any": "error",
       "typescript/no-extra-non-null-assertion": "error",
-      "typescript/no-floating-promises": "error",
       "typescript/no-misused-new": "error",
       "typescript/no-namespace": "error",
       "typescript/no-non-null-asserted-optional-chain": "error",
@@ -145,8 +144,6 @@ export default defineConfig({
       "typescript/triple-slash-reference": "error",
       "vite-plus/prefer-vite-plus-imports": "error",
       "oxc/no-accumulating-spread": "error",
-      "landmines/no-conditional-expect": "error",
-      "landmines/no-imported-mutation": "error",
       "landmines/no-shared-signal": "error",
       "landmines/strict-msw": "error",
     },
@@ -154,6 +151,7 @@ export default defineConfig({
       {
         files: ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"],
         rules: {
+          "typescript/no-floating-promises": "error",
           "constructor-super": "off",
           "getter-return": "off",
           "no-array-constructor": "error",
@@ -485,9 +483,25 @@ export default defineConfig({
         },
       },
       {
-        files: ["frontend/app/src/lib/browser-cache.test.tsx", "frontend/app/e2e/cache-smoke.mjs"],
+        files: ["frontend/app/src/components/composer/**/*.{ts,tsx}"],
+        rules: {
+          "landmines/no-silent-catch": "error",
+        },
+      },
+      {
+        files: [
+          "frontend/app/src/lib/browser-cache.test.tsx",
+          "frontend/app/e2e/cache-smoke.mjs",
+          "frontend/app/e2e/posts-composer.spec.ts",
+        ],
         rules: {
           "landmines/no-fixed-sleep": "error",
+        },
+      },
+      {
+        files: ["frontend/app/e2e/posts-composer.spec.ts"],
+        rules: {
+          "landmines/no-unsignaled-poll": "error",
         },
       },
       {

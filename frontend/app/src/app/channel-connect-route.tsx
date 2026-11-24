@@ -14,7 +14,7 @@ function ChannelConnectSurface(): React.ReactElement | null {
   const finished = useRef(false);
 
   useEffect(() => {
-    if (!selectionId) navigate("/channels", { replace: true });
+    if (!selectionId) void navigate("/channels", { replace: true });
   }, [selectionId, navigate]);
 
   const finish = useCallback(
@@ -24,7 +24,7 @@ function ChannelConnectSurface(): React.ReactElement | null {
       const outcome = connected
         ? `/channels?oauth=connected&provider=${encodeURIComponent(provider ?? "")}`
         : "/channels";
-      navigate(outcome, { replace: true });
+      void navigate(outcome, { replace: true });
     },
     [navigate, provider],
   );

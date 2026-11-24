@@ -145,7 +145,7 @@ export function AnalyticsView(): React.ReactElement {
     platform: Platform | undefined;
     range: typeof range;
   }) => {
-    navigate(`${pathname}?${formatAnalyticsSearchParams(next)}`);
+    void navigate(`${pathname}?${formatAnalyticsSearchParams(next)}`);
   };
 
   const connectedPlatforms = new Set(

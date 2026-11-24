@@ -80,7 +80,7 @@ export default function SettingsPage({
 }: {
   embedded?: boolean;
 } = {}): React.ReactElement {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const { canManageSettings, isInstallationOwner, isLoading, user } = useWorkspace();
   const scope = useSessionScope();
   const workspaceId = user?.orgId ?? "";
@@ -437,7 +437,7 @@ export default function SettingsPage({
                             dateTime={invitation.expires_at}
                             className="whitespace-nowrap text-xs text-ink-3"
                           >
-                            {new Date(invitation.expires_at).toLocaleDateString()}
+                            {new Date(invitation.expires_at).toLocaleDateString(language)}
                           </time>
                         </TableCell>
                         <TableCell>

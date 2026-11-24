@@ -1,4 +1,4 @@
-import type { ChannelIntegration, PostContentItem } from "@/api/types";
+import type { ChannelIntegration } from "@/api/types";
 import type { WorkspaceView } from "@/lib/navigation";
 import type {
   Asset,
@@ -31,7 +31,7 @@ export interface PostDetailItem {
   status: string;
   errorMessage?: string | null;
   integration?: ChannelIntegration;
-  content: PostContentItem[];
+  caption: string;
   attachments: ChannelMediaItem[];
   distribution?: Distribution;
   target?: PostTarget;

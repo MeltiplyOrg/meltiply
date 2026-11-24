@@ -146,8 +146,14 @@ interface PostMutation {
   };
 }
 
-async function watchPostMutations(page: Page): Promise<PostMutation[]> {
+interface PostMutationRecorder {
+  mutations: PostMutation[];
+  waitForSaveAfter: (seen: number) => Promise<void>;
+}
+
+async function watchPostMutations(page: Page): Promise<PostMutationRecorder> {
   const mutations: PostMutation[] = [];
+  const waiting = new Set<{ seen: number; resolve: () => void }>();
   await page.route(/\/api\/v1\/posts(\/|\?|$)/, async (route) => {
     const request = route.request();
     const isDraftSave =
@@ -160,16 +166,29 @@ async function watchPostMutations(page: Page): Promise<PostMutation[]> {
     const response = await route.fetch();
     const body = (await response.json()) as PostMutation["response"];
     const parsedRequest: unknown = JSON.parse(request.postData() ?? "{}");
+    const headers = { ...response.headers() };
+    delete headers["content-length"];
+    await route.fulfill({ body: JSON.stringify(body), headers, status: response.status() });
     mutations.push({
       method: request.method(),
       request: parsedRequest as PostMutation["request"],
       response: body,
     });
-    const headers = { ...response.headers() };
-    delete headers["content-length"];
-    await route.fulfill({ body: JSON.stringify(body), headers, status: response.status() });
+    for (const waiter of waiting) {
+      if (mutations.length <= waiter.seen) continue;
+      waiting.delete(waiter);
+      waiter.resolve();
+    }
   });
-  return mutations;
+  return {
+    mutations,
+    waitForSaveAfter(seen) {
+      if (mutations.length > seen) return Promise.resolve();
+      const { promise, resolve } = Promise.withResolvers<void>();
+      waiting.add({ seen, resolve });
+      return promise;
+    },
+  };
 }
 
 async function holdNextPostSave(page: Page): Promise<{
@@ -204,10 +223,6 @@ async function holdNextPostSave(page: Page): Promise<{
     await route.fallback();
   });
   return { arrived, held, release: () => open() };
-}
-
-async function waitForPostSave(mutations: readonly PostMutation[], seen: number): Promise<void> {
-  await expect.poll(() => mutations.length, { timeout: 60_000 }).toBeGreaterThan(seen);
 }
 
 async function presentChannelAsProvider(
@@ -430,7 +445,7 @@ test("recovers independent profile copies and retries only unfinished publishing
   await secondaryPanel
     .getByRole("button", { name: attachmentControlName("1. ", video.name) })
     .click();
-  const mutations = await watchPostMutations(page);
+  const { mutations } = await watchPostMutations(page);
   let rejectSecondaryDraft = true;
   await page.route(/\/api\/v1\/asset-upload-sessions$/, async (route) => {
     const body: unknown = route.request().postDataJSON();
@@ -706,7 +721,7 @@ test("detaches an in-flight attachment without reattaching or leaking it", async
   await trackBlobUrls(page);
   await openIsolatedOwnerWorkspace(page);
   await openComposer(page);
-  const mutations = await watchPostMutations(page);
+  const { mutations, waitForSaveAfter } = await watchPostMutations(page);
 
   await composerTextarea(page).fill("Detached upload journey");
   await saveDraft(page);
@@ -752,7 +767,7 @@ test("detaches an in-flight attachment without reattaching or leaking it", async
 
   const beforeRelease = mutations.length;
   held.release();
-  await waitForPostSave(mutations, beforeRelease);
+  await waitForSaveAfter(beforeRelease);
   const detachedAssetIds = held.held[0]?.attachment_ids ?? [];
   expect(detachedAssetIds).toHaveLength(1);
   const detachedAssetId = detachedAssetIds[0];
@@ -761,7 +776,7 @@ test("detaches an in-flight attachment without reattaching or leaking it", async
     .getByRole("button", { name: /save( draft)?$/i })
     .first()
     .click();
-  await waitForPostSave(mutations, beforeSave);
+  await waitForSaveAfter(beforeSave);
   const latest = mutations[mutations.length - 1];
   expect(latest.request.attachment_ids).not.toContain(detachedAssetId);
   expect(latest.response.attachments.map((attachment) => attachment.asset_id)).not.toContain(
@@ -854,7 +869,7 @@ test("identifies media-required channels before submitting text-only posts", asy
 }) => {
   const { profileName } = await openIsolatedOwnerWorkspace(page);
   const [instagram] = await attachChannels(page, request, profileName, ["instagram"]);
-  const mutations = await watchPostMutations(page);
+  const { mutations } = await watchPostMutations(page);
 
   const capabilitiesArrived = page.waitForResponse(
     (response) => response.url().includes("/platforms/capabilities") && response.ok(),
@@ -989,7 +1004,7 @@ test("reopens a draft whose provider options have no distribution", async ({ pag
   await reloadWithScopedProfile(page);
   await openComposer(page);
 
-  const mutations = await watchPostMutations(page);
+  const { mutations, waitForSaveAfter } = await watchPostMutations(page);
   const title = "Title without a distribution";
   const tags = "alpha, beta";
   const channelPanel = page.getByRole("region", { name: channel, exact: true });
@@ -1024,7 +1039,7 @@ test("reopens a draft whose provider options have no distribution", async ({ pag
     .getByRole("button", { name: /save( draft)?$/i })
     .first()
     .click();
-  await waitForPostSave(mutations, beforeSave);
+  await waitForSaveAfter(beforeSave);
   expect(mutations[mutations.length - 1].request.targets?.[0]).toMatchObject({
     hashtags: ["alpha", "beta"],
     title_override: title,
@@ -1036,7 +1051,7 @@ test("keeps an enabled but blank channel caption blank across saves", async ({ p
   const [channel] = await attachChannels(page, request, profileName, ["threads"]);
   await openComposer(page);
 
-  const mutations = await watchPostMutations(page);
+  const { mutations, waitForSaveAfter } = await watchPostMutations(page);
   const caption = "Blank override journey";
   await composerTextarea(page).fill(caption);
   const channelPanel = page.getByRole("region", { name: channel, exact: true });
@@ -1063,7 +1078,7 @@ test("keeps an enabled but blank channel caption blank across saves", async ({ p
     .getByRole("button", { name: /save( draft)?$/i })
     .first()
     .click();
-  await waitForPostSave(mutations, beforeSave);
+  await waitForSaveAfter(beforeSave);
   expect(mutations[mutations.length - 1].request.targets?.[0]?.description_override).toBe("");
 });
 

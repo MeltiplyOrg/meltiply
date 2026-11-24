@@ -93,7 +93,7 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
 
   const complete = () => {
     if (onSuccess) onSuccess();
-    else navigate(redirectTo, { replace: true });
+    else void navigate(redirectTo, { replace: true });
   };
 
   const derivedLabel = (name.trim() || email.trim().split("@")[0] || "Meltiply").slice(0, 180);

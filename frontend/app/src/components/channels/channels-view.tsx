@@ -154,7 +154,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
     next.delete("oauth");
     next.delete("provider");
     const query = next.toString();
-    navigate(`${pathname}${query ? `?${query}` : ""}`, { replace: true });
+    void navigate(`${pathname}${query ? `?${query}` : ""}`, { replace: true });
   }, [navigate, oauthMessage, oauthOutcome, pathname, searchParams, t]);
 
   const platformsQuery = usePlatforms(scope);

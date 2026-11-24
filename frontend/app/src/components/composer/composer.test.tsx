@@ -483,6 +483,47 @@ describe("Composer and collection scope", () => {
   });
 });
 
+describe("Composer attachment ownership", () => {
+  it("shows a failed ownership write and saves the attachment on an explicit retry", async () => {
+    vi.mocked(updatePost)
+      .mockReturnValueOnce(
+        Effect.fail(
+          new ApiError(new Response(null, { status: 503 }), {
+            error: { code: "dependency_unavailable", message: "database unavailable" },
+          }),
+        ),
+      )
+      .mockReturnValue(Effect.succeed(hydratedPost));
+    renderComposer({
+      brandProfiles: composerProfiles,
+      initialPostId: hydratedPost.id,
+      post: hydratedPost,
+    });
+    await waitFor(() => expect(composerTextarea()).toHaveValue(hydratedPost.default_text));
+    fireEvent.change(screen.getByLabelText("Add Media"), {
+      target: { files: [new File(["bytes"], "clip.mp4", { type: "video/mp4" })] },
+    });
+    const upload = vi.mocked(createAssetUpload).mock.calls[0]![0];
+    await act(async () => {
+      await upload.onSessionStart?.("ownership-asset");
+    });
+
+    expect(await screen.findByText("An error has occurred.")).toBeVisible();
+    expect(updatePost).toHaveBeenCalledTimes(1);
+    fireEvent.change(composerTextarea(), { target: { value: "Keep this attachment" } });
+    expect(updatePost).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    await waitFor(() => expect(updatePost).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(updatePost).mock.lastCall?.[2]).toMatchObject({
+      attachment_ids: ["ownership-asset"],
+      default_text: "Keep this attachment",
+    });
+    await waitFor(() =>
+      expect(screen.queryByText("An error has occurred.")).not.toBeInTheDocument(),
+    );
+  });
+});
+
 describe("Composer channel captions", () => {
   it("keeps blank channel edits independent and restores live inheritance on reset", async () => {
     renderComposer({

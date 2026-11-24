@@ -1,10 +1,10 @@
 import { Effect } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
+import { isPlatform } from "@meltiply/domain";
 import {
   isDiagnosticCategory,
   isDiscoverySource,
   isOperationCategory,
-  isPlatform,
   isProviderFailureClass,
   reportingConfiguration,
   REPORTING_MAX_DELIVERY_BATCH,

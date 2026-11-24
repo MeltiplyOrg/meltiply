@@ -54,7 +54,8 @@ jobs:
         run: |
           status=0
           node --test lint/*.test.mjs || status=1
-          bun run --cwd frontend/app test src/lib/browser-cache.test.tsx --coverage.enabled=false || status=1
+          bun run --cwd frontend/app test src/lib/browser-cache.test.tsx src/components/posts/post-row.test.ts src/components/composer/composer.test.tsx src/components/settings-page.test.tsx --coverage.enabled=false || status=1
+          bun run --cwd workers/automation test test/account-analytics.test.ts test/channel-revocation.test.ts --coverage.enabled=false || status=1
           bun run lint || status=1
           bun run docs:links || status=1
           exit "$status"

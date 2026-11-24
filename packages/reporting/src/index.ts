@@ -12,7 +12,6 @@ export {
   isDiagnosticCategory,
   isDiscoverySource,
   isOperationCategory,
-  isPlatform,
   isProviderFailureClass,
   OPERATION_CATEGORIES,
   PROVIDER_FAILURE_CLASSES,

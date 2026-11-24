@@ -18,21 +18,6 @@ export interface ChannelIntegration {
   disabled: boolean;
   refreshNeeded: boolean;
   brandProfileId: string;
-  postingTimes?: string;
-  additionalSettings?: string;
-}
-
-export interface MediaItem {
-  id: string;
-  path: string;
-  name?: string;
-}
-
-export interface PostContentItem {
-  id?: string;
-  content: string;
-  image?: MediaItem[];
-  delay?: number;
 }
 
 export interface YoutubeSettings {
@@ -40,7 +25,6 @@ export interface YoutubeSettings {
   type: "public" | "private" | "unlisted";
   selfDeclaredMadeForKids?: "no" | "yes";
   tags?: Array<{ value: string; label: string }>;
-  thumbnail?: MediaItem;
 }
 
 export interface TikTokSettings {

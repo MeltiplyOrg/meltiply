@@ -440,7 +440,9 @@ test("recovers independent profile copies and retries only unfinished publishing
   await composerFileInput(page).setInputFiles(video);
   await expectAttachmentPhases(page, [[video.name, "Ready"]]);
   const secondaryPanel = page.getByRole("region", { name: "Secondary Threads", exact: true });
-  await secondaryPanel.getByRole("textbox").fill(secondaryCaption);
+  await secondaryPanel
+    .getByRole("textbox", { name: "Custom Text for Secondary Threads", exact: true })
+    .fill(secondaryCaption);
   await secondaryPanel.getByRole("switch", { name: "Use post attachments", exact: true }).click();
   await secondaryPanel
     .getByRole("button", { name: attachmentControlName("1. ", video.name) })
@@ -475,7 +477,9 @@ test("recovers independent profile copies and retries only unfinished publishing
   await reloadWithScopedProfile(page);
   await openComposer(page);
   await expect(composerTextarea(page)).toHaveValue(caption);
-  await expect(secondaryPanel.getByRole("textbox")).toHaveValue(secondaryCaption);
+  await expect(
+    secondaryPanel.getByRole("textbox", { name: "Custom Text for Secondary Threads", exact: true }),
+  ).toHaveValue(secondaryCaption);
   await page.getByRole("button", { name: "Save Drafts", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText(/Saved to your workspace at/i)).toBeVisible({ timeout: 60_000 });
@@ -963,7 +967,9 @@ test("reopens one Post with its ordered attachments and channel targets", async 
   const instagramPanel = page.getByRole("region", { name: instagram, exact: true });
   const threadsPanel = page.getByRole("region", { name: threads, exact: true });
   await instagramPanel.getByRole("switch", { name: "Use post attachments", exact: true }).click();
-  await threadsPanel.getByRole("textbox").fill("Threads-only caption");
+  await threadsPanel
+    .getByRole("textbox", { name: `Custom Text for ${threads}`, exact: true })
+    .fill("Threads-only caption");
   await saveDraft(page);
   const savedPreview = new RegExp(`${caption}|Threads-only caption`);
 
@@ -977,7 +983,9 @@ test("reopens one Post with its ordered attachments and channel targets", async 
   await expect(
     instagramPanel.getByRole("switch", { name: "Use post attachments", exact: true }),
   ).toHaveAttribute("aria-checked", "false");
-  await expect(threadsPanel.getByRole("textbox")).toHaveValue("Threads-only caption");
+  await expect(
+    threadsPanel.getByRole("textbox", { name: `Custom Text for ${threads}`, exact: true }),
+  ).toHaveValue("Threads-only caption");
 
   const second = await browser.newContext();
   const secondPage = await second.newPage();
@@ -991,7 +999,9 @@ test("reopens one Post with its ordered attachments and channel targets", async 
     [png.name, "2. "],
   ]);
   await expect(
-    secondPage.getByRole("region", { name: threads, exact: true }).getByRole("textbox"),
+    secondPage
+      .getByRole("region", { name: threads, exact: true })
+      .getByRole("textbox", { name: `Custom Text for ${threads}`, exact: true }),
   ).toHaveValue("Threads-only caption");
   await second.close();
 });

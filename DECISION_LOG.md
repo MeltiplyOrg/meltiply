@@ -156,11 +156,19 @@ later `skills:check` fails on unchanged managed-pack drift; React diagnostics ar
 therefore not reached in that lane. The
 [fresh-fixture control](https://github.com/MeltiplyOrg/meltiply/actions/runs/45385273363)
 separates fixture contamination from the corrected capability wait.
-The changed composer recorder callers and React diagnostics still require hosted
-publishing-browser verification. Passing unit tests alone is not runtime acceptance.
+The full application gate, React diagnostics command, and changed composer save,
+recovery, detach, Provider-options, and blank-caption scenarios
+[pass without retries](https://github.com/MeltiplyOrg/meltiply/actions/runs/45399029343).
+The acceptance selection also includes the ordered-attachments reopening scenario
+whose caption locators were corrected during the same test review.
 
 Independent reviews traced the delivered fixes and identified the late-write and
-fake-timer bypass problems addressed above. The final targeted review found no
+fake-timer bypass problems addressed above. The final targeted reviews found no
 further actionable defect. Review coverage remains sampled across large frontend,
 Worker, and tooling modules; this is not a claim that the entire repository has
 no other worthwhile issues.
+
+[Automatic CI](https://github.com/MeltiplyOrg/meltiply/actions/runs/45392469307)
+passes frontend, performance, and tooling jobs but retains the baseline secret-scan,
+spelling, and self-hosted smoke failures. No failing rule, test, or CI check is
+suppressed to make this change pass. Managed skill files remain untouched.

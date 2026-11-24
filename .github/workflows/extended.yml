@@ -113,7 +113,7 @@ jobs:
         run: |
           bash scripts/cloudflare-local/database.sh reset
           status=0
-          bun run --cwd frontend/app test:e2e e2e/posts-composer.spec.ts --project composer --grep "recovers independent profile copies|detaches an in-flight attachment|reopens a draft whose provider options|keeps an enabled but blank channel caption" --trace on --retries 0 || status=1
+          bun run --cwd frontend/app test:e2e e2e/posts-composer.spec.ts --project composer --grep "recovers independent profile copies|detaches an in-flight attachment|reopens one Post with its ordered attachments|reopens a draft whose provider options|keeps an enabled but blank channel caption" --trace on --retries 0 || status=1
           mkdir -p artifacts/publishing/recovery
           cp -R frontend/app/test-results/. artifacts/publishing/recovery/ 2>/dev/null || true
           exit "$status"

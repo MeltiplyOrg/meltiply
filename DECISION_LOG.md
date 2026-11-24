@@ -156,11 +156,9 @@ later `skills:check` fails on unchanged managed-pack drift; React diagnostics ar
 therefore not reached in that lane. The
 [fresh-fixture control](https://github.com/MeltiplyOrg/meltiply/actions/runs/45385273363)
 separates fixture contamination from the corrected capability wait.
-The full application gate, React diagnostics command, and changed composer save,
-recovery, detach, Provider-options, and blank-caption scenarios
-[pass without retries](https://github.com/MeltiplyOrg/meltiply/actions/runs/45399029343).
-The acceptance selection also includes the ordered-attachments reopening scenario
-whose caption locators were corrected during the same test review.
+The full application gate, React diagnostics command, and composer save,
+recovery, detach, ordered-attachment reopening, Provider-options, and blank-caption
+scenarios [pass without retries](https://github.com/MeltiplyOrg/meltiply/actions/runs/45401216968).
 
 Independent reviews traced the delivered fixes and identified the late-write and
 fake-timer bypass problems addressed above. The final targeted reviews found no

@@ -55,12 +55,7 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
         profileReads++;
       if (analyticsPaths.has(url.pathname)) analyticsReads.push(url);
     });
-    const capabilities = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === "/api/v1/platforms/capabilities" && response.ok(),
-    );
     await page.goto(`${origin}/posts`);
-    assert.equal(await (await capabilities).finished(), null);
     await expect(page.getByRole("heading", { name: "Posts", exact: true })).toBeVisible();
     if (progressFixture) {
       await expect(page.getByText("Progress removed smoke", { exact: true }).first()).toBeVisible();
@@ -92,12 +87,20 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
       }
       await page.setViewportSize({ width: 1280, height: 900 });
     }
-    await page.getByRole("button", { name: "Channels", exact: true }).click();
+    const [capabilities] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v1/platforms/capabilities" && response.ok(),
+      ),
+      page.getByRole("button", { name: "Channels", exact: true }).click(),
+    ]);
+    assert.equal(await capabilities.finished(), null);
     await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
     assert.equal(reads, 1);
-    const initialAnalytics = waitForAnalytics(page);
-    await page.getByRole("button", { name: "Analytics", exact: true }).click();
-    await initialAnalytics;
+    await Promise.all([
+      waitForAnalytics(page),
+      page.getByRole("button", { name: "Analytics", exact: true }).click(),
+    ]);
     await expect(page.getByRole("heading", { name: "Analytics", exact: true })).toBeVisible();
     assert.equal(analyticsReads.length, 2);
     assert.equal(
@@ -152,9 +155,7 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
         assert.ok(previous);
         await page.clock.setFixedTime(new Date(Date.parse(previous) + 1_000));
         const expected = analyticsReads.length + 2;
-        const refreshedAnalytics = waitForAnalytics(page);
-        await refresh.click();
-        await refreshedAnalytics;
+        await Promise.all([waitForAnalytics(page), refresh.click()]);
         assert.equal(analyticsReads.length, expected);
         await expect(refresh).toBeEnabled();
         const [dashboard, ranked] = analyticsReads.slice(-2);
@@ -173,12 +174,14 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
     }
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole("button", { name: "Channels", exact: true }).click();
-    const reloadedCapabilities = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === "/api/v1/platforms/capabilities" && response.ok(),
-    );
-    await page.reload();
-    assert.equal(await (await reloadedCapabilities).finished(), null);
+    const [reloadedCapabilities] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v1/platforms/capabilities" && response.ok(),
+      ),
+      page.reload(),
+    ]);
+    assert.equal(await reloadedCapabilities.finished(), null);
     await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
     assert.equal(reads, 2);
     console.log(

@@ -390,6 +390,7 @@ jobs:
           API_BASE_URL: http://127.0.0.1:8787
           APP_URL: http://127.0.0.1:3000
         run: |
+          bash scripts/cloudflare-local/database.sh reset
           ./scripts/cloudflare-local/compose.sh exec -T postgres psql -U postgres -d meltiply -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements'"
           ./scripts/cloudflare-local/compose.sh restart postgres
           ./scripts/cloudflare-local/compose.sh up -d --wait postgres

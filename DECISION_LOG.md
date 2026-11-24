@@ -30,6 +30,9 @@ baseline; the fixes describe the current ownership.
     and polls request counters rather than awaiting the requests.
   - `frontend/app/e2e/posts-composer.spec.ts` polls a mutation recorder even though
     the mutation has an observable response.
+  - Register capability completion before the Channels action that starts its
+    request. Waiting on Posts for a request only Channels makes blocks the action
+    that can satisfy the wait.
 
 - Make `@meltiply/domain` the owner of Platform recognition. Migrate callers and
   delete the duplicate reporting export rather than retaining an alias.
@@ -68,6 +71,14 @@ baseline; the fixes describe the current ownership.
 - Use the active application language for invitation expiry dates.
   - `frontend/app/src/app/(dashboard)/settings/page.tsx` formats these dates with
     the browser locale while other settings tables use the selected language.
+
+- Give runtime acceptance its own disposable database fixture after integration.
+  - `test:integration` leaves signing keys encrypted with its fixture secret in
+    the shared local database. The development runtime uses a separately
+    generated local secret; the combined cache lane then fails token minting.
+  - The fresh-database control reaches token minting successfully. Keep phase
+    isolation in the hosted workflow, not a key-deletion workaround in auth or
+    an unsafe database reset inside the reusable local smoke script.
 
 - Remove implementation-restating comments and review tests after the structural
   fixes. Keep tests that distinguish a real regression from an internal rename.
@@ -125,10 +136,14 @@ passes real positive and negative Vite+ diagnostics for every added rule, strict
 lint, cache and composer regressions, row projections, selected-language dates,
 account-analytics failures, channel revocation, and documentation checks.
 
-The cross-cutting `bun run cloudflare:check` and real cache/browser acceptance are
-[in progress](https://github.com/MeltiplyOrg/meltiply/actions/runs/45384060377).
-Changed composer recorder callers also require the hosted publishing-browser
-acceptance lane. Passing unit tests alone is not runtime acceptance.
+The cross-cutting `bun run cloudflare:check`
+[passes](https://github.com/MeltiplyOrg/meltiply/actions/runs/45384060377).
+That run's later cache acceptance fails before the browser because it reuses
+integration signing keys. The
+[fresh-fixture control](https://github.com/MeltiplyOrg/meltiply/actions/runs/45385273363)
+passes token minting and exposes the misplaced capability wait instead.
+Cache acceptance and the changed composer recorder callers still require hosted
+verification. Passing unit tests alone is not runtime acceptance.
 
 Independent reviews traced the delivered fixes and identified the late-write and
 fake-timer bypass problems addressed above. The final targeted review found no

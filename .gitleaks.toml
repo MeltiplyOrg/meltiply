@@ -53,6 +53,12 @@ condition = "AND"
 paths = ['''^packages/database/migrations/001_baseline_schema\.sql$''']
 regexes = ['''^r2_thumbnail$''']
 
+[[rules.allowlists]]
+description = "Sequential 16-character boundary fixture for processor token validation"
+condition = "AND"
+paths = ['''^workers/automation/processor/engine/engine-job\.test\.mjs$''']
+regexes = ['''^0123456789abcdef$''']
+
 [[rules]]
 id = "jwt"
 [[rules.allowlists]]

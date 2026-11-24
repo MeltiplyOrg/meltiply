@@ -34,13 +34,13 @@ extend-glob = ["CC-BY-3.0.txt"]
 MERCHANTIBILITY = "MERCHANTIBILITY"
 
 [type.schedule-date-time-test]
-extend-glob = ["frontend/app/src/components/composer/schedule-date-time.test.tsx"]
+extend-glob = ["schedule-date-time.test.tsx"]
 
 [type.schedule-date-time-test.extend-words]
 Januar = "Januar"
 
 [type.calendar-date-detail-dialog-test]
-extend-glob = ["frontend/app/src/components/posts/calendar-date-detail-dialog.test.tsx"]
+extend-glob = ["calendar-date-detail-dialog.test.tsx"]
 
 [type.calendar-date-detail-dialog-test.extend-words]
 Oktober = "Oktober"

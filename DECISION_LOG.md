@@ -33,6 +33,10 @@ baseline; the fixes describe the current ownership.
   - The history scanner reports only a finding count. Enable redacted finding
     details so the source, rule, and commit can be investigated without exposing
     the matched credential.
+  - Its finding is the sequential 16-character processor config fixture, not a
+    credential. Match only that exact value, source path, and detector rule;
+    preserve history scanning and the detection canary. Prove the boundary with
+    real-scanner controls for different values, paths, and a prefixed value.
 
 - Control polling time and wait for request completion instead of guessing delays.
   Preserve the same observable cache and refresh assertions.

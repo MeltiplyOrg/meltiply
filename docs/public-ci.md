@@ -118,14 +118,15 @@ Worker runtime tries to read host-only cache paths.
 
 Spelling checks cover generated third-party notice bundles and localization tests.
 File-scoped dictionaries preserve an upstream author's surname and the German month
-names asserted by their owning tests. Preserve attribution and localization semantics
-rather than replacing them with English spellings.
+names asserted by their owning tests. Real-checker controls ensure that other files,
+other month names, and ordinary misspellings remain checked. Preserve attribution and
+localization semantics rather than replacing them with English spellings.
 
-The secret scanner keeps a live synthetic detection canary. Its config excludes three
-proven false positives only when their exact source path and rule also match: the Argo
-guide's `YOUR_API_TOKEN`, the SQL column `r2_thumbnail`, and one example JWT whose
-signature is plain text. These are not file or commit exemptions — different
-credentials in the same files still fail.
+The secret scanner keeps a live synthetic detection canary and reports redacted
+finding details. Proven documentation and test false positives are matched by exact
+value, source path, and detector rule, not file or commit exemptions. Real-scanner
+controls verify that the processor fixture exception rejects different values,
+paths, and prefixed values; different credentials in the same files still fail.
 
 ## Runner costs and branch protection
 

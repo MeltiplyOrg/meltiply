@@ -1415,8 +1415,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
 
     expect(processor.calls).toHaveLength(1);
     const [call] = processor.calls;
-    expect(call.deadlineSeconds).toBeGreaterThanOrEqual(5);
-    expect(call.deadlineSeconds).toBeLessThanOrEqual(540);
+    expect(call?.deadlineSeconds).toBeGreaterThanOrEqual(5);
+    expect(call?.deadlineSeconds).toBeLessThanOrEqual(540);
     expect(call).toMatchObject({
       expectedSize: body.byteLength,
       inputKey: originalKey,

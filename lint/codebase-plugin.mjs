@@ -138,19 +138,30 @@ function isExportDocComment(comment, context) {
 const codebasePlugin = {
   meta: { name: "meltiply" },
   rules: {
-    "no-unknown-double-cast": rule(
-      "Do not cast through `unknown`. Build a typed value (typed test builder, schema decode, or a narrow port type) instead.",
-      (_context, report) => ({
-        TSAsExpression(node) {
-          const inner = node.expression;
-          if (
-            inner?.type === "TSAsExpression" &&
-            inner.typeAnnotation?.type === "TSUnknownKeyword"
-          ) {
-            report(node);
+    "no-chained-type-assertions": rule(
+      "Do not chain type assertions. Preserve the original type, build a typed value, or validate untrusted input at its boundary.",
+      (_context, report) => {
+        const isAssertion = (node) =>
+          node?.type === "TSAsExpression" || node?.type === "TSTypeAssertion";
+        const check = (node) => {
+          let parent = node.parent;
+          while (parent?.type === "ParenthesizedExpression") parent = parent.parent;
+          if (isAssertion(parent)) return;
+          let current = node;
+          let count = 0;
+          let hasNonConstAssertion = false;
+          while (isAssertion(current)) {
+            count += 1;
+            const annotation = current.typeAnnotation;
+            hasNonConstAssertion ||=
+              annotation?.type !== "TSTypeReference" || annotation.typeName?.name !== "const";
+            current = current.expression;
+            while (current?.type === "ParenthesizedExpression") current = current.expression;
           }
-        },
-      }),
+          if (count > 1 && hasNonConstAssertion) report(node);
+        };
+        return { TSAsExpression: check, TSTypeAssertion: check };
+      },
     ),
 
     "no-error-message-classification": rule(

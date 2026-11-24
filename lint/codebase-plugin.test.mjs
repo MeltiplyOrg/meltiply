@@ -14,11 +14,12 @@ const workerFile = `${repositoryRoot}workers/api/src/example.ts`;
 const componentFile = `${repositoryRoot}frontend/app/src/components/example.tsx`;
 const rule = (name) => codebasePlugin.rules[name];
 
-ruleTester.run("meltiply/no-unknown-double-cast", rule("no-unknown-double-cast"), {
+ruleTester.run("meltiply/no-chained-type-assertions", rule("no-chained-type-assertions"), {
   valid: [
     { code: "const value = input as unknown;", filename: workerFile },
     { code: "const value = input as Record<string, string>;", filename: workerFile },
     { code: "const value = (input as unknown) satisfies unknown;", filename: workerFile },
+    { code: "const value = ({ id: 1 } as const) as const;", filename: workerFile },
   ],
   invalid: [
     {
@@ -26,6 +27,13 @@ ruleTester.run("meltiply/no-unknown-double-cast", rule("no-unknown-double-cast")
       filename: workerFile,
       errors: [{ messageId: "restricted" }],
     },
+    ...[
+      "const value = ((input as First)) as Second;",
+      "const value = <Second>(<First>input);",
+      "const value = (<First>input) as Second;",
+      "const value = input as First as Second as Third;",
+      "const value = ({ id: 1 } as const) as Record<string, string>;",
+    ].map((code) => ({ code, filename: workerFile, errors: [{ messageId: "restricted" }] })),
   ],
 });
 

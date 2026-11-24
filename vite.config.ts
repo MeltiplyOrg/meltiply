@@ -130,6 +130,7 @@ export default defineConfig({
       "typescript/no-empty-object-type": "error",
       "typescript/no-explicit-any": "error",
       "typescript/no-extra-non-null-assertion": "error",
+      "typescript/no-floating-promises": "error",
       "typescript/no-misused-new": "error",
       "typescript/no-namespace": "error",
       "typescript/no-non-null-asserted-optional-chain": "error",
@@ -143,6 +144,11 @@ export default defineConfig({
       "typescript/prefer-namespace-keyword": "error",
       "typescript/triple-slash-reference": "error",
       "vite-plus/prefer-vite-plus-imports": "error",
+      "oxc/no-accumulating-spread": "error",
+      "landmines/no-conditional-expect": "error",
+      "landmines/no-imported-mutation": "error",
+      "landmines/no-shared-signal": "error",
+      "landmines/strict-msw": "error",
     },
     overrides: [
       {
@@ -439,7 +445,7 @@ export default defineConfig({
           "vite.config.ts",
         ],
         rules: {
-          "meltiply/no-unknown-double-cast": "error",
+          "meltiply/no-chained-type-assertions": "error",
           "meltiply/no-error-message-classification": "error",
           "meltiply/no-platform-roster-literal": "error",
           "meltiply/no-sql-conditional-fragment": "error",
@@ -479,6 +485,12 @@ export default defineConfig({
         },
       },
       {
+        files: ["frontend/app/src/lib/browser-cache.test.tsx", "frontend/app/e2e/cache-smoke.mjs"],
+        rules: {
+          "landmines/no-fixed-sleep": "error",
+        },
+      },
+      {
         files: ["lint/codebase-plugin.test.mjs"],
         rules: {
           "meltiply/no-sql-date-column": "off",
@@ -499,6 +511,10 @@ export default defineConfig({
       {
         name: "meltiply",
         specifier: "./lint/codebase-plugin.mjs",
+      },
+      {
+        name: "landmines",
+        specifier: "@interfere/landmines",
       },
       {
         name: "shadcn",

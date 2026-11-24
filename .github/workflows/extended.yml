@@ -10,6 +10,7 @@ on:
         options:
           - frontend-full
           - frontend-ui
+          - lint-guardrails
           - cloudflare-integration
           - cloudflare-extended
           - cloudflare-full
@@ -48,6 +49,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
+      - name: Exercise lint guardrails and deterministic cache behavior
+        if: inputs.lane == 'lint-guardrails'
+        run: |
+          status=0
+          node --test lint/*.test.mjs || status=1
+          bun run --cwd frontend/app test src/lib/browser-cache.test.tsx --coverage.enabled=false || status=1
+          bun run lint || status=1
+          bun run docs:links || status=1
+          exit "$status"
       - name: Exercise publishing regressions
         if: inputs.lane == 'publishing-flow'
         run: |
@@ -920,7 +930,7 @@ jobs:
           ../../scripts/ci/lighthouse.sh http://127.0.0.1:3000/posts ../../artifacts/performance/lighthouse.json
           bun run --cwd ../public check
       - name: Stop owned local services
-        if: always() && inputs.lane != 'cloudflare-extended'
+        if: always() && inputs.lane != 'cloudflare-extended' && inputs.lane != 'lint-guardrails'
         run: ./scripts/cloudflare-local/teardown.sh
       - name: Preserve diagnostic and policy evidence
         if: always()

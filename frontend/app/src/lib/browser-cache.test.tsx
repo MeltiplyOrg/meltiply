@@ -199,6 +199,7 @@ describe("private browser read cache", () => {
   });
 
   it("updates in-flight Posts without refetching loaded pages or disturbing settled rows", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const fixture = contractSuccessBody<Post>("getPost");
     const distribution = contractSuccessBody<Post["distributions"][number]>("getDistribution");
     const pending: Post = {
@@ -246,10 +247,10 @@ describe("private browser read cache", () => {
     expect(paths.filter((path) => path.endsWith("/posts"))).toHaveLength(2);
     const completedReads = paths.length;
     await act(async () => {
-      await new Promise<void>((resolve) => setTimeout(resolve, 11_000));
+      await vi.advanceTimersByTimeAsync(20_000);
     });
     expect(paths).toHaveLength(completedReads);
-  }, 15_000);
+  });
   it("refreshes a dense active Post page with a batched list read", async () => {
     const fixture = contractSuccessBody<Post>("getPost");
     const distribution = contractSuccessBody<Post["distributions"][number]>("getDistribution");
@@ -375,6 +376,7 @@ describe("private browser read cache", () => {
   });
 
   it("refreshes only active and newly due Calendar details, preserving settled events", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const fixture = contractSuccessBody<Post["distributions"][number]>("getDistribution");
     const startedAt = Date.now();
     const clock = vi.spyOn(Date, "now").mockReturnValue(startedAt);
@@ -437,12 +439,17 @@ describe("private browser read cache", () => {
     expect(view.result.current.data?.[2]).toEqual(settled);
     clock.mockReturnValue(startedAt + 61_000);
     await act(async () => {
-      await new Promise<void>((resolve) => setTimeout(resolve, 11_000));
+      await vi.advanceTimersByTimeAsync(10_000);
     });
     await waitFor(() => expect(view.result.current.data?.[1]?.status).toBe("published"));
     expect(paths.filter((path) => path.endsWith("/calendar"))).toHaveLength(1);
     expect(paths.some((path) => path.endsWith("/settled-outcome"))).toBe(false);
-  }, 15_000);
+    const completedReads = paths.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(paths).toHaveLength(completedReads);
+  });
 
   it("refreshes multiple active Calendar outcomes with one range read", async () => {
     const fixture = contractSuccessBody<Post["distributions"][number]>("getDistribution");

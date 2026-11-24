@@ -136,14 +136,15 @@ passes real positive and negative Vite+ diagnostics for every added rule, strict
 lint, cache and composer regressions, row projections, selected-language dates,
 account-analytics failures, channel revocation, and documentation checks.
 
-The cross-cutting `bun run cloudflare:check`
-[passes](https://github.com/MeltiplyOrg/meltiply/actions/runs/45384060377).
-That run's later cache acceptance fails before the browser because it reuses
-integration signing keys. The
+The cross-cutting `bun run cloudflare:check` and real workerd cache/browser
+acceptance [pass](https://github.com/MeltiplyOrg/meltiply/actions/runs/45386271865).
+The cache smoke exercises both palettes at desktop and phone widths. The lane's
+later `skills:check` fails on unchanged managed-pack drift; React diagnostics are
+therefore not reached in that lane. The
 [fresh-fixture control](https://github.com/MeltiplyOrg/meltiply/actions/runs/45385273363)
-passes token minting and exposes the misplaced capability wait instead.
-Cache acceptance and the changed composer recorder callers still require hosted
-verification. Passing unit tests alone is not runtime acceptance.
+separates fixture contamination from the corrected capability wait.
+The changed composer recorder callers and React diagnostics still require hosted
+publishing-browser verification. Passing unit tests alone is not runtime acceptance.
 
 Independent reviews traced the delivered fixes and identified the late-write and
 fake-timer bypass problems addressed above. The final targeted review found no

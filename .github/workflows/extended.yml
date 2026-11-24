@@ -67,7 +67,7 @@ jobs:
           bun run --cwd packages/providers test test/facebook.test.ts test/instagram.test.ts test/threads.test.ts test/tiktok.test.ts test/youtube.test.ts --coverage.enabled=false || status=1
           exit "$status"
       - name: Review publishing React changes
-        if: inputs.lane == 'publishing-flow'
+        if: inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser'
         working-directory: frontend/app
         run: npx --yes react-doctor@0.9.18 --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
       - name: Prepare publishing acceptance

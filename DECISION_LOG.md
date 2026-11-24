@@ -16,9 +16,13 @@ net until the structural changes are verified.
     an executable policy.
   - The researched Cloudflare preset requires a newer toolchain. Installing it
     here would tie this cleanup to an unrelated upgrade.
-  - Status: implemented with TypeScript floating-promise checks, accumulating
-    spread, assertion chains, shared signals, strict MSW, and focused
-    synchronization/failure guards. Hosted verification is not yet green.
+  - The first-principles review found that landmines exempts a whole test file
+    when any fake-timer call appears. Date-only mocking can therefore hide a
+    real Promise sleep in another test.
+  - Add a focused raw-timer Promise guard for the cache tests. Exercise each
+    configured rule through real positive and negative Vite+ diagnostics.
+  - Status: the first focused runtime regressions pass. Guardrail hardening and
+    complete hosted verification remain in progress.
 
 - Control polling time and wait for request completion instead of guessing delays.
   Preserve the same observable cache and refresh assertions.
@@ -62,15 +66,17 @@ net until the structural changes are verified.
   - Status: implemented with row, frozen-publication, and event-only caption
     regression tests. Hosted tests are pending.
 
-- Give composer attachment-ownership persistence an explicit failure outcome.
-  Track attempts as attempts, show failures, and recover through explicit Save
-  rather than blindly repeating failed writes.
+- Queue composer attachment-ownership writes and make explicit Save follow that
+  queue. Show failures through the existing form state rather than silently
+  discarding them or blindly repeating writes.
   - `frontend/app/src/components/composer/composer.tsx` marks asset IDs as
     persisted before an asynchronous write and discards its rejection.
   - `useUpdatePost` does not own error presentation for this caller.
-  - Status: implemented using the existing form error and dirty state. The
-    regression test checks visible failure, no repeat on edits, and explicit
-    Save retaining the attachment. Hosted verification is pending.
+  - A late ownership rejection can mark a newer successful Save as failed.
+    Suppressing that message alone would still permit older writes to overwrite
+    newer attachment state. One composer-owned queue orders the actual writes.
+  - Status: visible failure and explicit-retry regressions pass. The queued-write
+    ordering regression and hosted revalidation remain in progress.
 
 - Use the active application language for invitation expiry dates.
   - `frontend/app/src/app/(dashboard)/settings/page.tsx` formats these dates with

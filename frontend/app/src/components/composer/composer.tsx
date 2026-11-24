@@ -483,6 +483,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const dirtyRef = useRef(false);
   const postIdRef = useRef<string | null>(null);
   const ownershipSyncAttemptedRef = useRef(new Set<string>());
+  const ownershipSyncRef = useRef<Promise<void> | null>(null);
   const removedAssetIdsRef = useRef<Set<string>>(new Set());
 
   const composerIdentity = `${scope.workspaceId ?? "personal"}::${ownerProfileId ?? "all"}::${initialPostId ?? "new"}`;
@@ -595,6 +596,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     dirtyRef.current = false;
     removedAssetIdsRef.current = new Set();
     ownershipSyncAttemptedRef.current = new Set();
+    ownershipSyncRef.current = null;
     setIsDirty(false);
   }, [setSelectedChannelIds]);
 
@@ -887,10 +889,13 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       attachmentIds.push(assetId);
       claimed.add(assetId);
     }
-    void updatePost
-      .mutateAsync({
-        id: postId,
-        input: { brand_profile_id: profileId, attachment_ids: attachmentIds },
+    ownershipSyncRef.current = (ownershipSyncRef.current ?? Promise.resolve())
+      .then(async () => {
+        if (composerIdentityRef.current !== identityAtStart) return;
+        await updatePost.mutateAsync({
+          id: postId,
+          input: { brand_profile_id: profileId, attachment_ids: attachmentIds },
+        });
       })
       .catch((error: unknown) => {
         if (composerIdentityRef.current !== identityAtStart) return;
@@ -1691,6 +1696,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
 
       setIsSubmitting(true);
       try {
+        await ownershipSyncRef.current;
+        setErrorMessage(null);
         if (
           type !== "queue" &&
           (selectedProfileIds.length !== 1 ||

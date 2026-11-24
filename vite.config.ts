@@ -489,17 +489,22 @@ export default defineConfig({
         },
       },
       {
+        files: ["frontend/app/src/lib/**/browser-cache.test.tsx"],
+        rules: {
+          "meltiply/no-promise-sleep": "error",
+        },
+      },
+      {
         files: [
-          "frontend/app/src/lib/browser-cache.test.tsx",
-          "frontend/app/e2e/cache-smoke.mjs",
-          "frontend/app/e2e/posts-composer.spec.ts",
+          "frontend/app/e2e/**/cache-smoke.mjs",
+          "frontend/app/e2e/**/posts-composer.spec.ts",
         ],
         rules: {
           "landmines/no-fixed-sleep": "error",
         },
       },
       {
-        files: ["frontend/app/e2e/posts-composer.spec.ts"],
+        files: ["frontend/app/e2e/**/posts-composer.spec.ts"],
         rules: {
           "landmines/no-unsignaled-poll": "error",
         },

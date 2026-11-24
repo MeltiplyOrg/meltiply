@@ -173,9 +173,14 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
     }
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole("button", { name: "Channels", exact: true }).click();
+    const reloadedCapabilities = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/v1/platforms/capabilities" && response.ok(),
+    );
     await page.reload();
+    assert.equal(await (await reloadedCapabilities).finished(), null);
     await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
-    await expect.poll(() => reads).toBe(2);
+    assert.equal(reads, 2);
     console.log(
       JSON.stringify({
         scenario: "browser-private-cache",

@@ -164,6 +164,44 @@ const codebasePlugin = {
       },
     ),
 
+    "no-promise-sleep": rule(
+      "Do not synchronize cache tests with timer Promises. Await a completion signal or advance the controlled clock.",
+      (_context, report) => ({
+        NewExpression(node) {
+          if (node.callee.type !== "Identifier" || node.callee.name !== "Promise") return;
+          const executor = node.arguments[0];
+          if (
+            executor?.type !== "ArrowFunctionExpression" &&
+            executor?.type !== "FunctionExpression"
+          )
+            return;
+          const resolve = executor.params[0];
+          if (resolve?.type !== "Identifier") return;
+          let body = executor.body;
+          if (body.type === "BlockStatement") {
+            if (body.body.length !== 1) return;
+            const statement = body.body[0];
+            body = statement.type === "ReturnStatement" ? statement.argument : statement.expression;
+          }
+          if (body?.type !== "CallExpression") return;
+          const callee = body.callee;
+          const isTimer =
+            (callee.type === "Identifier" && callee.name === "setTimeout") ||
+            (callee.type === "MemberExpression" &&
+              !callee.computed &&
+              ["globalThis", "window"].includes(callee.object?.name) &&
+              callee.property?.name === "setTimeout");
+          if (
+            isTimer &&
+            body.arguments[0]?.type === "Identifier" &&
+            body.arguments[0].name === resolve.name
+          ) {
+            report(node);
+          }
+        },
+      }),
+    ),
+
     "no-error-message-classification": rule(
       "Do not classify errors by message text. Branch on an error class, `_tag`, or a typed error code.",
       (_context, report) => ({

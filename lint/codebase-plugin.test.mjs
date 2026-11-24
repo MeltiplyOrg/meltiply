@@ -37,6 +37,25 @@ ruleTester.run("meltiply/no-chained-type-assertions", rule("no-chained-type-asse
   ],
 });
 
+ruleTester.run("meltiply/no-promise-sleep", rule("no-promise-sleep"), {
+  valid: [
+    { code: "await vi.advanceTimersByTimeAsync(10_000);", filename: componentFile },
+    {
+      code: "const pending = new Promise(resolve => { release = resolve; });",
+      filename: componentFile,
+    },
+    { code: "setTimeout(onIdle, 100);", filename: componentFile },
+  ],
+  invalid: [
+    ...[
+      "await new Promise(resolve => setTimeout(resolve, 11_000));",
+      "await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 11_000)); });",
+      "vi.useFakeTimers({ toFake: ['Date'] }); it('other test', async () => { await new Promise(resolve => setTimeout(resolve, 11_000)); });",
+      "vi.useFakeTimers(); const sleep = new Promise(resolve => { return globalThis.setTimeout(resolve, 100); });",
+    ].map((code) => ({ code, filename: componentFile, errors: [{ messageId: "restricted" }] })),
+  ],
+});
+
 ruleTester.run(
   "meltiply/no-error-message-classification",
   rule("no-error-message-classification"),

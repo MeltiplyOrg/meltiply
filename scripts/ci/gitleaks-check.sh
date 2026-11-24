@@ -19,7 +19,7 @@ if printf 'token=%s%s%s\n' "$canary_prefix" "$canary_marker" "$canary_body" \
   exit 1
 fi
 
-scan_args=(detect --config .gitleaks.toml --redact)
+scan_args=(detect --config .gitleaks.toml --redact --verbose)
 range="--all"
 echo "secret scan: $range"
 scan_args+=(--log-opts="$range")

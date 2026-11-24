@@ -59,6 +59,7 @@ jobs:
           bun run --cwd workers/automation test test/account-analytics.test.ts test/channel-revocation.test.ts --coverage.enabled=false || status=1
           bun run lint || status=1
           bun run docs:links || status=1
+          bun run skills:check || status=1
           exit "$status"
       - name: Exercise publishing regressions
         if: inputs.lane == 'publishing-flow'

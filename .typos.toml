@@ -33,6 +33,18 @@ extend-glob = ["CC-BY-3.0.txt"]
 [type.cc-by-license.extend-words]
 MERCHANTIBILITY = "MERCHANTIBILITY"
 
+[type.schedule-date-time-test]
+extend-glob = ["frontend/app/src/components/composer/schedule-date-time.test.tsx"]
+
+[type.schedule-date-time-test.extend-words]
+Januar = "Januar"
+
+[type.calendar-date-detail-dialog-test]
+extend-glob = ["frontend/app/src/components/posts/calendar-date-detail-dialog.test.tsx"]
+
+[type.calendar-date-detail-dialog-test.extend-words]
+Oktober = "Oktober"
+
 [type.python-license]
 extend-glob = ["python-argparse.txt"]
 

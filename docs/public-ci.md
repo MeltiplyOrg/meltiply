@@ -51,8 +51,8 @@ capability expiry must not let it outlive the persisted write hold.
 ## Manual lanes
 
 [`extended.yml`](../.github/workflows/extended.yml) exposes manually selected lanes.
-The `lint-guardrails` lane isolates lint diagnostics and focused regressions from
-runtime acceptance. `composer-guardrails` runs the full application gate followed
+The `lint-guardrails` lane isolates lint diagnostics, focused regressions, and
+pinned managed-skill verification from runtime acceptance. `composer-guardrails` runs the full application gate followed
 by composer save and recovery acceptance. All lanes run on GitHub-hosted machines without deployment
 secrets. A passing `ci-gate` does not imply a manual lane ran.
 
@@ -116,9 +116,10 @@ Worker runtime tries to read host-only cache paths.
 [`install-quality-tool.sh`](../scripts/ci/install-quality-tool.sh) installs Gitleaks
 8.30.1 and typos 1.35.5 from versioned archives with pinned SHA-256 checksums.
 
-Spelling checks cover generated third-party notice bundles; a scoped dictionary
-preserves an upstream author's surname. Do not rewrite copyright attribution to satisfy
-a spelling suggestion.
+Spelling checks cover generated third-party notice bundles and localization tests.
+File-scoped dictionaries preserve an upstream author's surname and the German month
+names asserted by their owning tests. Preserve attribution and localization semantics
+rather than replacing them with English spellings.
 
 The secret scanner keeps a live synthetic detection canary. Its config excludes three
 proven false positives only when their exact source path and rule also match: the Argo

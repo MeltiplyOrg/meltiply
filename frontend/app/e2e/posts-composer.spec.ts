@@ -147,7 +147,7 @@ interface PostMutation {
 }
 
 interface PostMutationRecorder {
-  mutations: PostMutation[];
+  mutations: readonly PostMutation[];
   waitForSaveAfter: (seen: number) => Promise<void>;
 }
 

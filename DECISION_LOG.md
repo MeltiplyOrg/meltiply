@@ -1,8 +1,8 @@
 # Untangling decisions
 
 The goal is behavior-preserving structural cleanup with selective anti-slop checks.
-Comments and test-quality cleanup are included. Tests remain the regression safety
-net until the structural changes are verified.
+Comments and test-quality cleanup are included. Problems below describe the
+baseline; the fixes describe the current ownership.
 
 ## Problem list and fixes
 
@@ -21,8 +21,6 @@ net until the structural changes are verified.
     real Promise sleep in another test.
   - Add a focused raw-timer Promise guard for the cache tests. Exercise each
     configured rule through real positive and negative Vite+ diagnostics.
-  - Status: the first focused runtime regressions pass. Guardrail hardening and
-    complete hosted verification remain in progress.
 
 - Control polling time and wait for request completion instead of guessing delays.
   Preserve the same observable cache and refresh assertions.
@@ -32,9 +30,6 @@ net until the structural changes are verified.
     and polls request counters rather than awaiting the requests.
   - `frontend/app/e2e/posts-composer.spec.ts` polls a mutation recorder even though
     the mutation has an observable response.
-  - Status: implemented. The first hosted fake-timer run exposed a mismatch
-    with Testing Library polling; controlled-time settling now uses the Vitest
-    clock with React updates flushed. Reverification is pending.
 
 - Make `@meltiply/domain` the owner of Platform recognition. Migrate callers and
   delete the duplicate reporting export rather than retaining an alias.
@@ -43,16 +38,12 @@ net until the structural changes are verified.
   - `workers/api/src/validation.ts` and
     `workers/automation/src/channel-revocation.ts` repeat membership checks and
     assert the result back to `Platform` instead of using the existing guard.
-  - Status: implemented. All reporting callers use the domain guard; the old
-    implementation and export are removed. Hosted regression tests are pending.
 
 - Preserve account-analytics infrastructure failures on the job error channel.
   Keep per-account failure counts for partial Provider failures.
   - `workers/automation/src/account-analytics.ts` catches a failed candidate query
     and returns the same empty success result as a sweep with no eligible accounts.
   - The scheduler cannot distinguish a database failure from successful work.
-  - Status: implemented with empty, failure, and partial-success regression
-    cases through the existing transaction test seam. Hosted tests are pending.
 
 - Represent a Post row's caption as a string. Keep attachment metadata in the
   existing attachment projection and remove unused preview-image allocations.
@@ -63,8 +54,6 @@ net until the structural changes are verified.
   - `frontend/app/src/api/types.ts` also retains unread posting-time, additional
     settings, and YouTube thumbnail members. The thumbnail member is the last
     reference to the unused `MediaItem` type.
-  - Status: implemented with row, frozen-publication, and event-only caption
-    regression tests. Hosted tests are pending.
 
 - Queue composer attachment-ownership writes and make explicit Save follow that
   queue. Show failures through the existing form state rather than silently
@@ -75,21 +64,17 @@ net until the structural changes are verified.
   - A late ownership rejection can mark a newer successful Save as failed.
     Suppressing that message alone would still permit older writes to overwrite
     newer attachment state. One composer-owned queue orders the actual writes.
-  - Status: visible failure and explicit-retry regressions pass. The queued-write
-    ordering regression and hosted revalidation remain in progress.
 
 - Use the active application language for invitation expiry dates.
   - `frontend/app/src/app/(dashboard)/settings/page.tsx` formats these dates with
     the browser locale while other settings tables use the selected language.
-  - Status: implemented with a language-switching regression test. Hosted
-    verification is pending.
 
 - Remove implementation-restating comments and review tests after the structural
   fixes. Keep tests that distinguish a real regression from an internal rename.
-  - The duplicate reporting guard has a comment that becomes obsolete with its
-    removal. Other candidate comments and tests require individual review.
-  - Status: pending final cleanup. No test is selected for deletion without
-    evidence that it cannot catch a regression.
+  - Remove the obsolete doc comment with the duplicate reporting guard. The
+    comment review found no other redundant comments in the delivered changes.
+  - Keep the reviewed regression tests. Fix async test callbacks and middleware
+    setup so tests assert behavior rather than incidental synchronous execution.
 
 ## Required special cases and rejected changes
 
@@ -134,12 +119,19 @@ The baseline is `4f25fb862083cd1cc1b3e873d5c23c3087958846`.
 passed frontend and tooling jobs but failed secret scanning, spelling, and
 self-hosted smoke. It is not a green baseline.
 
-Verification runs on GitHub-hosted runners. Rule tests must exercise positive and
-negative diagnostics. The cross-cutting completion gate is `bun run
-cloudflare:check`; focused tests run first. Compiler success alone does not prove
-behavior preservation.
+Verification runs on GitHub-hosted runners.
+[The focused gate](https://github.com/MeltiplyOrg/meltiply/actions/runs/45383733441)
+passes real positive and negative Vite+ diagnostics for every added rule, strict
+lint, cache and composer regressions, row projections, selected-language dates,
+account-analytics failures, channel revocation, and documentation checks.
 
-The initial inventory sampled each major area and traced the findings above.
-Large frontend and Worker modules have coverage gaps. The tooling scout did not
-return a usable final report. Follow-up review remains required; this log does not
-claim the entire repository has no other worthwhile issues.
+The cross-cutting `bun run cloudflare:check` and real cache/browser acceptance are
+[in progress](https://github.com/MeltiplyOrg/meltiply/actions/runs/45384060377).
+Changed composer recorder callers also require the hosted publishing-browser
+acceptance lane. Passing unit tests alone is not runtime acceptance.
+
+Independent reviews traced the delivered fixes and identified the late-write and
+fake-timer bypass problems addressed above. The final targeted review found no
+further actionable defect. Review coverage remains sampled across large frontend,
+Worker, and tooling modules; this is not a claim that the entire repository has
+no other worthwhile issues.

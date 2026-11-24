@@ -14,11 +14,12 @@ const workerFile = `${repositoryRoot}workers/api/src/example.ts`;
 const componentFile = `${repositoryRoot}frontend/app/src/components/example.tsx`;
 const rule = (name) => codebasePlugin.rules[name];
 
-ruleTester.run("meltiply/no-unknown-double-cast", rule("no-unknown-double-cast"), {
+ruleTester.run("meltiply/no-chained-type-assertions", rule("no-chained-type-assertions"), {
   valid: [
     { code: "const value = input as unknown;", filename: workerFile },
     { code: "const value = input as Record<string, string>;", filename: workerFile },
     { code: "const value = (input as unknown) satisfies unknown;", filename: workerFile },
+    { code: "const value = ({ id: 1 } as const) as const;", filename: workerFile },
   ],
   invalid: [
     {
@@ -26,6 +27,32 @@ ruleTester.run("meltiply/no-unknown-double-cast", rule("no-unknown-double-cast")
       filename: workerFile,
       errors: [{ messageId: "restricted" }],
     },
+    ...[
+      "const value = ((input as First)) as Second;",
+      "const value = <Second>(<First>input);",
+      "const value = (<First>input) as Second;",
+      "const value = input as First as Second as Third;",
+      "const value = ({ id: 1 } as const) as Record<string, string>;",
+    ].map((code) => ({ code, filename: workerFile, errors: [{ messageId: "restricted" }] })),
+  ],
+});
+
+ruleTester.run("meltiply/no-promise-sleep", rule("no-promise-sleep"), {
+  valid: [
+    { code: "await vi.advanceTimersByTimeAsync(10_000);", filename: componentFile },
+    {
+      code: "const pending = new Promise(resolve => { release = resolve; });",
+      filename: componentFile,
+    },
+    { code: "setTimeout(onIdle, 100);", filename: componentFile },
+  ],
+  invalid: [
+    ...[
+      "await new Promise(resolve => setTimeout(resolve, 11_000));",
+      "await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 11_000)); });",
+      "vi.useFakeTimers({ toFake: ['Date'] }); it('other test', async () => { await new Promise(resolve => setTimeout(resolve, 11_000)); });",
+      "vi.useFakeTimers(); const sleep = new Promise(resolve => { return globalThis.setTimeout(resolve, 100); });",
+    ].map((code) => ({ code, filename: componentFile, errors: [{ messageId: "restricted" }] })),
   ],
 });
 

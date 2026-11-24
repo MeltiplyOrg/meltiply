@@ -116,6 +116,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.12",
+    "@interfere/landmines": "0.3.1",
     "@redocly/cli": "2.39.0",
     "@shadcn/lint": "^0.1.0",
     "@shipi18n/cli": "2.16.2",

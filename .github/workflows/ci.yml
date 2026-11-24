@@ -51,6 +51,7 @@ jobs:
         run: |
           ./scripts/ci/install-quality-tool.sh gitleaks
           export PATH="$HOME/.local/bin:$PATH"
+          bash scripts/ci/gitleaks-check.test.sh
           ./scripts/ci/gitleaks-check.sh --all-history
       - name: Check documentation and routing behavior
         run: |
@@ -98,6 +99,7 @@ jobs:
         run: |
           ./scripts/ci/install-quality-tool.sh typos
           export PATH="$HOME/.local/bin:$PATH"
+          bash scripts/ci/typos-check.test.sh
           typos --config .typos.toml
       - name: Validate contracts and generated Worker bindings
         run: |

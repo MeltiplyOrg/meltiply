@@ -110,7 +110,9 @@ describe("audit log table", () => {
     });
     expect(spies.onSearchChange).not.toHaveBeenCalled();
 
-    act(() => vi.advanceTimersByTime(300));
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
     expect(spies.onSearchChange).toHaveBeenCalledWith("alpha");
   });
 

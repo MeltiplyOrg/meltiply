@@ -178,9 +178,8 @@ export function resolveRowCaption(row: PostRow): string {
       const publication = channel.distribution.publication;
       const text = publication.title || publication.text;
       if (text) return text;
-    } else {
-      const text = channel.content[0]?.content;
-      if (text) return text;
+    } else if (channel.caption) {
+      return channel.caption;
     }
   }
   if (!sawFrozenChannel && row.post) return row.post.default_text || row.post.title;

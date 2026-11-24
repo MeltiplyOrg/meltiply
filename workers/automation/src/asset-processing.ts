@@ -11,6 +11,7 @@ import {
 import { readyObjectKey, type ObjectStore } from "@meltiply/storage";
 import {
   PROCESSOR_CAPABILITY_TTL_SECONDS,
+  PROCESSOR_CONTAINER_TIMEOUT_MS,
   NativeProcessorError,
   invokeNativeProcessorEffect,
   processorJobUrlsEffect,
@@ -51,7 +52,7 @@ const videoProfile: NativeProcessorProfile = {
 
 const orphanGraceDays = assetOrphanGraceSeconds / (24 * 60 * 60);
 
-const processorJobDeadlineSeconds = PROCESSOR_CAPABILITY_TTL_SECONDS - 60;
+const processorJobDeadlineSeconds = PROCESSOR_CONTAINER_TIMEOUT_MS / 1_000 - 60;
 
 const processorCapabilityTtlSeconds = PROCESSOR_CAPABILITY_TTL_SECONDS;
 

@@ -138,14 +138,63 @@ function isExportDocComment(comment, context) {
 const codebasePlugin = {
   meta: { name: "meltiply" },
   rules: {
-    "no-unknown-double-cast": rule(
-      "Do not cast through `unknown`. Build a typed value (typed test builder, schema decode, or a narrow port type) instead.",
+    "no-chained-type-assertions": rule(
+      "Do not chain type assertions. Preserve the original type, build a typed value, or validate untrusted input at its boundary.",
+      (_context, report) => {
+        const isAssertion = (node) =>
+          node?.type === "TSAsExpression" || node?.type === "TSTypeAssertion";
+        const check = (node) => {
+          let parent = node.parent;
+          while (parent?.type === "ParenthesizedExpression") parent = parent.parent;
+          if (isAssertion(parent)) return;
+          let current = node;
+          let count = 0;
+          let hasNonConstAssertion = false;
+          while (isAssertion(current)) {
+            count += 1;
+            const annotation = current.typeAnnotation;
+            hasNonConstAssertion ||=
+              annotation?.type !== "TSTypeReference" || annotation.typeName?.name !== "const";
+            current = current.expression;
+            while (current?.type === "ParenthesizedExpression") current = current.expression;
+          }
+          if (count > 1 && hasNonConstAssertion) report(node);
+        };
+        return { TSAsExpression: check, TSTypeAssertion: check };
+      },
+    ),
+
+    "no-promise-sleep": rule(
+      "Do not synchronize cache tests with timer Promises. Await a completion signal or advance the controlled clock.",
       (_context, report) => ({
-        TSAsExpression(node) {
-          const inner = node.expression;
+        NewExpression(node) {
+          if (node.callee.type !== "Identifier" || node.callee.name !== "Promise") return;
+          const executor = node.arguments[0];
           if (
-            inner?.type === "TSAsExpression" &&
-            inner.typeAnnotation?.type === "TSUnknownKeyword"
+            executor?.type !== "ArrowFunctionExpression" &&
+            executor?.type !== "FunctionExpression"
+          )
+            return;
+          const resolve = executor.params[0];
+          if (resolve?.type !== "Identifier") return;
+          let body = executor.body;
+          if (body.type === "BlockStatement") {
+            if (body.body.length !== 1) return;
+            const statement = body.body[0];
+            body = statement.type === "ReturnStatement" ? statement.argument : statement.expression;
+          }
+          if (body?.type !== "CallExpression") return;
+          const callee = body.callee;
+          const isTimer =
+            (callee.type === "Identifier" && callee.name === "setTimeout") ||
+            (callee.type === "MemberExpression" &&
+              !callee.computed &&
+              ["globalThis", "window"].includes(callee.object?.name) &&
+              callee.property?.name === "setTimeout");
+          if (
+            isTimer &&
+            body.arguments[0]?.type === "Identifier" &&
+            body.arguments[0].name === resolve.name
           ) {
             report(node);
           }

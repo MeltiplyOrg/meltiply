@@ -143,11 +143,15 @@ export default defineConfig({
       "typescript/prefer-namespace-keyword": "error",
       "typescript/triple-slash-reference": "error",
       "vite-plus/prefer-vite-plus-imports": "error",
+      "oxc/no-accumulating-spread": "error",
+      "landmines/no-shared-signal": "error",
+      "landmines/strict-msw": "error",
     },
     overrides: [
       {
         files: ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"],
         rules: {
+          "typescript/no-floating-promises": "error",
           "constructor-super": "off",
           "getter-return": "off",
           "no-array-constructor": "error",
@@ -439,7 +443,7 @@ export default defineConfig({
           "vite.config.ts",
         ],
         rules: {
-          "meltiply/no-unknown-double-cast": "error",
+          "meltiply/no-chained-type-assertions": "error",
           "meltiply/no-error-message-classification": "error",
           "meltiply/no-platform-roster-literal": "error",
           "meltiply/no-sql-conditional-fragment": "error",
@@ -479,6 +483,33 @@ export default defineConfig({
         },
       },
       {
+        files: ["frontend/app/src/components/composer/**/*.{ts,tsx}"],
+        rules: {
+          "landmines/no-silent-catch": "error",
+        },
+      },
+      {
+        files: ["frontend/app/src/lib/**/browser-cache.test.tsx"],
+        rules: {
+          "meltiply/no-promise-sleep": "error",
+        },
+      },
+      {
+        files: [
+          "frontend/app/e2e/**/cache-smoke.mjs",
+          "frontend/app/e2e/**/posts-composer.spec.ts",
+        ],
+        rules: {
+          "landmines/no-fixed-sleep": "error",
+        },
+      },
+      {
+        files: ["frontend/app/e2e/**/posts-composer.spec.ts"],
+        rules: {
+          "landmines/no-unsignaled-poll": "error",
+        },
+      },
+      {
         files: ["lint/codebase-plugin.test.mjs"],
         rules: {
           "meltiply/no-sql-date-column": "off",
@@ -499,6 +530,10 @@ export default defineConfig({
       {
         name: "meltiply",
         specifier: "./lint/codebase-plugin.mjs",
+      },
+      {
+        name: "landmines",
+        specifier: "@interfere/landmines",
       },
       {
         name: "shadcn",

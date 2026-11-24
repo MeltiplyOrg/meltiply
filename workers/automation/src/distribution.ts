@@ -10,6 +10,7 @@ import {
   type ProviderRegistry,
 } from "@meltiply/providers";
 import {
+  isPlatform,
   rateLimitBudgetFreshSeconds,
   type DatabaseError,
   type Platform,
@@ -18,7 +19,6 @@ import {
 import type { EffectTransactionClient } from "@meltiply/database";
 import { errorDiagnostic, log } from "@meltiply/observability";
 import {
-  isPlatform,
   isProviderFailureClass,
   recordPublicationUsage,
   reportingConfiguration,

@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
-import type { DatabaseError } from "@meltiply/domain";
-import { isPlatform, recordPublicationUsage, reportingConfiguration } from "@meltiply/reporting";
+import { isPlatform, type DatabaseError } from "@meltiply/domain";
+import { recordPublicationUsage, reportingConfiguration } from "@meltiply/reporting";
 
 import { CoreApiError } from "./core-types";
 import { withSystemTransactionEffect } from "./database";

@@ -32,6 +32,7 @@ import { Composer, type ComposerProps } from "./composer";
 import { authClient } from "@/lib/auth-client";
 import { I18nProvider } from "@/lib/i18n";
 import { queryKeys } from "@/lib/queries";
+import { contractSuccessBody } from "@/test/contract-fixtures";
 
 vi.mock("@/lib/upload", async (importActual) => {
   const actual = await importActual<object>();
@@ -480,6 +481,93 @@ describe("Composer and collection scope", () => {
     );
     expect(task.cancel).not.toHaveBeenCalled();
     expect(screen.getByText(/clip\.mp4/)).toBeInTheDocument();
+  });
+});
+
+describe("Composer attachment ownership", () => {
+  it("finishes an older ownership write before saving the latest composition", async () => {
+    const ownership = Promise.withResolvers<Post>();
+    const failure = new ApiError(new Response(null, { status: 503 }), {
+      error: { code: "dependency_unavailable", message: "database unavailable" },
+    });
+    const saved: Post = {
+      ...hydratedPost,
+      default_text: "Latest composition",
+      attachments: contractSuccessBody<Post>("getPost").attachments,
+    };
+    vi.mocked(updatePost)
+      .mockReturnValueOnce(
+        Effect.tryPromise({ try: () => ownership.promise, catch: () => failure }),
+      )
+      .mockReturnValue(Effect.succeed(saved));
+    renderComposer({
+      brandProfiles: composerProfiles,
+      initialPostId: hydratedPost.id,
+      post: hydratedPost,
+    });
+    await waitFor(() => expect(composerTextarea()).toHaveValue(hydratedPost.default_text));
+    fireEvent.change(screen.getByLabelText("Add Media"), {
+      target: { files: [new File(["bytes"], "clip.mp4", { type: "video/mp4" })] },
+    });
+    const upload = vi.mocked(createAssetUpload).mock.calls[0]![0];
+    await act(async () => {
+      await upload.onSessionStart?.(saved.attachments[0]!.asset_id);
+    });
+    await waitFor(() => expect(updatePost).toHaveBeenCalledTimes(1));
+    fireEvent.change(composerTextarea(), { target: { value: "Latest composition" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    });
+    expect(updatePost).toHaveBeenCalledTimes(1);
+
+    await act(async () => ownership.reject(failure));
+
+    await waitFor(() => expect(updatePost).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(updatePost).mock.lastCall?.[2]).toMatchObject({
+      attachment_ids: [saved.attachments[0]!.asset_id],
+      default_text: "Latest composition",
+    });
+    expect(await screen.findByText(/Saved to your workspace at/)).toBeVisible();
+    expect(screen.queryByText("An error has occurred.")).not.toBeInTheDocument();
+  });
+
+  it("shows a failed ownership write and saves the attachment on an explicit retry", async () => {
+    vi.mocked(updatePost)
+      .mockReturnValueOnce(
+        Effect.fail(
+          new ApiError(new Response(null, { status: 503 }), {
+            error: { code: "dependency_unavailable", message: "database unavailable" },
+          }),
+        ),
+      )
+      .mockReturnValue(Effect.succeed(hydratedPost));
+    renderComposer({
+      brandProfiles: composerProfiles,
+      initialPostId: hydratedPost.id,
+      post: hydratedPost,
+    });
+    await waitFor(() => expect(composerTextarea()).toHaveValue(hydratedPost.default_text));
+    fireEvent.change(screen.getByLabelText("Add Media"), {
+      target: { files: [new File(["bytes"], "clip.mp4", { type: "video/mp4" })] },
+    });
+    const upload = vi.mocked(createAssetUpload).mock.calls[0]![0];
+    await act(async () => {
+      await upload.onSessionStart?.("ownership-asset");
+    });
+
+    expect(await screen.findByText("An error has occurred.")).toBeVisible();
+    expect(updatePost).toHaveBeenCalledTimes(1);
+    fireEvent.change(composerTextarea(), { target: { value: "Keep this attachment" } });
+    expect(updatePost).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updatePost).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(updatePost).mock.lastCall?.[2]).toMatchObject({
+      attachment_ids: ["ownership-asset"],
+      default_text: "Keep this attachment",
+    });
+    await waitFor(() =>
+      expect(screen.queryByText("An error has occurred.")).not.toBeInTheDocument(),
+    );
   });
 });
 

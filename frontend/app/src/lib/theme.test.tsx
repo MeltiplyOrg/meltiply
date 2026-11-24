@@ -220,7 +220,9 @@ it("follows live OS changes only while System is selected", () => {
   expect(document.documentElement).toHaveClass("dark");
   expect(screen.getByTestId("requested")).toHaveTextContent("system");
   act(() => screen.getByRole("button", { name: "light" }).click());
-  act(() => media.dispatchEvent(new Event("change")));
+  act(() => {
+    media.dispatchEvent(new Event("change"));
+  });
   expect(document.documentElement).not.toHaveClass("dark");
   act(() => screen.getByRole("button", { name: "system" }).click());
   expect(document.documentElement).toHaveClass("dark");

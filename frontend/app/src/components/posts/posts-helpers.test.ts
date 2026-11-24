@@ -35,7 +35,7 @@ function channelItem(overrides: Partial<PostDetailItem>): PostDetailItem {
     postId: basePost.id,
     publishDate: baseDistribution.created_at,
     status: "published",
-    content: [],
+    caption: "",
     attachments: [],
     ...overrides,
   };
@@ -184,7 +184,7 @@ describe("filterAndSortPosts search and platform", () => {
   it("ignores whitespace around the search query", () => {
     const row = postRow({
       id: "launch",
-      channels: [channelItem({ content: [{ content: "Launch" }] })],
+      channels: [channelItem({ caption: "Launch" })],
     });
     expect(
       filterAndSortPosts([row], { ...criteria, searchQuery: "launch  " }).map((item) => item.id),
@@ -341,7 +341,7 @@ describe("resolveRowCaption", () => {
       channels: [
         channelItem({
           distribution: baseDistribution,
-          content: [{ content: "Stale pending copy" }],
+          caption: "Stale pending copy",
         }),
       ],
     });
@@ -357,7 +357,7 @@ describe("resolveRowCaption", () => {
             ...baseDistribution,
             publication: { ...published, title: "", text: "" },
           },
-          content: [{ content: "Edited caption" }],
+          caption: "Edited caption",
         }),
       ],
     });

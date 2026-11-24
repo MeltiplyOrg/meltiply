@@ -67,7 +67,7 @@ function statusPost(status: string): PostRow {
         postId: `status-${status}`,
         publishDate: new Date(2026, 9, 23, 8).toISOString(),
         status,
-        content: [{ content: "Status probe" }],
+        caption: "Status probe",
         attachments: [],
       },
     ],

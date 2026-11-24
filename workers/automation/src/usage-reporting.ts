@@ -1,10 +1,9 @@
 import { Effect } from "effect";
-import { PLATFORM_IDS, type Platform } from "@meltiply/domain";
+import { isPlatform, PLATFORM_IDS, type Platform } from "@meltiply/domain";
 import { cachedProviderRegistryFromEnvironment, type ProviderRegistry } from "@meltiply/providers";
 import {
   categoryEffective,
   createReportingServiceLive,
-  isPlatform,
   loadPreferences,
   lockReportingMeasurement,
   policySnapshot,

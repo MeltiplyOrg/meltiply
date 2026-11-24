@@ -45,7 +45,7 @@ const row: PostRow = {
       postId: basePost.id,
       publishDate: "2026-10-23T12:00:00Z",
       status: "published",
-      content: [],
+      caption: "",
       attachments: [],
     },
   ],

@@ -1,5 +1,5 @@
 import { Data } from "effect";
-import { PLATFORM_IDS, type Platform } from "@meltiply/domain";
+import type { Platform } from "@meltiply/domain";
 
 /** The two independent reporting choices an Installation Owner makes. */
 export type ReportingCategory = "usage" | "diagnostics";
@@ -153,11 +153,6 @@ export function isProviderFailureClass(value: unknown): value is ProviderFailure
   return (
     typeof value === "string" && (PROVIDER_FAILURE_CLASSES as readonly string[]).includes(value)
   );
-}
-
-/** Narrows untrusted input to a supported Platform identifier. */
-export function isPlatform(value: unknown): value is Platform {
-  return typeof value === "string" && (PLATFORM_IDS as readonly string[]).includes(value);
 }
 
 /** One audience counter reported from stored Provider analytics. */

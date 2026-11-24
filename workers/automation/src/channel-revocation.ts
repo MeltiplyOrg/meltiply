@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { PLATFORM_IDS, type Platform } from "@meltiply/domain";
+import { isPlatform } from "@meltiply/domain";
 import {
   cachedProviderRegistryFromEnvironment,
   revokeEffect,
@@ -33,7 +33,7 @@ export function processChannelRevocationMessage(
         }),
       );
     }
-    if (!PLATFORM_IDS.includes(platform as Platform)) {
+    if (!isPlatform(platform)) {
       return yield* Effect.fail(
         new TerminalJobError({
           code: "channel_revocation_payload_invalid",
@@ -42,7 +42,7 @@ export function processChannelRevocationMessage(
       );
     }
     const registry = dependencies.providerRegistry ?? cachedProviderRegistryFromEnvironment(env);
-    const adapter = registry.get(platform as Platform);
+    const adapter = registry.get(platform);
     if (!adapter) {
       return yield* Effect.fail(
         new RetryableJobError({

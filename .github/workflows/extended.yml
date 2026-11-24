@@ -10,6 +10,8 @@ on:
         options:
           - frontend-full
           - frontend-ui
+          - lint-guardrails
+          - composer-guardrails
           - cloudflare-integration
           - cloudflare-extended
           - cloudflare-full
@@ -48,6 +50,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
+      - name: Exercise lint guardrails and deterministic cache behavior
+        if: inputs.lane == 'lint-guardrails'
+        run: |
+          status=0
+          node --test lint/*.test.mjs || status=1
+          bun run --cwd frontend/app test src/lib/browser-cache.test.tsx src/components/posts/post-row.test.ts src/components/composer/composer.test.tsx src/components/settings-page.test.tsx --coverage.enabled=false || status=1
+          bun run --cwd workers/automation test test/account-analytics.test.ts test/channel-revocation.test.ts --coverage.enabled=false || status=1
+          bun run lint || status=1
+          bun run docs:links || status=1
+          bun run skills:check || status=1
+          exit "$status"
       - name: Exercise publishing regressions
         if: inputs.lane == 'publishing-flow'
         run: |
@@ -56,16 +69,16 @@ jobs:
           bun run --cwd packages/providers test test/facebook.test.ts test/instagram.test.ts test/threads.test.ts test/tiktok.test.ts test/youtube.test.ts --coverage.enabled=false || status=1
           exit "$status"
       - name: Review publishing React changes
-        if: inputs.lane == 'publishing-flow'
+        if: inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser' || inputs.lane == 'composer-guardrails'
         working-directory: frontend/app
         run: npx --yes react-doctor@0.9.18 --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
       - name: Prepare publishing acceptance
-        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser')
+        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser' || inputs.lane == 'composer-guardrails')
         run: |
           bun run setup --skip-dependencies --skip-image-pull
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
           status=0
-          if [ "${{ inputs.lane }}" = publishing-flow ]; then bun run cloudflare:check || status=1; fi
+          if [ "${{ inputs.lane }}" = publishing-flow ] || [ "${{ inputs.lane }}" = composer-guardrails ]; then bun run cloudflare:check || status=1; fi
           bun run docs:links || status=1
           exit "$status"
       - name: Exercise full publishing lifecycle
@@ -93,15 +106,15 @@ jobs:
           mkdir -p artifacts/publishing/queues
           cp -R frontend/app/test-results/. artifacts/publishing/queues/ 2>/dev/null || true
           exit "$status"
-      - name: Exercise multi-profile delivery recovery
-        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser')
+      - name: Exercise composer save and recovery regressions
+        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser' || inputs.lane == 'composer-guardrails')
         env:
           MELTIPLY_E2E_ACCEPTANCE: "1"
           MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
         run: |
           bash scripts/cloudflare-local/database.sh reset
           status=0
-          bun run --cwd frontend/app test:e2e e2e/posts-composer.spec.ts --project composer --grep "recovers independent profile copies and retries only unfinished publishing" --trace on --retries 0 || status=1
+          bun run --cwd frontend/app test:e2e e2e/posts-composer.spec.ts --project composer --grep "recovers independent profile copies|detaches an in-flight attachment|reopens one Post with its ordered attachments|reopens a draft whose provider options|keeps an enabled but blank channel caption" --trace on --retries 0 || status=1
           mkdir -p artifacts/publishing/recovery
           cp -R frontend/app/test-results/. artifacts/publishing/recovery/ 2>/dev/null || true
           exit "$status"
@@ -379,6 +392,7 @@ jobs:
           API_BASE_URL: http://127.0.0.1:8787
           APP_URL: http://127.0.0.1:3000
         run: |
+          bash scripts/cloudflare-local/database.sh reset
           ./scripts/cloudflare-local/compose.sh exec -T postgres psql -U postgres -d meltiply -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements'"
           ./scripts/cloudflare-local/compose.sh restart postgres
           ./scripts/cloudflare-local/compose.sh up -d --wait postgres
@@ -920,7 +934,7 @@ jobs:
           ../../scripts/ci/lighthouse.sh http://127.0.0.1:3000/posts ../../artifacts/performance/lighthouse.json
           bun run --cwd ../public check
       - name: Stop owned local services
-        if: always() && inputs.lane != 'cloudflare-extended'
+        if: always() && inputs.lane != 'cloudflare-extended' && inputs.lane != 'lint-guardrails'
         run: ./scripts/cloudflare-local/teardown.sh
       - name: Preserve diagnostic and policy evidence
         if: always()

@@ -56,7 +56,7 @@ export function useWorkspaceNavigate(): (
     (view, options) => {
       const search = options?.search ?? "";
       const query = !search || search.startsWith("?") ? search : `?${search}`;
-      navigate(`${workspaceViewPath(view)}${query}`);
+      void navigate(`${workspaceViewPath(view)}${query}`);
     },
     [navigate],
   );

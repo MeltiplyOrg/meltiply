@@ -1,6 +1,6 @@
 import type { components } from "@meltiply/contracts/schema";
 import type { TikTokPrivacyLevel } from "@meltiply/providers";
-import { codePointLength, PLATFORM_IDS, type Platform } from "@meltiply/domain";
+import { codePointLength, isPlatform, type Platform } from "@meltiply/domain";
 import type { Context } from "hono";
 import { z } from "zod";
 
@@ -223,10 +223,10 @@ const RFC3339_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]
 const JSON_BODY_MAXIMUM_BYTES = 512 * 1024;
 
 export function platformParam(value: string): Platform {
-  if (!PLATFORM_IDS.includes(value as Platform)) {
+  if (!isPlatform(value)) {
     throw new CoreApiError(400, "invalid_request", "The platform is not supported.");
   }
-  return value as Platform;
+  return value;
 }
 
 export function uuidParam(value: string, name: string): string {

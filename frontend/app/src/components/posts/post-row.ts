@@ -1,22 +1,13 @@
-import type { ChannelIntegration, MediaItem } from "@/api/types";
+import type { ChannelIntegration } from "@/api/types";
 import type { CalendarEvent, Distribution, Post, PostTarget } from "@/types";
 import { summarizePublicationStatuses } from "@/lib/publication-status";
-import type { ChannelMediaItem, PostDetailItem, PostRow } from "./types";
+import type { PostDetailItem, PostRow } from "./types";
 import { calendarDateKey } from "./calendar-dates";
 import { resolveChannelMedia, resolveChannelText, resolvePostDisplayDate } from "./posts-helpers";
 
 type IntegrationById = Map<string, ChannelIntegration>;
 function distributionDate(d: Distribution): string {
   return d.scheduled_at ?? d.published_at ?? d.created_at;
-}
-
-function toPreviewImages(media: ChannelMediaItem[]): MediaItem[] {
-  const images: MediaItem[] = [];
-  for (const item of media) {
-    const path = item.attachment?.asset.thumbnail_url ?? item.attachment?.asset.download_url;
-    if (path) images.push({ id: item.assetId, path });
-  }
-  return images;
 }
 
 function toChannelEntry(
@@ -26,8 +17,6 @@ function toChannelEntry(
   integrationById: IntegrationById,
 ): PostDetailItem {
   const accountId = distribution?.platform_account_id ?? target?.platform_account_id ?? null;
-  const media = resolveChannelMedia(post, target, distribution);
-  const caption = resolveChannelText(post, distribution ?? target ?? {}, distribution?.publication);
   return {
     id: distribution?.id ?? `target:${accountId ?? post.id}`,
     postId: post.id,
@@ -35,8 +24,8 @@ function toChannelEntry(
     status: distribution?.status ?? (post.status === "draft" ? "draft" : "scheduled"),
     errorMessage: distribution?.failure?.message ?? null,
     integration: accountId ? integrationById.get(accountId) : undefined,
-    content: [{ content: caption, image: toPreviewImages(media) }],
-    attachments: media,
+    caption: resolveChannelText(post, distribution ?? target ?? {}, distribution?.publication),
+    attachments: resolveChannelMedia(post, target, distribution),
     distribution,
     target,
   };
@@ -98,7 +87,7 @@ function toEventRow(event: CalendarEvent, integrationById: IntegrationById): Pos
         publishDate: calendarEventDate(event),
         status: event.status,
         integration,
-        content: [],
+        caption: "",
         attachments: [],
         calendarEvent: event,
       },

@@ -528,7 +528,9 @@ describe("Channels table contract", () => {
     );
 
     const [, options] = queryMutations.create.mutate.mock.calls[0]!;
-    act(() => options.onSuccess(betaProfile));
+    act(() => {
+      options.onSuccess(betaProfile);
+    });
 
     expect(workspace.setSelectedBrandProfileId).toHaveBeenCalledWith(betaProfile.id);
     const connectDialog = screen.getByRole("dialog", { name: "Connect social account" });
@@ -777,7 +779,9 @@ describe("Channels table contract", () => {
     );
 
     const [, options] = queryMutations.update.mutate.mock.calls[0]!;
-    act(() => options.onSuccess({ ...alphaProfile, name: "Renamed Brand" }));
+    act(() => {
+      options.onSuccess({ ...alphaProfile, name: "Renamed Brand" });
+    });
 
     expect(workspace.setSelectedBrandProfileId).not.toHaveBeenCalled();
     expect(

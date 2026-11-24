@@ -312,6 +312,7 @@ function objectStoreHarness(): ObjectStoreHarness {
 
 interface MediaProcessorHarness {
   calls: Array<{
+    deadlineSeconds: number | null;
     expectedSize: number;
     inputKey: string;
     jobId: string;
@@ -393,6 +394,7 @@ function mediaProcessorNamespace(harness: ObjectStoreHarness): MediaProcessorHar
       const inputKey = keyFromUrl(job.input_url);
       const outputKey = keyFromUrl(job.output_url);
       calls.push({
+        deadlineSeconds: job.deadline_seconds ?? null,
         expectedSize: job.expected_size,
         inputKey,
         jobId: job.job_id,
@@ -1413,6 +1415,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
 
     expect(processor.calls).toHaveLength(1);
     const [call] = processor.calls;
+    expect(call.deadlineSeconds).toBeGreaterThanOrEqual(5);
+    expect(call.deadlineSeconds).toBeLessThanOrEqual(540);
     expect(call).toMatchObject({
       expectedSize: body.byteLength,
       inputKey: originalKey,

@@ -11,6 +11,7 @@ on:
           - frontend-full
           - frontend-ui
           - lint-guardrails
+          - composer-guardrails
           - cloudflare-integration
           - cloudflare-extended
           - cloudflare-full
@@ -67,16 +68,16 @@ jobs:
           bun run --cwd packages/providers test test/facebook.test.ts test/instagram.test.ts test/threads.test.ts test/tiktok.test.ts test/youtube.test.ts --coverage.enabled=false || status=1
           exit "$status"
       - name: Review publishing React changes
-        if: inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser'
+        if: inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser' || inputs.lane == 'composer-guardrails'
         working-directory: frontend/app
         run: npx --yes react-doctor@0.9.18 --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
       - name: Prepare publishing acceptance
-        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser')
+        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser' || inputs.lane == 'composer-guardrails')
         run: |
           bun run setup --skip-dependencies --skip-image-pull
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
           status=0
-          if [ "${{ inputs.lane }}" = publishing-flow ]; then bun run cloudflare:check || status=1; fi
+          if [ "${{ inputs.lane }}" = publishing-flow ] || [ "${{ inputs.lane }}" = composer-guardrails ]; then bun run cloudflare:check || status=1; fi
           bun run docs:links || status=1
           exit "$status"
       - name: Exercise full publishing lifecycle
@@ -105,7 +106,7 @@ jobs:
           cp -R frontend/app/test-results/. artifacts/publishing/queues/ 2>/dev/null || true
           exit "$status"
       - name: Exercise composer save and recovery regressions
-        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser')
+        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser' || inputs.lane == 'composer-guardrails')
         env:
           MELTIPLY_E2E_ACCEPTANCE: "1"
           MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable

@@ -52,7 +52,8 @@ capability expiry must not let it outlive the persisted write hold.
 
 [`extended.yml`](../.github/workflows/extended.yml) exposes manually selected lanes.
 The `lint-guardrails` lane isolates lint diagnostics and focused regressions from
-runtime acceptance. All lanes run on GitHub-hosted machines without deployment
+runtime acceptance. `composer-guardrails` runs the full application gate followed
+by composer save and recovery acceptance. All lanes run on GitHub-hosted machines without deployment
 secrets. A passing `ci-gate` does not imply a manual lane ran.
 
 Lanes use the real API, storage, processor, transport, and consumer with controlled

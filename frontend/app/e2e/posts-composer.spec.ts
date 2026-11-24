@@ -1055,7 +1055,10 @@ test("keeps an enabled but blank channel caption blank across saves", async ({ p
   const caption = "Blank override journey";
   await composerTextarea(page).fill(caption);
   const channelPanel = page.getByRole("region", { name: channel, exact: true });
-  const override = channelPanel.getByRole("textbox");
+  const override = channelPanel.getByRole("textbox", {
+    name: `Custom Text for ${channel}`,
+    exact: true,
+  });
   await expect(override).toHaveValue(caption);
   await override.fill("");
   await saveDraft(page);

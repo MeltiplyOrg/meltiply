@@ -80,6 +80,19 @@ baseline; the fixes describe the current ownership.
     isolation in the hosted workflow, not a key-deletion workaround in auth or
     an unsafe database reset inside the reusable local smoke script.
 
+- Derive media job deadlines from container lifetime, not signed-URL lifetime.
+  - `workers/automation/src/asset-processing.ts` sends 840 seconds because it
+    derives the deadline from the longer-lived storage capabilities. The engine
+    protocol accepts only 5 through 540 seconds and rejects every such job.
+  - Use the existing container timeout with completion headroom. Keep storage
+    URL expiry separate so transfers remain authorized through job completion.
+  - Assert the actual emitted deadline is within the engine's accepted range in
+    the existing staged-upload integration test.
+
+- Name the channel-caption field in its browser regression.
+  - The Threads editor has multiple textboxes. An unnamed textbox locator fails
+    without a product regression and never reaches the save assertion.
+
 - Remove implementation-restating comments and review tests after the structural
   fixes. Keep tests that distinguish a real regression from an internal rename.
   - Remove the obsolete doc comment with the duplicate reporting guard. The

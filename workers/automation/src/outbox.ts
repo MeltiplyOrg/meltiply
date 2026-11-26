@@ -1,10 +1,7 @@
 import { Cause, Effect, Exit } from "effect";
-import type { EffectTransactionClient } from "@meltiply/database";
-import type { DatabaseError, Platform } from "@meltiply/domain";
+import { maximumDelayedDeliverySeconds } from "@meltiply/domain";
 import { errorDiagnostic, log } from "@meltiply/observability";
 
-import { maximumDelayedDeliverySeconds } from "@meltiply/domain";
-import { withSystemTransactionEffect } from "./database";
 import {
   classifyJobError,
   PublishQueueResolver,
@@ -14,24 +11,17 @@ import {
 import type { AutomationEnv } from "./env";
 import { safeErrorMessage } from "./errors";
 import type { OutboxMessage } from "./messages";
+import {
+  createPostgresOutboxRepository,
+  type OutboxRepository,
+  type OutboxRow,
+} from "./repositories/outbox-repository";
 import { nextDelaySeconds, QUEUE_RETRY_POLICY } from "./retry-policy";
 
-interface OutboxRow extends Record<string, unknown> {
-  aggregate_id: string;
-  attempt_count: number;
-  id: string;
-  next_attempt_at: Date | string | null;
-  org_id: string;
-  payload: Record<string, unknown>;
-  platform: Platform | null;
-  scheduled_at: Date | string | null;
-  topic: string;
-}
-
 interface PendingOutboxMessage {
+  delaySeconds: number | null;
   message: OutboxMessage;
   row: OutboxRow;
-  delaySeconds: number | null;
 }
 
 interface FailedOutboxMessage {
@@ -46,76 +36,13 @@ export interface OutboxRelayResult {
   published: number;
 }
 
+export interface RelayOutboxOptions {
+  readonly now?: () => number;
+  readonly repository?: OutboxRepository;
+}
+
 const maximumAttempts = 10;
 const leaseSeconds = 120;
-
-function claimOutbox(
-  client: EffectTransactionClient,
-  batchSize: number,
-): Effect.Effect<OutboxRow[], DatabaseError> {
-  return Effect.map(
-    client.query<OutboxRow>(
-      `WITH exhausted AS (
-         UPDATE outbox_events
-         SET state = 'dead',
-             available_at = NULL,
-             lease_expires_at = NULL,
-             last_error = 'The relay lease expired on the final delivery attempt.',
-             updated_at = now()
-         WHERE id IN (
-           SELECT id
-           FROM outbox_events
-           WHERE state = 'leased'
-             AND attempt_count >= $2
-             AND lease_expires_at <= now()
-           ORDER BY lease_expires_at, id
-           LIMIT $1
-           FOR UPDATE SKIP LOCKED
-         )
-       ), candidates AS (
-         SELECT event.id,
-                CASE WHEN event.topic LIKE 'distribution.%'
-                  THEN distribution.platform
-                  ELSE NULL
-                END AS platform,
-        CASE WHEN event.topic LIKE 'distribution.%'
-                  THEN distribution.scheduled_at
-                  ELSE NULL
-                END AS scheduled_at,
-                CASE WHEN event.topic LIKE 'distribution.%'
-                  THEN distribution.next_attempt_at
-                  ELSE NULL
-                END AS next_attempt_at
-         FROM outbox_events AS event
-         LEFT JOIN distributions AS distribution
-           ON event.aggregate_type = 'distribution'
-          AND distribution.id = event.aggregate_id
-         WHERE event.attempt_count < $2
-           AND (
-             (event.state IN ('pending', 'failed') AND event.available_at <= now())
-             OR (event.state = 'leased' AND event.lease_expires_at <= now())
-           )
-         ORDER BY event.available_at, event.created_at, event.id
-         LIMIT $1
-         FOR UPDATE OF event SKIP LOCKED
-       )
-       UPDATE outbox_events AS event
-       SET state = 'leased',
-           attempt_count = event.attempt_count + 1,
-           lease_expires_at = now() + ($3 * INTERVAL '1 second'),
-           last_error = NULL,
-           updated_at = now()
-       FROM candidates
-       WHERE event.id = candidates.id
-       RETURNING
-         event.id, event.org_id, event.topic, event.aggregate_id,
-        event.payload, event.attempt_count, candidates.platform,
-        candidates.scheduled_at, candidates.next_attempt_at`,
-      [batchSize, maximumAttempts, leaseSeconds],
-    ),
-    (result) => result.rows,
-  );
-}
 
 function safePayload(row: OutboxRow): Record<string, unknown> {
   switch (row.topic) {
@@ -222,73 +149,17 @@ function queueFor(
   });
 }
 
-function markPublished(
-  env: AutomationEnv,
-  eventIds: readonly string[],
-): Effect.Effect<void, DatabaseError> {
-  if (eventIds.length === 0) return Effect.void;
-  return withSystemTransactionEffect(env, (client) =>
-    client.query(
-      `UPDATE outbox_events
-       SET state = 'published',
-           published_at = now(),
-           lease_expires_at = NULL,
-           last_error = NULL,
-           updated_at = now()
-       WHERE id = ANY($1::uuid[]) AND state = 'leased'`,
-      [eventIds],
-    ),
-  ).pipe(Effect.asVoid);
-}
-
-function markFailed(
-  env: AutomationEnv,
-  messages: readonly FailedOutboxMessage[],
-): Effect.Effect<number, DatabaseError> {
-  if (messages.length === 0) return Effect.succeed(0);
-  const eventIds = messages.map(({ row }) => row.id);
-  const delays = messages.map(
-    ({ row }) =>
-      nextDelaySeconds(QUEUE_RETRY_POLICY, row.attempt_count) ?? QUEUE_RETRY_POLICY.maxSeconds,
-  );
-  const errors = messages.map(({ cause }) => safeErrorMessage(cause, "unknown relay error"));
-  return withSystemTransactionEffect(env, (client) =>
-    Effect.map(
-      client.query<{ state: string }>(
-        `UPDATE outbox_events AS event
-         SET state = CASE WHEN event.attempt_count >= $4 THEN 'dead' ELSE 'failed' END,
-             available_at = CASE
-               WHEN event.attempt_count >= $4 THEN NULL
-               ELSE now() + (updates.delay_seconds * INTERVAL '1 second')
-             END,
-             lease_expires_at = NULL,
-             last_error = updates.last_error,
-             updated_at = now()
-         FROM unnest(
-           $1::uuid[],
-           $2::integer[],
-           $3::text[]
-         ) AS updates(id, delay_seconds, last_error)
-         WHERE event.id = updates.id AND event.state = 'leased'
-         RETURNING event.state`,
-        [eventIds, delays, errors, maximumAttempts],
-      ),
-      (result) => result.rows.filter(({ state }) => state === "dead").length,
-    ),
-  );
-}
-
 function messageFor(row: OutboxRow): OutboxMessage {
   return {
-    attempt: row.attempt_count,
     aggregate_id: row.aggregate_id,
+    attempt: row.attempt_count,
     event_id: row.id,
     organization_id: row.org_id,
     payload: safePayload(row),
+    request_id: typeof row.payload.request_id === "string" ? row.payload.request_id : null,
     topic: row.topic,
     type: "outbox.event",
     version: 1,
-    request_id: typeof row.payload.request_id === "string" ? row.payload.request_id : null,
   };
 }
 
@@ -297,13 +168,13 @@ function boundedDelay(seconds: number): number | null {
   return Math.max(0, Math.ceil(seconds));
 }
 
-function publishDelaySeconds(row: OutboxRow): number | null {
+function publishDelaySeconds(row: OutboxRow, nowMs: number): number | null {
   const dueAt =
     row.topic === "distribution.publish.requested"
       ? (row.scheduled_at ?? row.next_attempt_at)
       : row.next_attempt_at;
   if (row.topic.startsWith("distribution.") && dueAt) {
-    return boundedDelay((new Date(dueAt).getTime() - Date.now()) / 1000);
+    return boundedDelay((new Date(dueAt).getTime() - nowMs) / 1000);
   }
   if (row.topic === "comment.reply.requested" && typeof row.payload.delay_seconds === "number") {
     return boundedDelay(row.payload.delay_seconds);
@@ -336,16 +207,19 @@ function publishQueueMessages(
 export function relayOutbox(
   env: AutomationEnv,
   batchSize = 50,
+  options: RelayOutboxOptions = {},
 ): Effect.Effect<OutboxRelayResult, AutomationJobError, QueuePublisher | PublishQueueResolver> {
+  const repository = options.repository ?? createPostgresOutboxRepository(env);
+  const now = options.now ?? (() => Date.now());
   return Effect.gen(function* () {
     if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 100) {
       yield* Effect.fail(
         classifyJobError(new RangeError("outbox batch size must be between 1 and 100")),
       );
     }
-    const rows = yield* withSystemTransactionEffect(env, (client) =>
-      claimOutbox(client, batchSize),
-    ).pipe(Effect.mapError(classifyJobError));
+    const rows = yield* repository
+      .claim(batchSize, maximumAttempts, leaseSeconds)
+      .pipe(Effect.mapError(classifyJobError));
     const result: OutboxRelayResult = {
       claimed: rows.length,
       dead: 0,
@@ -356,6 +230,7 @@ export function relayOutbox(
     const queueGroups = new Map<Queue<unknown>, PendingOutboxMessage[]>();
     const publishedWithoutQueue: PendingOutboxMessage[] = [];
     const failed: FailedOutboxMessage[] = [];
+    const nowMs = now();
 
     for (const row of rows) {
       const routed = yield* Effect.exit(queueFor(env, row));
@@ -370,7 +245,7 @@ export function relayOutbox(
           publishedWithoutQueue.push({ ...pending, delaySeconds: null });
           continue;
         }
-        const delaySeconds = publishDelaySeconds(row);
+        const delaySeconds = publishDelaySeconds(row, nowMs);
         if (delaySeconds !== null && delaySeconds > maximumDelayedDeliverySeconds) {
           publishedWithoutQueue.push({ ...pending, delaySeconds });
           continue;
@@ -405,10 +280,9 @@ export function relayOutbox(
 
     if (published.length > 0) {
       const marked = yield* Effect.exit(
-        markPublished(
-          env,
-          published.map(({ row }) => row.id),
-        ).pipe(Effect.mapError(classifyJobError)),
+        repository
+          .markPublished(published.map(({ row }) => row.id))
+          .pipe(Effect.mapError(classifyJobError)),
       );
       if (Exit.isFailure(marked)) {
         log(
@@ -434,7 +308,15 @@ export function relayOutbox(
       }
     }
     if (failed.length > 0) {
-      result.dead = yield* markFailed(env, failed).pipe(Effect.mapError(classifyJobError));
+      const updates = failed.map(({ cause, row }) => ({
+        delaySeconds:
+          nextDelaySeconds(QUEUE_RETRY_POLICY, row.attempt_count) ?? QUEUE_RETRY_POLICY.maxSeconds,
+        id: row.id,
+        lastError: safeErrorMessage(cause, "unknown relay error"),
+      }));
+      result.dead = yield* repository
+        .markFailed(updates, maximumAttempts)
+        .pipe(Effect.mapError(classifyJobError));
       result.failed = failed.length;
     }
     return result;

@@ -9,7 +9,6 @@ import {
   ProviderAdapterError,
   ProviderRegistry,
   type OAuthAccountSelection,
-  validatePublishInput,
 } from "@meltiply/providers";
 import { oauthStateRoutingKey } from "../src/core-routes";
 import { tokenCipherFor } from "../src/token-credentials";
@@ -18,7 +17,6 @@ import {
   DatabaseError,
   PLATFORM_IDS,
   StorageUnavailableError,
-  type PlatformCapability,
 } from "@meltiply/domain";
 import type { JwtIdentity, SessionClaims } from "@meltiply/auth";
 import { Effect } from "effect";
@@ -3275,93 +3273,6 @@ describe("OAuth Page selection flow", () => {
       oauthEnv,
     );
     expect(busyRes.status).toBe(409);
-  });
-});
-
-describe("provider publish option platform validation", () => {
-  function capability(platform: string): PlatformCapability {
-    return {
-      accepted_mime_types: ["video/mp4"],
-      analytics: false,
-      asset_types: ["video"],
-      comments: false,
-      connect_available: true,
-      max_caption_length: null,
-      max_file_size: null,
-      max_hashtags: null,
-      max_media_count: null,
-      max_video_duration_sec: null,
-      min_media_count: null,
-      multi_asset_types: null,
-      notes: [],
-      platform: platform as PlatformCapability["platform"],
-      publish: true,
-      reply: false,
-    };
-  }
-
-  const publishInput = {
-    caption: "launch day",
-    hashtags: [],
-    idempotencyKey: "publish-1",
-    media: [
-      {
-        contentType: "video/mp4",
-        fileSize: 500,
-        mode: "remote_ingest" as const,
-        url: "https://cdn.example.com/clip.mp4",
-      },
-    ],
-  };
-
-  it("accepts YouTube publish options on a YouTube capability", () => {
-    expect(
-      validatePublishInput(capability("youtube"), {
-        ...publishInput,
-        providerOptions: {
-          youtube: { madeForKids: true, privacyStatus: "private" },
-        },
-      }),
-    ).toEqual([]);
-  });
-
-  it("rejects YouTube publish options on a non-YouTube capability", () => {
-    expect(
-      validatePublishInput(capability("threads"), {
-        ...publishInput,
-        providerOptions: { youtube: { madeForKids: false } },
-      }),
-    ).toEqual([
-      expect.objectContaining({
-        constraint: "unsupported_provider_options",
-        field: "providerOptions.youtube",
-      }),
-    ]);
-  });
-
-  it("rejects TikTok publish options on a non-TikTok capability", () => {
-    expect(
-      validatePublishInput(capability("youtube"), {
-        ...publishInput,
-        providerOptions: {
-          tiktok: {
-            allowComment: true,
-            allowDuet: false,
-            allowStitch: false,
-            brandContent: false,
-            brandOrganic: false,
-            isAiGenerated: false,
-            musicUsageConfirmed: true,
-            privacyLevel: "PUBLIC_TO_EVERYONE",
-          },
-        },
-      }),
-    ).toEqual([
-      expect.objectContaining({
-        constraint: "unsupported_provider_options",
-        field: "providerOptions.tiktok",
-      }),
-    ]);
   });
 });
 

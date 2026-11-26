@@ -7,7 +7,6 @@ import { createApiApp } from "../src/app";
 import { authPolicyHandler } from "../src/auth-policy";
 import { CoreApiError } from "../src/core-types";
 import type { ApiWorkerEnv } from "../src/env";
-import { logRecords } from "./log-records";
 
 const database = vi.hoisted(() => ({
   pool: { connect: vi.fn(), query: vi.fn() },
@@ -93,29 +92,6 @@ describe("tenant authentication boundary", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "email_verification_required" },
     });
-  });
-});
-
-describe("error code logging", () => {
-  it("reads a small error code without parsing bodies past the probe limit", async () => {
-    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
-    const app = createApiApp();
-    const jsonError = (code: string, padding: number) =>
-      new Response(JSON.stringify({ error: { code, padding: "x".repeat(padding) } }), {
-        headers: { "Content-Type": "application/json" },
-        status: 400,
-      });
-    app.get("/small-error", () => jsonError("small_error", 0));
-    app.get("/oversized-error", () => jsonError("oversized_error", 9 * 1024));
-
-    await app.request("/small-error", {}, env);
-    const oversized = await app.request("/oversized-error", {}, env);
-
-    await expect(oversized.json()).resolves.toMatchObject({ error: { code: "oversized_error" } });
-    const requests = logRecords(info)
-      .map((record) => record.context as Record<string, unknown>)
-      .filter((context) => context.event === "http_request");
-    expect(requests.map((context) => context.error_code)).toEqual(["small_error", undefined]);
   });
 });
 

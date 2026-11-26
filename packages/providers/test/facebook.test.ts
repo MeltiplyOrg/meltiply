@@ -7,6 +7,8 @@ import {
   type ProviderRequestContext,
   type PublishInput,
 } from "../src";
+import { discoveryRequestLimit } from "../src/facebook/oauth";
+import { failureOf, providerFailure } from "./support";
 
 const context: ProviderRequestContext = {
   operationId: "operation-1",
@@ -1311,71 +1313,53 @@ describe("createFacebookAdapter", () => {
     });
   });
 
-  it("bounds pagination without discovered Pages", async () => {
-    const atLimitPages = Array.from(
-      { length: 1_000 },
-      (_, index) => () =>
-        json({
+  describe("Page discovery request limit", () => {
+    const discover = (pageCount: number, lastHasNext: boolean) => {
+      const pages = Array.from({ length: pageCount }, (_, index) => () => {
+        const next = lastHasNext || index < pageCount - 1;
+        return json({
           data: [],
-          ...(index === 999
-            ? {}
-            : {
+          ...(next
+            ? {
                 paging: {
-                  cursors: { after: `at-limit-${index}` },
-                  next: `https://graph.facebook.com/v25.0/me/accounts?after=at-limit-${index}`,
+                  cursors: { after: `cursor-${index}` },
+                  next: `https://graph.facebook.com/v25.0/me/accounts?after=cursor-${index}`,
                 },
-              }),
-        }),
-    );
-    const atLimit = sequence(
-      () => json({ access_token: "short" }),
-      () => json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
-      defaultGrantedPermissions,
-      ...atLimitPages,
-    );
-    await expect(
-      adapter(atLimit.fetcher).exchangeAuthorizationCode!(context, {
+              }
+            : {}),
+        });
+      });
+      const { fetcher } = sequence(
+        () => json({ access_token: "short" }),
+        () => json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
+        defaultGrantedPermissions,
+        ...pages,
+      );
+      return createFacebookAdapter({
+        clientId: "facebook-client",
+        clientSecret: "facebook-client-secret",
+        fetch: fetcher,
+        maxDiscoveryRequests: 3,
+        redirectUri,
+      }).exchangeAuthorizationCode!(context, {
         code: "code",
         codeVerifier: "unused",
         redirectUri,
-      }),
-    ).resolves.toEqual({ accounts: [] });
+      });
+    };
 
-    const responders: Responder[] = [
-      () => json({ access_token: "short" }),
-      () => json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
-      defaultGrantedPermissions,
-      ...Array.from(
-        { length: 1_001 },
-        (_, index) => () =>
-          json({
-            data: [],
-            paging: {
-              cursors: { after: `empty-${index}` },
-              next: `https://graph.facebook.com/v25.0/me/accounts?after=empty-${index}`,
-            },
-          }),
-      ),
-      () =>
-        json({
-          data: [
-            {
-              id: "eventual-page",
-              name: "Too late",
-              access_token: "page-token",
-              tasks: ["CREATE_CONTENT"],
-            },
-          ],
-        }),
-    ];
-    await expect(
-      adapter(sequence(...responders).fetcher).exchangeAuthorizationCode!(context, {
-        code: "code",
-        codeVerifier: "unused",
-        redirectUri,
-      }),
-    ).rejects.toMatchObject({
-      failure: { code: "facebook_oauth_page_pagination_invalid" },
+    it("pages ending on the last allowed request", async () => {
+      expect(await discover(3, false)).toEqual({ accounts: [] });
+    });
+
+    it("pages continuing past the last allowed request", async () => {
+      expect(await failureOf(discover(4, false))).toEqual(
+        providerFailure("transient", "facebook_oauth_page_pagination_invalid"),
+      );
+    });
+
+    it("the default limit", () => {
+      expect(discoveryRequestLimit(undefined)).toEqual(1_000);
     });
   });
 

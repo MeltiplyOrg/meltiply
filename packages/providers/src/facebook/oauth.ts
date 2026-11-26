@@ -56,7 +56,6 @@ const reservedPaths = new Set([
 ]);
 const contentTasks = ["CREATE_CONTENT", "PROFILE_PLUS_CREATE_CONTENT"];
 const discoveryPageSize = 100;
-const maxDiscoveryRequests = 1_000;
 const maxDiscoveredPages = 1_000;
 const maxBusinessUsers = 1_000;
 const maxPageTasks = 32;
@@ -201,7 +200,11 @@ function parsePageTasks(value: unknown): string[] {
   return value;
 }
 
-export function createFacebookOAuth(runtime: AdapterRuntime) {
+export function discoveryRequestLimit(override: number | undefined): number {
+  return override ?? 1_000;
+}
+
+export function createFacebookOAuth(runtime: AdapterRuntime, maxDiscoveryRequests: number) {
   const { clientId, clientSecret, http, now, redirectUri } = runtime;
   const tokenUrl = graphUrl("oauth/access_token").toString();
   const authorizationEndpoint = `https://www.facebook.com/${META_GRAPH_API_VERSION}/dialog/oauth`;

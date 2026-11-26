@@ -3,7 +3,7 @@ import type { PlatformCapability } from "@meltiply/domain";
 import { adapterRuntime, type ProviderAdapterOptions } from "../runtime";
 import type { ProviderAdapter } from "../types";
 import { createFacebookAnalytics } from "./analytics";
-import { createFacebookOAuth } from "./oauth";
+import { createFacebookOAuth, discoveryRequestLimit } from "./oauth";
 import { createFacebookPublish } from "./publish";
 import {
   FACEBOOK_GRAPH_ORIGIN,
@@ -42,7 +42,9 @@ const capability: PlatformCapability = {
   reply: false,
 };
 
-export type FacebookAdapterOptions = ProviderAdapterOptions;
+export interface FacebookAdapterOptions extends ProviderAdapterOptions {
+  maxDiscoveryRequests?: number;
+}
 
 export function createFacebookAdapter(options: FacebookAdapterOptions): ProviderAdapter {
   const runtime = adapterRuntime(
@@ -50,7 +52,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
     [FACEBOOK_GRAPH_ORIGIN, FACEBOOK_UPLOAD_ORIGIN],
     options,
   );
-  const oauth = createFacebookOAuth(runtime);
+  const oauth = createFacebookOAuth(runtime, discoveryRequestLimit(options.maxDiscoveryRequests));
   const analytics = createFacebookAnalytics(runtime.http, runtime.now);
   const publish = createFacebookPublish(runtime.http);
   return {

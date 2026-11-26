@@ -2,14 +2,14 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { idempotencyHeaders } from "../src/idempotent-response";
 
-describe("idempotency response headers", () => {
-  it("marks replayed responses", () => {
+describe("idempotencyHeaders", () => {
+  it("a replayed response", () => {
     expect(idempotencyHeaders(true)).toEqual({
       "Idempotency-Replayed": "true",
     });
   });
 
-  it("does not add a header to fresh responses", () => {
+  it("a fresh response", () => {
     expect(idempotencyHeaders(false)).toEqual({});
   });
 });

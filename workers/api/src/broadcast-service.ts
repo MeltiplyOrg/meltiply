@@ -1,28 +1,20 @@
 import type { SessionClaims } from "@meltiply/auth";
-import { Effect } from "effect";
+import type { DatabaseError } from "@meltiply/domain";
 import { ProviderService, type ProviderBroadcastInfo } from "@meltiply/providers";
-import type { DatabaseError, Platform } from "@meltiply/domain";
-import { CoreApiError } from "./core-types";
-import { activeBrandProfilePredicate } from "./brand-profile-guard";
-import { withTenantTransactionEffect } from "./database";
-import type { ApiWorkerEnv } from "./env";
-import { tokenCipherFor } from "./token-credentials";
-import {
-  completeIdempotencyEffect,
-  hashIdempotencyRequestEffect,
-  reserveIdempotencyEffect,
-} from "./idempotency";
+import { Effect } from "effect";
 
-interface BroadcastRow extends Record<string, unknown> {
-  org_id: string;
-  platform: Platform;
-  platform_user_id: string;
-  provider_operation_id: string;
-  access_token: string;
-  token_expires_at: Date | string | null;
-  connection_status: string;
-  revoked_at: Date | string | null;
-  role: string;
+import { CoreApiError } from "./core-types";
+import type { ApiWorkerEnv } from "./env";
+import { hashIdempotencyRequestEffect } from "./idempotency";
+import {
+  createPostgresBroadcastRepository,
+  type BroadcastRepository,
+} from "./repositories/broadcast-repository";
+import { tokenCipherFor } from "./token-credentials";
+
+export interface BroadcastControlOptions {
+  readonly now?: () => Date;
+  readonly repository?: BroadcastRepository;
 }
 
 export function broadcastControlEffect(
@@ -31,72 +23,55 @@ export function broadcastControlEffect(
   distributionId: string,
   requestId: string,
   action: { kind: "read" } | { kind: "end"; key: string },
+  options: BroadcastControlOptions = {},
 ): Effect.Effect<
   ProviderBroadcastInfo | { ended: true },
   CoreApiError | DatabaseError,
   ProviderService
 > {
+  const repository = options.repository ?? createPostgresBroadcastRepository(env, session);
+  const now = options.now ?? (() => new Date());
   return Effect.gen(function* () {
+    const operation = "broadcast.end";
     const requestHash =
       action.kind === "end" ? yield* hashIdempotencyRequestEffect(distributionId) : "";
-    const operation = "broadcast.end";
-    const selected = yield* withTenantTransactionEffect(env, session, (client) =>
-      Effect.gen(function* () {
-        const result = yield* client.query<BroadcastRow>(
-          `SELECT distribution.org_id, distribution.platform, distribution.provider_operation_id,
-                account.platform_user_id, account.access_token, account.token_expires_at,
-                account.connection_status, account.revoked_at, public.auth_active_org_role() AS role
-           FROM distributions AS distribution
-           JOIN platform_accounts AS account ON account.id = distribution.platform_account_id
-          WHERE distribution.id = $1
-            AND ${activeBrandProfilePredicate("distribution.brand_profile_id")}`,
-          [distributionId],
-        );
-        const row = result.rows[0];
-        if (!row)
-          return yield* Effect.fail(
-            new CoreApiError(404, "not_found", "The broadcast was not found."),
-          );
-        if (!["admin", "editor"].includes(row.role))
-          return yield* Effect.fail(
-            new CoreApiError(
-              403,
-              "forbidden_role",
-              "Your Workspace role cannot access encoder credentials.",
-            ),
-          );
-        if (action.kind === "end") {
-          const replay = yield* reserveIdempotencyEffect(
-            client,
-            row.org_id,
-            operation,
-            distributionId,
-            requestHash,
-          );
-          if (replay) return { row, replayed: true };
-        }
-        if (!row.provider_operation_id?.startsWith("live:"))
-          return yield* Effect.fail(
-            new CoreApiError(422, "invalid_state", "This Distribution is not a live broadcast."),
-          );
-        if (
-          row.revoked_at ||
-          !["connected", "expiring"].includes(row.connection_status) ||
-          (row.token_expires_at && new Date(row.token_expires_at) <= new Date())
-        ) {
-          return yield* Effect.fail(
-            new CoreApiError(
-              409,
-              "invalid_state",
-              "Reconnect this Channel before controlling the broadcast.",
-            ),
-          );
-        }
-        return { row, replayed: false };
-      }),
+    const loaded = yield* repository.loadAndReserve(
+      distributionId,
+      action.kind === "end" ? { operation, requestHash } : null,
     );
-    if (selected.replayed) return { ended: true as const };
-    const row = selected.row;
+    const row = loaded.row;
+    if (!row) {
+      return yield* Effect.fail(new CoreApiError(404, "not_found", "The broadcast was not found."));
+    }
+    if (!["admin", "editor"].includes(row.role)) {
+      return yield* Effect.fail(
+        new CoreApiError(
+          403,
+          "forbidden_role",
+          "Your Workspace role cannot access encoder credentials.",
+        ),
+      );
+    }
+    if (loaded.replay) return { ended: true as const };
+    if (!row.provider_operation_id?.startsWith("live:")) {
+      return yield* Effect.fail(
+        new CoreApiError(422, "invalid_state", "This Distribution is not a live broadcast."),
+      );
+    }
+    if (
+      row.revoked_at ||
+      !["connected", "expiring"].includes(row.connection_status) ||
+      (row.token_expires_at && new Date(row.token_expires_at) <= now())
+    ) {
+      return yield* Effect.fail(
+        new CoreApiError(
+          409,
+          "invalid_state",
+          "Reconnect this Channel before controlling the broadcast.",
+        ),
+      );
+    }
+
     const accessToken = yield* Effect.tryPromise({
       catch: () =>
         new CoreApiError(
@@ -108,8 +83,9 @@ export function broadcastControlEffect(
     });
     const provider = yield* ProviderService;
     const credentials = { accessToken, accountId: row.platform_user_id };
-    const context = { requestId, operationId: `broadcast:${distributionId}` };
+    const context = { operationId: `broadcast:${distributionId}`, requestId };
     const lookup = { providerOperationId: row.provider_operation_id };
+
     if (action.kind === "read") {
       const info = yield* provider
         .getBroadcastInfo(row.platform, context, credentials, lookup)
@@ -124,17 +100,15 @@ export function broadcastControlEffect(
           ),
         );
       if (info.providerPostId) {
-        yield* withTenantTransactionEffect(env, session, (client) =>
-          client.query(
-            `UPDATE distributions SET status = 'published', platform_post_id = $2, platform_url = $3,
-                  published_at = COALESCE(published_at, now()), next_attempt_at = NULL, updated_at = now()
-            WHERE id = $1 AND status IN ('delivered', 'published')`,
-            [distributionId, info.providerPostId, info.providerUrl ?? null],
-          ),
-        );
+        yield* repository.markPublishedFromRead({
+          distributionId,
+          providerPostId: info.providerPostId,
+          providerUrl: info.providerUrl ?? null,
+        });
       }
       return info;
     }
+
     const ended = yield* provider
       .endBroadcast(row.platform, context, credentials, lookup)
       .pipe(
@@ -147,7 +121,7 @@ export function broadcastControlEffect(
             ),
         ),
       );
-    if (ended.outcome !== "confirmed_success")
+    if (ended.outcome !== "confirmed_success") {
       return yield* Effect.fail(
         new CoreApiError(
           409,
@@ -155,26 +129,15 @@ export function broadcastControlEffect(
           "The end request is uncertain. Refresh the broadcast state.",
         ),
       );
-    yield* withTenantTransactionEffect(env, session, (client) =>
-      Effect.gen(function* () {
-        yield* client.query(
-          `UPDATE distributions SET status = $4, platform_post_id = $2, platform_url = $3,
-                published_at = CASE WHEN $4 = 'published' THEN COALESCE(published_at, now()) ELSE published_at END,
-                provider_operation_id = $5, next_attempt_at = NULL, updated_at = now()
-          WHERE id = $1`,
-          [
-            distributionId,
-            ended.providerPostId ?? null,
-            ended.providerUrl ?? null,
-            ended.providerPostId ? "published" : "delivered",
-            ended.providerOperationId ?? row.provider_operation_id,
-          ],
-        );
-        yield* completeIdempotencyEffect(client, row.org_id, operation, distributionId, 200, {
-          ended: true,
-        });
-      }),
-    );
+    }
+    yield* repository.completeEnd({
+      distributionId,
+      operation,
+      orgId: row.org_id,
+      providerOperationId: ended.providerOperationId ?? row.provider_operation_id,
+      providerPostId: ended.providerPostId ?? null,
+      providerUrl: ended.providerUrl ?? null,
+    });
     return { ended: true as const };
   });
 }

@@ -1,420 +1,449 @@
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
-
 import { memoryAdapter } from "better-auth/adapters/memory";
-import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
-import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { decodeJwt } from "jose";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import {
-  accessClaims,
-  bearerToken,
   createBetterAuth,
-  createCloudflareAccessTokenVerifier,
-  createJwtVerifier,
-  createRemoteJwtVerifier,
-  jwtClaims,
-  type AccessTokenVerifier,
-  type JwtVerifier,
+  type BetterAuthConfig,
+  type BetterAuthEmailConfig,
+  type BetterAuthInstance,
 } from "../src";
 
-let signAccess: (claims?: Record<string, unknown>) => Promise<string>;
-let verifyAccess: AccessTokenVerifier;
-let signJwt: (claims?: Record<string, unknown>, key?: CryptoKey) => Promise<string>;
-let verifyJwt: JwtVerifier;
-let jwtPrivateKey: CryptoKey;
-let jwksServer: Server;
-let jwksUrl: URL;
+type Row = Record<string, unknown>;
+type Database = Record<
+  | "account"
+  | "deviceCode"
+  | "jwks"
+  | "rateLimit"
+  | "session"
+  | "twoFactor"
+  | "user"
+  | "verification",
+  Row[]
+>;
+type Message = Parameters<BetterAuthEmailConfig["send"]>[0];
+
+const ORIGIN = "https://auth.example.test";
+const EMAIL = "device-user@example.test";
+const PASSWORD = "device-password-for-http-test";
+const ID = expect.stringMatching(/^[A-Za-z0-9]{32}$/);
+const device = {
+  clientId: "melti-cli",
+  expiresIn: "10m",
+  interval: "5s",
+  verificationUri: `${ORIGIN}/device`,
+} as const;
+
+class FakeMailer implements BetterAuthEmailConfig {
+  readonly sent: Message[] = [];
+  failure: Error | undefined;
+
+  send = async (message: Message) => {
+    if (this.failure) throw this.failure;
+    this.sent.push(message);
+  };
+}
+
+function emptyDatabase(): Database {
+  return {
+    account: [],
+    deviceCode: [],
+    jwks: [],
+    rateLimit: [],
+    session: [],
+    twoFactor: [],
+    user: [],
+    verification: [],
+  };
+}
+
+function build(database: Database, config: Partial<BetterAuthConfig> = {}) {
+  return createBetterAuth({
+    baseURL: ORIGIN,
+    database: memoryAdapter(database),
+    deviceAuthorization: device,
+    jwt: { audience: "meltiply-api", issuer: "https://issuer.example.test" },
+    requireEmailVerification: false,
+    secret: "meltiply-auth-http-test-secret-32",
+    trustedOrigins: [ORIGIN],
+    ...config,
+  });
+}
+
+function post(
+  auth: BetterAuthInstance,
+  path: string,
+  body: Row,
+  headers: Record<string, string> = {},
+) {
+  return auth.handler(
+    new Request(`${ORIGIN}${path}`, {
+      body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json", Origin: ORIGIN, ...headers },
+      method: "POST",
+    }),
+  );
+}
+
+function get(auth: BetterAuthInstance, path: string, headers: Record<string, string>) {
+  return auth.handler(new Request(`${ORIGIN}${path}`, { headers }));
+}
+
+async function record(response: Response): Promise<Row> {
+  const value: unknown = await response.json();
+  if (typeof value !== "object" || value === null) throw new TypeError("Expected an object");
+  return Object.fromEntries(Object.entries(value));
+}
+
+function sessionCookie(response: Response): string {
+  const header = response.headers.getSetCookie().find((entry) => entry.includes("session_token="));
+  const pair = header?.split(";", 1)[0];
+  if (!pair) throw new Error("Expected a browser session cookie");
+  return pair;
+}
+
+const signUp = (auth: BetterAuthInstance, email: string, extra: Row = {}) =>
+  post(auth, "/api/auth/sign-up/email", {
+    email,
+    name: "Device User",
+    password: PASSWORD,
+    ...extra,
+  });
+
+async function approvedDeviceCode(auth: BetterAuthInstance, cookie: string): Promise<string> {
+  const issued = await record(
+    await post(auth, "/api/auth/device/code", { client_id: "melti-cli" }),
+  );
+  const userCode = String(issued.user_code);
+  await get(auth, `/api/auth/device?user_code=${userCode}`, { Cookie: cookie });
+  await post(auth, "/api/auth/device/approve", { userCode }, { Cookie: cookie });
+  return String(issued.device_code);
+}
+
+const redeem = (auth: BetterAuthInstance, deviceCode: string) =>
+  post(auth, "/api/auth/device/token", {
+    client_id: "melti-cli",
+    device_code: deviceCode,
+    grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+    clientChannel: "web",
+  });
+
+const snapshot = { database: emptyDatabase(), cookie: "", cliToken: "" };
 
 beforeAll(async () => {
-  const { privateKey, publicKey } = await generateKeyPair("RS256");
-  const publicJwk = await exportJWK(publicKey);
-  publicJwk.kid = "test-key";
-  verifyAccess = createCloudflareAccessTokenVerifier(
-    {
-      audience: "operator-application-audience",
-      teamDomain: "https://meltiply.cloudflareaccess.com",
-    },
-    createLocalJWKSet({ keys: [publicJwk] }),
-  );
-  signAccess = async (claims = {}) =>
-    new SignJWT({
-      aud: "operator-application-audience",
-      email: "operator@example.test",
-      type: "app",
-      ...claims,
-    })
-      .setProtectedHeader({ alg: "RS256", kid: "test-key" })
-      .setIssuedAt()
-      .setExpirationTime("5m")
-      .setIssuer("https://meltiply.cloudflareaccess.com")
-      .setSubject("access-user-alpha")
-      .sign(privateKey);
-  const jwtKeys = await generateKeyPair("EdDSA");
-  jwtPrivateKey = jwtKeys.privateKey;
-  const jwtPublicJwk = await exportJWK(jwtKeys.publicKey);
-  jwtPublicJwk.kid = "jwt-test-key";
-  const localJwtKeys = createLocalJWKSet({ keys: [jwtPublicJwk] });
-  verifyJwt = createJwtVerifier(
-    {
-      audience: "meltiply-api",
-      issuer: "https://api.example.test/api/auth",
-    },
-    localJwtKeys,
-  );
-  signJwt = async (claims = {}, key = jwtPrivateKey) => {
-    const { exp, ...payload } = claims;
-    return new SignJWT({
-      aud: "meltiply-api",
-      email: "alpha@example.test",
-      iss: "https://api.example.test/api/auth",
-      name: "Alpha User",
-      sub: "user-alpha",
-      ...payload,
-    })
-      .setProtectedHeader({ alg: "EdDSA", kid: "jwt-test-key" })
-      .setIssuedAt()
-      .setExpirationTime(
-        typeof exp === "number" || typeof exp === "string" || exp instanceof Date ? exp : "5m",
-      )
-      .sign(key);
-  };
-  jwksServer = createServer((_request, response) => {
-    response
-      .writeHead(200, { "content-type": "application/json" })
-      .end(JSON.stringify({ keys: [jwtPublicJwk] }));
-  });
-  await new Promise<void>((resolve) => {
-    jwksServer.listen(0, "127.0.0.1", resolve);
-  });
-  const address = jwksServer.address() as AddressInfo;
-  jwksUrl = new URL(`http://127.0.0.1:${address.port}/api/auth/jwks`);
+  const database = emptyDatabase();
+  const auth = await build(database);
+  snapshot.cookie = sessionCookie(await signUp(auth, EMAIL));
+  await get(auth, "/api/auth/get-session", { Cookie: snapshot.cookie });
+  const granted = await record(await redeem(auth, await approvedDeviceCode(auth, snapshot.cookie)));
+  snapshot.cliToken = String(granted.access_token);
+  snapshot.database = database;
 });
 
-afterAll(async () => {
-  await new Promise<void>((resolve, reject) => {
-    jwksServer.close((error) => (error ? reject(error) : resolve()));
-  });
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
-describe("Better Auth JWT verification", () => {
-  it("verifies a locally signed JWT into subject, normalized email, and name", async () => {
-    await expect(verifyJwt(await signJwt())).resolves.toEqual({
-      email: "alpha@example.test",
-      name: "Alpha User",
-      subject: "user-alpha",
-    });
-    expect(
-      jwtClaims({
-        email: "  ALPHA@example.test  ",
-        name: "Alpha User",
-        sub: "user-alpha",
-      }),
-    ).toEqual({
-      email: "alpha@example.test",
-      name: "Alpha User",
-      subject: "user-alpha",
-    });
-  });
+async function setup(config: Partial<BetterAuthConfig> = {}) {
+  const database = structuredClone(snapshot.database);
+  const mail = new FakeMailer();
+  const auth = await build(database, { email: mail, ...config });
+  const channelOf = (token: unknown) =>
+    database.session.find((session) => session.token === token)?.clientChannel;
+  const identityOf = async (headers: Record<string, string>) =>
+    auth.getSession?.(new Headers(headers));
+  return { auth, database, mail, channelOf, identityOf };
+}
 
-  it("omits the display name when the JWT carries no name claim", async () => {
-    const identity = await verifyJwt(await signJwt({ name: undefined }));
-    expect(identity).toEqual({
-      email: "alpha@example.test",
-      subject: "user-alpha",
-    });
-    expect(identity).not.toHaveProperty("name");
-  });
+const browser = () => ({ Cookie: snapshot.cookie });
+const cli = () => ({ Authorization: `Bearer ${snapshot.cliToken}` });
 
-  it("rejects tokens signed by a different key", async () => {
-    const { privateKey: otherKey } = await generateKeyPair("EdDSA");
-    await expect(verifyJwt(await signJwt({}, otherKey))).rejects.toThrow();
-  });
-
-  it("rejects tokens with the wrong issuer or audience", async () => {
+describe("createBetterAuth", () => {
+  it("unusable device authorization settings", async () => {
     await expect(
-      verifyJwt(await signJwt({ iss: "https://attacker.example.test" })),
-    ).rejects.toThrow();
-    await expect(verifyJwt(await signJwt({ aud: "other-api" }))).rejects.toThrow();
+      build(emptyDatabase(), { deviceAuthorization: { ...device, clientId: " " } }),
+    ).rejects.toThrow("device authorization requires an exact client identifier");
   });
 
-  it("rejects expired tokens and payloads missing identity claims", async () => {
-    await expect(
-      verifyJwt(await signJwt({ exp: Math.floor(Date.now() / 1000) - 60 })),
-    ).rejects.toThrow();
-    await expect(verifyJwt(await signJwt({ sub: undefined }))).rejects.toThrow(
-      "identity subject and email",
-    );
-    await expect(verifyJwt(await signJwt({ email: undefined }))).rejects.toThrow(
-      "identity subject and email",
-    );
+  it("a sign-up that asks for the CLI channel", async () => {
+    const { auth, channelOf } = await setup();
+
+    const response = await signUp(auth, "new@example.test", { clientChannel: "cli" });
+
+    expect(response.status).toBe(200);
+    expect(channelOf((await record(response)).token)).toEqual("web");
   });
 
-  it("verifies tokens through the remote JWKS endpoint", async () => {
-    const remoteVerifier = createRemoteJwtVerifier(
+  it("a sign-up with an email already used", async () => {
+    const { auth, database } = await setup();
+
+    const response = await signUp(auth, EMAIL);
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      code: "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL",
+      message: "User already exists. Use another email.",
+    });
+    expect(database.user).toEqual(snapshot.database.user);
+  });
+
+  it("a sign-up for a suspended account", async () => {
+    const { auth, database } = await setup({ isAccountActive: async () => false });
+
+    const response = await signUp(auth, "new@example.test");
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "FAILED_TO_CREATE_SESSION",
+      message: "Failed to create session",
+    });
+    expect(database.session).toEqual(snapshot.database.session);
+  });
+
+  it("a sign-up while the account check is down", async () => {
+    const failure = new Error("account check down");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { auth, database } = await setup({
+      isAccountActive: async () => {
+        throw failure;
+      },
+    });
+
+    const response = await signUp(auth, "new@example.test");
+
+    expect(response.status).toBe(500);
+    expect(database.session).toEqual(snapshot.database.session);
+    expect(logged).toHaveBeenCalledWith("# SERVER_ERROR: ", failure);
+  });
+
+  it("a sign-up with mail configured", async () => {
+    const { auth, mail } = await setup();
+
+    await signUp(auth, "new@example.test");
+
+    expect(mail.sent).toEqual([
       {
-        audience: "meltiply-api",
-        issuer: "https://api.example.test/api/auth",
+        html: expect.stringContaining(`<a href="${ORIGIN}/api/auth/verify-email?token=`),
+        subject: "Verify your Meltiply email",
+        text: expect.stringContaining(`${ORIGIN}/api/auth/verify-email?token=`),
+        to: "new@example.test",
       },
-      jwksUrl,
-    );
-    await expect(remoteVerifier(await signJwt())).resolves.toEqual({
-      email: "alpha@example.test",
-      name: "Alpha User",
-      subject: "user-alpha",
-    });
-    await expect(remoteVerifier(await signJwt({ aud: "other-api" }))).rejects.toThrow();
-  });
-});
-
-describe("Cloudflare Access verification", () => {
-  it("verifies issuer, audience, identity type, subject, and normalized email", async () => {
-    await expect(verifyAccess(await signAccess())).resolves.toEqual({
-      email: "operator@example.test",
-      subject: "access-user-alpha",
-    });
-    expect(
-      accessClaims({
-        email: "OPERATOR@example.test",
-        sub: "access-user-alpha",
-        type: "app",
-      }),
-    ).toEqual({
-      email: "operator@example.test",
-      subject: "access-user-alpha",
-    });
+    ]);
   });
 
-  it("rejects the wrong audience and non-identity service tokens", async () => {
-    await expect(verifyAccess(await signAccess({ aud: ["other-application"] }))).rejects.toThrow();
-    await expect(verifyAccess(await signAccess({ type: "service" }))).rejects.toThrow(
-      "identity subject and email",
-    );
-    await expect(verifyAccess(await signAccess({ email: undefined }))).rejects.toThrow(
-      "identity subject and email",
-    );
-    expect(() => accessClaims({ email: "operator@example.test", type: "app" })).toThrow(
-      "identity subject and email",
-    );
+  it("a sign-up while mail is down", async () => {
+    const logged = vi.spyOn(console, "error");
+    const { auth, database, mail } = await setup();
+    mail.failure = new Error("mail down");
+
+    const response = await signUp(auth, "new@example.test");
+
+    expect(response.status).toBe(200);
+    expect(database.user.map((user) => user.email)).toEqual([EMAIL, "new@example.test"]);
+    expect(logged).not.toHaveBeenCalled();
   });
 
-  it("rejects non-Cloudflare and non-origin team domains", () => {
-    for (const teamDomain of [
-      "http://meltiply.cloudflareaccess.com",
-      "https://access.example.test",
-      "https://meltiply.cloudflareaccess.com/path",
-    ]) {
-      expect(() =>
-        createCloudflareAccessTokenVerifier(
-          { audience: "operator-application-audience", teamDomain },
-          async () => {
-            throw new Error("unused");
-          },
-        ),
-      ).toThrow("canonical HTTPS cloudflareaccess.com origin");
-    }
-  });
-});
+  it("a password reset request", async () => {
+    const { auth, mail } = await setup();
 
-describe("bearerToken", () => {
-  it("accepts one exact bearer token", () => {
-    expect(bearerToken("Bearer token-value")).toBe("token-value");
-    expect(bearerToken("bearer token-value")).toBeUndefined();
-    expect(bearerToken("Bearer two values")).toBeUndefined();
-  });
-});
+    const response = await post(auth, "/api/auth/request-password-reset", { email: EMAIL });
 
-describe("Better Auth device protocol HTTP composition", () => {
-  it("completes a CLI grant and keeps browser and CLI session lifecycles separate", async () => {
-    const origin = "https://auth.example.test";
-    const email = "device-user@example.test";
-    const database: {
-      [model: string]: Record<string, unknown>[];
-      session: Record<string, unknown>[];
-    } = {
-      account: [],
-      deviceCode: [],
-      jwks: [],
-      rateLimit: [],
-      session: [],
-      twoFactor: [],
-      user: [],
-      verification: [],
-    };
-    const auth = await createBetterAuth({
-      baseURL: origin,
-      database: memoryAdapter(database),
-      deviceAuthorization: {
-        clientId: "melti-cli",
-        expiresIn: "10m",
-        interval: "5s",
-        verificationUri: `${origin}/device`,
+    expect(response.status).toBe(200);
+    expect(mail.sent).toEqual([
+      {
+        html: expect.stringContaining(`<a href="${ORIGIN}/api/auth/reset-password/`),
+        subject: "Reset your Meltiply password",
+        text: expect.stringContaining(`${ORIGIN}/api/auth/reset-password/`),
+        to: EMAIL,
       },
-      isAccountActive: async () => true,
-      jwt: { audience: "meltiply-api", issuer: origin },
-      requireEmailVerification: false,
-      secret: "meltiply-auth-http-test-secret-32",
-      trustedOrigins: [origin],
+    ]);
+  });
+
+  it("a password reset request while mail is down", async () => {
+    const logged = vi.spyOn(console, "error");
+    const { auth, mail } = await setup();
+    mail.failure = new Error("mail down");
+
+    const response = await post(auth, "/api/auth/request-password-reset", { email: EMAIL });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      status: true,
+      message: "If this email exists in our system, check your email for the reset link",
+    });
+    expect(logged).not.toHaveBeenCalled();
+  });
+
+  it("an unverified sign-in where verification is required", async () => {
+    const { auth, database } = await setup({ requireEmailVerification: true });
+
+    const response = await post(auth, "/api/auth/sign-in/email", {
+      email: EMAIL,
+      password: PASSWORD,
     });
 
-    const postJson = (
-      path: string,
-      body: Record<string, unknown>,
-      headers: Record<string, string> = {},
-    ): Promise<Response> =>
-      auth.handler(
-        new Request(`${origin}${path}`, {
-          body: JSON.stringify(body),
-          headers: {
-            "Content-Type": "application/json",
-            Origin: origin,
-            ...headers,
-          },
-          method: "POST",
-        }),
-      );
+    expect(response.status).toBe(403);
+    expect(database.session).toEqual(snapshot.database.session);
+  });
 
-    const jsonRecord = async (response: Response): Promise<Record<string, unknown>> => {
-      const value: unknown = await response.json();
-      if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        throw new TypeError("Expected an object response");
-      }
-      return Object.fromEntries(Object.entries(value));
-    };
+  it("an unverified sign-in where verification is not required", async () => {
+    const { auth, channelOf } = await setup();
 
-    const sessionCookie = (response: Response): string => {
-      const header = response.headers
-        .getSetCookie()
-        .find((entry) => entry.includes("session_token="));
-      const pair = header?.split(";", 1)[0];
-      if (!pair) throw new Error("Expected a browser session cookie");
-      return pair;
-    };
-
-    const signUp = await postJson("/api/auth/sign-up/email", {
-      email,
-      name: "Device User",
-      password: "device-password-for-http-test",
-      clientChannel: "cli",
+    const response = await post(auth, "/api/auth/sign-in/email", {
+      email: EMAIL,
+      password: PASSWORD,
     });
-    expect(signUp.status).toBe(200);
-    const browserCookie = sessionCookie(signUp);
-    if (typeof auth.getSession !== "function") {
-      throw new Error("Better Auth instance must expose its session lookup");
-    }
-    const browserIdentity = await auth.getSession(new Headers({ Cookie: browserCookie }));
-    expect(browserIdentity).toMatchObject({
-      session: { id: expect.any(String) },
-      user: { id: expect.any(String) },
+
+    expect(response.status).toBe(200);
+    expect(channelOf((await record(response)).token)).toEqual("web");
+  });
+
+  it("a browser session lookup", async () => {
+    const { identityOf } = await setup();
+
+    expect(await identityOf(browser())).toEqual({ session: { id: ID }, user: { id: ID } });
+  });
+
+  it("a session lookup with no credential", async () => {
+    const { identityOf } = await setup();
+
+    expect(await identityOf({})).toEqual(null);
+  });
+
+  it("a device code for the first-party client", async () => {
+    const { auth } = await setup();
+
+    const response = await post(auth, "/api/auth/device/code", { client_id: "melti-cli" });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ verification_uri: `${ORIGIN}/device` });
+  });
+
+  it("a device code for another client", async () => {
+    const { auth } = await setup();
+
+    const response = await post(auth, "/api/auth/device/code", { client_id: "other" });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "invalid_client",
+      error_description: "Invalid client ID",
     });
-    expect(
-      database.session.find((session) => session.id === browserIdentity?.session.id)?.clientChannel,
-    ).toBe("web");
+  });
 
-    const issued = await postJson("/api/auth/device/code", { client_id: "melti-cli" });
-    expect(issued.status).toBe(200);
-    const issuedBody = await jsonRecord(issued);
-    const deviceCode = issuedBody.device_code;
-    const userCode = issuedBody.user_code;
-    if (typeof deviceCode !== "string" || typeof userCode !== "string") {
-      throw new TypeError("Expected device and user codes");
-    }
+  it("a device code without device authorization", async () => {
+    const { auth } = await setup({ deviceAuthorization: undefined });
 
-    const review = await auth.handler(
-      new Request(`${origin}/api/auth/device?user_code=${encodeURIComponent(userCode)}`, {
-        headers: { Cookie: browserCookie },
-      }),
+    const response = await post(auth, "/api/auth/device/code", { client_id: "melti-cli" });
+
+    expect(response.status).toBe(404);
+  });
+
+  it("a device code under review", async () => {
+    const { auth } = await setup();
+    const issued = await record(
+      await post(auth, "/api/auth/device/code", { client_id: "melti-cli" }),
     );
-    const reviewBody = await jsonRecord(review);
-    expect(reviewBody).toMatchObject({
+
+    const response = await get(auth, `/api/auth/device?user_code=${issued.user_code}`, browser());
+
+    expect(await response.json()).toMatchObject({
       client_id: "melti-cli",
       status: "pending",
-      user_code: userCode,
+      user_code: issued.user_code,
     });
-    const approved = await postJson(
-      "/api/auth/device/approve",
-      { userCode },
-      { Cookie: browserCookie },
-    );
-    expect(approved.status).toBe(200);
+  });
 
-    const exchange = await postJson("/api/auth/device/token", {
-      client_id: "melti-cli",
-      device_code: deviceCode,
-      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-      clientChannel: "web",
+  it("an approved device grant", async () => {
+    const { auth, channelOf } = await setup();
+    const deviceCode = await approvedDeviceCode(auth, snapshot.cookie);
+
+    const response = await redeem(auth, deviceCode);
+
+    expect(response.status).toBe(200);
+    const granted = await record(response);
+    expect(granted.token_type).toEqual("Bearer");
+    expect(channelOf(granted.access_token)).toEqual("cli");
+  });
+
+  it("a device grant redeemed twice", async () => {
+    const { auth, database } = await setup();
+    const deviceCode = await approvedDeviceCode(auth, snapshot.cookie);
+    await redeem(auth, deviceCode);
+    const sessions = database.session.length;
+
+    const response = await redeem(auth, deviceCode);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "invalid_grant" });
+    expect(database.session.length).toEqual(sessions);
+  });
+
+  it("a CLI session read", async () => {
+    const { auth } = await setup();
+
+    const response = await get(auth, "/api/auth/get-session", cli());
+
+    const body = await record(response);
+    expect(body.user).toMatchObject({ email: EMAIL });
+    expect(body.session).toMatchObject({ id: ID });
+    expect(body.session).not.toHaveProperty("clientChannel");
+    const claims = decodeJwt(response.headers.get("set-auth-jwt") ?? "");
+    expect(claims).toEqual({
+      aud: "meltiply-api",
+      email: EMAIL,
+      exp: (claims.iat ?? 0) + 900,
+      iat: expect.any(Number),
+      iss: "https://issuer.example.test",
+      name: "Device User",
+      sid: ID,
+      sub: ID,
     });
-    expect(exchange.status).toBe(200);
-    const exchangeBody = await jsonRecord(exchange);
-    expect(exchangeBody.token_type).toBe("Bearer");
-    const accessToken = exchangeBody.access_token;
-    if (typeof accessToken !== "string") throw new TypeError("Expected a CLI session credential");
+  });
 
-    const cliSession = await auth.handler(
-      new Request(`${origin}/api/auth/get-session`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }),
-    );
-    expect(cliSession.status).toBe(200);
-    expect(cliSession.headers.get("set-auth-jwt")).toBeTruthy();
-    const cliBody = await jsonRecord(cliSession);
-    expect(cliBody.user).toMatchObject({ email });
-    expect(cliBody.session).toMatchObject({ id: expect.any(String) });
-    expect(cliBody.session).not.toHaveProperty("clientChannel");
-    expect(database.session.find((session) => session.token === accessToken)?.clientChannel).toBe(
-      "cli",
-    );
+  it("a session token with no configured audience or issuer", async () => {
+    const { auth } = await setup({ jwt: undefined });
 
-    const signOut = await auth.handler(
-      new Request(`${origin}/api/auth/sign-out`, {
-        body: "{}",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-          Origin: origin,
-        },
-        method: "POST",
-      }),
-    );
-    expect(signOut.status).toBe(200);
+    const response = await get(auth, "/api/auth/get-session", cli());
 
-    const revokedCliSession = await auth.handler(
-      new Request(`${origin}/api/auth/get-session`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }),
-    );
-    const revokedCliSessionBody: unknown = await revokedCliSession.json();
-    expect(revokedCliSessionBody).toBeNull();
+    expect(decodeJwt(response.headers.get("set-auth-jwt") ?? "")).toMatchObject({
+      aud: ORIGIN,
+      iss: ORIGIN,
+    });
+  });
 
-    const browserSession = await auth.handler(
-      new Request(`${origin}/api/auth/get-session`, {
-        headers: { Cookie: browserCookie },
-      }),
-    );
-    expect((await jsonRecord(browserSession)).user).toMatchObject({ email });
-    const changed = await postJson(
+  it("a CLI sign-out", async () => {
+    const { auth, identityOf } = await setup();
+
+    const response = await post(auth, "/api/auth/sign-out", {}, cli());
+
+    expect(response.status).toBe(200);
+    expect(await identityOf(cli())).toEqual(null);
+    expect(await identityOf(browser())).not.toEqual(null);
+  });
+
+  it.each([
+    ["the browser", browser, "web"],
+    ["the CLI", cli, "cli"],
+  ])("a password change from %s", async (_example, credential, channel) => {
+    const { auth, channelOf, identityOf } = await setup();
+
+    const response = await post(
+      auth,
       "/api/auth/change-password",
       {
-        currentPassword: "device-password-for-http-test",
+        currentPassword: PASSWORD,
         newPassword: "replacement-password-for-http-test",
         revokeOtherSessions: true,
-        clientChannel: "cli",
+        clientChannel: "unknown",
       },
-      { Cookie: browserCookie },
+      credential(),
     );
-    expect(changed.status).toBe(200);
-    const replacement = await jsonRecord(changed);
-    expect(
-      database.session.find((session) => session.token === replacement.token)?.clientChannel,
-    ).toBe("web");
-    const replacedSession = await auth.handler(
-      new Request(`${origin}/api/auth/get-session`, {
-        headers: { Cookie: sessionCookie(changed) },
-      }),
-    );
-    const replacedBody = await jsonRecord(replacedSession);
-    expect(replacedBody.user).toMatchObject({ email });
-    expect(replacedBody.session).toMatchObject({ id: expect.any(String) });
-    expect(replacedBody.session).not.toHaveProperty("clientChannel");
-    expect(await auth.getSession(new Headers({ Cookie: browserCookie }))).toBeNull();
+
+    expect(response.status).toBe(200);
+    const { token } = await record(response);
+    expect(channelOf(token)).toEqual(channel);
+    expect(await identityOf(credential())).toEqual(null);
+    expect(await identityOf({ Authorization: `Bearer ${token}` })).not.toEqual(null);
   });
 });

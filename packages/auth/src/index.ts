@@ -1,24 +1,25 @@
-import { escapeMailHtml } from "@meltiply/domain/mail-content";
 import type { BetterAuthOptions, GenericEndpointContext } from "better-auth";
-import type { TimeString } from "better-auth/plugins";
-import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey, type JWTPayload } from "jose";
+import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
+
+import { passwordResetMail, verificationMail } from "./auth-mail";
+import { accessClaims, jwtClaims, type AccessClaims, type JwtIdentity } from "./claims";
+import {
+  deviceAuthorizationSettings,
+  type BetterAuthDeviceAuthorizationConfig,
+} from "./device-authorization";
+import { clientChannelFor, type ClientChannel, type SessionProvenance } from "./session-channel";
+
+export {
+  accessClaims,
+  bearerToken,
+  jwtClaims,
+  type AccessClaims,
+  type JwtIdentity,
+} from "./claims";
+export type { BetterAuthDeviceAuthorizationConfig } from "./device-authorization";
 
 const trailingSlashPattern = /\/$/;
 const accessTeamHostnamePattern = /^[a-z0-9-]+\.cloudflareaccess\.com$/i;
-const bearerTokenPattern = /^Bearer ([^\s]+)$/;
-
-/**
- * Identity from a verified Better Auth JWT. `clientChannel` and `emailVerified` are never JWT
- * claims; the host fills them from the live database session.
- */
-export interface JwtIdentity {
-  clientChannel?: "web" | "cli" | "unknown";
-  email: string;
-  emailVerified?: boolean;
-  name?: string;
-  subject: string;
-  sessionId?: string;
-}
 
 /** Tenant claims resolved server-side from a verified identity and its Workspace membership. */
 export interface SessionClaims {
@@ -33,11 +34,6 @@ interface AccessVerifierConfig {
   teamDomain: string;
 }
 
-export interface AccessClaims {
-  email: string;
-  subject: string;
-}
-
 interface JwtVerifierConfig {
   audience: string;
   issuer: string;
@@ -45,10 +41,6 @@ interface JwtVerifierConfig {
 
 export type JwtVerifier = (token: string) => Promise<JwtIdentity>;
 export type AccessTokenVerifier = (token: string) => Promise<AccessClaims>;
-
-function nonEmptyString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
 
 function cloudflareAccessTeamDomain(value: string): string {
   const candidate = value.trim().replace(trailingSlashPattern, "");
@@ -66,32 +58,6 @@ function cloudflareAccessTeamDomain(value: string): string {
     throw new TypeError("Access team domain must be a canonical HTTPS cloudflareaccess.com origin");
   }
   return parsed.origin;
-}
-
-export function bearerToken(authorization: string | undefined): string | undefined {
-  return authorization?.match(bearerTokenPattern)?.[1];
-}
-
-/** Throws `TypeError` unless the payload carries a non-empty subject and email. */
-export function jwtClaims(payload: JWTPayload): JwtIdentity {
-  const subject = nonEmptyString(payload.sub);
-  const email = nonEmptyString(payload.email)?.toLowerCase();
-  if (!subject || !email) {
-    throw new TypeError("JWT requires an identity subject and email");
-  }
-  const name = nonEmptyString(payload.name);
-  const sessionId = nonEmptyString(payload.sid);
-  return { email, ...(name ? { name } : {}), ...(sessionId ? { sessionId } : {}), subject };
-}
-
-/** Throws `TypeError` unless the payload is an Access application identity (`type: "app"`). */
-export function accessClaims(payload: JWTPayload): AccessClaims {
-  const subject = nonEmptyString(payload.sub);
-  const email = nonEmptyString(payload.email)?.toLowerCase();
-  if (!subject || !email || payload.type !== "app") {
-    throw new TypeError("Access token requires an identity subject and email");
-  }
-  return { email, subject };
 }
 
 export function createJwtVerifier(config: JwtVerifierConfig, getKey: JWTVerifyGetKey): JwtVerifier {
@@ -127,15 +93,6 @@ export function createCloudflareAccessTokenVerifier(
   };
 }
 
-/** Device-authorization flow for the first-party CLI client; scope grants no extra capability. */
-export interface BetterAuthDeviceAuthorizationConfig {
-  clientId: string;
-  expiresIn: TimeString;
-  interval: TimeString;
-  /** Absolute browser verification URL, same-origin with `baseURL`. */
-  verificationUri: string;
-}
-
 export interface BetterAuthConfig {
   baseURL?: string;
   database: BetterAuthOptions["database"];
@@ -166,16 +123,7 @@ export interface BetterAuthInstance {
   ) => Promise<{ session: { id: string }; user: { id: string } } | null>;
 }
 
-type ClientChannel = "web" | "cli" | "unknown";
-
-interface SessionProvenance {
-  readonly clientChannel: ClientChannel;
-  readonly userId: string;
-}
-
 const sessionProvenanceByContext = new WeakMap<object, SessionProvenance>();
-
-const webSessionPaths = new Set(["/sign-in/email", "/sign-up/email", "/verify-email"]);
 
 async function retainSessionProvenance(context: GenericEndpointContext | null): Promise<void> {
   const current = context?.context.session;
@@ -195,39 +143,16 @@ function sessionClientChannel(
   context: GenericEndpointContext | null,
   userId: string,
 ): ClientChannel {
-  const path = context?.path;
-  if (path === "/device/token") return "cli";
-  const provenance = context ? sessionProvenanceByContext.get(context.context) : undefined;
-  if (provenance?.userId === userId) return provenance.clientChannel;
-  if (path && (webSessionPaths.has(path) || path.startsWith("/two-factor/verify-"))) return "web";
-  return "unknown";
-}
-
-function deviceAuthorizationSettings(
-  config: BetterAuthConfig,
-): BetterAuthDeviceAuthorizationConfig | undefined {
-  if (!config.deviceAuthorization) return undefined;
-  const clientId = config.deviceAuthorization.clientId.trim();
-  if (!clientId) {
-    throw new TypeError("device authorization requires an exact client identifier");
-  }
-  const verificationUrl = new URL(config.deviceAuthorization.verificationUri);
-  if (config.baseURL && verificationUrl.origin !== new URL(config.baseURL).origin) {
-    throw new TypeError("device authorization verification URI must be same-origin");
-  }
-  return { ...config.deviceAuthorization, clientId, verificationUri: verificationUrl.href };
+  const provenanceForContext = context
+    ? sessionProvenanceByContext.get(context.context)
+    : undefined;
+  return clientChannelFor(context?.path, provenanceForContext, userId);
 }
 
 function authMail(email: BetterAuthEmailConfig) {
   return {
     sendResetPassword: async ({ url, user }: { url: string | URL; user: { email: string } }) => {
-      const link = String(url);
-      await email.send({
-        html: `<p>Reset your Meltiply password by opening <a href="${escapeMailHtml(link)}">this link</a>. The link expires soon; if you did not request a reset, ignore this email.</p>`,
-        subject: "Reset your Meltiply password",
-        text: `Reset your Meltiply password: ${link}\n\nIf you did not request a reset, ignore this email.`,
-        to: user.email,
-      });
+      await email.send(passwordResetMail(String(url), user.email));
     },
     sendVerificationEmail: async ({
       url,
@@ -236,13 +161,7 @@ function authMail(email: BetterAuthEmailConfig) {
       url: string | URL;
       user: { email: string };
     }) => {
-      const link = String(url);
-      await email.send({
-        html: `<p>Verify your Meltiply email address by opening <a href="${escapeMailHtml(link)}">this link</a>.</p>`,
-        subject: "Verify your Meltiply email",
-        text: `Verify your Meltiply email address: ${link}`,
-        to: user.email,
-      });
+      await email.send(verificationMail(String(url), user.email));
     },
   };
 }
@@ -257,7 +176,7 @@ function authMail(email: BetterAuthEmailConfig) {
 export async function createBetterAuth(config: BetterAuthConfig): Promise<BetterAuthInstance> {
   const { betterAuth } = await import("better-auth");
   const { bearer, deviceAuthorization, jwt, twoFactor } = await import("better-auth/plugins");
-  const device = deviceAuthorizationSettings(config);
+  const device = deviceAuthorizationSettings(config.deviceAuthorization, config.baseURL);
   const mail = config.email ? authMail(config.email) : undefined;
   const instance = betterAuth({
     baseURL: config.baseURL,

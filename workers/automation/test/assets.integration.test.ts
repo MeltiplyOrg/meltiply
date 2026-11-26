@@ -13,7 +13,7 @@ import {
   COMMUNITY_LIMITS,
   mediaUploadMaximum,
 } from "@meltiply/domain";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type * as Domain from "@meltiply/domain";
 
 vi.mock("@meltiply/domain", async (importOriginal) => ({
@@ -1113,6 +1113,21 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     });
   });
 
+  beforeEach(async () => {
+    await runSystemTransaction(env, async (client) => {
+      await client.query(
+        `DELETE FROM outbox_events
+         WHERE state IN ('pending', 'failed', 'leased')
+           AND NOT (id = ANY($1::uuid[]))`,
+        [baselineOutboxIds],
+      );
+      await client.query("DELETE FROM distributions WHERE id = ANY($1::uuid[])", [
+        automationDistributionFixtureIds,
+      ]);
+      await client.query("DELETE FROM rate_limit_budgets");
+    });
+  });
+
   afterAll(async () => {
     await runSystemTransaction(env, async (client) => {
       await client.query(
@@ -1213,8 +1228,11 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
   it("leases, publishes, and closes an outbox event once", async () => {
     const eventId = "92000000-0000-4000-8000-000000000001";
     send.mockClear();
-    await runSystemTransaction(env, (client) =>
-      client.query(
+    await runSystemTransaction(env, async (client) => {
+      await client.query(
+        "DELETE FROM outbox_events WHERE state IN ('pending', 'failed', 'leased')",
+      );
+      await client.query(
         `INSERT INTO outbox_events
            (id, org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
          VALUES (
@@ -1227,8 +1245,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
            }'::jsonb
          )`,
         [eventId, organizationId],
-      ),
-    );
+      );
+    });
 
     const relayed = await runRelay(env);
     expect(relayed.failed).toBe(0);
@@ -4592,9 +4610,11 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         [organizationId, period],
       );
       await client.query(
-        `UPDATE usage_records
-         SET uploads = 900, distributions = 901, storage_bytes = 902
-         WHERE org_id = $1 AND period = $2`,
+        `INSERT INTO usage_records
+           (org_id, period, uploads, distributions, storage_bytes)
+         VALUES ($1, $2, 900, 901, 902)
+         ON CONFLICT (org_id, period) DO UPDATE
+         SET uploads = 900, distributions = 901, storage_bytes = 902`,
         [organizationId, period],
       );
       await client.query(
@@ -4608,7 +4628,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         organizationId,
         period,
       ]);
-      return usage.rows[0]!;
+      return usage.rows[0];
     });
 
     const first = await reconcileDueUsage(env, { batchLimit: 100, now });
@@ -4683,20 +4703,27 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         [organizationId, period],
       );
       expect(corrections.rows[0]?.count).toBe("1");
-      await client.query(
-        `UPDATE usage_records
-         SET uploads = $3, distributions = $4, api_calls = $5,
-             storage_bytes = $6
-         WHERE org_id = $1 AND period = $2`,
-        [
+      if (original) {
+        await client.query(
+          `UPDATE usage_records
+           SET uploads = $3, distributions = $4, api_calls = $5,
+               storage_bytes = $6
+           WHERE org_id = $1 AND period = $2`,
+          [
+            organizationId,
+            period,
+            original.uploads,
+            original.distributions,
+            original.api_calls,
+            original.storage_bytes,
+          ],
+        );
+      } else {
+        await client.query("DELETE FROM usage_records WHERE org_id = $1 AND period = $2", [
           organizationId,
           period,
-          original.uploads,
-          original.distributions,
-          original.api_calls,
-          original.storage_bytes,
-        ],
-      );
+        ]);
+      }
       await client.query("DELETE FROM usage_corrections WHERE org_id = $1 AND period = $2", [
         organizationId,
         period,
@@ -5253,6 +5280,13 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         ]);
       });
 
+      await runSystemTransaction(env, (client) =>
+        client.query(
+          `DELETE FROM outbox_events
+           WHERE state IN ('pending', 'failed', 'leased') AND aggregate_id <> $1`,
+          [distributionId],
+        ),
+      );
       send.mockClear();
       youtubePublishSend.mockClear();
       await expect(runRelay(env, 10)).resolves.toMatchObject({
@@ -5325,6 +5359,9 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const rescheduleWinsId = "93000000-0000-4000-8000-000000000002";
     const claimWinsId = "93000000-0000-4000-8000-000000000003";
     await runSystemTransaction(env, async (client) => {
+      await client.query("DELETE FROM distributions WHERE id = ANY($1::uuid[])", [
+        automationDistributionFixtureIds,
+      ]);
       for (const distributionId of [rescheduleWinsId, claimWinsId]) {
         await seedDistributionPost(client, {
           postId: postIdForDistribution(distributionId),
@@ -5721,6 +5758,14 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         status: "awaiting_provider",
       });
       expect(result.rows[1]!.next_attempt_at).toBeInstanceOf(Date);
+      await client.query("DELETE FROM distributions WHERE id IN ($1, $2)", [
+        retryId,
+        reconciliationId,
+      ]);
+      await client.query("DELETE FROM outbox_events WHERE aggregate_id IN ($1, $2)", [
+        retryId,
+        reconciliationId,
+      ]);
     });
   });
 
@@ -5796,13 +5841,17 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
 
   it("schedules only bounded safe provider retries with provider backoff", async () => {
     const distributionId = "93000000-0000-4000-8000-000000000008";
-    await runSystemTransaction(env, async (client) => {
-      await seedDistributionPost(client, {
-        postId: postIdForDistribution(distributionId),
-        target: { platformAccountId: seededYouTubeAccountId },
-      });
-      await client.query(
-        `INSERT INTO distributions
+    try {
+      await runSystemTransaction(env, async (client) => {
+        await client.query("DELETE FROM distributions WHERE id = ANY($1::uuid[])", [
+          automationDistributionFixtureIds,
+        ]);
+        await seedDistributionPost(client, {
+          postId: postIdForDistribution(distributionId),
+          target: { platformAccountId: seededYouTubeAccountId },
+        });
+        await client.query(
+          `INSERT INTO distributions
            (id, org_id, brand_profile_id, post_id, platform_account_id,
             platform, status)
          VALUES (
@@ -5811,138 +5860,140 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
            '50000000-0000-4000-8000-000000000001',
            'youtube', 'queued'
          )`,
-        [
-          distributionId,
-          organizationId,
-          seededAlphaProfileId,
-          postIdForDistribution(distributionId),
-        ],
-      );
-    });
-    const publish = vi.fn(async () => {
-      throw new ProviderAdapterError(
-        classifyProviderFailure({
-          code: "rate_limited",
-          retryAfterSeconds: 30,
-          status: 429,
+          [
+            distributionId,
+            organizationId,
+            seededAlphaProfileId,
+            postIdForDistribution(distributionId),
+          ],
+        );
+      });
+      const publish = vi.fn(async () => {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({
+            code: "rate_limited",
+            retryAfterSeconds: 30,
+            status: 429,
+          }),
+        );
+      });
+      const dependencies = {
+        decryptToken: async (stored: string) => stored,
+        mediaFor: async (request: { contentType: string; fileSize: number }) => ({
+          contentType: request.contentType,
+          fileSize: request.fileSize,
+          mode: "remote_ingest" as const,
+          url: "https://r2.example/signed-object",
         }),
-      );
-    });
-    const dependencies = {
-      decryptToken: async (stored: string) => stored,
-      mediaFor: async (request: { contentType: string; fileSize: number }) => ({
-        contentType: request.contentType,
-        fileSize: request.fileSize,
-        mode: "remote_ingest" as const,
-        url: "https://r2.example/signed-object",
-      }),
-      providerRegistry: youtubeRegistry(publish),
-      random: () => 1,
-    };
-    const firstMessage = {
-      ...outboxMessage(
-        "automation-integration-provider-rate-limit-1",
-        distributionId,
-        "distribution.publish.requested",
-      ),
-      payload: { distribution_id: distributionId },
-    } as const;
+        providerRegistry: youtubeRegistry(publish),
+        random: () => 1,
+      };
+      const firstMessage = {
+        ...outboxMessage(
+          "automation-integration-provider-rate-limit-1",
+          distributionId,
+          "distribution.publish.requested",
+        ),
+        payload: { distribution_id: distributionId },
+      } as const;
 
-    await expect(
-      Effect.runPromise(processDistributionMessage(env, firstMessage, dependencies)),
-    ).resolves.toBe("processed");
-    await runSystemTransaction(env, async (client) => {
-      const result = await client.query<{
-        attempt_count: number;
-        failure_retryable: boolean;
-        retry_in_seconds: number;
-        status: string;
-      }>(
-        `SELECT status, attempt_count, failure_retryable,
+      await expect(
+        Effect.runPromise(processDistributionMessage(env, firstMessage, dependencies)),
+      ).resolves.toBe("processed");
+      await runSystemTransaction(env, async (client) => {
+        const result = await client.query<{
+          attempt_count: number;
+          failure_retryable: boolean;
+          retry_in_seconds: number;
+          status: string;
+        }>(
+          `SELECT status, attempt_count, failure_retryable,
                 EXTRACT(EPOCH FROM (next_attempt_at - now()))::integer
                   AS retry_in_seconds
          FROM distributions WHERE id = $1`,
-        [distributionId],
-      );
-      expect(result.rows[0]).toMatchObject({
-        attempt_count: 1,
-        failure_retryable: true,
-        status: "failed",
+          [distributionId],
+        );
+        expect(result.rows[0]).toMatchObject({
+          attempt_count: 1,
+          failure_retryable: true,
+          status: "failed",
+        });
+        expect(result.rows[0]!.retry_in_seconds).toBeGreaterThanOrEqual(28);
+        expect(result.rows[0]!.retry_in_seconds).toBeLessThanOrEqual(30);
       });
-      expect(result.rows[0]!.retry_in_seconds).toBeGreaterThanOrEqual(28);
-      expect(result.rows[0]!.retry_in_seconds).toBeLessThanOrEqual(30);
-    });
-    await expect(enqueueFixtureDistributions()).resolves.toBe(0);
+      await expect(enqueueFixtureDistributions()).resolves.toBe(0);
 
-    await runSystemTransaction(env, (client) =>
-      client.query(
-        `UPDATE distributions
+      await runSystemTransaction(env, (client) =>
+        client.query(
+          `UPDATE distributions
          SET next_attempt_at = now() - INTERVAL '1 second'
          WHERE id = $1`,
-        [distributionId],
-      ),
-    );
-    await expect(enqueueFixtureDistributions()).resolves.toBe(1);
-    await expect(enqueueFixtureDistributions()).resolves.toBe(0);
-    await runSystemTransaction(env, async (client) => {
-      const result = await client.query<{
-        dedupe_key: string;
-        failure_code: string | null;
-        next_attempt_at: Date | null;
-        status: string;
-      }>(
-        `SELECT distribution.status, distribution.failure_code,
+          [distributionId],
+        ),
+      );
+      await expect(enqueueFixtureDistributions()).resolves.toBe(1);
+      await expect(enqueueFixtureDistributions()).resolves.toBe(0);
+      await runSystemTransaction(env, async (client) => {
+        const result = await client.query<{
+          dedupe_key: string;
+          failure_code: string | null;
+          next_attempt_at: Date | null;
+          status: string;
+        }>(
+          `SELECT distribution.status, distribution.failure_code,
                 distribution.next_attempt_at, event.dedupe_key
          FROM distributions AS distribution
          JOIN outbox_events AS event
            ON event.aggregate_id = distribution.id
           AND event.topic = 'distribution.publish.requested'
          WHERE distribution.id = $1`,
-        [distributionId],
-      );
-      expect(result.rows).toEqual([
-        {
-          dedupe_key: `distribution:${distributionId}:automatic-retry:2`,
-          failure_code: null,
-          next_attempt_at: null,
-          status: "queued",
-        },
-      ]);
-      await client.query("UPDATE distributions SET attempt_count = 4 WHERE id = $1", [
-        distributionId,
-      ]);
-      await client.query(
-        "DELETE FROM rate_limit_budgets WHERE platform = 'youtube' AND account_id = 'local-youtube-alpha'",
-      );
-    });
-
-    const finalMessage = {
-      ...firstMessage,
-      event_id: "automation-integration-provider-rate-limit-5",
-    };
-    await expect(
-      Effect.runPromise(processDistributionMessage(env, finalMessage, dependencies)),
-    ).resolves.toBe("processed");
-    await runSystemTransaction(env, async (client) => {
-      const result = await client.query<{
-        attempt_count: number;
-        failure_retryable: boolean;
-        next_attempt_at: Date | null;
-        status: string;
-      }>(
-        `SELECT status, attempt_count, failure_retryable, next_attempt_at
-         FROM distributions WHERE id = $1`,
-        [distributionId],
-      );
-      expect(result.rows[0]).toEqual({
-        attempt_count: 5,
-        failure_retryable: true,
-        next_attempt_at: null,
-        status: "failed",
+          [distributionId],
+        );
+        expect(result.rows).toEqual([
+          {
+            dedupe_key: `distribution:${distributionId}:automatic-retry:2`,
+            failure_code: null,
+            next_attempt_at: null,
+            status: "queued",
+          },
+        ]);
+        await client.query("UPDATE distributions SET attempt_count = 4 WHERE id = $1", [
+          distributionId,
+        ]);
+        await client.query(
+          "DELETE FROM rate_limit_budgets WHERE platform = 'youtube' AND account_id = 'local-youtube-alpha'",
+        );
       });
-      await client.query("DELETE FROM rate_limit_budgets");
-    });
-    expect(publish).toHaveBeenCalledTimes(2);
+
+      const finalMessage = {
+        ...firstMessage,
+        event_id: "automation-integration-provider-rate-limit-5",
+      };
+      await expect(
+        Effect.runPromise(processDistributionMessage(env, finalMessage, dependencies)),
+      ).resolves.toBe("processed");
+      await runSystemTransaction(env, async (client) => {
+        const result = await client.query<{
+          attempt_count: number;
+          failure_retryable: boolean;
+          next_attempt_at: Date | null;
+          status: string;
+        }>(
+          `SELECT status, attempt_count, failure_retryable, next_attempt_at
+         FROM distributions WHERE id = $1`,
+          [distributionId],
+        );
+        expect(result.rows[0]).toEqual({
+          attempt_count: 5,
+          failure_retryable: true,
+          next_attempt_at: null,
+          status: "failed",
+        });
+      });
+      expect(publish).toHaveBeenCalledTimes(2);
+    } finally {
+      await runSystemTransaction(env, (client) => client.query("DELETE FROM rate_limit_budgets"));
+    }
   });
 
   it("publishes through an accepted adapter and commits provider evidence atomically", async () => {
@@ -7291,6 +7342,15 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         "sync-refresh-new",
       );
       expect(account.rows[0]!.token_refresh_next_attempt_at).toBeInstanceOf(Date);
+      await client.query(
+        `UPDATE platform_accounts
+         SET access_token = 'local-only-not-a-provider-credential',
+             refresh_token = NULL, token_expires_at = NULL,
+             scopes = ARRAY['upload'], connection_status = 'connected',
+             token_refresh_next_attempt_at = NULL, updated_at = now()
+         WHERE id = $1`,
+        [accountId],
+      );
     });
   });
 

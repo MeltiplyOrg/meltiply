@@ -43,6 +43,7 @@ const capability: PlatformCapability = {
 };
 
 export interface FacebookAdapterOptions extends ProviderAdapterOptions {
+  maxDiscoveredPages?: number;
   maxDiscoveryRequests?: number;
 }
 
@@ -52,7 +53,11 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
     [FACEBOOK_GRAPH_ORIGIN, FACEBOOK_UPLOAD_ORIGIN],
     options,
   );
-  const oauth = createFacebookOAuth(runtime, discoveryRequestLimit(options.maxDiscoveryRequests));
+  const oauth = createFacebookOAuth(
+    runtime,
+    discoveryRequestLimit(options.maxDiscoveryRequests),
+    options.maxDiscoveredPages,
+  );
   const analytics = createFacebookAnalytics(runtime.http, runtime.now);
   const publish = createFacebookPublish(runtime.http);
   return {

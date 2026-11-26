@@ -1,4 +1,4 @@
-import { malformed, rejected } from "../failures";
+import { rejected } from "../failures";
 import type { ProviderHttpClient } from "../http";
 import { parseMetaInsightsMap } from "../meta";
 import { engagementSnapshot } from "../results";
@@ -11,7 +11,8 @@ import type {
   ProviderPublicationLookup,
   ProviderRequestContext,
 } from "../types";
-import { bearer, metricValue, record, requiredIdentifier, validateSnapshotPage } from "../values";
+import { bearer, record, requiredIdentifier, validateSnapshotPage } from "../values";
+import { facebookAccountFollowers, facebookReelEngagement } from "./responses";
 import {
   facebookAccountId,
   graphUrl,
@@ -30,10 +31,6 @@ const nonReelPhases: ReadonlySet<FacebookOperationPhase> = new Set([
   "ended_live",
   "ab_test",
 ]);
-
-function summaryCount(edge: unknown): number | undefined {
-  return metricValue(record(record(edge)?.summary)?.total_count);
-}
 
 export function createFacebookAnalytics(http: ProviderHttpClient, now: () => Date) {
   const get = async (context: ProviderRequestContext, accessToken: string, url: URL) =>
@@ -57,9 +54,7 @@ export function createFacebookAnalytics(http: ProviderHttpClient, now: () => Dat
         credentials.accessToken,
         nodeUrl(facebookAccountId(credentials), "followers_count"),
       );
-      const followers = metricValue(body?.followers_count);
-      if (followers === undefined) throw malformed();
-      return { followers, recordedAt: now().toISOString() };
+      return { followers: facebookAccountFollowers(body), recordedAt: now().toISOString() };
     },
 
     async listAnalytics(
@@ -89,21 +84,8 @@ export function createFacebookAnalytics(http: ProviderHttpClient, now: () => Dat
         credentials.accessToken,
         nodeUrl(providerPostId, "likes.summary(true).limit(0),comments.summary(true).limit(0)"),
       );
-      const likes = summaryCount(video?.likes);
-      const comments = summaryCount(video?.comments);
-      const views = metrics.get("blue_reels_play_count");
-      const socialActions = metrics.get("post_video_social_actions");
-      if (
-        comments === undefined ||
-        likes === undefined ||
-        views === undefined ||
-        socialActions === undefined ||
-        socialActions < comments
-      ) {
-        throw malformed();
-      }
       return engagementSnapshot(
-        { comments, likes, providerPostId, shares: socialActions - comments, views },
+        { ...facebookReelEngagement(metrics, video), providerPostId },
         now(),
       );
     },

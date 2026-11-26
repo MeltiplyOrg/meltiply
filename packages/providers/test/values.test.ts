@@ -25,6 +25,7 @@ import {
   validateSnapshotPage,
   validFileSize,
 } from "../src/values";
+import { failureThrownBy, refused, thrownBy } from "./support";
 
 describe("firstNonEmptyLine", () => {
   it.each([
@@ -81,7 +82,7 @@ describe("required", () => {
     ["text over the maximum", "abcdef"],
     ["a control character", "a\u0000b"],
   ])("%s", (_example, value) => {
-    expect(() => required("field", value, 5)).toThrow(new TypeError("field is invalid"));
+    expect(thrownBy(() => required("field", value, 5))).toEqual(new TypeError("field is invalid"));
   });
 });
 
@@ -101,7 +102,7 @@ describe("assertHttpsOrLoopbackUrl", () => {
     ["a password", "https://:p@a.test"],
     ["a fragment", "https://a.test/#x"],
   ])("%s", (_example, value) => {
-    expect(() => assertHttpsOrLoopbackUrl(value, "callback")).toThrow(
+    expect(thrownBy(() => assertHttpsOrLoopbackUrl(value, "callback"))).toEqual(
       new TypeError("callback must be HTTPS or an exact loopback HTTP URL"),
     );
   });
@@ -113,7 +114,7 @@ describe("exactRedirectUri", () => {
   });
 
   it("a blank URI", () => {
-    expect(() => exactRedirectUri(" ")).toThrow(new TypeError("redirectUri is invalid"));
+    expect(thrownBy(() => exactRedirectUri(" "))).toEqual(new TypeError("redirectUri is invalid"));
   });
 });
 
@@ -136,8 +137,8 @@ describe("requiredIdentifier", () => {
   });
 
   it("an invalid identifier", () => {
-    expect(() => requiredIdentifier("", "post_id_invalid")).toThrow(
-      "The provider rejected this request.",
+    expect(failureThrownBy(() => requiredIdentifier("", "post_id_invalid"))).toEqual(
+      refused("post_id_invalid"),
     );
   });
 });
@@ -204,10 +205,8 @@ describe("validatePageInput", () => {
     ["a fractional limit", { limit: 1.5 }],
     ["an empty cursor", { limit: 1, cursor: "" }],
   ])("%s", (_example, input) => {
-    expect(() => validatePageInput("tiktok", input)).toThrow(
-      expect.objectContaining({
-        failure: expect.objectContaining({ code: "tiktok_page_invalid" }),
-      }),
+    expect(failureThrownBy(() => validatePageInput("tiktok", input))).toEqual(
+      refused("tiktok_page_invalid"),
     );
   });
 });
@@ -218,11 +217,9 @@ describe("validateSnapshotPage", () => {
   });
 
   it("a cursor", () => {
-    expect(() => validateSnapshotPage("youtube", { limit: 1, cursor: "next" })).toThrow(
-      expect.objectContaining({
-        failure: expect.objectContaining({ code: "youtube_analytics_not_paginated" }),
-      }),
-    );
+    expect(
+      failureThrownBy(() => validateSnapshotPage("youtube", { limit: 1, cursor: "next" })),
+    ).toEqual(refused("youtube_analytics_not_paginated"));
   });
 });
 
@@ -243,7 +240,7 @@ describe("requireIdempotencyKey", () => {
   });
 
   it("a key of 256 characters", () => {
-    expect(() => requireIdempotencyKey("k".repeat(256))).toThrow(
+    expect(thrownBy(() => requireIdempotencyKey("k".repeat(256)))).toEqual(
       new TypeError("idempotencyKey is invalid"),
     );
   });
@@ -293,7 +290,7 @@ describe("bearer", () => {
   });
 
   it("a blank token", () => {
-    expect(() => bearer(" ")).toThrow(new TypeError("accessToken is invalid"));
+    expect(thrownBy(() => bearer(" "))).toEqual(new TypeError("accessToken is invalid"));
   });
 });
 

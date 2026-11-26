@@ -8,6 +8,7 @@ import {
   exchangeAuthorizationCodeForm,
   postForm,
 } from "../src/oauth";
+import { failureThrownBy, malformedAnswer, thrownBy } from "./support";
 
 const context = { operationId: "op-1", requestId: "req-1" };
 const NOW = new Date("2026-01-02T00:00:00.000Z");
@@ -49,7 +50,7 @@ describe("addSeconds", () => {
     ["a fraction", 1.5],
     ["a numeric string", "1"],
   ])("refuses %s", (_example, seconds) => {
-    expect(() => addSeconds(NOW, seconds, 60)).toThrow("The provider is temporarily unavailable.");
+    expect(failureThrownBy(() => addSeconds(NOW, seconds, 60))).toEqual(malformedAnswer);
   });
 });
 
@@ -59,7 +60,7 @@ describe("assertConfiguredRedirectUri", () => {
   });
 
   it("another URI", () => {
-    expect(() => assertConfiguredRedirectUri(`${REDIRECT}/x`, REDIRECT)).toThrow(
+    expect(thrownBy(() => assertConfiguredRedirectUri(`${REDIRECT}/x`, REDIRECT))).toEqual(
       new TypeError("OAuth redirect URI does not match configuration"),
     );
   });
@@ -77,7 +78,7 @@ describe("authorizationCodeUrl", () => {
   it("a state of 1025 characters", () => {
     const input = { codeChallenge: "c", redirectUri: REDIRECT, state: "s".repeat(1_025) };
 
-    expect(() => authorizationCodeUrl("https://auth.test", input, REDIRECT, {})).toThrow(
+    expect(thrownBy(() => authorizationCodeUrl("https://auth.test", input, REDIRECT, {}))).toEqual(
       new TypeError("state is invalid"),
     );
   });
@@ -127,14 +128,21 @@ describe("exchangeAuthorizationCodeForm", () => {
 
     await exchangeAuthorizationCodeForm(http, context, { ...request, ...patch });
 
-    expect(requests).toEqual([expect.objectContaining({ body })]);
+    expect(requests).toEqual([
+      {
+        url: "https://api.test/token",
+        method: "POST",
+        type: "application/x-www-form-urlencoded",
+        body,
+      },
+    ]);
   });
 
   it("a blank code", () => {
     const { http } = setup();
 
-    expect(() => exchangeAuthorizationCodeForm(http, context, { ...request, code: " " })).toThrow(
-      new TypeError("authorizationCode is invalid"),
-    );
+    expect(
+      thrownBy(() => exchangeAuthorizationCodeForm(http, context, { ...request, code: " " })),
+    ).toEqual(new TypeError("authorizationCode is invalid"));
   });
 });

@@ -15,9 +15,16 @@ import {
   requestMetaBearerToken,
   type MetaContainerProtocol,
 } from "../src/meta";
+import {
+  failureOf,
+  failureThrownBy,
+  malformedAnswer,
+  providerFailure,
+  refused,
+  unconfirmed,
+} from "./support";
 
 const context = { operationId: "op-1", requestId: "req-1" };
-const MALFORMED = "The provider is temporarily unavailable.";
 const NOW = new Date("2026-01-02T00:00:00.000Z");
 const credentials = { accessToken: "token" };
 const limits = { tokenLifetimeMaxSeconds: 100, tokenMaxChars: 10 };
@@ -138,7 +145,9 @@ describe("parseMetaInsightsMap", () => {
       true,
     ],
   ])("refuses %s", (_example, body, singleValue) => {
-    expect(() => parseMetaInsightsMap(body, { singleValue })).toThrow(MALFORMED);
+    expect(failureThrownBy(() => parseMetaInsightsMap(body, { singleValue }))).toEqual(
+      malformedAnswer,
+    );
   });
 });
 
@@ -181,21 +190,25 @@ describe("parseMetaCommentPage", () => {
     ["cursors that are not an object", { data: [], paging: { cursors: "x" } }],
     ["an unusable cursor", { data: [], paging: { cursors: { after: "" } } }],
   ])("refuses %s", (_example, body) => {
-    expect(() => parseMetaCommentPage(body, "p1", 1, mapping)).toThrow(MALFORMED);
+    expect(failureThrownBy(() => parseMetaCommentPage(body, "p1", 1, mapping))).toEqual(
+      malformedAnswer,
+    );
   });
 
   it("refuses a repeated comment ID", () => {
-    expect(() => parseMetaCommentPage({ data: [comment, comment] }, "p1", 10, mapping)).toThrow(
-      MALFORMED,
-    );
+    expect(
+      failureThrownBy(() => parseMetaCommentPage({ data: [comment, comment] }, "p1", 10, mapping)),
+    ).toEqual(malformedAnswer);
   });
 
   it("refuses an http avatar", () => {
     const body = { data: [{ ...comment, avatar: "http://a.test" }] };
 
-    expect(() =>
-      parseMetaCommentPage(body, "p1", 10, { ...mapping, avatarField: "avatar" }),
-    ).toThrow(MALFORMED);
+    expect(
+      failureThrownBy(() =>
+        parseMetaCommentPage(body, "p1", 10, { ...mapping, avatarField: "avatar" }),
+      ),
+    ).toEqual(malformedAnswer);
   });
 });
 
@@ -249,9 +262,11 @@ describe("requestMetaBearerToken", () => {
   ])("refuses %s", async (_example, body) => {
     const { http } = setup(json(body));
 
-    await expect(
-      requestMetaBearerToken(http, context, "https://graph.test/token", {}, limits, NOW),
-    ).rejects.toThrow(MALFORMED);
+    expect(
+      await failureOf(
+        requestMetaBearerToken(http, context, "https://graph.test/token", {}, limits, NOW),
+      ),
+    ).toEqual(malformedAnswer);
   });
 });
 
@@ -302,7 +317,7 @@ describe("lookupMetaPost", () => {
   it("a provider error", async () => {
     const { result } = lookup("required", json({}, 500));
 
-    await expect(result).rejects.toThrow(MALFORMED);
+    expect(await failureOf(result)).toEqual(providerFailure("transient", "provider_http_500"));
   });
 
   it.each([
@@ -312,7 +327,7 @@ describe("lookupMetaPost", () => {
   ] as const)("refuses %s", async (_example, permalink, body) => {
     const { result } = lookup(permalink, json(body));
 
-    await expect(result).rejects.toThrow(MALFORMED);
+    expect(await failureOf(result)).toEqual(malformedAnswer);
   });
 });
 
@@ -335,15 +350,17 @@ describe("createMetaContainer", () => {
   it("an answer without an ID", async () => {
     const { http } = setup(json({}));
 
-    await expect(
-      createMetaContainer(
-        http,
-        context,
-        "token",
-        new URL("https://graph.test/media"),
-        new URLSearchParams(),
+    expect(
+      await failureOf(
+        createMetaContainer(
+          http,
+          context,
+          "token",
+          new URL("https://graph.test/media"),
+          new URLSearchParams(),
+        ),
       ),
-    ).rejects.toThrow(MALFORMED);
+    ).toEqual(malformedAnswer);
   });
 });
 
@@ -365,11 +382,13 @@ describe("readMetaContainer", () => {
   });
 
   it("another container's ID", async () => {
-    await expect(read(json({ id: "8" }))).rejects.toThrow(MALFORMED);
+    expect(await failureOf(read(json({ id: "8" })))).toEqual(malformedAnswer);
   });
 
   it("a provider error", async () => {
-    await expect(read(json({}, 500))).rejects.toThrow(MALFORMED);
+    expect(await failureOf(read(json({}, 500)))).toEqual(
+      providerFailure("transient", "provider_http_500"),
+    );
   });
 });
 
@@ -382,13 +401,13 @@ describe("lookupMetaContainer", () => {
     };
   };
   const container = (status: string, extra: object = {}) => json({ id: "9", status, ...extra });
-  const failed = (code: string, operation = "created:9") => ({
-    result: expect.objectContaining({
-      failure: expect.objectContaining({ code }),
-      outcome: "confirmed_failure",
-      providerOperationId: operation,
-    }),
+  const failed = (failure: object, operation = "created:9") => ({
+    result: { failure, outcome: "confirmed_failure", providerOperationId: operation },
     state: "failed",
+  });
+  const unknown = (failure: object) => ({
+    result: { failure, outcome: "unknown", providerOperationId: "submitted:9" },
+    state: "unknown",
   });
 
   it("a container still processing", async () => {
@@ -425,33 +444,24 @@ describe("lookupMetaContainer", () => {
   it("a finished container already submitted", async () => {
     const { status, requests } = run("submitted", container("FINISHED"));
 
-    expect(await status).toEqual({
-      result: expect.objectContaining({
-        failure: expect.objectContaining({ code: "instagram_publish_evidence_missing" }),
-        outcome: "unknown",
-        providerOperationId: "submitted:9",
-      }),
-      state: "unknown",
-    });
+    expect(await status).toEqual(
+      unknown(providerFailure("ambiguous", "instagram_publish_evidence_missing")),
+    );
     expect(requests).toEqual(["GET https://graph.test/9"]);
   });
 
   it("a publish with an unknown outcome", async () => {
     const { status } = run("created", container("FINISHED"), new TypeError("socket"));
 
-    expect(await status).toEqual({
-      result: expect.objectContaining({ outcome: "unknown", providerOperationId: "submitted:9" }),
-      state: "unknown",
-    });
+    expect(await status).toEqual(
+      unknown(providerFailure("ambiguous", "provider_http_request_failed")),
+    );
   });
 
   it("a publish answered without a post ID", async () => {
     const { status } = run("created", container("FINISHED"), json({}));
 
-    expect(await status).toEqual({
-      result: expect.objectContaining({ outcome: "unknown", providerOperationId: "submitted:9" }),
-      state: "unknown",
-    });
+    expect(await status).toEqual(unknown(unconfirmed));
   });
 
   it("a rate-limited publish", async () => {
@@ -463,7 +473,7 @@ describe("lookupMetaContainer", () => {
   it("a refused publish", async () => {
     const { status } = run("created", container("FINISHED"), json({}, 400));
 
-    expect(await status).toEqual(failed("provider_http_400"));
+    expect(await status).toEqual(failed(refused("provider_http_400")));
   });
 
   it("a published container", async () => {
@@ -478,7 +488,7 @@ describe("lookupMetaContainer", () => {
   it("an expired container", async () => {
     const { status } = run("created", container("EXPIRED"));
 
-    expect(await status).toEqual(failed("instagram_container_expired"));
+    expect(await status).toEqual(failed(refused("instagram_container_expired")));
   });
 
   it.each([
@@ -491,12 +501,12 @@ describe("lookupMetaContainer", () => {
   ])("%s", async (_example, detail, code) => {
     const { status } = run("created", container("ERROR", { error_message: detail }));
 
-    expect(await status).toEqual(failed(code));
+    expect(await status).toEqual(failed(refused(code)));
   });
 
   it("an unknown status", async () => {
     const { status } = run("created", container("PAUSED"));
 
-    await expect(status).rejects.toThrow(MALFORMED);
+    expect(await failureOf(status)).toEqual(malformedAnswer);
   });
 });

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import { createPostHogTransport } from "../src/transport";
 
@@ -37,6 +37,10 @@ function setup(answer: (signal: AbortSignal) => Promise<Response>, timeoutMillis
 const status = (code: number) => () => Promise.resolve(new Response(null, { status: code }));
 
 describe("createPostHogTransport", () => {
+  beforeAll(async () => {
+    await setup(status(200)).transport.capture(usageEvent);
+  });
+
   describe("capture", () => {
     it("an accepted event", async () => {
       const { transport, requests } = setup(status(200));

@@ -1148,24 +1148,90 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
   });
 
   it("recovers a stalled attempt through a reconciliation trigger, never a second publish", async () => {
+    await resetCompositions();
     const eventId = eventIds[2]!;
 
-    await runSystemTransaction(env, (client) =>
-      client.query(
-        `UPDATE async_job_events
-         SET lease_expires_at = now() - INTERVAL '1 second'
-         WHERE event_key = $1`,
-        [`outbox:${eventId}`],
-      ),
-    );
-    await runSystemTransaction(env, (client) =>
-      client.query(
+    await runSystemTransaction(env, async (client) => {
+      await client.query(
         `UPDATE distributions
-         SET updated_at = now() - ($2 * INTERVAL '1 second')
+         SET status = 'processing',
+             updated_at = now() - ($2 * INTERVAL '1 second')
          WHERE id = $1`,
         [leaseRecoveryDistributionId, distributionProcessingGraceSeconds + 60],
-      ),
-    );
+      );
+      await client.query(
+        `INSERT INTO provider_operations
+           (org_id, distribution_id, operation, idempotency_key, status,
+            publication_snapshot, media_hold_until, media_asset_ids)
+         VALUES ($1, $2, 'publish', $3, 'started', $4::jsonb,
+                 now() + ($5 * INTERVAL '1 second'), $6::uuid[])
+         ON CONFLICT (distribution_id, operation, idempotency_key)
+         DO NOTHING`,
+        [
+          organizationId,
+          leaseRecoveryDistributionId,
+          `queue:${eventId}`,
+          JSON.stringify({
+            version: 1,
+            post_id: secondPostId,
+            content: {
+              title: "Second launch",
+              text: "Second caption",
+              hashtags: [],
+            },
+            media: [
+              {
+                position: 0,
+                asset_id: secondAssetId,
+                asset_type: "image",
+                rendition_id: secondRenditionId,
+                object_id: secondRenditionObjectId,
+                object_key: secondRenditionKey,
+                content_type: "image/webp",
+                file_size: 3072,
+                etag: "etag-rendition-2",
+                width: 1200,
+                height: 1200,
+                duration_sec: null,
+              },
+            ],
+          }),
+          providerMediaRetrievalLeaseSeconds,
+          [secondAssetId],
+        ],
+      );
+      await client.query(
+        `INSERT INTO provider_operation_media
+           (operation_id, org_id, distribution_id, asset_id, brand_profile_id,
+            rendition_id, object_id, object_key, position)
+         SELECT operation.id, operation.org_id, operation.distribution_id,
+                $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, 0
+         FROM provider_operations AS operation
+         WHERE operation.distribution_id = $1
+           AND operation.operation = 'publish'`,
+        [
+          leaseRecoveryDistributionId,
+          secondAssetId,
+          seededAlphaProfileId,
+          secondRenditionId,
+          secondRenditionObjectId,
+          secondRenditionKey,
+        ],
+      );
+      await client.query(
+        `INSERT INTO async_job_events
+           (event_key, job_type, aggregate_id, outcome, lease_expires_at,
+            org_id, aggregate_type)
+         VALUES ($1, 'distribution.publish.requested', $2, 'processing',
+                 now() - INTERVAL '1 second', $3, 'distribution')
+         ON CONFLICT (event_key) DO UPDATE
+           SET outcome = 'processing',
+               lease_expires_at = EXCLUDED.lease_expires_at,
+               processed_at = NULL,
+               updated_at = now()`,
+        [`outbox:${eventId}`, leaseRecoveryDistributionId, organizationId],
+      );
+    });
 
     await expect(Effect.runPromise(enqueueDueDistributions(env))).resolves.toBeGreaterThanOrEqual(
       1,

@@ -460,4 +460,87 @@ describe("createBetterAuth", () => {
     expect(await identityOf(credential())).toEqual(null);
     expect(await identityOf({ Authorization: `Bearer ${token}` })).not.toEqual(null);
   });
+
+  it("completes a password reset and revokes every existing browser and CLI session", async () => {
+    const { auth, identityOf, mail } = await setup();
+
+    const requested = await post(auth, "/api/auth/request-password-reset", { email: EMAIL });
+    expect(requested.status).toBe(200);
+    const linkMatch = /https:\/\/[^\s"<]+reset-password\/([^?\s"<]+)/.exec(
+      mail.sent[0]?.text ?? "",
+    );
+    const token = linkMatch?.[1];
+    expect(token).toBeTruthy();
+
+    const newPassword = "reset-password-for-http-test";
+    const completed = await post(auth, "/api/auth/reset-password", {
+      newPassword,
+      token,
+    });
+
+    expect(completed.status).toBe(200);
+    expect(await identityOf(browser())).toEqual(null);
+    expect(await identityOf(cli())).toEqual(null);
+
+    const oldSignIn = await post(auth, "/api/auth/sign-in/email", {
+      email: EMAIL,
+      password: PASSWORD,
+    });
+    expect(oldSignIn.status).toBe(401);
+
+    const newSignIn = await post(auth, "/api/auth/sign-in/email", {
+      email: EMAIL,
+      password: newPassword,
+    });
+    expect(newSignIn.status).toBe(200);
+  });
+
+  it("keeps session cookie caching disabled so deleted sessions are rejected immediately", async () => {
+    const { auth, database } = await setup();
+
+    const signedIn = await post(auth, "/api/auth/sign-in/email", {
+      email: EMAIL,
+      password: PASSWORD,
+    });
+    expect(signedIn.status).toBe(200);
+    const cookies = signedIn.headers.getSetCookie();
+    expect(cookies.some((entry) => entry.includes("session_data="))).toBe(false);
+    const cookie = sessionCookie(signedIn);
+
+    const live = await get(auth, "/api/auth/get-session", { Cookie: cookie });
+    expect(live.status).toBe(200);
+    expect(await live.json()).not.toBeNull();
+
+    database.session.length = 0;
+
+    const revoked = await get(auth, "/api/auth/get-session", { Cookie: cookie });
+    expect(revoked.status).toBe(200);
+    expect(await revoked.json()).toBeNull();
+  });
+
+  it("pins that Better Auth skips trustedOrigins checks while Vitest sets isTest()", async () => {
+    const { auth } = await setup();
+
+    const response = await post(
+      auth,
+      "/api/auth/sign-out",
+      {},
+      { ...browser(), Origin: "https://evil.example" },
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  it.skip("rejects state-changing requests from an untrusted origin even in test runs", async () => {
+    const { auth } = await setup();
+
+    const response = await post(
+      auth,
+      "/api/auth/sign-out",
+      {},
+      { ...browser(), Origin: "https://evil.example" },
+    );
+
+    expect(response.status).toBe(403);
+  });
 });

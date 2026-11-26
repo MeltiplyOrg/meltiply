@@ -6968,83 +6968,106 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         : capability,
     );
     const replyService = createCoreApiService(capabilities);
-    const first = await Effect.runPromise(
-      replyService.replyToComment(
-        env,
-        alpha,
-        "80000000-0000-4000-8000-000000000001",
-        alphaBrandProfileId,
-        "Thanks for watching!",
-        "integration-reply-accepted",
-        "integration-reply-request",
-      ),
-    );
-    expect(first).toMatchObject({
-      replayed: false,
-      value: {
-        reply_status: "queued",
-        reply_text: "Thanks for watching!",
-      },
-    });
-
-    const replay = await Effect.runPromise(
-      replyService.replyToComment(
-        env,
-        alpha,
-        "80000000-0000-4000-8000-000000000001",
-        alphaBrandProfileId,
-        "Thanks for watching!",
-        "integration-reply-accepted",
-      ),
-    );
-    expect(replay).toEqual({ ...first, replayed: true });
-
-    await expect(
-      Effect.runPromise(
+    try {
+      const first = await Effect.runPromise(
         replyService.replyToComment(
           env,
           alpha,
           "80000000-0000-4000-8000-000000000001",
           alphaBrandProfileId,
-          "A different reply",
+          "Thanks for watching!",
           "integration-reply-accepted",
+          "integration-reply-request",
         ),
-      ),
-    ).rejects.toMatchObject({
-      code: "idempotency_conflict",
-      status: 409,
-    });
-    await expect(
-      Effect.runPromise(
+      );
+      expect(first).toMatchObject({
+        replayed: false,
+        value: {
+          reply_status: "queued",
+          reply_text: "Thanks for watching!",
+        },
+      });
+
+      const replay = await Effect.runPromise(
         replyService.replyToComment(
           env,
-          beta,
+          alpha,
           "80000000-0000-4000-8000-000000000001",
-          betaBrandProfileId,
-          "Cross-tenant reply",
-          "integration-cross-tenant-reply",
+          alphaBrandProfileId,
+          "Thanks for watching!",
+          "integration-reply-accepted",
         ),
-      ),
-    ).rejects.toMatchObject({ code: "not_found", status: 404 });
+      );
+      expect(replay).toEqual({ ...first, replayed: true });
 
-    await systemTransaction(env, (client) =>
-      Effect.gen(function* () {
-        const result = yield* client.query<{
-          count: string;
-          request_id: string;
-        }>(
-          `SELECT COUNT(*)::text AS count,
+      await expect(
+        Effect.runPromise(
+          replyService.replyToComment(
+            env,
+            alpha,
+            "80000000-0000-4000-8000-000000000001",
+            alphaBrandProfileId,
+            "A different reply",
+            "integration-reply-accepted",
+          ),
+        ),
+      ).rejects.toMatchObject({
+        code: "idempotency_conflict",
+        status: 409,
+      });
+      await expect(
+        Effect.runPromise(
+          replyService.replyToComment(
+            env,
+            beta,
+            "80000000-0000-4000-8000-000000000001",
+            betaBrandProfileId,
+            "Cross-tenant reply",
+            "integration-cross-tenant-reply",
+          ),
+        ),
+      ).rejects.toMatchObject({ code: "not_found", status: 404 });
+
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          const result = yield* client.query<{
+            count: string;
+            request_id: string;
+          }>(
+            `SELECT COUNT(*)::text AS count,
                 MIN(payload->>'request_id') AS request_id
          FROM outbox_events
          WHERE dedupe_key = 'integration-reply-accepted'
            AND topic = 'comment.reply.requested'`,
-        );
-        expect(result.rows[0]).toEqual({
-          count: "1",
-          request_id: "integration-reply-request",
-        });
-      }),
-    );
+          );
+          expect(result.rows[0]).toEqual({
+            count: "1",
+            request_id: "integration-reply-request",
+          });
+        }),
+      );
+    } finally {
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          yield* client.query(
+            `UPDATE comments
+             SET replied = false,
+                 reply_status = 'none',
+                 reply_text = NULL,
+                 updated_at = now()
+             WHERE id = '80000000-0000-4000-8000-000000000001'`,
+          );
+          yield* client.query(
+            `DELETE FROM outbox_events
+             WHERE dedupe_key = 'integration-reply-accepted'`,
+          );
+          yield* client.query(
+            `DELETE FROM idempotency_keys
+             WHERE idempotency_key = 'integration-reply-accepted'`,
+          );
+        }),
+      );
+    }
   });
 
   it("disconnects idempotently and cancels only future work", async () => {

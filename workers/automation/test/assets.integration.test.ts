@@ -1266,8 +1266,11 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const eventId = "92000000-0000-4000-8000-000000000009";
     send.mockClear();
     send.mockRejectedValueOnce(new Error("queue unavailable at https://signed.example/private"));
-    await runSystemTransaction(env, (client) =>
-      client.query(
+    await runSystemTransaction(env, async (client) => {
+      await client.query(
+        `DELETE FROM outbox_events WHERE state IN ('pending', 'failed', 'leased')`,
+      );
+      await client.query(
         `INSERT INTO outbox_events
            (id, org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
          VALUES (
@@ -1277,8 +1280,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
            '{"asset_id":"40000000-0000-4000-8000-000000000001"}'::jsonb
          )`,
         [eventId, organizationId],
-      ),
-    );
+      );
+    });
 
     const failed = await runRelay(env);
     expect(failed).toMatchObject({ failed: 1, published: 0 });
@@ -1315,8 +1318,11 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
   it("replays an expired lease after Queue acceptance with the same event identity", async () => {
     const eventId = "92000000-0000-4000-8000-000000000010";
     send.mockClear();
-    await runSystemTransaction(env, (client) =>
-      client.query(
+    await runSystemTransaction(env, async (client) => {
+      await client.query(
+        `DELETE FROM outbox_events WHERE state IN ('pending', 'failed', 'leased')`,
+      );
+      await client.query(
         `INSERT INTO outbox_events
            (id, org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload,
             state, attempt_count, lease_expires_at)
@@ -1328,8 +1334,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
            'leased', 1, now() - INTERVAL '1 second'
          )`,
         [eventId, organizationId],
-      ),
-    );
+      );
+    });
 
     const replayed = await runRelay(env);
     expect(replayed).toMatchObject({ failed: 0, published: 1 });
@@ -1357,8 +1363,11 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const eventId = "92000000-0000-4000-8000-000000000011";
     const distributionId = "60000000-0000-4000-8000-000000000001";
     youtubePublishSend.mockClear();
-    await runSystemTransaction(env, (client) =>
-      client.query(
+    await runSystemTransaction(env, async (client) => {
+      await client.query(
+        `DELETE FROM outbox_events WHERE state IN ('pending', 'failed', 'leased')`,
+      );
+      await client.query(
         `INSERT INTO outbox_events
            (id, org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
          VALUES (
@@ -1367,8 +1376,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
            jsonb_build_object('distribution_id', $3::uuid::text, 'version', 1)
          )`,
         [eventId, organizationId, distributionId],
-      ),
-    );
+      );
+    });
 
     await expect(runRelay(env)).resolves.toMatchObject({
       failed: 0,
@@ -4887,6 +4896,9 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const stalledId = "93000000-0000-4000-8000-000000000051";
     try {
       await runSystemTransaction(env, async (client) => {
+        await client.query("DELETE FROM distributions WHERE id = ANY($1::uuid[])", [
+          automationDistributionFixtureIds,
+        ]);
         for (const distributionId of [
           scheduledId,
           retryId,
@@ -5055,6 +5067,9 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const activeId = "93000000-0000-4000-8000-000000000053";
     try {
       await runSystemTransaction(env, async (client) => {
+        await client.query("DELETE FROM distributions WHERE id = ANY($1::uuid[])", [
+          automationDistributionFixtureIds,
+        ]);
         for (const distributionId of [stalledId, activeId]) {
           await seedDistributionPost(client, {
             postId: postIdForDistribution(distributionId),
@@ -7573,6 +7588,13 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
 
     await runSystemTransaction(env, async (client) => {
       await client.query("DELETE FROM distributions WHERE id = $1", [distributionId]);
+      await client.query(
+        `UPDATE platform_accounts
+         SET access_token = 'local-only-not-a-provider-credential',
+             updated_at = now()
+         WHERE id = $1`,
+        [accountId],
+      );
     });
   });
 
@@ -7758,6 +7780,13 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       await client.query("DELETE FROM distributions WHERE id = ANY($1::uuid[])", [
         [pastThresholdId, recentId],
       ]);
+      await client.query(
+        `UPDATE platform_accounts
+         SET access_token = 'local-only-not-a-provider-credential',
+             updated_at = now()
+         WHERE id = $1`,
+        [accountId],
+      );
     });
   });
 

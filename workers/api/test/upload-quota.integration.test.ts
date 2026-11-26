@@ -922,7 +922,7 @@ async function seedResidentInventory(
          (id, org_id, brand_profile_id, uploaded_by, asset_type, title, status,
           file_size, mime_type, finalized_at, updated_at)
        SELECT unnest($1::uuid[]), $2, $3, $4, 'image', 'Quota baseline', 'ready',
-              1024, 'image/png', now() - INTERVAL '3 days', now()`,
+              1024, 'image/png', date_trunc('month', now() AT TIME ZONE 'UTC') - INTERVAL '3 days', now()`,
       [assetIds, studio.organizationId, studio.profileId, seededUserId],
     );
     await client.query(

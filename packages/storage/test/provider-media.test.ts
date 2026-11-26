@@ -1,78 +1,86 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import {
-  PROVIDER_MEDIA_ROUTE_PREFIX,
+  providerMediaPayload,
   signProviderMediaSignature,
   signProviderMediaUrl,
   verifyProviderMediaSignature,
-} from "../src";
+} from "../src/provider-media";
 
-describe("provider-media signing and verification", () => {
-  const secret = "0123456789abcdef0123456789abcdef";
-  const key = "org-1/asset-1/original";
-  const expires = 1_800_000_000;
+const secret = "0123456789abcdef0123456789abcdef";
+const key = "org-1/asset-1/original";
+const expiresAtSeconds = 1_800_000_000;
+const SIGNATURE = "9K1QGriZ14O5DY9bmWSQlIUOw7lOAykT39xndJtLWgQ";
+const input = { appUrl: "https://app.meltiply.test", expiresAtSeconds, key, secret };
 
-  it("signs and verifies a valid provider-media URL", async () => {
-    const signedUrl = await signProviderMediaUrl({
-      appUrl: "https://app.meltiply.test",
-      expiresAtSeconds: expires,
-      key,
-      secret,
-    });
-    expect(signedUrl).toBeDefined();
-    const parsed = new URL(signedUrl!);
-    expect(parsed.pathname).toBe(`${PROVIDER_MEDIA_ROUTE_PREFIX}${key}`);
-    expect(parsed.searchParams.get("expires")).toBe(String(expires));
-    const signature = parsed.searchParams.get("signature")!;
-    await expect(verifyProviderMediaSignature(secret, expires, key, signature)).resolves.toBe(true);
-    await expect(verifyProviderMediaSignature(secret, expires + 1, key, signature)).resolves.toBe(
-      false,
+beforeAll(async () => {
+  await signProviderMediaSignature(secret, expiresAtSeconds, key);
+});
+
+describe("providerMediaPayload", () => {
+  it("an expiry and a key", () => {
+    expect(providerMediaPayload(expiresAtSeconds, key)).toEqual(
+      "meltiply-provider-media-v1\n1800000000\norg-1/asset-1/original",
     );
-    await expect(
-      verifyProviderMediaSignature(secret, expires, "org-1/asset-2/original", signature),
-    ).resolves.toBe(false);
-    await expect(verifyProviderMediaSignature(undefined, expires, key, signature)).resolves.toBe(
-      false,
+  });
+});
+
+describe("signProviderMediaSignature", () => {
+  it("a key", async () => {
+    expect(await signProviderMediaSignature(secret, expiresAtSeconds, key)).toEqual(SIGNATURE);
+  });
+});
+
+describe("verifyProviderMediaSignature", () => {
+  it("the matching signature", async () => {
+    expect(await verifyProviderMediaSignature(secret, expiresAtSeconds, key, SIGNATURE)).toEqual(
+      true,
     );
-    await expect(verifyProviderMediaSignature(secret, expires, key, "bad")).resolves.toBe(false);
   });
 
-  it("returns undefined for insecure or incomplete verified delivery config", async () => {
-    await expect(
-      signProviderMediaUrl({
-        appUrl: "http://127.0.0.1:3000",
-        expiresAtSeconds: expires,
-        key,
-        secret,
-      }),
-    ).resolves.toBeUndefined();
-    await expect(
-      signProviderMediaUrl({
-        appUrl: "https://user:pass@app.meltiply.test",
-        expiresAtSeconds: expires,
-        key,
-        secret,
-      }),
-    ).resolves.toBeUndefined();
-    await expect(
-      signProviderMediaUrl({
-        appUrl: "not-a-url",
-        expiresAtSeconds: expires,
-        key,
-        secret,
-      }),
-    ).resolves.toBeUndefined();
-    await expect(
-      signProviderMediaUrl({
-        appUrl: "https://app.meltiply.test",
-        expiresAtSeconds: expires,
-        key,
-      }),
-    ).resolves.toBeUndefined();
+  it.each([
+    ["another expiry", secret, expiresAtSeconds + 1, key, SIGNATURE],
+    ["another key", secret, expiresAtSeconds, "org-1/asset-2/original", SIGNATURE],
+    ["another secret", "f".repeat(32), expiresAtSeconds, key, SIGNATURE],
+    ["no secret", undefined, expiresAtSeconds, key, SIGNATURE],
+    ["a short signature", secret, expiresAtSeconds, key, "bad"],
+    ["a padded signature", secret, expiresAtSeconds, key, `${SIGNATURE}=`],
+    ["an empty signature", secret, expiresAtSeconds, key, ""],
+  ])("%s", async (_example, withSecret, expiry, objectKey, signature) => {
+    expect(await verifyProviderMediaSignature(withSecret, expiry, objectKey, signature)).toEqual(
+      false,
+    );
+  });
+});
+
+describe("signProviderMediaUrl", () => {
+  it("an https application origin", async () => {
+    expect(await signProviderMediaUrl({ ...input, appUrl: " https://app.meltiply.test " })).toEqual(
+      `https://app.meltiply.test/api/v1/provider-media/${key}?expires=1800000000&signature=${SIGNATURE}`,
+    );
   });
 
-  it("matches direct signature verification", async () => {
-    const signature = await signProviderMediaSignature(secret, expires, key);
-    await expect(verifyProviderMediaSignature(secret, expires, key, signature)).resolves.toBe(true);
+  it("a key with a space outside ASCII", async () => {
+    expect(await signProviderMediaUrl({ ...input, key: "org 1/café.png" })).toEqual(
+      `https://app.meltiply.test/api/v1/provider-media/org%201/caf%C3%A9.png?expires=1800000000&signature=1OcnQGKYsuiB_HnI_aL9r1fPDoaEZF3mTJt1q4PDvmQ`,
+    );
+  });
+
+  it.each([
+    ["a plain-http origin", { appUrl: "http://127.0.0.1:3000" }],
+    ["a username", { appUrl: "https://user@app.meltiply.test" }],
+    ["a password", { appUrl: "https://:pass@app.meltiply.test" }],
+    ["an origin that is not a URL", { appUrl: "not-a-url" }],
+    ["a blank origin", { appUrl: " " }],
+    ["no origin", { appUrl: undefined }],
+    ["no secret", { secret: undefined }],
+  ])("%s", async (_example, override) => {
+    expect(await signProviderMediaUrl({ ...input, ...override })).toEqual(undefined);
+  });
+
+  it("a traversal key", async () => {
+    await expect(signProviderMediaUrl({ ...input, key: "org/../x" })).rejects.toThrow(
+      new TypeError("key must be a non-empty path segment"),
+    );
   });
 });

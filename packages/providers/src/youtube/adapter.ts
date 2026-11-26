@@ -1,14 +1,15 @@
 import type { PlatformCapability } from "@meltiply/domain";
 
-import { malformed } from "../failures";
+import { malformed, optionalLookupPostId } from "../failures";
 import { adapterRuntime, type ProviderAdapterOptions } from "../runtime";
 import type { ProviderAdapter, ProviderPublicationStatus } from "../types";
-import { providerIdentifier, required, requireIdempotencyKey } from "../values";
+import { required, requireIdempotencyKey, STANDARD_VIDEO_MIME_TYPES } from "../values";
 import { createYouTubeAnalytics } from "./analytics";
 import { createYouTubeLive } from "./live";
 import { createYouTubeOAuth } from "./oauth";
 import { createYouTubeResumable } from "./resumable";
 import {
+  broadcastOperationId,
   googleErrorDiagnosis,
   parseBroadcastOperationId,
   parseYouTubeOperationId,
@@ -29,7 +30,7 @@ const maxChunkBytes = 64 * 1024 * 1024;
 const defaultChunkBytes = 8 * 1024 * 1024;
 
 const capability: PlatformCapability = {
-  accepted_mime_types: ["video/mp4", "video/quicktime"],
+  accepted_mime_types: [...STANDARD_VIDEO_MIME_TYPES],
   analytics: true,
   asset_types: ["video"],
   comments: false,
@@ -111,7 +112,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
           state: "published",
           result: {
             outcome: "confirmed_success",
-            providerOperationId: `ended_live:${broadcast.id}`,
+            providerOperationId: broadcastOperationId({ id: broadcast.id, phase: "ended_live" }),
             providerPostId: broadcast.id,
             providerUrl: youtubeWatchUrl(broadcast.id),
           },
@@ -138,8 +139,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
               },
             };
       }
-      const providerPostId = providerIdentifier(lookup.providerPostId);
-      if (lookup.providerPostId && !providerPostId) throw malformed();
+      const providerPostId = optionalLookupPostId(lookup.providerPostId);
       const operation = parseYouTubeOperationId(lookup.providerOperationId);
       if (lookup.providerOperationId && !operation) throw malformed();
       if (providerPostId) {

@@ -1,3 +1,4 @@
+import { isDevelopmentEnvironment } from "@meltiply/domain";
 import {
   configureLogSampling,
   createRequestId,
@@ -14,8 +15,7 @@ const app = createApiApp();
 let deployedBindingsValidated = false;
 
 function validateDeployedBindingsOnce(env: ApiWorkerEnv): void {
-  if (env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test" || deployedBindingsValidated)
-    return;
+  if (isDevelopmentEnvironment(env.ENVIRONMENT) || deployedBindingsValidated) return;
   validateProductionBindings(env);
   deployedBindingsValidated = true;
 }
@@ -57,6 +57,6 @@ export default {
         status: 500,
       });
     }
-    return app.fetch(request, { ...env }, executionContext);
+    return app.fetch(request, env, executionContext);
   },
 } satisfies ExportedHandler<ApiWorkerEnv>;

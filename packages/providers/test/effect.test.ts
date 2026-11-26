@@ -8,6 +8,7 @@ import {
   createProviderServiceTest,
   failureDiagnostic,
   ProviderAdapterError,
+  providerCallEffect,
   ProviderHttpClient,
   ProviderRegistry,
   ProviderService,
@@ -63,10 +64,12 @@ describe("Effect provider safety", () => {
         : Response.json({ value: "recovered" });
     });
     const read = withReadRetry(
-      http.requestEffect(context, {
-        method: "GET",
-        url: "https://provider.example/read",
-      }),
+      providerCallEffect(context, (ctx) =>
+        http.request(ctx, {
+          method: "GET",
+          url: "https://provider.example/read",
+        }),
+      ),
       policy,
     );
     const program = Effect.gen(function* () {
@@ -86,10 +89,12 @@ describe("Effect provider safety", () => {
       );
       const error = await failure(
         withReadRetry(
-          client(fetcher).requestEffect(context, {
-            method: "GET",
-            url: "https://provider.example/read",
-          }),
+          providerCallEffect(context, (ctx) =>
+            client(fetcher).request(ctx, {
+              method: "GET",
+              url: "https://provider.example/read",
+            }),
+          ),
           policy,
         ),
       );
@@ -202,10 +207,12 @@ describe("Effect provider safety", () => {
         notify(signal);
       });
     const fiber = Effect.runFork(
-      client(fetcher).requestEffect(context, {
-        method: "GET",
-        url: "https://provider.example/read",
-      }),
+      providerCallEffect(context, (ctx) =>
+        client(fetcher).request(ctx, {
+          method: "GET",
+          url: "https://provider.example/read",
+        }),
+      ),
     );
     const signal = await started;
     await Effect.runPromise(Fiber.interrupt(fiber));

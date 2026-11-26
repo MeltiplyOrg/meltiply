@@ -165,7 +165,10 @@ function toJsonSafe(value: unknown, seen: Set<unknown>, depth: number): unknown 
   }
 }
 
-/** Bounded, cycle-safe JSON copy with sensitive keys, credentials, and URL queries redacted. */
+export function isLocalOrTestEnvironment(environment: string | undefined): boolean {
+  return environment === "local" || environment === "test";
+}
+
 export function sanitizeRecord(record: Record<string, unknown>): Record<string, unknown> {
   return sanitizeEntries(record, new Set([record]), maxJsonDepth);
 }

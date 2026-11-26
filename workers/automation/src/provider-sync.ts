@@ -7,11 +7,11 @@ import {
   type Platform,
 } from "@meltiply/domain";
 import type { EffectTransactionClient } from "@meltiply/database";
+import { errorDiagnostic, log } from "@meltiply/observability";
 import {
   cachedProviderRegistryFromEnvironment,
   classifyProviderFailure,
   createProviderServiceLive,
-  type ProviderAdapterError,
   type ProviderAnalyticsRecord,
   type ProviderCommentRecord,
   type ProviderFailure,
@@ -22,15 +22,29 @@ import {
 } from "@meltiply/providers";
 
 import { withSystemTransactionEffect } from "./database";
+import {
+  claimOnDemandCommentsWork,
+  maximumDelayedDeliverySeconds,
+  maximumProviderSyncAttempts,
+  onDemandCommentsBound,
+  releaseDueProviderSyncClaims,
+  sweepDueProviderSyncWork,
+  type DueWorkClaim,
+} from "./due-work";
 import { type AutomationJobError, classifyJobError, QueuePublisher } from "./effect/index";
-import type { AutomationEnv } from "./env";
+import { recurringCommentsEnabled, type AutomationEnv } from "./env";
 import {
   isProviderSyncMessage,
   providerSyncMessage,
   type ProviderSyncMessage,
   type ProviderSyncWorkload,
 } from "./messages";
-import { decryptStoredToken, tokenCipherFor } from "./provider-credentials";
+import {
+  decryptStoredToken,
+  encryptRotatedTokens,
+  nextTokenRefreshAt,
+  persistRotatedPlatformTokens,
+} from "./provider-credentials";
 import {
   executeProviderAnalyticsEffect,
   executeProviderCommentsEffect,
@@ -100,19 +114,8 @@ export interface ProviderSyncProcessingDependencies {
 
 export {
   maximumDelayedDeliverySeconds,
-  minimumProviderVisibilityTimeoutSeconds,
   overdueRecoveryGraceSeconds,
   providerAttemptLeaseSeconds,
-} from "./due-work";
-
-import {
-  claimOnDemandCommentsWork,
-  maximumDelayedDeliverySeconds,
-  maximumProviderSyncAttempts,
-  onDemandCommentsBound,
-  releaseDueProviderSyncClaims,
-  sweepDueProviderSyncWork,
-  type DueWorkClaim,
 } from "./due-work";
 
 function eligiblePlatforms(registry: ProviderRegistry, workload: ProviderSyncWorkload): Platform[] {
@@ -233,14 +236,34 @@ function sendNextProviderTrigger(
         },
       ]);
     }),
-    () => Effect.void,
+    (cause) => {
+      log(
+        "warn",
+        {
+          environment: env.ENVIRONMENT,
+          job_id: eventId,
+          service: "automation",
+          trace_id: eventId,
+          version: env.VERSION,
+        },
+        {
+          ...errorDiagnostic(cause),
+          event: "provider_sync_trigger_send_failed",
+          outcome: "deferred_to_sweep",
+          retry_class: "none",
+          target_id: targetId,
+          workload,
+        },
+      );
+      return Effect.void;
+    },
   );
 }
 
 export function sweepDueProviderJobs(
   env: AutomationEnv,
   dependencies: ProviderDueDependencies = {},
-): Effect.Effect<ProviderDueResult, AutomationJobError | ProviderAdapterError, QueuePublisher> {
+): Effect.Effect<ProviderDueResult, AutomationJobError, QueuePublisher> {
   return Effect.gen(function* () {
     const registry = dependencies.providerRegistry ?? cachedProviderRegistryFromEnvironment(env);
     const transaction = dependencies.transaction ?? withSystemTransactionEffect;
@@ -294,7 +317,7 @@ export function requestOnDemandCommentsSync(
   env: AutomationEnv,
   input: { distributionId: string | null; organizationId: string },
   dependencies: ProviderDueDependencies = {},
-): Effect.Effect<number, AutomationJobError | ProviderAdapterError, QueuePublisher> {
+): Effect.Effect<number, AutomationJobError, QueuePublisher> {
   return Effect.gen(function* () {
     const registry = dependencies.providerRegistry ?? cachedProviderRegistryFromEnvironment(env);
     const transaction = dependencies.transaction ?? withSystemTransactionEffect;
@@ -345,9 +368,7 @@ function loadDistributionTarget(
       const row = result.rows[0];
       if (
         row &&
-        (message.workload !== "comments" ||
-          env.RECURRING_COMMENTS_ENABLED === "true" ||
-          row.on_demand)
+        (message.workload !== "comments" || recurringCommentsEnabled(env) || row.on_demand)
       )
         return row;
       yield* client.query(
@@ -683,7 +704,7 @@ function recordCommentsSuccess(
         }
         delay = nextCursor
           ? 0
-          : row.on_demand || env.RECURRING_COMMENTS_ENABLED !== "true"
+          : row.on_demand || !recurringCommentsEnabled(env)
             ? null
             : commentsCadenceSeconds(
                 ageSeconds(row.published_at, now),
@@ -739,11 +760,7 @@ function processDistributionSync<T>(
   message: ProviderSyncMessage,
   dependencies: ProviderSyncProcessingDependencies,
   operation: DistributionSyncOperation<T>,
-): Effect.Effect<
-  "processed" | "skipped",
-  AutomationJobError | ProviderAdapterError,
-  QueuePublisher
-> {
+): Effect.Effect<"processed" | "skipped", AutomationJobError, QueuePublisher> {
   return Effect.gen(function* () {
     const transaction = dependencies.transaction ?? withSystemTransactionEffect;
     const row = yield* loadDistributionTarget(env, message, transaction).pipe(
@@ -813,11 +830,7 @@ function processAnalytics(
   env: AutomationEnv,
   message: ProviderSyncMessage,
   dependencies: ProviderSyncProcessingDependencies,
-): Effect.Effect<
-  "processed" | "skipped",
-  AutomationJobError | ProviderAdapterError,
-  QueuePublisher
-> {
+): Effect.Effect<"processed" | "skipped", AutomationJobError, QueuePublisher> {
   return processDistributionSync<ProviderAnalyticsRecord>(env, message, dependencies, {
     execute: executeProviderAnalyticsEffect,
     recordSuccess: recordAnalyticsSuccess,
@@ -830,11 +843,7 @@ function processComments(
   env: AutomationEnv,
   message: ProviderSyncMessage,
   dependencies: ProviderSyncProcessingDependencies,
-): Effect.Effect<
-  "processed" | "skipped",
-  AutomationJobError | ProviderAdapterError,
-  QueuePublisher
-> {
+): Effect.Effect<"processed" | "skipped", AutomationJobError, QueuePublisher> {
   return processDistributionSync<ProviderCommentRecord>(env, message, dependencies, {
     execute: executeProviderCommentsEffect,
     recordSuccess: recordCommentsSuccess,
@@ -914,15 +923,7 @@ function recordTokenSuccess(
   return Effect.gen(function* () {
     const encrypted = yield* Effect.catch(
       Effect.tryPromise({
-        try: async () => {
-          const cipher = tokenCipherFor(env);
-          return {
-            accessToken: await cipher.encrypt(execution.tokens.accessToken),
-            refreshToken: execution.tokens.refreshToken
-              ? await cipher.encrypt(execution.tokens.refreshToken)
-              : row.refresh_token,
-          };
-        },
+        try: () => encryptRotatedTokens(env, execution.tokens),
         catch: (cause) => classifyJobError(cause),
       }),
       () => Effect.succeed(null),
@@ -949,51 +950,21 @@ function recordTokenSuccess(
       execution.tokens.expiresAt !== undefined ? new Date(execution.tokens.expiresAt) : null;
     const scopes =
       execution.tokens.scopes.length > 0 ? execution.tokens.scopes : (row.scopes ?? []);
-    const nextAttemptAt =
-      expiresAt !== null
-        ? new Date(Math.max(now.getTime() + 3_600_000, expiresAt.getTime() - 7 * 86_400_000))
-        : null;
+    const nextAttemptAt = nextTokenRefreshAt(expiresAt, now);
     const delay =
       nextAttemptAt !== null ? Math.max(0, (nextAttemptAt.getTime() - now.getTime()) / 1000) : null;
     const nextEventId = armedEventId(delay);
     const committed = yield* transaction(env, (client) =>
-      Effect.gen(function* () {
-        const updated = yield* client.query(
-          `UPDATE platform_accounts
-             SET access_token = $3, refresh_token = $4,
-                 token_expires_at = $5, scopes = $6,
-                 connection_status = 'connected', last_synced_at = now(),
-                 token_refresh_event_id = $8::uuid,
-                 token_refresh_lease_expires_at = NULL,
-                 token_refresh_next_attempt_at = $9::timestamptz,
-                 token_refresh_attempt_count = 0,
-                 token_refresh_last_error = NULL,
-                 reconnect_notified_at = NULL, updated_at = now()
-             WHERE id = $1 AND token_refresh_event_id = $2::uuid
-               AND token_expires_at IS NOT DISTINCT FROM $7::timestamptz`,
-          [
-            row.id,
-            row.event_id,
-            encrypted.accessToken,
-            encrypted.refreshToken,
-            expiresAt,
-            scopes,
-            row.token_expires_at,
-            nextEventId,
-            nextAttemptAt,
-          ],
-        );
-        if (updated.rowCount === 0) {
-          yield* client.query(
-            `UPDATE platform_accounts
-               SET token_refresh_event_id = NULL,
-                   token_refresh_lease_expires_at = NULL, updated_at = now()
-               WHERE id = $1 AND token_refresh_event_id = $2::uuid`,
-            [row.id, row.event_id],
-          );
-          return false;
-        }
-        return true;
+      persistRotatedPlatformTokens(client, {
+        accessToken: encrypted.accessToken,
+        expectedEventId: row.event_id,
+        expectedTokenExpiresAt: row.token_expires_at,
+        expiresAt,
+        nextAttemptAt,
+        nextEventId,
+        platformAccountId: row.id,
+        refreshToken: encrypted.refreshToken,
+        scopes,
       }),
     ).pipe(Effect.mapError(classifyJobError));
     if (committed && nextEventId !== null && delay !== null) {
@@ -1013,11 +984,7 @@ function processTokenRefresh(
   env: AutomationEnv,
   message: ProviderSyncMessage,
   dependencies: ProviderSyncProcessingDependencies,
-): Effect.Effect<
-  "processed" | "skipped",
-  AutomationJobError | ProviderAdapterError,
-  QueuePublisher
-> {
+): Effect.Effect<"processed" | "skipped", AutomationJobError, QueuePublisher> {
   return Effect.gen(function* () {
     const transaction = dependencies.transaction ?? withSystemTransactionEffect;
     const row = yield* loadTokenTarget(env, message, transaction).pipe(
@@ -1061,11 +1028,7 @@ export function processProviderSyncMessage(
   env: AutomationEnv,
   message: ProviderSyncMessage,
   dependencies: ProviderSyncProcessingDependencies = {},
-): Effect.Effect<
-  "processed" | "skipped",
-  AutomationJobError | ProviderAdapterError,
-  QueuePublisher
-> {
+): Effect.Effect<"processed" | "skipped", AutomationJobError, QueuePublisher> {
   if (!isProviderSyncMessage(message)) return Effect.succeed("skipped");
   switch (message.workload) {
     case "analytics":

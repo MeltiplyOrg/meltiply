@@ -1,9 +1,8 @@
-import type { Effect } from "effect";
 import type { Platform } from "@meltiply/domain";
 
-import { providerCallEffect } from "./effect";
 import {
   classifyProviderFailure,
+  MAX_RETRY_AFTER_SECONDS,
   ProviderAdapterError,
   type ProviderFailureInput,
   type ProviderRequestDiagnostic,
@@ -48,7 +47,6 @@ export interface ProviderHttpClientOptions {
   fetch?: typeof fetch;
   maximumResponseBytes?: number;
   now?: () => Date;
-  /** Selects the rate-limit header parser whose budget is recorded on the request context. */
   platform?: Platform;
   timeoutMilliseconds?: number;
 }
@@ -57,7 +55,6 @@ const defaultMaximumResponseBytes = 256 * 1024;
 const maximumResponseBytesCeiling = 1024 * 1024;
 const defaultTimeoutMilliseconds = 30_000;
 const timeoutMillisecondsCeiling = 120_000;
-const maxRetryAfterSeconds = 86_400;
 const maxAcceptedStatuses = 10;
 const unsafeIntegerSourcePattern = /^-?\d+$/;
 const utf8Decoder = new TextDecoder();
@@ -118,7 +115,7 @@ function retryAfterSeconds(value: string | null, now: Date): number | undefined 
   const seconds = Number.isFinite(numeric)
     ? Math.ceil(numeric)
     : Math.ceil((new Date(value).getTime() - now.getTime()) / 1_000);
-  return Number.isInteger(seconds) && seconds >= 0 && seconds <= maxRetryAfterSeconds
+  return Number.isInteger(seconds) && seconds >= 0 && seconds <= MAX_RETRY_AFTER_SECONDS
     ? seconds
     : undefined;
 }
@@ -211,12 +208,6 @@ function failure(
   });
 }
 
-/**
- * Fetch boundary for every provider call: HTTPS origin allowlist, no redirects,
- * timeout and caller abort, bounded bodies, JSON decoding, and failure
- * classification. Rate-limit budgets from response headers are written to
- * `context.metadata`.
- */
 export class ProviderHttpClient {
   readonly #allowedOrigins: ReadonlySet<string>;
   readonly #fetch: typeof fetch;
@@ -364,13 +355,6 @@ export class ProviderHttpClient {
     } finally {
       cleanup();
     }
-  }
-
-  requestEffect(
-    context: ProviderRequestContext,
-    request: ProviderHttpRequest,
-  ): Effect.Effect<ProviderHttpResponse, ProviderAdapterError> {
-    return providerCallEffect(context, (child) => this.request(child, request));
   }
 
   async #diagnose(

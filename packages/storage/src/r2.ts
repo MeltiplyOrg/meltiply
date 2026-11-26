@@ -1,15 +1,11 @@
+import { isDevelopmentEnvironment } from "@meltiply/domain";
+
 import { assertValidByteRange, bytesToHex } from "./encoding";
 import { normalizeSegment } from "./keys";
 import { SigV4UrlSigner } from "./sigv4";
 import type { MultipartUpload, ObjectBody, ObjectMetadata, UploadedPart } from "./object-store";
 import { EffectObjectStore } from "./object-store";
 
-/**
- * Minimal shape of the Cloudflare R2 bucket binding Meltiply depends on.
- *
- * Declared structurally so the adapter can be unit-tested without workerd and so
- * a self-hosted binding shim only has to implement what Meltiply calls.
- */
 export interface R2BucketLike {
   createMultipartUpload(
     key: string,
@@ -85,14 +81,6 @@ function multipart(upload: R2MultipartUploadLike): MultipartUpload {
   };
 }
 
-/**
- * Cloudflare R2 implementation of the object store.
- *
- * Promotion from the upload-writable `staging/` namespace to the protected
- * ready key is the store's security-critical operation, so the copy stays
- * inside the bucket: the source generation is pinned by ETag and the
- * destination is written only when absent.
- */
 export class R2ObjectStore extends EffectObjectStore {
   constructor(private readonly bucket: R2BucketLike) {
     super();
@@ -112,9 +100,12 @@ export class R2ObjectStore extends EffectObjectStore {
       ifSourceEtagMatches?: string;
     } = {},
   ): Promise<ObjectMetadata | null> {
-    const source = await this.bucket.get(sourceKey, {
-      onlyIf: { etagMatches: options.ifSourceEtagMatches },
-    });
+    const source =
+      options.ifSourceEtagMatches !== undefined
+        ? await this.bucket.get(sourceKey, {
+            onlyIf: { etagMatches: options.ifSourceEtagMatches },
+          })
+        : await this.bucket.get(sourceKey);
     if (!source) return null;
     if (!source.body) return null;
     const copied = await this.bucket.put(destinationKey, source.body, {
@@ -132,7 +123,7 @@ export class R2ObjectStore extends EffectObjectStore {
     const object = await this.bucket.get(key);
     if (!object) return null;
     if (!object.body) {
-      throw new TypeError("object body is unavailable");
+      throw new Error("object body is unavailable");
     }
     return {
       body: object.body,
@@ -160,16 +151,6 @@ export class R2ObjectStore extends EffectObjectStore {
   }
 }
 
-/**
- * Configuration for the R2 SigV4 signer.
- *
- * `endpoint` stays an origin (no path, query, credentials, or fragment) so the
- * signed host is exactly what the operator configured; `endpointPathPrefix`
- * carries any path prefix separately so it can be part of the canonical URI
- * without weakening origin-only validation. `allowInsecureEndpoint` is the
- * explicit development-only switch that permits a plain-HTTP origin; it
- * defaults to false so production can only ever sign HTTPS URLs.
- */
 export interface R2SigV4SignerOptions {
   accessKeyId: string;
   accountId: string;
@@ -181,13 +162,6 @@ export interface R2SigV4SignerOptions {
   secretAccessKey: string;
 }
 
-/**
- * Presigned URL signer for Cloudflare R2.
- *
- * R2 is addressed path-style under the account's public endpoint and signed in
- * the `auto` region, which are the only differences from a generic
- * S3-compatible origin.
- */
 export class R2SigV4Signer extends SigV4UrlSigner {
   constructor(options: R2SigV4SignerOptions) {
     super({
@@ -206,12 +180,6 @@ export class R2SigV4Signer extends SigV4UrlSigner {
   }
 }
 
-/**
- * Credential, endpoint, and environment bindings every worker needs to presign
- * R2 URLs. `R2_ENDPOINT` is operator configuration only; the development-only
- * permission to sign a plain-HTTP origin is derived from `ENVIRONMENT`, never
- * from a configurable flag.
- */
 export interface R2SignerEnv {
   ENVIRONMENT?: string;
   R2_ACCESS_KEY_ID?: string;
@@ -222,14 +190,6 @@ export interface R2SignerEnv {
   R2_SECRET_ACCESS_KEY?: string;
 }
 
-/**
- * Builds the R2 SigV4 signer from plain worker environment bindings.
- *
- * The development-only permission to sign a plain-HTTP origin is derived here
- * from `ENVIRONMENT === "local" | "test"` alone, so no configuration value can
- * turn it on in a deployed environment. Credentials are validated eagerly so a
- * misconfigured worker fails closed instead of signing nothing.
- */
 export function createR2SignerFromEnv(env: R2SignerEnv, now?: () => Date): R2SigV4Signer {
   if (
     !env.R2_ACCESS_KEY_ID ||
@@ -239,11 +199,10 @@ export function createR2SignerFromEnv(env: R2SignerEnv, now?: () => Date): R2Sig
   ) {
     throw new TypeError("R2 signing credentials are incomplete");
   }
-  const developmentEnvironment = env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test";
   return new R2SigV4Signer({
     accessKeyId: env.R2_ACCESS_KEY_ID,
     accountId: env.R2_ACCOUNT_ID,
-    allowInsecureEndpoint: developmentEnvironment,
+    allowInsecureEndpoint: isDevelopmentEnvironment(env),
     bucket: env.R2_BUCKET_NAME,
     secretAccessKey: env.R2_SECRET_ACCESS_KEY,
     ...(env.R2_ENDPOINT ? { endpoint: env.R2_ENDPOINT } : {}),

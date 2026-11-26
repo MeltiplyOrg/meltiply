@@ -22,7 +22,6 @@ export interface AdapterRuntime {
   redirectUri: string;
 }
 
-/** Validates app credentials and builds the platform's allowlisted HTTP client. */
 export function adapterRuntime(
   platform: Platform,
   allowedOrigins: readonly string[],

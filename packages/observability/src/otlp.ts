@@ -1,4 +1,4 @@
-import { sanitizeRecord } from "./log";
+import { isLocalOrTestEnvironment, sanitizeRecord } from "./log";
 
 const traceIdPattern = /^[0-9a-f]{32}$/;
 const nonHexPattern = /[^0-9a-f]/g;
@@ -56,7 +56,7 @@ export async function exportOtlpSpan(
   env: { ENVIRONMENT: string },
   span: OtlpSpanInput,
 ): Promise<void> {
-  if (env.ENVIRONMENT !== "local" && env.ENVIRONMENT !== "test") return;
+  if (!isLocalOrTestEnvironment(env.ENVIRONMENT)) return;
 
   const attributes = Object.entries(sanitizeRecord(span.attributes ?? {})).map(([key, value]) => ({
     key,

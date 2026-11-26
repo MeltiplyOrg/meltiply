@@ -2,6 +2,7 @@ import type { EffectTransactionClient } from "@meltiply/database";
 import { DatabaseError } from "@meltiply/domain";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import type * as ObjectCleanupModule from "../src/object-cleanup";
 import { fakeTransactionClient } from "./test-doubles";
 
 const { withSystemTransactionEffect, claimObjectsForDeletion, settleDeletedObjects } = vi.hoisted(
@@ -13,7 +14,8 @@ const { withSystemTransactionEffect, claimObjectsForDeletion, settleDeletedObjec
 );
 
 vi.mock("../src/database", () => ({ withSystemTransactionEffect }));
-vi.mock("../src/assets", () => ({
+vi.mock("../src/object-cleanup", async (importOriginal) => ({
+  ...(await importOriginal<typeof ObjectCleanupModule>()),
   claimObjectsForDeletion,
   settleDeletedObjects,
 }));

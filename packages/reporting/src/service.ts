@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import type { DatabaseError } from "@meltiply/domain";
+import { isoDateTime, isoDateTimeOrNull, type DatabaseError } from "@meltiply/domain";
 
 import type { ReportingConfiguration } from "./configuration";
 import { reportedAppVersion } from "./configuration";
@@ -14,6 +14,7 @@ import {
   REPORTING_MAX_PENDING_ROWS,
   REPORTING_SCHEMA_VERSION,
   type CaptureEvent,
+  type CaptureResult,
   type CaptureTransport,
   type DeliverySummary,
   type DiagnosticReportInput,
@@ -27,7 +28,6 @@ import {
 import {
   categoryEffective,
   feedbackEffective,
-  isoOrNull,
   policySnapshot,
   retryDelaySeconds,
   type PreferencesRow,
@@ -41,13 +41,11 @@ import {
 } from "./sanitize";
 import { CAPTURE_TIMEOUT_MILLISECONDS } from "./transport";
 
-/** Minimal driver result shape; a `pg` QueryResult satisfies it structurally. */
 export interface ReportingQueryResult<Row> {
   readonly rowCount: number | null;
   readonly rows: Row[];
 }
 
-/** Minimal Effect-native query client the reporting module needs. */
 export interface ReportingClient {
   readonly query: <Row extends Record<string, unknown> = Record<string, unknown>>(
     text: string,
@@ -55,13 +53,6 @@ export interface ReportingClient {
   ) => Effect.Effect<ReportingQueryResult<Row>, DatabaseError>;
 }
 
-/**
- * Runs one operation against a system-scoped transaction.
- *
- * The worker supplies its own adapter, so this package never reads environment
- * bindings, never owns a connection pool and never constructs a driver client.
- * Outbound HTTP happens between transactions, never inside one.
- */
 export type ReportingTransactionRunner = <A, E>(
   operation: (client: ReportingClient) => Effect.Effect<A, E>,
 ) => Effect.Effect<A, E | DatabaseError>;
@@ -113,12 +104,10 @@ export interface ReportingServiceShape {
   }) => Effect.Effect<DeliverySummary, DatabaseError>;
 }
 
-/** Effect service tag for installation improvement reporting. */
 export class ReportingService extends Context.Service<ReportingService, ReportingServiceShape>()(
   "ReportingService",
 ) {}
 
-/** Options for the live layer. */
 export interface ReportingServiceOptions {
   readonly configuration: ReportingConfiguration;
   readonly appVersion: string | undefined;
@@ -137,12 +126,7 @@ function lockReportingMutations(client: ReportingClient): Effect.Effect<void, Da
 
 const reportingMeasurementLockKey = 810_000_102;
 
-/**
- * Takes the publication-measurement lock for the rest of the transaction.
- *
- * Exported because the in-transaction measurement and the scheduled producer must
- * share one lock identity; a second constant would silently stop ordering them.
- */
+/** Shared lock ordering in-transaction publication marks and daily usage aggregation. */
 export function lockReportingMeasurement(
   client: ReportingClient,
 ): Effect.Effect<void, DatabaseError> {
@@ -255,7 +239,7 @@ function feedbackStateFrom(
     deliveryStatus: row ? deliveryStatus : "not_shared",
     discoverySource: row ? (row.discovery_source as DiscoverySource) : null,
     shared: row?.shared === true,
-    submittedAt: row ? isoOrNull(row.submitted_at) : null,
+    submittedAt: row ? isoDateTimeOrNull(row.submitted_at) : null,
   };
 }
 
@@ -269,14 +253,6 @@ function hourBucket(occurredAt: string): string {
   return date.toISOString().slice(0, 13);
 }
 
-/**
- * Creates the live reporting service.
- *
- * All reads and writes go through the caller's system transaction adapter. The
- * persisted policy is re-read inside the write transaction for preference
- * changes and inside a fresh transaction before each send, which is what makes a
- * withdrawn or operator-disabled category stop transmitting immediately.
- */
 export function createReportingServiceLive(
   options: ReportingServiceOptions,
 ): Layer.Layer<ReportingService, never, never> {
@@ -290,13 +266,7 @@ export function createReportingServiceLive(
     (row) => Effect.succeed(policySnapshot(row, configuration)),
   );
 
-  const sendCapture = (
-    event: CaptureEvent,
-  ): Effect.Effect<{
-    readonly ok: boolean;
-    readonly errorCode?: string;
-    readonly retryable?: boolean;
-  }> =>
+  const sendCapture = (event: CaptureEvent): Effect.Effect<CaptureResult> =>
     Effect.gen(function* () {
       if (!transport) return { ok: false, errorCode: "destination_unavailable", retryable: false };
       const violation = payloadViolation(event.properties);
@@ -446,18 +416,22 @@ export function createReportingServiceLive(
               "not_recorded",
             );
           }
-          yield* enqueuePending(client, {
-            category: "feedback",
-            distinctId: responseId,
-            eventName: REPORTING_EVENTS.feedback,
-            eventTimestamp: decidedAt,
-            intervalStartedAt: decidedAt.toISOString(),
-            logicalId: responseId,
-            payload: feedbackProperties(source, {
-              appVersion,
-              deploymentCategory: configuration.deploymentCategory,
-            }),
-          });
+          yield* insertPending(
+            client,
+            {
+              category: "feedback",
+              distinctId: responseId,
+              eventName: REPORTING_EVENTS.feedback,
+              eventTimestamp: decidedAt,
+              intervalStartedAt: decidedAt.toISOString(),
+              logicalId: responseId,
+              payload: feedbackProperties(source, {
+                appVersion,
+                deploymentCategory: configuration.deploymentCategory,
+              }),
+            },
+            { bounded: false },
+          );
           return feedbackStateFrom(
             {
               discovery_source: source,
@@ -662,7 +636,7 @@ export function createReportingServiceLive(
               }
               if (!categoryEffective(policy, current.category)) return "revoked" as const;
               const liveInterval = policy.categories[current.category].intervalStartedAt;
-              const rowInterval = isoOrNull(current.interval_started_at);
+              const rowInterval = isoDateTimeOrNull(current.interval_started_at);
               if (rowInterval === null || liveInterval !== rowInterval) {
                 return "stale_interval" as const;
               }
@@ -696,10 +670,7 @@ export function createReportingServiceLive(
             event: row.event_name,
             eventUuid: row.event_uuid,
             properties,
-            timestamp:
-              row.event_timestamp instanceof Date
-                ? row.event_timestamp.toISOString()
-                : new Date(row.event_timestamp).toISOString(),
+            timestamp: isoDateTime(row.event_timestamp),
           });
           if (result.ok) {
             delivered += 1;
@@ -716,8 +687,7 @@ export function createReportingServiceLive(
           }
           const expiresAt =
             row.expires_at instanceof Date ? row.expires_at : new Date(row.expires_at);
-          const delay =
-            result.retryable === true ? retryDelaySeconds(row.attempts, expiresAt, now()) : null;
+          const delay = result.retryable ? retryDelaySeconds(row.attempts, expiresAt, now()) : null;
           if (delay === null) {
             discarded += 1;
             yield* transaction((client) =>
@@ -726,7 +696,7 @@ export function createReportingServiceLive(
                  SET state = 'discarded', updated_at = now(), last_error_code = $3,
                      lease_token = NULL, lease_expires_at = NULL
                  WHERE id = $1 AND lease_token = $2 AND state = 'leased'`,
-                [row.id, row.lease_token, result.errorCode ?? "delivery_failed"],
+                [row.id, row.lease_token, result.errorCode],
               ),
             );
             continue;
@@ -739,7 +709,7 @@ export function createReportingServiceLive(
                    available_at = now() + ($4 * INTERVAL '1 second'),
                    lease_token = NULL, lease_expires_at = NULL
                WHERE id = $1 AND lease_token = $2 AND state = 'leased'`,
-              [row.id, row.lease_token, result.errorCode ?? "delivery_failed", delay],
+              [row.id, row.lease_token, result.errorCode, delay],
             ),
           );
         }
@@ -769,14 +739,7 @@ interface PendingInsert {
   payload: Record<string, unknown>;
 }
 
-function insertPending(
-  client: ReportingClient,
-  input: PendingInsert,
-): Effect.Effect<boolean, DatabaseError> {
-  if (payloadViolation(input.payload)) return Effect.succeed(false);
-  return Effect.map(
-    client.query(
-      `INSERT INTO reporting_pending_reports (
+const INSERT_BOUNDED_PENDING_SQL = `INSERT INTO reporting_pending_reports (
          category, logical_id, event_name, schema_version, event_uuid, event_timestamp,
          distinct_id, payload, interval_started_at, expires_at
        )
@@ -789,51 +752,39 @@ function insertPending(
            SELECT count(*) FROM reporting_pending_reports WHERE state IN ('pending', 'leased')
          ) < $11
        ON CONFLICT (category, logical_id) DO NOTHING
-       RETURNING id`,
-      [
-        input.category,
-        input.logicalId,
-        input.eventName,
-        REPORTING_SCHEMA_VERSION,
-        crypto.randomUUID(),
-        input.eventTimestamp,
-        input.distinctId,
-        JSON.stringify(input.payload),
-        input.intervalStartedAt,
-        REPORTING_MAX_PENDING_AGE_DAYS,
-        REPORTING_MAX_PENDING_ROWS,
-      ],
-    ),
-    (result) => (result.rowCount ?? result.rows.length) > 0,
-  );
-}
+       RETURNING id`;
 
-function enqueuePending(
-  client: ReportingClient,
-  input: PendingInsert,
-): Effect.Effect<boolean, DatabaseError> {
-  return Effect.map(
-    client.query(
-      `INSERT INTO reporting_pending_reports (
+const INSERT_UNBOUNDED_PENDING_SQL = `INSERT INTO reporting_pending_reports (
          category, logical_id, event_name, schema_version, event_uuid, event_timestamp,
          distinct_id, payload, interval_started_at, expires_at
        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9,
                  now() + ($10 * INTERVAL '1 day'))
        ON CONFLICT (category, logical_id) DO NOTHING
-       RETURNING id`,
-      [
-        input.category,
-        input.logicalId,
-        input.eventName,
-        REPORTING_SCHEMA_VERSION,
-        crypto.randomUUID(),
-        input.eventTimestamp,
-        input.distinctId,
-        JSON.stringify(input.payload),
-        input.intervalStartedAt,
-        REPORTING_MAX_PENDING_AGE_DAYS,
-      ],
-    ),
+       RETURNING id`;
+
+function insertPending(
+  client: ReportingClient,
+  input: PendingInsert,
+  options: { readonly bounded?: boolean } = {},
+): Effect.Effect<boolean, DatabaseError> {
+  const bounded = options.bounded ?? true;
+  if (bounded && payloadViolation(input.payload)) return Effect.succeed(false);
+  const baseParams: readonly unknown[] = [
+    input.category,
+    input.logicalId,
+    input.eventName,
+    REPORTING_SCHEMA_VERSION,
+    crypto.randomUUID(),
+    input.eventTimestamp,
+    input.distinctId,
+    JSON.stringify(input.payload),
+    input.intervalStartedAt,
+    REPORTING_MAX_PENDING_AGE_DAYS,
+  ];
+  return Effect.map(
+    bounded
+      ? client.query(INSERT_BOUNDED_PENDING_SQL, [...baseParams, REPORTING_MAX_PENDING_ROWS])
+      : client.query(INSERT_UNBOUNDED_PENDING_SQL, baseParams),
     (result) => (result.rowCount ?? result.rows.length) > 0,
   );
 }

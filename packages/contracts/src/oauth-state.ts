@@ -4,9 +4,6 @@ export type OAuthSelectionAccount = components["schemas"]["OAuthSelectionAccount
 export type OAuthSelectionPublic = components["schemas"]["OAuthSelection"];
 export type Platform = components["schemas"]["Platform"];
 
-/**
- * Context persisted for an initial OAuth authorization handoff.
- */
 export interface OAuthStateRecord {
   expires_at: number;
   organization_id: string;
@@ -16,18 +13,12 @@ export interface OAuthStateRecord {
   user_id: string;
 }
 
-/**
- * One discovered candidate account containing both sanitized metadata and sealed credential.
- * Stored in its own bounded storage entry to avoid exceeding SQLite 2MB limits.
- */
+/** Stored in its own entry so candidate payloads stay under the SQLite 2 MB DO value limit. */
 export interface OAuthSelectionCandidate {
   readonly account: OAuthSelectionAccount;
   readonly encryptedConnection: string;
 }
 
-/**
- * Initial metadata supplied when initiating a pending OAuth assignment session.
- */
 export interface OAuthSelectionInit {
   readonly expires_at: number;
   readonly id: string;
@@ -36,37 +27,6 @@ export interface OAuthSelectionInit {
   readonly user_id: string;
 }
 
-/**
- * Master lifecycle record for a pending OAuth account assignment.
- * Stores bounded metadata, account IDs, and lifecycle state only.
- */
-export interface OAuthSelectionRecord {
-  readonly account_ids: ReadonlyArray<string>;
-  claim?: {
-    readonly brand_profile_id: string;
-    readonly claimed_at: number;
-    readonly expires_at: number;
-    readonly idempotency_key: string;
-    readonly token: string;
-  };
-  completed_account_id?: string;
-  completed_brand_profile_id?: string;
-  completed_idempotency_key?: string;
-  cancelled_idempotency_key?: string;
-  evidence_expires_at?: number;
-  expires_at: number;
-  readonly id: string;
-  readonly organization_id: string;
-  pinned_account_id?: string;
-  readonly platform: string;
-  ready: boolean;
-  status: "pending" | "completed" | "cancelled";
-  readonly user_id: string;
-}
-
-/**
- * Result of claiming an OAuth candidate account for persistence.
- */
 export type ClaimSelectionResult =
   | {
       readonly claimToken: string;
@@ -96,17 +56,11 @@ export type ClaimSelectionResult =
       readonly status: "invalid_account";
     };
 
-/**
- * Result of discarding or cancelling an in-flight OAuth selection.
- */
 export type CancelSelectionResult =
   | { readonly status: "cancelled" }
   | { readonly status: "not_found" }
   | { readonly message: string; readonly status: "conflict" };
 
-/**
- * RPC contract for the OAuthStateCoordinator Durable Object (meltiply-state).
- */
 export interface OAuthStateCoordinatorStub {
   create(state: string, record: OAuthStateRecord): Promise<void>;
   consume(state: string): Promise<OAuthStateRecord | null>;

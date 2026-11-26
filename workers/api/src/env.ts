@@ -1,11 +1,14 @@
 import { objectStorageBindings } from "@meltiply/storage";
 import type { AccessClaims, JwtIdentity } from "@meltiply/auth";
-import type { WorkerEnvironment } from "@meltiply/domain";
-
-import type { ResolvedActor } from "./actor-resolution";
+import {
+  isDevelopmentEnvironment,
+  isLoopbackHostname,
+  type WorkerEnvironment,
+} from "@meltiply/domain";
 import { mailSenderConfiguration } from "@meltiply/domain/mail-content";
-
 import type { OAuthStateCoordinatorStub } from "@meltiply/contracts";
+
+import type { ResolvedActor } from "./actor-types";
 
 export interface OAuthStateStub extends Rpc.DurableObjectBranded, OAuthStateCoordinatorStub {}
 
@@ -99,7 +102,7 @@ const deployedAuthBindings: (keyof ApiWorkerEnv)[] = ["BETTER_AUTH_SECRET", "AUT
 export function requiresEmailVerification(env: ApiWorkerEnv): boolean {
   if (env.ENVIRONMENT === "selfhost" && env.REQUIRE_EMAIL_VERIFICATION?.trim() === "false")
     return false;
-  return env.ENVIRONMENT !== "local" && env.ENVIRONMENT !== "test";
+  return !isDevelopmentEnvironment(env.ENVIRONMENT);
 }
 
 export function applicationOrigin(env: ApiWorkerEnv): string {
@@ -128,13 +131,7 @@ export function applicationOrigin(env: ApiWorkerEnv): string {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("APP_URL must use HTTP or HTTPS");
   }
-  const loopback =
-    url.hostname === "localhost" ||
-    url.hostname.endsWith(".localhost") ||
-    url.hostname === "127.0.0.1" ||
-    url.hostname === "::1" ||
-    url.hostname === "[::1]";
-  if (url.protocol === "http:" && !loopback) {
+  if (url.protocol === "http:" && !isLoopbackHostname(url.hostname)) {
     throw new Error("APP_URL must use HTTPS outside loopback-only development");
   }
   return url.origin;
@@ -155,15 +152,14 @@ function objectStorageStatuses(env: ApiWorkerEnv): BindingStatus[] {
 
 export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
   const requiresMail = requiresEmailVerification(env);
-  const bindings =
-    env.ENVIRONMENT !== "local" && env.ENVIRONMENT !== "test"
-      ? [
-          ...requiredBindings,
-          ...deployedAuthBindings,
-          ...(requiresMail ? deployedMailBindings : []),
-          ...deployedAutomationBindings,
-        ]
-      : requiredBindings;
+  const bindings = !isDevelopmentEnvironment(env.ENVIRONMENT)
+    ? [
+        ...requiredBindings,
+        ...deployedAuthBindings,
+        ...(requiresMail ? deployedMailBindings : []),
+        ...deployedAutomationBindings,
+      ]
+    : requiredBindings;
   return [
     ...bindings.map((name) => {
       const ready =
@@ -180,8 +176,26 @@ export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
   ];
 }
 
+function readAcceptedFlag(
+  env: ApiWorkerEnv,
+  key:
+    | "FACEBOOK_LIVE_ACCEPTED"
+    | "INSTAGRAM_LIVE_ACCEPTED"
+    | "INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED"
+    | "THREADS_LIVE_ACCEPTED"
+    | "THREADS_ENGAGEMENT_LIVE_ACCEPTED"
+    | "TIKTOK_LIVE_ACCEPTED"
+    | "YOUTUBE_LIVE_ACCEPTED",
+): boolean {
+  const value = env[key]?.trim() ?? "false";
+  if (value !== "true" && value !== "false" && value !== "") {
+    throw new Error(`${key} must be true or false`);
+  }
+  return value === "true";
+}
+
 export function validateProductionBindings(env: ApiWorkerEnv): void {
-  if (env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test") return;
+  if (isDevelopmentEnvironment(env.ENVIRONMENT)) return;
   applicationOrigin(env);
   if (requiresEmailVerification(env)) {
     if (typeof env.MAIL?.send !== "function") {
@@ -200,56 +214,32 @@ export function validateProductionBindings(env: ApiWorkerEnv): void {
   if (!env.BETTER_AUTH_SECRET || env.BETTER_AUTH_SECRET.trim().length < 32) {
     throw new Error("BETTER_AUTH_SECRET must be at least 32 characters in deployed environments");
   }
-  const facebookAccepted = env.FACEBOOK_LIVE_ACCEPTED?.trim() ?? "false";
-  const instagramAccepted = env.INSTAGRAM_LIVE_ACCEPTED?.trim() ?? "false";
-  const instagramEngagementAccepted = env.INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED?.trim() ?? "false";
-  const threadsAccepted = env.THREADS_LIVE_ACCEPTED?.trim() ?? "false";
-  const engagementAccepted = env.THREADS_ENGAGEMENT_LIVE_ACCEPTED?.trim() ?? "false";
-  const tiktokAccepted = env.TIKTOK_LIVE_ACCEPTED?.trim() ?? "false";
-  const youtubeAccepted = env.YOUTUBE_LIVE_ACCEPTED?.trim() ?? "false";
-  if (!["true", "false", ""].includes(facebookAccepted)) {
-    throw new Error("FACEBOOK_LIVE_ACCEPTED must be true or false");
-  }
-  if (!["true", "false", ""].includes(instagramAccepted)) {
-    throw new Error("INSTAGRAM_LIVE_ACCEPTED must be true or false");
-  }
-  if (!["true", "false", ""].includes(instagramEngagementAccepted)) {
-    throw new Error("INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED must be true or false");
-  }
-  if (instagramEngagementAccepted === "true" && instagramAccepted !== "true") {
+  const facebookAccepted = readAcceptedFlag(env, "FACEBOOK_LIVE_ACCEPTED");
+  const instagramAccepted = readAcceptedFlag(env, "INSTAGRAM_LIVE_ACCEPTED");
+  const instagramEngagementAccepted = readAcceptedFlag(env, "INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED");
+  const threadsAccepted = readAcceptedFlag(env, "THREADS_LIVE_ACCEPTED");
+  const engagementAccepted = readAcceptedFlag(env, "THREADS_ENGAGEMENT_LIVE_ACCEPTED");
+  const tiktokAccepted = readAcceptedFlag(env, "TIKTOK_LIVE_ACCEPTED");
+  const youtubeAccepted = readAcceptedFlag(env, "YOUTUBE_LIVE_ACCEPTED");
+  if (instagramEngagementAccepted && !instagramAccepted) {
     throw new Error("INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED requires INSTAGRAM_LIVE_ACCEPTED=true");
   }
-  if (!["true", "false", ""].includes(threadsAccepted)) {
-    throw new Error("THREADS_LIVE_ACCEPTED must be true or false");
-  }
-  if (!["true", "false", ""].includes(engagementAccepted)) {
-    throw new Error("THREADS_ENGAGEMENT_LIVE_ACCEPTED must be true or false");
-  }
-  if (engagementAccepted === "true" && threadsAccepted !== "true") {
+  if (engagementAccepted && !threadsAccepted) {
     throw new Error("THREADS_ENGAGEMENT_LIVE_ACCEPTED requires THREADS_LIVE_ACCEPTED=true");
   }
-  if (!["true", "false", ""].includes(tiktokAccepted)) {
-    throw new Error("TIKTOK_LIVE_ACCEPTED must be true or false");
-  }
-  if (!["true", "false", ""].includes(youtubeAccepted)) {
-    throw new Error("YOUTUBE_LIVE_ACCEPTED must be true or false");
-  }
-  if (facebookAccepted === "true" && (!env.FACEBOOK_CLIENT_ID || !env.FACEBOOK_CLIENT_SECRET)) {
+  if (facebookAccepted && (!env.FACEBOOK_CLIENT_ID || !env.FACEBOOK_CLIENT_SECRET)) {
     throw new Error("accepted Facebook provider requires client ID and client secret bindings");
   }
-  if (instagramAccepted === "true" && (!env.INSTAGRAM_CLIENT_ID || !env.INSTAGRAM_CLIENT_SECRET)) {
+  if (instagramAccepted && (!env.INSTAGRAM_CLIENT_ID || !env.INSTAGRAM_CLIENT_SECRET)) {
     throw new Error("accepted Instagram provider requires client ID and client secret bindings");
   }
-  if (threadsAccepted === "true" && (!env.THREADS_CLIENT_ID || !env.THREADS_CLIENT_SECRET)) {
+  if (threadsAccepted && (!env.THREADS_CLIENT_ID || !env.THREADS_CLIENT_SECRET)) {
     throw new Error("accepted Threads provider requires client ID and client secret bindings");
   }
-  if (tiktokAccepted === "true" && (!env.TIKTOK_CLIENT_KEY || !env.TIKTOK_CLIENT_SECRET)) {
+  if (tiktokAccepted && (!env.TIKTOK_CLIENT_KEY || !env.TIKTOK_CLIENT_SECRET)) {
     throw new Error("accepted TikTok provider requires client key and client secret bindings");
   }
-  if (
-    youtubeAccepted === "true" &&
-    (!env.YOUTUBE_SHORTS_CLIENT_ID || !env.YOUTUBE_SHORTS_CLIENT_SECRET)
-  ) {
+  if (youtubeAccepted && (!env.YOUTUBE_SHORTS_CLIENT_ID || !env.YOUTUBE_SHORTS_CLIENT_SECRET)) {
     throw new Error("accepted YouTube provider requires client ID and client secret bindings");
   }
 }

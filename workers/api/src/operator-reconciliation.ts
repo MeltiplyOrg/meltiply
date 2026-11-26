@@ -1,9 +1,9 @@
 import { Effect } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
-import { isPlatform, type DatabaseError } from "@meltiply/domain";
+import { isoDateTimeOrNull, isPlatform, type DatabaseError } from "@meltiply/domain";
 import { recordPublicationUsage, reportingConfiguration } from "@meltiply/reporting";
 
-import { CoreApiError } from "./core-types";
+import { CoreApiError } from "./api-errors";
 import { withSystemTransactionEffect } from "./database";
 import { hashIdempotencyRequestEffect } from "./idempotency";
 import type {
@@ -40,8 +40,7 @@ function auditState(row: DistributionResolutionState) {
   return {
     failure_code: row.failure_code,
     failure_retryable: row.failure_retryable,
-    next_attempt_at:
-      row.next_attempt_at === null ? null : new Date(row.next_attempt_at).toISOString(),
+    next_attempt_at: isoDateTimeOrNull(row.next_attempt_at),
     platform_post_id: row.platform_post_id,
     platform_url: row.platform_url,
     provider_operation_id: row.provider_operation_id,

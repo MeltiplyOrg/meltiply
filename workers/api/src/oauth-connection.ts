@@ -4,7 +4,7 @@ import type { OAuthConnection } from "@meltiply/providers";
 import { Effect } from "effect";
 
 import { requireActiveBrandProfileEffect } from "./brand-profile-guard";
-import { CoreApiError } from "./core-types";
+import { CoreApiError } from "./api-errors";
 import { withSystemTransactionEffect } from "./database";
 import type { ApiWorkerEnv } from "./env";
 import { lockOrganizationEffect } from "./organization-lock";
@@ -80,15 +80,15 @@ export function saveOAuthConnectionEffect(
 
     yield* withSystemTransactionEffect(env, (client) =>
       Effect.gen(function* () {
-        const organization = yield* client.query<{
-          id: string;
-        }>(
+        yield* lockOrganizationEffect(client, owner.organizationId);
+        const lockedOrganization = yield* client.query<{ id: string }>(
           `SELECT id
-         FROM organizations
-         WHERE id::text = $1`,
+           FROM organizations
+           WHERE id::text = $1
+           FOR UPDATE`,
           [owner.organizationId],
         );
-        let organizationRow = organization.rows[0];
+        const organizationRow = lockedOrganization.rows[0];
         if (!organizationRow) {
           return yield* Effect.fail(
             new CoreApiError(
@@ -100,11 +100,11 @@ export function saveOAuthConnectionEffect(
         }
         const membership = yield* client.query<{ role: string }>(
           `SELECT om.role
-         FROM org_members om
-         JOIN users u ON u.id = om.user_id
-         WHERE om.org_id = $1
-           AND (u.id::text = $2 OR u.auth_user_id = $2)
-         LIMIT 1`,
+           FROM org_members om
+           JOIN users u ON u.id = om.user_id
+           WHERE om.org_id = $1
+             AND (u.id::text = $2 OR u.auth_user_id = $2)
+           LIMIT 1`,
           [organizationRow.id, owner.userId],
         );
         if (membership.rows.length === 0) {
@@ -113,24 +113,6 @@ export function saveOAuthConnectionEffect(
               403,
               "forbidden",
               "The OAuth organization is not accessible to this account.",
-            ),
-          );
-        }
-        yield* lockOrganizationEffect(client, organizationRow.id);
-        const lockedOrganization = yield* client.query<{
-          id: string;
-        }>(
-          `SELECT id
-       FROM organizations WHERE id = $1 FOR UPDATE`,
-          [organizationRow.id],
-        );
-        organizationRow = lockedOrganization.rows[0];
-        if (!organizationRow) {
-          return yield* Effect.fail(
-            new CoreApiError(
-              409,
-              "invalid_state",
-              "The OAuth organization is no longer available.",
             ),
           );
         }

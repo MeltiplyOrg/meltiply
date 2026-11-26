@@ -1,19 +1,17 @@
 import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
+import { isoDateTime, isUuid, MAXIMUM_NOTIFICATION_RECIPIENTS } from "@meltiply/domain";
+import { isMailSenderAddress, mailSenderConfiguration } from "@meltiply/domain/mail-content";
 import { Effect } from "effect";
 
-import {
-  activeOrganizationIdEffect,
-  type EffectTransactionClient,
-  withTenantTransactionEffect,
-} from "./database";
+import { CoreApiError, type TenantServiceError } from "./api-errors";
+import { requireActiveWorkspaceAdminEffect } from "./authorization";
+import type { IdempotentResult } from "./core-types";
+import { activeOrganizationIdEffect, withTenantTransactionEffect } from "./database";
 import type { ApiWorkerEnv } from "./env";
-import { RFC4122_UUID_PATTERN } from "./crypto";
-import { CoreApiError, type IdempotentResult } from "./core-types";
 import { hashIdempotencyRequestEffect } from "./idempotency";
 import { withIdempotentMutation } from "./idempotent-mutation";
-import { isMailSenderAddress, mailSenderConfiguration } from "@meltiply/domain/mail-content";
-import type { PostServiceError } from "./post-types";
+import { validateIanaTimezoneEffect } from "./validation";
 
 type Schemas = components["schemas"];
 
@@ -37,27 +35,6 @@ function emailDeliveryAvailable(env: ApiWorkerEnv): boolean {
   return typeof env.MAIL?.send === "function" && mailSenderConfiguration(env) !== undefined;
 }
 
-function validateTimezoneEffect(
-  client: EffectTransactionClient,
-  timezone: string | null,
-): Effect.Effect<void, PostServiceError> {
-  if (timezone === null) return Effect.void;
-  return client
-    .query<{ valid: boolean }>(
-      "SELECT EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = $1) AS valid",
-      [timezone],
-    )
-    .pipe(
-      Effect.flatMap((result) =>
-        result.rows[0]?.valid
-          ? Effect.void
-          : Effect.fail(
-              new CoreApiError(422, "validation_error", "Use a supported IANA timezone."),
-            ),
-      ),
-    );
-}
-
 function normalizeSignatureTemplates(
   templates: readonly Schemas["SignatureTemplate"][],
 ): Schemas["SignatureTemplate"][] {
@@ -75,7 +52,7 @@ function normalizeSignatureTemplates(
   }
   return templates.map((template, position) => {
     const id = typeof template.id === "string" ? template.id.toLowerCase() : "";
-    if (!RFC4122_UUID_PATTERN.test(id) || ids.has(id)) {
+    if (!isUuid(id) || ids.has(id)) {
       throw new CoreApiError(
         422,
         "validation_error",
@@ -118,14 +95,12 @@ function normalizeSignatureTemplates(
   });
 }
 
-const maximumNotificationRecipients = 20;
-
 function normalizeNotificationRecipients(recipients: readonly string[]): string[] {
-  if (recipients.length > maximumNotificationRecipients) {
+  if (recipients.length > MAXIMUM_NOTIFICATION_RECIPIENTS) {
     throw new CoreApiError(
       422,
       "validation_error",
-      `Use no more than ${maximumNotificationRecipients} email recipients.`,
+      `Use no more than ${MAXIMUM_NOTIFICATION_RECIPIENTS} email recipients.`,
     );
   }
   const normalized: string[] = [];
@@ -201,8 +176,7 @@ function mapPreferences(
     notifications: row.notification_preferences,
     signature_templates: row.signature_templates,
     timezone: row.timezone,
-    updated_at:
-      row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at),
+    updated_at: isoDateTime(row.updated_at),
   };
 }
 
@@ -210,13 +184,13 @@ export interface PublishingPreferencesApiService {
   get(
     env: ApiWorkerEnv,
     session: SessionClaims,
-  ): Effect.Effect<Schemas["PublishingPreferences"], PostServiceError>;
+  ): Effect.Effect<Schemas["PublishingPreferences"], TenantServiceError>;
   replace(
     env: ApiWorkerEnv,
     session: SessionClaims,
     input: PublishingPreferencesUpdate,
     idempotencyKey: string,
-  ): Effect.Effect<IdempotentResult<Schemas["PublishingPreferences"]>, PostServiceError>;
+  ): Effect.Effect<IdempotentResult<Schemas["PublishingPreferences"]>, TenantServiceError>;
 }
 
 export function createPublishingPreferencesApiService(): PublishingPreferencesApiService {
@@ -240,21 +214,13 @@ export function createPublishingPreferencesApiService(): PublishingPreferencesAp
         return yield* withTenantTransactionEffect(env, session, (client) =>
           Effect.gen(function* () {
             const organizationId = yield* activeOrganizationIdEffect(client);
-            const role = yield* client.query<{ role: string }>(
-              "SELECT public.auth_active_org_role() AS role",
+            yield* requireActiveWorkspaceAdminEffect(
+              client,
+              "Only Workspace Admins can change publishing preferences.",
             );
-            if (role.rows[0]?.role !== "admin") {
-              return yield* Effect.fail(
-                new CoreApiError(
-                  403,
-                  "workspace_admin_required",
-                  "Only Workspace Admins can change publishing preferences.",
-                ),
-              );
-            }
             return yield* withIdempotentMutation<
               Schemas["PublishingPreferences"],
-              PostServiceError
+              TenantServiceError
             >(
               client,
               organizationId,
@@ -264,7 +230,7 @@ export function createPublishingPreferencesApiService(): PublishingPreferencesAp
               200,
               (tx) =>
                 Effect.gen(function* () {
-                  yield* validateTimezoneEffect(tx, input.timezone);
+                  yield* validateIanaTimezoneEffect(tx, input.timezone);
                   const emailAvailable = emailDeliveryAvailable(env);
                   const validated = yield* Effect.try({
                     catch: (cause) =>

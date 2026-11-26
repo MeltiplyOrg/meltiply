@@ -111,7 +111,6 @@ function unavailableCapabilities(): ReturnType<ProviderRegistry["capabilities"]>
 function service(overrides: Partial<CoreApiService> = {}): CoreApiService {
   const notImplemented = () => Effect.die(new Error("unexpected service call"));
   return {
-    activeOrganization: notImplemented,
     analyticsPosts: notImplemented,
     calendar: notImplemented,
     cancelDistribution: notImplemented,

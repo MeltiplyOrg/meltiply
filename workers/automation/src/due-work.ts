@@ -4,7 +4,7 @@ import { Effect } from "effect";
 
 import { withSystemTransactionEffect } from "./database";
 import { type AutomationJobError, classifyJobError } from "./effect/index";
-import type { AutomationEnv } from "./env";
+import { recurringCommentsEnabled, type AutomationEnv } from "./env";
 import { safeErrorMessage } from "./errors";
 import type { ProviderSyncWorkload } from "./messages";
 import {
@@ -16,7 +16,7 @@ export { maximumDelayedDeliverySeconds, overdueRecoveryGraceSeconds };
 
 export const distributionProcessingGraceSeconds = 300;
 
-export const minimumProviderVisibilityTimeoutSeconds = 120;
+const minimumProviderVisibilityTimeoutSeconds = 120;
 export const providerAttemptLeaseSeconds = Math.floor(minimumProviderVisibilityTimeoutSeconds / 2);
 
 export const maximumProviderSyncAttempts = 20;
@@ -47,14 +47,7 @@ export type OutboxDueWorkKind =
   | "distribution_sweep"
   | "reply_reconciliation";
 
-const dueWorkTables = {
-  assets: "assets",
-  comments: "comments",
-  distributions: "distributions",
-  platform_accounts: "platform_accounts",
-} as const;
-
-type DueWorkTable = keyof typeof dueWorkTables;
+type DueWorkTable = "assets" | "comments" | "distributions" | "platform_accounts";
 
 interface OutboxDueWorkDescriptor {
   aggregateType: OutboxAggregateType;
@@ -305,15 +298,13 @@ const outboxDueWorkDescriptors: Readonly<Record<OutboxDueWorkKind, OutboxDueWork
 };
 
 function outboxFromClause(descriptor: OutboxDueWorkDescriptor): string {
-  return `${dueWorkTables[descriptor.table]}${
-    descriptor.tableAlias ? ` AS ${descriptor.tableAlias}` : ""
-  }`;
+  return `${descriptor.table}${descriptor.tableAlias ? ` AS ${descriptor.tableAlias}` : ""}`;
 }
 
 function outboxClaimStatement(descriptor: OutboxDueWorkDescriptor): string {
   const claimed = descriptor.transitionAssignments
     ? `, claimed AS (
-         UPDATE ${dueWorkTables[descriptor.table]} d
+         UPDATE ${descriptor.table} d
             SET ${descriptor.transitionAssignments}
            FROM due
            JOIN emitted ON emitted.aggregate_id = due.id
@@ -343,7 +334,7 @@ function outboxClaimStatement(descriptor: OutboxDueWorkDescriptor): string {
        )${claimed}
        SELECT ${
          descriptor.transitionAssignments
-           ? "(SELECT COUNT(*)::integer FROM claimed) AS claimed_count,\n              (SELECT COUNT(*)::integer FROM emitted) AS inserted_count"
+           ? "(SELECT COUNT(*)::integer FROM claimed) AS claimed_count"
            : "(SELECT COUNT(*)::integer FROM emitted) AS claimed_count"
        }`;
 }
@@ -475,14 +466,14 @@ function providerSyncClaimStatement(descriptor: LeaseDueWorkDescriptor): string 
   const leaseParamIndex = 2 + descriptor.constants.length;
   return `WITH candidates AS (
      SELECT ${descriptor.selection}
-     FROM ${dueWorkTables[descriptor.table]} AS ${alias}
+     FROM ${descriptor.table} AS ${alias}
      ${descriptor.join ?? ""}
      WHERE ${descriptor.predicate}
      ORDER BY ${descriptor.ordering}
      LIMIT $1
      FOR UPDATE OF ${alias} SKIP LOCKED
    )
-   UPDATE ${dueWorkTables[descriptor.table]} AS ${alias}
+   UPDATE ${descriptor.table} AS ${alias}
    SET ${columns.eventId} = gen_random_uuid(),
        ${columns.leaseExpiresAt} = now() + ($${leaseParamIndex} * INTERVAL '1 second'),
        ${columns.attemptCount} = ${alias}.${columns.attemptCount} + 1,
@@ -497,7 +488,7 @@ function providerSyncClaimStatement(descriptor: LeaseDueWorkDescriptor): string 
 
 const onDemandCommentsClaimStatement = `WITH candidates AS (
      SELECT distribution.id
-     FROM ${dueWorkTables.distributions} AS distribution
+     FROM distributions AS distribution
      ${platformAccountJoin}
      WHERE distribution.org_id = $2::uuid
        AND ($3::uuid IS NULL OR distribution.id = $3::uuid)
@@ -519,7 +510,7 @@ const onDemandCommentsClaimStatement = `WITH candidates AS (
      LIMIT $1
      FOR UPDATE OF distribution SKIP LOCKED
    )
-   UPDATE ${dueWorkTables.distributions} AS distribution
+   UPDATE distributions AS distribution
    SET comments_sync_event_id = gen_random_uuid(),
        comments_sync_on_demand = true,
        comments_next_sync_at = NULL,
@@ -535,7 +526,7 @@ const onDemandCommentsClaimStatement = `WITH candidates AS (
 function providerSyncReleaseStatement(descriptor: LeaseDueWorkDescriptor): string {
   const columns = descriptor.leaseColumns;
   const alias = descriptor.tableAlias;
-  return `UPDATE ${dueWorkTables[descriptor.table]} AS ${alias}
+  return `UPDATE ${descriptor.table} AS ${alias}
    SET ${columns.eventId} = NULL,
        ${columns.leaseExpiresAt} = NULL,
        ${columns.nextAttemptAt} = now() + INTERVAL '1 minute',
@@ -560,7 +551,7 @@ export function sweepDueProviderSyncWork(
   if (platforms.length === 0) return Effect.succeed([]);
   const base = providerSyncDueWorkDescriptors[workload];
   const descriptor =
-    workload === "comments" && env.RECURRING_COMMENTS_ENABLED !== "true"
+    workload === "comments" && !recurringCommentsEnabled(env)
       ? { ...base, predicate: `${base.predicate} AND distribution.comments_sync_on_demand` }
       : base;
   return transaction(env, (client) =>
@@ -596,7 +587,7 @@ export function claimOnDemandCommentsWork(
         maximumProviderSyncAttempts,
         onDemandCommentsIntervalSeconds,
         providerAttemptLeaseSeconds,
-        env.RECURRING_COMMENTS_ENABLED === "true",
+        recurringCommentsEnabled(env),
       ]),
       (result) => result.rows,
     ),

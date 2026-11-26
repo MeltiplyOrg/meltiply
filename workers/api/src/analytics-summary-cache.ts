@@ -2,16 +2,14 @@ import type { Exit } from "effect";
 import type { components } from "@meltiply/contracts/schema";
 
 import type { CoreServiceError } from "./core-types";
+import { SingleFlightGroup, type SingleFlight } from "./single-flight";
 
 type AnalyticsSummary = components["schemas"]["AnalyticsSummary"];
 type AnalyticsSummaryExit = Exit.Exit<AnalyticsSummary, CoreServiceError>;
 
 const ANALYTICS_SUMMARY_TTL_MS = 30_000;
-
 const ANALYTICS_SUMMARY_MAX_ENTRIES = 64;
-
 const ANALYTICS_SUMMARY_MAX_BYTES = 16 * 1024;
-
 const ANALYTICS_SUMMARY_MAX_PENDING = 32;
 
 const textEncoder = new TextEncoder();
@@ -21,25 +19,19 @@ interface RetainedAnalyticsSummary {
   value: AnalyticsSummary;
 }
 
-interface PendingAnalyticsSummary {
-  readonly promise: Promise<AnalyticsSummaryExit>;
-  readonly settle: (exit: AnalyticsSummaryExit) => void;
-}
-
-export interface AnalyticsSummaryFlight extends PendingAnalyticsSummary {
-  readonly leader: boolean;
-  readonly release: () => void;
-}
+export type AnalyticsSummaryFlight = SingleFlight<AnalyticsSummaryExit>;
 
 export class AnalyticsSummaryCache {
   private readonly entries = new Map<string, RetainedAnalyticsSummary>();
-  private readonly pending = new Map<string, PendingAnalyticsSummary>();
+  private readonly flights = new SingleFlightGroup<AnalyticsSummaryExit>(
+    ANALYTICS_SUMMARY_MAX_PENDING,
+  );
   private currentNamespace: string | undefined;
 
   useNamespace(namespace: string): void {
     if (this.currentNamespace === namespace) return;
     this.entries.clear();
-    this.pending.clear();
+    this.flights.clear();
     this.currentNamespace = namespace;
   }
 
@@ -61,23 +53,7 @@ export class AnalyticsSummaryCache {
   }
 
   acquire(key: string): AnalyticsSummaryFlight | undefined {
-    const existing = this.pending.get(key);
-    if (existing) return { ...existing, leader: false, release: () => undefined };
-    if (this.pending.size >= ANALYTICS_SUMMARY_MAX_PENDING) return undefined;
-
-    let settle!: PendingAnalyticsSummary["settle"];
-    const promise = new Promise<AnalyticsSummaryExit>((resolve) => {
-      settle = resolve;
-    });
-    const pending: PendingAnalyticsSummary = { promise, settle };
-    this.pending.set(key, pending);
-    return {
-      ...pending,
-      leader: true,
-      release: () => {
-        if (this.pending.get(key) === pending) this.pending.delete(key);
-      },
-    };
+    return this.flights.acquire(key);
   }
 
   set(key: string, summary: AnalyticsSummary, nowMs: number, namespace: string): void {

@@ -7,7 +7,6 @@ export type {
   ObjectMetadata,
   ObjectStore,
   ObjectUrlSigner,
-  ObjectWriteUrlSigner,
   SignedMultipartPartRequest,
   SignedObjectRequest,
   SignedObjectWriteRequest,
@@ -40,9 +39,9 @@ export {
 } from "./provider";
 export {
   PROVIDER_MEDIA_ROUTE_PREFIX,
-  providerMediaPayload,
   signProviderMediaSignature,
   signProviderMediaUrl,
+  validateProviderMediaKey,
   verifyProviderMediaSignature,
 } from "./provider-media";
 export {

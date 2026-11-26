@@ -1,4 +1,4 @@
-import type { components } from "@meltiply/contracts";
+import type { components } from "@meltiply/contracts/schema";
 
 import { isHttp404, malformed, ProviderAdapterError, rejection } from "./failures";
 import type { ProviderHttpClient } from "./http";
@@ -54,17 +54,13 @@ export function parseContainerOperationId(value: unknown): MetaContainerOperatio
   return { id, phase };
 }
 
-/** Insight values arrive as a periodic `values[0]` bucket or a lifetime `total_value`. */
-export function insightValue(metric: Record<string, unknown>): number | undefined {
+function insightValue(metric: Record<string, unknown>): number | undefined {
   const values = metric.values;
   if (Array.isArray(values)) return metricValue(record(values[0])?.value);
   return metricValue(record(metric.total_value)?.value);
 }
 
-/**
- * Parses an insights `data` array into one value per metric name. `singleValue`
- * requires exactly one `values` bucket (Facebook Video Insights).
- */
+/** `singleValue` requires a single `values` bucket (Facebook Video Insights). */
 export function parseMetaInsightsMap(
   body: unknown,
   options: { singleValue?: boolean } = {},
@@ -174,14 +170,15 @@ export async function requestMetaBearerToken(
   const response = await http.request(context, { method: "GET", url: url.toString() });
   const body = record(response.body);
   const accessToken = boundedString(body?.access_token, limits.tokenMaxChars);
-  if (!accessToken || body?.token_type !== "bearer") throw malformed();
+  if (!accessToken || boundedString(body?.token_type, 32)?.toLowerCase() !== "bearer") {
+    throw malformed();
+  }
   return {
     accessToken,
-    expiresAt: addSeconds(now, body.expires_in, limits.tokenLifetimeMaxSeconds),
+    expiresAt: addSeconds(now, body?.expires_in, limits.tokenLifetimeMaxSeconds),
   };
 }
 
-/** Confirms a known post ID; a 404 means it no longer exists. */
 export async function lookupMetaPost(
   http: ProviderHttpClient,
   context: ProviderRequestContext,
@@ -242,7 +239,6 @@ export async function createMetaContainer(
 
 type ProviderWarnings = components["schemas"]["Distribution"]["provider_warnings"];
 
-/** Per-platform parameters of the container create / poll / publish protocol. */
 export interface MetaContainerProtocol {
   containerReadUrl: (containerId: string) => string;
   extractWarnings: (body: Record<string, unknown>) => ProviderWarnings | undefined;
@@ -267,7 +263,6 @@ function containerFailureCode(provider: string, detail: unknown): string {
   return `${provider}_container_${category}`;
 }
 
-/** Returns the container status node, or undefined when the container no longer exists. */
 export async function readMetaContainer(
   http: ProviderHttpClient,
   protocol: MetaContainerProtocol,

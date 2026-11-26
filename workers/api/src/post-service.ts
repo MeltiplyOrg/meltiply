@@ -1,35 +1,43 @@
 import { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
-import { codePointLength, isoDateTime, type DatabaseError } from "@meltiply/domain";
+import {
+  codePointLength,
+  isAccountUsable,
+  isoDateTime,
+  type DatabaseError,
+} from "@meltiply/domain";
 import {
   composeCaption,
-  parseThreadsOptions,
+  hasProviderHostedContent,
   ProviderRegistry,
+  resolvePublishProviderOptions,
+  toWirePostProviderOptions,
   validatePublishInput,
   type ProviderMedia,
   type ProviderPublishOptions,
 } from "@meltiply/providers";
 
-import { mapAsset, type AssetRow } from "./asset-types";
+import { CoreApiError, toCoreApiErrorOrRethrow } from "./api-errors";
+import { assetSelectColumns, mapAsset, type AssetRow } from "./asset-types";
 import {
   activeBrandProfilePredicate,
   requireActiveBrandProfileEffect,
 } from "./brand-profile-guard";
-import { CoreApiError, toCoreApiErrorOrRethrow } from "./core-types";
 import { withTenantTransactionEffect, type EffectTransactionClient } from "./database";
 import type { ApiWorkerEnv } from "./env";
 import { hashIdempotencyRequestEffect } from "./idempotency";
 import { withTenantIdempotentMutation } from "./idempotent-mutation";
 import { lockOrganizationEffect } from "./organization-lock";
 import {
+  deletePendingDistributionOutboxEffect,
   distributionColumns,
   insertOutboxBatchEffect,
   isPendingDistribution,
   mapDistribution,
+  providerOwnedDistributionSql,
   providerReachedDistributionStatuses,
   publicationSnapshotColumn,
-  toWirePostProviderOptions,
   usageGuardEffect,
   validateTargetOverrides,
 } from "./distribution-service";
@@ -62,12 +70,7 @@ const postColumns = `
   id, org_id, brand_profile_id, title, default_text, status, revision,
   created_at, updated_at, ${postQueueMembershipColumn}`;
 
-const assetColumns = `
-  asset.id, asset.org_id, asset.brand_profile_id, asset.uploaded_by,
-  asset.asset_type, asset.title, asset.duration_sec, asset.file_size,
-  asset.mime_type, asset.width, asset.height,
-  asset.status, asset.failure_code, asset.failure_message,
-  asset.failure_retryable, asset.failure_at, asset.created_at, asset.updated_at`;
+const assetColumns = assetSelectColumns("asset");
 
 interface PostRow extends Record<string, unknown> {
   brand_profile_id: string;
@@ -494,20 +497,12 @@ function replaceAttachmentsEffect(
   client: EffectTransactionClient,
   post: PostMutationRow,
   assetIds: readonly string[],
-  previousIds?: readonly string[],
+  previousIds: readonly string[],
 ): Effect.Effect<void, DatabaseError> {
   return Effect.gen(function* () {
-    const previous =
-      previousIds ??
-      (yield* client
-        .query<{ asset_id: string }>(
-          `SELECT asset_id FROM post_attachments WHERE post_id = $1 ORDER BY position`,
-          [post.id],
-        )
-        .pipe(Effect.map((result) => result.rows.map((row) => row.asset_id))));
     if (
-      previous.length === assetIds.length &&
-      previous.every((id, index) => id === assetIds[index])
+      previousIds.length === assetIds.length &&
+      previousIds.every((id, index) => id === assetIds[index])
     ) {
       return;
     }
@@ -729,175 +724,25 @@ function loadRenditionCandidatesEffect(
   });
 }
 
-function publicationProviderOptions(
+function resolveTargetProviderOptions(
   options: PostProviderOptions | undefined,
-  platform: Platform,
-): ProviderPublishOptions | undefined {
-  if (!options && platform !== "youtube") return undefined;
-  const result: ProviderPublishOptions = {};
-  if (options?.threads) {
-    if (platform !== "threads")
-      throw new CoreApiError(422, "validation_error", "Threads options require a Threads Channel.");
-    const threads = parseThreadsOptions(options.threads);
-    if (!threads)
-      throw new CoreApiError(
-        422,
-        "validation_error",
-        "Complete the Threads publication choices before sending.",
-      );
-    result.threads = threads;
-  }
-  if (platform === "youtube" || options?.youtube) {
-    const madeForKids = options?.youtube?.madeForKids;
-    const privacyStatus = options?.youtube?.privacyStatus;
-    if (madeForKids === undefined) {
-      throw new CoreApiError(
-        422,
-        "validation_error",
-        "Choose whether the YouTube video is made for kids before publishing.",
-      );
-    }
-    if (privacyStatus === undefined) {
-      throw new CoreApiError(
-        422,
-        "validation_error",
-        "Choose a YouTube visibility before publishing.",
-      );
-    }
-    result.youtube = {
-      madeForKids,
-      privacyStatus,
-      ...(options?.youtube?.postType ? { postType: options.youtube.postType } : {}),
-    };
-  }
-  if (options?.tiktok) {
-    const { privacyLevel, discloseCommercialContent, ...choices } = options.tiktok;
-    if (privacyLevel === undefined && choices.postMode !== "inbox") {
-      throw new CoreApiError(
-        422,
-        "validation_error",
-        "Choose a TikTok privacy level before publishing.",
-      );
-    }
-    if (
-      choices.postMode !== "inbox" &&
-      discloseCommercialContent &&
-      !choices.brandContent &&
-      !choices.brandOrganic
-    ) {
-      throw new CoreApiError(
-        422,
-        "validation_error",
-        "Choose a TikTok commercial content subtype before publishing.",
-      );
-    }
-    result.tiktok = { ...choices, privacyLevel };
-  }
-  if (options?.instagram) {
-    if (platform !== "instagram") {
-      throw new CoreApiError(
-        422,
-        "validation_error",
-        "Instagram provider options require an Instagram account.",
-      );
-    }
-    result.instagram = { ...options.instagram };
-  }
-  if (options?.facebook) {
-    if (platform !== "facebook") {
-      throw new CoreApiError(422, "validation_error", "Facebook options require a Facebook Page.");
-    }
-    result.facebook = { ...options.facebook };
-  }
-  return result;
-}
-
-function validateProviderOptions(
-  providerOptions: ProviderPublishOptions | undefined,
   platform: Platform,
   selection: readonly string[],
   candidates: ReadonlyMap<string, CandidateRow[]>,
-): void {
-  const tiktok = providerOptions?.tiktok;
-  if (platform !== "tiktok" && tiktok) {
-    throw new CoreApiError(
-      422,
-      "validation_error",
-      "TikTok provider options require a TikTok account.",
-    );
-  }
-  if (platform !== "instagram" && providerOptions?.instagram) {
-    throw new CoreApiError(
-      422,
-      "validation_error",
-      "Instagram provider options require an Instagram account.",
-    );
-  }
-
+): ProviderPublishOptions | undefined {
   const kinds = selection.map((assetId) => {
-    const available = candidates.get(assetId) ?? [];
-    const candidate = available[0];
+    const candidate = (candidates.get(assetId) ?? [])[0];
     return candidate?.content_type.startsWith("video/")
-      ? "video"
+      ? ("video" as const)
       : candidate?.content_type.startsWith("image/")
-        ? "image"
+        ? ("image" as const)
         : null;
   });
-  const publishesPhoto = kinds.includes("image");
-  const publishesVideo = kinds.includes("video");
-
-  if (platform === "tiktok") {
-    if (!tiktok || tiktok.musicUsageConfirmed !== true) {
-      throw new CoreApiError(
-        422,
-        "validation_error",
-        "TikTok publishing choices and music-usage confirmation are required.",
-      );
-    }
-    if (tiktok.postMode !== "inbox" && publishesPhoto && (tiktok.allowDuet || tiktok.allowStitch)) {
-      throw new CoreApiError(
-        422,
-        "validation_error",
-        "TikTok photo posts do not support Duet or Stitch.",
-      );
-    }
-    if (publishesVideo && tiktok.autoAddMusic === true) {
-      throw new CoreApiError(
-        422,
-        "validation_error",
-        "TikTok automatic music applies to photo posts only.",
-      );
-    }
-    if (tiktok.postMode !== "inbox" && tiktok.brandContent && tiktok.privacyLevel === "SELF_ONLY") {
-      throw new CoreApiError(
-        422,
-        "validation_error",
-        "TikTok branded content cannot use private visibility.",
-      );
-    }
+  const resolved = resolvePublishProviderOptions(options, platform, kinds);
+  if (!resolved.ok) {
+    throw new CoreApiError(422, "validation_error", resolved.message);
   }
-
-  const instagram = providerOptions?.instagram;
-  if (platform === "instagram" && instagram) {
-    const postType =
-      instagram.postType ?? (kinds.length === 1 && kinds[0] === "video" ? "reel" : "feed");
-    const trialReel = instagram.trialReel === true;
-    if (
-      !["feed", "reel", "story"].includes(postType) ||
-      (postType === "reel" && (kinds.length !== 1 || kinds[0] !== "video")) ||
-      (postType === "story" && kinds.length !== 1) ||
-      (trialReel && postType !== "reel") ||
-      (instagram.trialGraduation !== undefined && !trialReel) ||
-      (instagram.trialGraduation !== undefined &&
-        !["manual", "performance"].includes(instagram.trialGraduation))
-    ) {
-      throw new CoreApiError(
-        422,
-        "validation_error",
-        "The selected Instagram post type or trial Reel does not apply to this attachment set.",
-      );
-    }
-  }
+  return resolved.value;
 }
 
 function validateTargetScheduleEffect(
@@ -925,11 +770,7 @@ function validateTargetScheduleEffect(
         ),
       );
     }
-    if (
-      account.revoked_at ||
-      account.connection_status !== "connected" ||
-      (account.token_expires_at && new Date(account.token_expires_at).getTime() <= now.getTime())
-    ) {
+    if (!isAccountUsable(account, now.getTime())) {
       return Effect.fail(
         new CoreApiError(
           409,
@@ -946,8 +787,12 @@ function validateTargetScheduleEffect(
     let providerOptions: ProviderPublishOptions | undefined;
     try {
       validateTargetOverrides(target);
-      providerOptions = publicationProviderOptions(target.providerOptions, platform);
-      validateProviderOptions(providerOptions, platform, selection, candidates);
+      providerOptions = resolveTargetProviderOptions(
+        target.providerOptions,
+        platform,
+        selection,
+        candidates,
+      );
     } catch (cause) {
       return cause instanceof CoreApiError ? Effect.fail(cause) : Effect.die(cause);
     }
@@ -1055,13 +900,7 @@ function requireNonEmptyPost(
   if (
     targets.some(
       ({ descriptionOverride, providerOptions: options }) =>
-        descriptionOverride?.trim() ||
-        options?.facebook?.link?.trim() ||
-        ["crosspost", "ab_test", "live"].includes(options?.facebook?.postType ?? "") ||
-        options?.youtube?.postType === "live" ||
-        options?.threads?.repost_id?.trim() ||
-        options?.threads?.gif_attachment?.gif_id?.trim() ||
-        options?.threads?.text_attachment?.plaintext?.trim(),
+        descriptionOverride?.trim() || hasProviderHostedContent(options),
     )
   )
     return;
@@ -1461,6 +1300,7 @@ export function createPostApiService(
       postId: string,
       input: SchedulePostInput,
       idempotencyKey: string,
+      requestId?: string,
     ) {
       return withTenantIdempotentMutation<Post, PostServiceError>(
         env,
@@ -1525,17 +1365,7 @@ export function createPostApiService(
             const existing = yield* client.query<DistributionSummaryRow>(
               `SELECT distribution.id, distribution.platform_account_id,
                       distribution.status,
-                      (distribution.attempt_count > 0
-                       OR distribution.last_attempt_at IS NOT NULL
-                       OR distribution.provider_operation_id IS NOT NULL
-                       OR distribution.published_at IS NOT NULL
-                       OR distribution.platform_post_id IS NOT NULL
-                       OR distribution.cancel_requested_at IS NOT NULL
-                       OR EXISTS (
-                            SELECT 1
-                              FROM provider_operations AS operation
-                             WHERE operation.distribution_id = distribution.id
-                          )) AS provider_owned
+                      ${providerOwnedDistributionSql("distribution")} AS provider_owned
                  FROM distributions AS distribution
                 WHERE distribution.post_id = $1
                 FOR UPDATE`,
@@ -1645,17 +1475,12 @@ export function createPostApiService(
             );
             const command = {
               now,
+              requestId,
               scheduledAt: scheduled ? deliveryAt : null,
             };
             yield* insertOutboxBatchEffect(client, organizationId, createdIds, command);
             if (rescheduledIds.length > 0) {
-              yield* client.query(
-                `DELETE FROM outbox_events
-                  WHERE aggregate_id = ANY($1::uuid[])
-                    AND topic = 'distribution.publish.requested'
-                    AND state IN ('pending', 'failed')`,
-                [rescheduledIds],
-              );
+              yield* deletePendingDistributionOutboxEffect(client, rescheduledIds);
               yield* insertOutboxBatchEffect(
                 client,
                 organizationId,
@@ -1717,21 +1542,7 @@ export function createPostApiService(
         200,
         (client, organizationId) =>
           Effect.gen(function* () {
-            const current = yield* client.query<
-              Pick<PostRow, "brand_profile_id" | "queue_membership">
-            >(
-              `SELECT brand_profile_id, ${postQueueMembershipColumn}
-               FROM posts
-               WHERE id = $1 AND org_id = public.auth_active_org_id() AND deleted_at IS NULL
-               FOR UPDATE`,
-              [postId],
-            );
-            const post = current.rows[0];
-            if (!post) {
-              return yield* Effect.fail(
-                new CoreApiError(404, "post_not_found", "The post was not found."),
-              );
-            }
+            const post = yield* lockPostEffect(client, postId);
             yield* Effect.try({
               try: () => requireMatchingBrandProfile(post, input.brandProfileId),
               catch: toCoreApiErrorOrRethrow,

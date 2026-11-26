@@ -17,7 +17,7 @@ import {
   processorJobUrlsEffect,
   type NativeProcessorProfile,
 } from "./native-processor";
-import { settleDeletedObjects } from "./assets";
+import { deleteObjectsAndSettleEffect, deleteStorageObjectEffect } from "./object-cleanup";
 
 import { withSystemTransactionEffect } from "./database";
 import {
@@ -27,6 +27,7 @@ import {
   type AutomationJobError,
 } from "./effect/index";
 import type { AutomationEnv } from "./env";
+import { toError as asError } from "./errors";
 
 const imageProfile: NativeProcessorProfile = {
   allowed_content_types: ["image/jpeg", "image/png", "image/webp"],
@@ -53,8 +54,6 @@ const videoProfile: NativeProcessorProfile = {
 const orphanGraceDays = assetOrphanGraceSeconds / (24 * 60 * 60);
 
 const processorJobDeadlineSeconds = PROCESSOR_CONTAINER_TIMEOUT_MS / 1_000 - 60;
-
-const processorCapabilityTtlSeconds = PROCESSOR_CAPABILITY_TTL_SECONDS;
 
 interface AssetProcessingRow extends Record<string, unknown> {
   asset_type: string;
@@ -107,10 +106,6 @@ interface ProcessedOutput {
   height: number | null;
   sha256: string | null;
   width: number | null;
-}
-
-function asError(cause: unknown): Error {
-  return cause instanceof Error ? cause : new Error(String(cause));
 }
 
 function asJobError(cause: unknown): RetryableJobError | TerminalJobError {
@@ -199,16 +194,9 @@ function verifyObject(
 }
 
 function deleteObject(objectStore: ObjectStore, key: string): Effect.Effect<boolean, never> {
-  return Effect.gen(function* () {
-    const present = yield* Effect.match(
-      Effect.tryPromise({ catch: asError, try: () => objectStore.head(key) }),
-      { onFailure: () => true, onSuccess: (object) => object !== null },
-    );
-    if (!present) return true;
-    return yield* Effect.match(
-      Effect.tryPromise({ catch: asError, try: () => objectStore.delete(key) }),
-      { onFailure: () => false, onSuccess: () => true },
-    );
+  return Effect.match(deleteStorageObjectEffect(objectStore, key, { checkBeforeDelete: true }), {
+    onFailure: () => false,
+    onSuccess: () => true,
   });
 }
 
@@ -406,7 +394,7 @@ function reserveProtectedCopy(
             destination.key,
             destination.reservedBytes,
             asset.mime_type,
-            processorCapabilityTtlSeconds,
+            PROCESSOR_CAPABILITY_TTL_SECONDS,
           ],
         );
       }
@@ -419,7 +407,7 @@ function reserveProtectedCopy(
              updated_at = now()
          WHERE asset_id = $1 AND r2_key = $3 AND status = 'writing'
          RETURNING id, write_hold_until`,
-        [asset.id, processorCapabilityTtlSeconds, destination.key],
+        [asset.id, PROCESSOR_CAPABILITY_TTL_SECONDS, destination.key],
       );
       const row = held.rows[0];
       if (!row) {
@@ -741,7 +729,7 @@ function reserveOutputs(
             profile.name,
             stagingKey,
             reservationBytes,
-            processorCapabilityTtlSeconds,
+            PROCESSOR_CAPABILITY_TTL_SECONDS,
           ],
         );
       }
@@ -780,7 +768,7 @@ function reserveOutputs(
              updated_at = now()
          WHERE id = $1 AND status = 'writing'
          RETURNING write_hold_until`,
-        [objectRow.id, processorCapabilityTtlSeconds, reservationBytes],
+        [objectRow.id, PROCESSOR_CAPABILITY_TTL_SECONDS, reservationBytes],
       );
       const rendition = yield* client.query<{ id: string }>(
         `INSERT INTO asset_renditions
@@ -956,7 +944,7 @@ function clearStagingForRetry(
                updated_at = now()
            WHERE id = $1 AND status = 'writing'
            RETURNING write_hold_until`,
-          [reservation.objectId, fileCeiling, processorCapabilityTtlSeconds],
+          [reservation.objectId, fileCeiling, PROCESSOR_CAPABILITY_TTL_SECONDS],
         );
         const hold = armed.rows[0]?.write_hold_until;
         if (!(hold instanceof Date)) {
@@ -1645,16 +1633,9 @@ export function releaseStaleProcessingStaging(
         )
         .pipe(Effect.map((result) => result.rows)),
     ).pipe(Effect.mapError(asError));
-    const outcomes = yield* Effect.forEach(
-      stale,
-      (row) =>
-        Effect.map(deleteObject(objectStore, row.r2_key), (removed) =>
-          removed ? { id: row.id } : null,
-        ),
-      { concurrency: 8 },
-    );
-    const removed = outcomes.filter((entry): entry is { id: string } => entry !== null);
-    const settled = yield* settleDeletedObjects(env, removed).pipe(Effect.mapError(asError));
-    return settled.deleted_objects;
+    const cleanup = yield* deleteObjectsAndSettleEffect(env, objectStore, stale, {
+      checkBeforeDelete: true,
+    }).pipe(Effect.mapError(asError));
+    return cleanup.deletedObjects;
   });
 }

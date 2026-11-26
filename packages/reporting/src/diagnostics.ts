@@ -10,7 +10,6 @@ import {
 
 const maximumStackCharacters = 8_192;
 
-/** Fixed report shape a boundary supplies; everything else is derived. */
 export interface DiagnosticBoundaryInput {
   readonly category?: DiagnosticCategory;
   readonly failureClass?: ProviderFailureClass;
@@ -30,10 +29,6 @@ function errorShape(cause: unknown): { name: string; stack?: string } {
   };
 }
 
-/**
- * Extracts a canonical `ProviderFailureClass` from an unknown thrown provider
- * error without touching vendor prose or depending directly on `@meltiply/providers`.
- */
 export function extractProviderFailureClass(cause: unknown): ProviderFailureClass | undefined {
   if (cause === null || typeof cause !== "object" || !("failure" in cause)) return undefined;
   const failure = (cause as { failure?: unknown }).failure;
@@ -44,9 +39,6 @@ export function extractProviderFailureClass(cause: unknown): ProviderFailureClas
   return isProviderFailureClass(classification) ? classification : undefined;
 }
 
-/**
- * Builds the approved diagnostic report for one boundary failure.
- */
 export function diagnosticReportInput(
   cause: unknown,
   input: DiagnosticBoundaryInput,

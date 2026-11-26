@@ -18,10 +18,10 @@ import {
   bearer,
   boundedString,
   boundedText,
+  optionalSecureUrl,
   providerIdentifier,
   record,
   required,
-  secureUrl,
 } from "../values";
 import {
   YOUTUBE_API_ORIGIN,
@@ -169,15 +169,15 @@ export function createYouTubeOAuth(runtime: AdapterRuntime, googleRequest: Googl
       const thumbnail = record(thumbnails?.default);
       const id = providerIdentifier(channel?.id);
       const displayName = boundedText(snippet?.title, 500);
-      const avatarUrl = thumbnail?.url === undefined ? undefined : secureUrl(thumbnail.url)?.href;
+      const avatar = optionalSecureUrl(thumbnail?.url);
       const username = youtubeHandle(snippet?.customUrl);
-      if (!id || !displayName || (thumbnail?.url !== undefined && !avatarUrl)) {
+      if (!id || !displayName || !avatar.valid) {
         throw malformed();
       }
       return {
         accessToken: tokens.accessToken,
         account: {
-          ...(avatarUrl ? { avatarUrl } : {}),
+          ...(avatar.href ? { avatarUrl: avatar.href } : {}),
           displayName,
           id,
           ...(username ? { username } : {}),

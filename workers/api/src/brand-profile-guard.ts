@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import type { DatabaseError } from "@meltiply/domain";
 import type { EffectTransactionClient } from "@meltiply/database";
 
-import { CoreApiError } from "./core-types";
+import { CoreApiError } from "./api-errors";
 
 export function requireActiveBrandProfileEffect(
   client: EffectTransactionClient,

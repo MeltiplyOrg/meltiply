@@ -1,11 +1,18 @@
 import type { components } from "@meltiply/contracts/schema";
-import type { TikTokPrivacyLevel } from "@meltiply/providers";
-import { codePointLength, isPlatform, type Platform } from "@meltiply/domain";
+import type { EffectTransactionClient } from "@meltiply/database";
+import {
+  codePointLength,
+  isPlatform,
+  isUuid,
+  type DatabaseError,
+  type Platform,
+} from "@meltiply/domain";
+import { parseProviderWireOptions, type ParsedPostProviderOptions } from "@meltiply/providers";
+import { Effect } from "effect";
 import type { Context } from "hono";
 import { z } from "zod";
 
-import { CoreApiError } from "./core-types";
-import { RFC4122_UUID_PATTERN as uuid } from "./crypto";
+import { CoreApiError } from "./api-errors";
 import type { ApiWorkerEnvironment } from "./env";
 
 const timezoneOffsetPattern = /^[+-]/;
@@ -66,7 +73,7 @@ export function uuidArrayField(
 ): string[] | null | undefined {
   const value = body[name];
   if (value === undefined || value === null) return value;
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !uuid.test(item))) {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !isUuid(item))) {
     throw new CoreApiError(400, "validation_error", `${name} must be an array of valid UUIDs.`);
   }
   const ids = value as string[];
@@ -211,12 +218,50 @@ const BRAND_PROFILE_COLOR_VALUES: ReadonlySet<BrandProfileColor> = new Set<Brand
   "#111827",
 ]);
 
-export const TIKTOK_PRIVACY_LEVELS: ReadonlySet<TikTokPrivacyLevel> = new Set<TikTokPrivacyLevel>([
-  "PUBLIC_TO_EVERYONE",
-  "MUTUAL_FOLLOW_FRIENDS",
-  "FOLLOWER_OF_CREATOR",
-  "SELF_ONLY",
+export const DISTRIBUTION_STATUS_VALUES: ReadonlySet<Schemas["DistributionStatus"]> = new Set([
+  "scheduled",
+  "queued",
+  "processing",
+  "awaiting_provider",
+  "delivered",
+  "published",
+  "failed",
+  "cancel_requested",
+  "cancelled",
+  "needs_reconciliation",
 ]);
+
+export function parseProviderOptionsField(
+  body: Record<string, unknown>,
+): ParsedPostProviderOptions | undefined {
+  if (body.provider_options === undefined) return undefined;
+  const parsed = parseProviderWireOptions(body.provider_options);
+  if (!parsed.ok) {
+    throw new CoreApiError(400, "validation_error", parsed.message);
+  }
+  return parsed.value;
+}
+
+export function validateIanaTimezoneEffect(
+  client: EffectTransactionClient,
+  timezone: string | null,
+): Effect.Effect<void, CoreApiError | DatabaseError> {
+  if (timezone === null) return Effect.void;
+  return client
+    .query<{ valid: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = $1) AS valid",
+      [timezone],
+    )
+    .pipe(
+      Effect.flatMap((result) =>
+        result.rows[0]?.valid
+          ? Effect.void
+          : Effect.fail(
+              new CoreApiError(422, "validation_error", "Use a supported IANA timezone."),
+            ),
+      ),
+    );
+}
 
 export const OAUTH_ROUTING_KEY_PATTERN = /^[A-Za-z0-9_-]{22}$/;
 const RFC3339_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -230,7 +275,7 @@ export function platformParam(value: string): Platform {
 }
 
 export function uuidParam(value: string, name: string): string {
-  if (!uuid.test(value)) {
+  if (!isUuid(value)) {
     throw new CoreApiError(400, "invalid_request", `${name} must be a valid UUID.`);
   }
   return value;
@@ -328,27 +373,25 @@ export function idempotencyKey(c: Context<ApiWorkerEnvironment>): string {
   return key;
 }
 
-async function rawBody(
-  request: Request,
-  code: string,
-  message: string,
-  maximumBytes = 1024 * 1024,
-  status = 400,
-): Promise<string> {
+async function readBoundedJsonBody(request: Request): Promise<string> {
   const declaredLengthHeader = request.headers.get("Content-Length");
   if (declaredLengthHeader !== null) {
     const declaredLength = Number(declaredLengthHeader);
     if (
       !Number.isSafeInteger(declaredLength) ||
       declaredLength < 0 ||
-      declaredLength > maximumBytes
+      declaredLength > JSON_BODY_MAXIMUM_BYTES
     ) {
-      throw new CoreApiError(status, code, message);
+      throw new CoreApiError(
+        413,
+        "payload_too_large",
+        "The request body exceeds the 512 KiB limit.",
+      );
     }
   }
   const body = await request.text();
-  if (new TextEncoder().encode(body).byteLength > maximumBytes) {
-    throw new CoreApiError(status, code, message);
+  if (new TextEncoder().encode(body).byteLength > JSON_BODY_MAXIMUM_BYTES) {
+    throw new CoreApiError(413, "payload_too_large", "The request body exceeds the 512 KiB limit.");
   }
   return body;
 }
@@ -359,13 +402,7 @@ export async function jsonBody(
 ): Promise<Record<string, unknown>> {
   let raw: string;
   try {
-    raw = await rawBody(
-      c.req.raw,
-      "payload_too_large",
-      "The request body exceeds the 512 KiB limit.",
-      JSON_BODY_MAXIMUM_BYTES,
-      413,
-    );
+    raw = await readBoundedJsonBody(c.req.raw);
   } catch (cause) {
     if (cause instanceof CoreApiError) throw cause;
     throw new CoreApiError(400, "invalid_request", "The request body must be valid JSON.");
@@ -440,7 +477,7 @@ export function workspaceNameValue(value: unknown, field: string): string {
     throw new CoreApiError(400, "validation_error", `${field} must be a string.`);
   }
   const trimmed = value.trim();
-  if (trimmed.length < 1 || trimmed.length > 200 || /[\x00-\x1F\x7F]/.test(trimmed)) {
+  if (trimmed.length < 1 || trimmed.length > 200 || controlCharactersPattern.test(trimmed)) {
     throw new CoreApiError(
       400,
       "validation_error",

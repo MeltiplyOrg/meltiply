@@ -1,4 +1,4 @@
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+import { isUuid } from "@meltiply/domain";
 
 export interface OutboxMessage {
   attempt?: number;
@@ -10,6 +10,21 @@ export interface OutboxMessage {
   type: "outbox.event";
   version: 1;
   request_id?: string | null;
+}
+
+export type NotificationKind = "publication_failed" | "channel_disconnected";
+
+export interface NotificationPayload {
+  aggregate_id: string;
+  brand_profile_id?: string;
+  channel_name?: string | null;
+  connection_status?: string;
+  delivery_key: string;
+  distribution_id?: string;
+  kind: NotificationKind;
+  platform: string;
+  post_id?: string;
+  version: 1;
 }
 
 export interface ReplyWorkflowPayload {
@@ -36,8 +51,57 @@ function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function uuid(value: unknown): value is string {
-  return typeof value === "string" && uuidPattern.test(value);
+export function sanitizeNotificationPayload(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...(typeof value.delivery_key === "string" ? { delivery_key: value.delivery_key } : {}),
+    ...(typeof value.kind === "string" ? { kind: value.kind } : {}),
+    ...(typeof value.aggregate_id === "string" ? { aggregate_id: value.aggregate_id } : {}),
+    ...(typeof value.brand_profile_id === "string"
+      ? { brand_profile_id: value.brand_profile_id }
+      : {}),
+    ...(typeof value.channel_name === "string" || value.channel_name === null
+      ? { channel_name: value.channel_name }
+      : {}),
+    ...(typeof value.connection_status === "string"
+      ? { connection_status: value.connection_status }
+      : {}),
+    ...(typeof value.distribution_id === "string"
+      ? { distribution_id: value.distribution_id }
+      : {}),
+    ...(typeof value.platform === "string" ? { platform: value.platform } : {}),
+    ...(typeof value.post_id === "string" ? { post_id: value.post_id } : {}),
+    version: 1,
+  };
+}
+
+export function parseNotificationPayload(
+  value: Record<string, unknown>,
+): NotificationPayload | null {
+  const kind = value.kind;
+  const deliveryKey = value.delivery_key;
+  const aggregateId = value.aggregate_id;
+  const platform = value.platform;
+  if (
+    value.version !== 1 ||
+    (kind !== "publication_failed" && kind !== "channel_disconnected") ||
+    typeof deliveryKey !== "string" ||
+    deliveryKey.length === 0 ||
+    deliveryKey.length > 300 ||
+    typeof aggregateId !== "string" ||
+    typeof platform !== "string"
+  ) {
+    return null;
+  }
+  return {
+    ...sanitizeNotificationPayload(value),
+    aggregate_id: aggregateId,
+    delivery_key: deliveryKey,
+    kind,
+    platform,
+    version: 1,
+  };
 }
 
 export function isOutboxMessage(value: unknown): value is OutboxMessage {
@@ -71,12 +135,13 @@ export function isProviderSyncMessage(value: unknown): value is ProviderSyncMess
   return (
     value.type === "provider.sync" &&
     value.version === 1 &&
-    ["analytics", "comments", "token_refresh"].includes(String(value.workload)) &&
-    uuid(value.event_id) &&
+    typeof value.workload === "string" &&
+    ["analytics", "comments", "token_refresh"].includes(value.workload) &&
+    isUuid(value.event_id) &&
     typeof value.request_id === "string" &&
     value.request_id.length > 0 &&
     value.request_id.length <= 255 &&
-    uuid(value.target_id)
+    isUuid(value.target_id)
   );
 }
 

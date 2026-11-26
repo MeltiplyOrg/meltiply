@@ -1,17 +1,10 @@
 import type { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
-import type { DatabaseError, ActiveOrganizationRequiredError } from "@meltiply/domain";
-import type {
-  FacebookPublishOptions,
-  InstagramPostType,
-  InstagramTrialGraduation,
-  TikTokPrivacyLevel,
-  TikTokPublishOptions,
-  YouTubePublishOptions,
-} from "@meltiply/providers";
+import type { ParsedPostProviderOptions } from "@meltiply/providers";
 
-import type { CoreApiError, IdempotentResult } from "./core-types";
+import type { TenantServiceError } from "./api-errors";
+import type { IdempotentResult } from "./core-types";
 import type { ApiWorkerEnv } from "./env";
 
 type Schemas = components["schemas"];
@@ -25,22 +18,7 @@ interface PostFilters {
   status?: Schemas["PostStatus"];
 }
 
-export interface PostProviderOptions {
-  threads?: components["schemas"]["ThreadsPostOptions"];
-  facebook?: FacebookPublishOptions;
-  instagram?: {
-    content?: components["schemas"]["InstagramContentOptions"];
-    mediaOptions?: components["schemas"]["InstagramContentOptions"][];
-    postType?: InstagramPostType;
-    trialGraduation?: InstagramTrialGraduation;
-    trialReel?: boolean;
-  };
-  tiktok?: Omit<TikTokPublishOptions, "privacyLevel"> & {
-    privacyLevel?: TikTokPrivacyLevel;
-    discloseCommercialContent?: boolean;
-  };
-  youtube?: Partial<YouTubePublishOptions>;
-}
+export type PostProviderOptions = ParsedPostProviderOptions;
 
 interface PostTargetInput {
   attachmentIds?: string[] | null;
@@ -76,7 +54,7 @@ interface DeletePostInput {
   brandProfileId: string;
 }
 
-export type PostServiceError = CoreApiError | ActiveOrganizationRequiredError | DatabaseError;
+export type PostServiceError = TenantServiceError;
 
 export interface PostApiService {
   createPost(

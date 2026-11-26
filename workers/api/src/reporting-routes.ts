@@ -16,19 +16,18 @@ import {
 } from "@meltiply/reporting";
 import type { Context, Hono } from "hono";
 
-import type { ResolvedActor } from "./actor-resolution";
-import { auditActorFrom, recordWorkspaceAuditEffect } from "./audit";
+import { auditActorFromResolved, recordWorkspaceAuditEffect } from "./audit";
+import { requireInstallationOwnerEffect } from "./authorization";
 import { runBackgroundContinuation } from "./background-continuation";
-import { CoreApiError } from "./core-types";
+import { CoreApiError } from "./api-errors";
 import { fromPromise } from "./effect/route";
 import { runRouteEffect } from "./effect/runtime";
 import type { ApiWorkerEnv, ApiWorkerEnvironment } from "./env";
 import { hashIdempotencyRequestEffect } from "./idempotency";
-import { idempotencyHeaders } from "./idempotent-response";
-import { jsonResponse } from "./responses";
+import { idempotentInstallationMutation } from "./idempotent-mutation";
+import { idempotencyHeaders, jsonResponse } from "./responses";
 import { reportingLayer, type ReportingDependencies } from "./reporting-layer";
 import { idempotencyKey, jsonBody, onlyKeys } from "./validation";
-import { idempotentInstallationMutation } from "./installation-mutation";
 
 interface CategoryBody {
   decision_at: string | null;
@@ -57,10 +56,6 @@ interface FeedbackBody {
 interface DiagnosticBody {
   accepted: boolean;
   reason: "category_disabled" | "queued";
-}
-
-function requestId(c: Context<ApiWorkerEnvironment>): string {
-  return c.get("requestId");
 }
 
 function categoryBody(status: ReportingCategoryStatus): CategoryBody {
@@ -107,18 +102,6 @@ function withReporting<A, E>(
   );
 }
 
-function requireInstallationOwner(actor: ResolvedActor): Effect.Effect<void, CoreApiError> {
-  return actor.isInstallationOwner
-    ? Effect.void
-    : Effect.fail(
-        new CoreApiError(
-          403,
-          "installation_owner_required",
-          "The installation owner role is required.",
-        ),
-      );
-}
-
 function booleanField(body: Record<string, unknown>, name: string): boolean {
   const value = body[name];
   if (typeof value !== "boolean") {
@@ -137,7 +120,7 @@ export function registerReportingRoutes(
       Effect.gen(function* () {
         const actor = c.get("actor");
         const policy = yield* withReporting(c.env, dependencies, (service) => service.policy());
-        return jsonResponse(policyBody(policy, actor.isInstallationOwner), 200, requestId(c));
+        return jsonResponse(policyBody(policy, actor.isInstallationOwner), 200, c.get("requestId"));
       }),
     ),
   );
@@ -147,7 +130,7 @@ export function registerReportingRoutes(
       c,
       Effect.gen(function* () {
         const actor = c.get("actor");
-        yield* requireInstallationOwner(actor);
+        yield* requireInstallationOwnerEffect(actor);
         const body = yield* fromPromise(() => jsonBody(c, true));
         yield* fromPromise(() => onlyKeys(body, ["diagnostics", "usage"]));
         const usage = yield* fromPromise(() => booleanField(body, "usage"));
@@ -173,11 +156,7 @@ export function registerReportingRoutes(
               if (updated.changed) {
                 yield* recordWorkspaceAuditEffect(client, {
                   action: "reporting.preferences_updated",
-                  actor: auditActorFrom({
-                    display_name: actor.displayName,
-                    email: actor.email,
-                    id: actor.userId,
-                  }),
+                  actor: auditActorFromResolved(actor),
                   after: {
                     diagnostics: updated.policy.categories.diagnostics.requested,
                     diagnostics_effective: updated.policy.categories.diagnostics.effective,
@@ -185,15 +164,15 @@ export function registerReportingRoutes(
                     usage_effective: updated.policy.categories.usage.effective,
                   },
                   orgId: actor.workspace.id,
-                  requestId: requestId(c),
+                  requestId: c.get("requestId"),
                   targetId: "reporting",
                   targetType: "installation",
                 });
               }
-              return { body: policyBody(updated.policy, true), replayed: false, status: 200 };
+              return { body: policyBody(updated.policy, true), status: 200 };
             }),
         );
-        return jsonResponse(result.body, result.status, requestId(c), {
+        return jsonResponse(result.body, result.status, c.get("requestId"), {
           ...idempotencyHeaders(result.replayed),
         });
       }),
@@ -205,11 +184,11 @@ export function registerReportingRoutes(
       c,
       Effect.gen(function* () {
         const actor = c.get("actor");
-        yield* requireInstallationOwner(actor);
+        yield* requireInstallationOwnerEffect(actor);
         const state = yield* withReporting(c.env, dependencies, (service) =>
           service.feedbackState(),
         );
-        return jsonResponse(feedbackBody(state), 200, requestId(c));
+        return jsonResponse(feedbackBody(state), 200, c.get("requestId"));
       }),
     ),
   );
@@ -219,7 +198,7 @@ export function registerReportingRoutes(
       c,
       Effect.gen(function* () {
         const actor = c.get("actor");
-        yield* requireInstallationOwner(actor);
+        yield* requireInstallationOwnerEffect(actor);
         const body = yield* fromPromise(() => jsonBody(c, true));
         yield* fromPromise(() => onlyKeys(body, ["discovery_source"]));
         const source = yield* fromPromise(() => {
@@ -254,25 +233,21 @@ export function registerReportingRoutes(
               if (state.shared) {
                 yield* recordWorkspaceAuditEffect(client, {
                   action: "reporting.feedback_submitted",
-                  actor: auditActorFrom({
-                    display_name: actor.displayName,
-                    email: actor.email,
-                    id: actor.userId,
-                  }),
+                  actor: auditActorFromResolved(actor),
                   after: {
                     delivery_status: state.deliveryStatus,
                     discovery_source: state.discoverySource,
                   },
                   orgId: actor.workspace.id,
-                  requestId: requestId(c),
+                  requestId: c.get("requestId"),
                   targetId: "reporting",
                   targetType: "installation",
                 });
               }
-              return { body: feedbackBody(state), replayed: false, status: 200 };
+              return { body: feedbackBody(state), status: 200 };
             }),
         );
-        return jsonResponse(result.body, result.status, requestId(c), {
+        return jsonResponse(result.body, result.status, c.get("requestId"), {
           ...idempotencyHeaders(result.replayed),
         });
       }),
@@ -283,7 +258,6 @@ export function registerReportingRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        c.get("actor");
         const body = yield* fromPromise(() => jsonBody(c, true));
         yield* fromPromise(() =>
           onlyKeys(body, [
@@ -351,7 +325,7 @@ export function registerReportingRoutes(
             reason: queued === "queued" ? "queued" : "category_disabled",
           } satisfies DiagnosticBody,
           202,
-          requestId(c),
+          c.get("requestId"),
         );
       }),
     ),

@@ -8,6 +8,7 @@ import {
   assetOrphanGraceSeconds,
   type DatabaseError,
   isoDateTime,
+  isoPeriodKey,
   COMMUNITY_LIMITS,
   uploadLayout,
   validateUpload,
@@ -21,6 +22,7 @@ import {
 } from "@meltiply/storage";
 
 import {
+  assetSelectColumns,
   mapAsset,
   type AssetApiService,
   type AssetRow,
@@ -30,7 +32,7 @@ import {
   activeBrandProfilePredicate,
   requireActiveBrandProfileEffect,
 } from "./brand-profile-guard";
-import { CoreApiError, toCoreApiErrorOrRethrow } from "./core-types";
+import { CoreApiError, toCoreApiErrorOrRethrow } from "./api-errors";
 import {
   activeOrganizationIdEffect,
   withSystemTransactionEffect,
@@ -48,7 +50,6 @@ import {
   reserveIdempotencyEffect,
 } from "./idempotency";
 import { lockActiveOrganizationEffect } from "./organization-lock";
-import { isoPeriodKey } from "./time";
 
 type Schemas = components["schemas"];
 type Asset = Schemas["Asset"];
@@ -86,18 +87,14 @@ interface UploadPartRow extends Record<string, unknown> {
   size: number | string;
 }
 
-export interface AssetServiceOptions {
+interface AssetServiceOptions {
   now?: () => Date;
   randomUUID?: () => string;
   storageService?: StorageServiceShape;
   storageServiceLayer?: Layer.Layer<StorageService, never, never>;
 }
 
-const assetColumns = `
-  id, org_id, brand_profile_id, uploaded_by, asset_type, title, duration_sec,
-  file_size, mime_type, width, height, status, failure_code,
-  failure_message, failure_retryable, failure_at, created_at, updated_at
-`;
+const assetColumns = assetSelectColumns();
 
 const orphanGraceDays = assetOrphanGraceSeconds / (24 * 60 * 60);
 
@@ -446,18 +443,14 @@ function getAssetRowEffect(
     requireActiveProfile?: boolean;
   } = {},
 ): Effect.Effect<AssetRow, CoreApiError | DatabaseError> {
-  const selectSql = options.requireActiveProfile
-    ? `SELECT ${assetColumns}
+  const activeClause = options.requireActiveProfile
+    ? ` AND ${activeBrandProfilePredicate("assets.brand_profile_id")}`
+    : "";
+  const selectSql = `SELECT ${assetColumns}
        FROM assets
        WHERE id = $1
          AND org_id = public.auth_active_org_id()
-         AND status != 'deleted'
-         AND ${activeBrandProfilePredicate("assets.brand_profile_id")}`
-    : `SELECT ${assetColumns}
-       FROM assets
-       WHERE id = $1
-         AND org_id = public.auth_active_org_id()
-         AND status != 'deleted'`;
+         AND status != 'deleted'${activeClause}`;
   return Effect.gen(function* () {
     const result = yield* client.query<AssetRow>(selectSql, [assetId]);
     const row = result.rows[0];
@@ -473,13 +466,11 @@ function lockAssetStatusEffect(
   assetId: string,
   requireActiveProfile = false,
 ): Effect.Effect<AssetRow["status"], CoreApiError | DatabaseError> {
-  const lockSql = requireActiveProfile
-    ? `SELECT status FROM assets
-       WHERE id = $1 AND org_id = public.auth_active_org_id() AND status != 'deleted'
-         AND ${activeBrandProfilePredicate("assets.brand_profile_id")}
-       FOR UPDATE`
-    : `SELECT status FROM assets
-       WHERE id = $1 AND org_id = public.auth_active_org_id() AND status != 'deleted'
+  const activeClause = requireActiveProfile
+    ? ` AND ${activeBrandProfilePredicate("assets.brand_profile_id")}`
+    : "";
+  const lockSql = `SELECT status FROM assets
+       WHERE id = $1 AND org_id = public.auth_active_org_id() AND status != 'deleted'${activeClause}
        FOR UPDATE`;
   return Effect.gen(function* () {
     const result = yield* client.query<Pick<AssetRow, "status">>(lockSql, [assetId]);
@@ -565,24 +556,18 @@ function getReadyMediaAssetRowEffect(
 function getSessionRowEffect(
   client: EffectTransactionClient,
   sessionId: string,
-  lock = false,
 ): Effect.Effect<UploadSessionRow, CoreApiError | DatabaseError> {
-  const sessionSql = lock
-    ? `SELECT
+  return Effect.gen(function* () {
+    const result = yield* client.query<UploadSessionRow>(
+      `SELECT
          id, org_id, asset_id, strategy, status, content_type, file_size,
          object_key, multipart_upload_id, part_size, part_count,
          max_parallel_parts, expires_at
        FROM asset_upload_sessions
        WHERE id = $1 AND org_id = public.auth_active_org_id()
-       FOR UPDATE`
-    : `SELECT
-         id, org_id, asset_id, strategy, status, content_type, file_size,
-         object_key, multipart_upload_id, part_size, part_count,
-         max_parallel_parts, expires_at
-       FROM asset_upload_sessions
-       WHERE id = $1 AND org_id = public.auth_active_org_id()`;
-  return Effect.gen(function* () {
-    const result = yield* client.query<UploadSessionRow>(sessionSql, [sessionId]);
+       FOR UPDATE`,
+      [sessionId],
+    );
     const row = result.rows[0];
     if (!row) {
       return yield* Effect.fail(
@@ -784,7 +769,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
     lockedRow?: UploadSessionRow,
   ): Effect.Effect<{ grantDeadline: Date | null; row: UploadSessionRow }, AssetServiceError> {
     return Effect.gen(function* () {
-      const row = lockedRow ?? (yield* getSessionRowEffect(client, sessionId, true));
+      const row = lockedRow ?? (yield* getSessionRowEffect(client, sessionId));
       if (
         row.strategy !== "single" ||
         !["created", "uploading"].includes(row.status) ||
@@ -1089,7 +1074,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
         Effect.gen(function* () {
           const result = yield* withTenantTransactionEffect(env, session, (client) =>
             Effect.gen(function* () {
-              const row = yield* getSessionRowEffect(client, sessionId, true);
+              const row = yield* getSessionRowEffect(client, sessionId);
               const current = now();
               if (
                 ["created", "uploading"].includes(row.status) &&
@@ -1160,7 +1145,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
           );
           const planned = yield* withTenantTransactionEffect(env, session, (client) =>
             Effect.gen(function* () {
-              const upload = yield* getSessionRowEffect(client, sessionId, true);
+              const upload = yield* getSessionRowEffect(client, sessionId);
               const current = now();
               yield* Effect.try({
                 try: () => ensureActiveSession(upload, current),
@@ -1276,7 +1261,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
           );
           const preparation = yield* withTenantTransactionEffect(env, session, (client) =>
             Effect.gen(function* () {
-              const row = yield* getSessionRowEffect(client, sessionId, true);
+              const row = yield* getSessionRowEffect(client, sessionId);
               const replay = yield* reserveIdempotencyEffect(
                 client,
                 row.org_id,
@@ -1386,7 +1371,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                         );
                 yield* withTenantTransactionEffect(env, session, (client) =>
                   Effect.gen(function* () {
-                    const row = yield* getSessionRowEffect(client, sessionId, true);
+                    const row = yield* getSessionRowEffect(client, sessionId);
                     yield* markSessionAbortedEffect(client, row.id);
                     yield* releaseReservationToStagingEffect(client, row.id, row.asset_id);
                     yield* markStagedObjectDeletingEffect(client, row.asset_id, {
@@ -1408,7 +1393,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
 
           const outcome = yield* withTenantTransactionEffect(env, session, (client) =>
             Effect.gen(function* () {
-              const row = yield* getSessionRowEffect(client, sessionId, true);
+              const row = yield* getSessionRowEffect(client, sessionId);
               const metadataError = yield* verifyMetadataEffect(client, row, metadata);
               if (metadataError) {
                 if (metadataError.code === "missing_object") {
@@ -1618,7 +1603,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
           const requestHash = yield* hashIdempotencyRequestEffect(sessionId);
           const preparation = yield* withTenantTransactionEffect(env, session, (client) =>
             Effect.gen(function* () {
-              const row = yield* getSessionRowEffect(client, sessionId, true);
+              const row = yield* getSessionRowEffect(client, sessionId);
               const replay = yield* reserveIdempotencyEffect(
                 client,
                 row.org_id,
@@ -1679,7 +1664,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
 
           return yield* withTenantTransactionEffect(env, session, (client) =>
             Effect.gen(function* () {
-              const row = yield* getSessionRowEffect(client, sessionId, true);
+              const row = yield* getSessionRowEffect(client, sessionId);
               yield* releaseReservationToStagingEffect(client, row.id, row.asset_id);
               yield* markStagedObjectDeletingEffect(client, row.asset_id, { writersClosed });
               yield* failAssetEffect(

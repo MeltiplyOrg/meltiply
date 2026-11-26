@@ -1,10 +1,8 @@
 import { Effect } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
-import { maximumDelayedDeliverySeconds, type DatabaseError } from "@meltiply/domain";
+import type { DatabaseError } from "@meltiply/domain";
 
 type OutboxCommandTopic =
-  | "asset.deletion.requested"
-  | "asset.processing.requested"
   | "comment.reply.requested"
   | "distribution.publish.requested"
   | "distribution.reconcile.requested";
@@ -14,9 +12,6 @@ export type OutboxAggregateType = "asset" | "comment" | "distribution";
 export type OutboxConflictMode = "nothing" | "rearm" | "revive";
 
 export const outboxDedupeKey = {
-  assetLifecycleRecovery(assetId: string, status: string): string {
-    return `asset:${assetId}:lifecycle-recovery:${status}`;
-  },
   commentReplyReconcile(commentId: string, completedAttempts: number): string {
     return `comment-reply-reconcile:${commentId}:${completedAttempts + 1}`;
   },
@@ -77,7 +72,7 @@ export interface OutboxCommandInput {
   readonly aggregateId: string;
   readonly aggregateType: OutboxAggregateType;
   readonly dedupeKey: string;
-  readonly onConflict: OutboxConflictMode;
+  readonly onConflict: "nothing" | "rearm";
   readonly orgId: string;
   readonly payload: Readonly<Record<string, unknown>>;
   readonly topic: OutboxCommandTopic;
@@ -87,26 +82,20 @@ export function armOutboxCommand(
   client: EffectTransactionClient,
   command: OutboxCommandInput,
 ): Effect.Effect<number, DatabaseError> {
-  const conflictSql =
-    command.onConflict === "revive"
-      ? outboxConflictClause("revive", "$7")
-      : outboxConflictClause(command.onConflict);
-  const values: unknown[] = [
-    command.orgId,
-    command.topic,
-    command.aggregateType,
-    command.aggregateId,
-    command.dedupeKey,
-    JSON.stringify(command.payload),
-    ...(command.onConflict === "revive" ? [maximumDelayedDeliverySeconds] : []),
-  ];
   return Effect.map(
     client.query(
       `INSERT INTO outbox_events
          (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
        VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6::jsonb)
-       ${conflictSql}`,
-      values,
+       ${outboxConflictClause(command.onConflict)}`,
+      [
+        command.orgId,
+        command.topic,
+        command.aggregateType,
+        command.aggregateId,
+        command.dedupeKey,
+        JSON.stringify(command.payload),
+      ],
     ),
     (result) => result.rowCount ?? 0,
   );

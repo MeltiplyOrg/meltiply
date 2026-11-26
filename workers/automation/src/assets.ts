@@ -14,7 +14,12 @@ import {
 import { createObjectStoreFromEnv, type ObjectStore } from "@meltiply/storage";
 import { errorDiagnostic, log } from "@meltiply/observability";
 
-import { safeErrorMessage } from "./errors";
+import {
+  claimObjectsForDeletion,
+  deleteObjectsAndSettleEffect,
+  type ClaimedAssetObject,
+} from "./object-cleanup";
+import { safeErrorMessage, toError as asError } from "./errors";
 import { withSystemTransactionEffect, type EffectTransactionClient } from "./database";
 import { classifyJobError, TerminalJobError, type AutomationJobError } from "./effect/index";
 import type { AutomationEnv } from "./env";
@@ -27,17 +32,6 @@ import {
   processAssetMedia,
   releaseStaleProcessingStaging,
 } from "./asset-processing";
-
-export interface ClaimedAssetObject extends Record<string, unknown> {
-  asset_id: string;
-  bytes: number | string | null;
-  id: string;
-  kind: string;
-  org_id: string;
-  r2_key: string;
-  reserved_bytes: number | string | null;
-  status: string;
-}
 
 export interface AssetMaintenanceResult {
   cleanup_errors: number;
@@ -76,11 +70,9 @@ interface AbandonedMultipartUploadRow extends Record<string, unknown> {
 function logContext(
   env: AutomationEnv,
   eventKey: string,
-  requestId?: string | null,
 ): {
   environment: string;
   job_id: string;
-  request_id?: string;
   service: string;
   trace_id: string;
   version: string;
@@ -88,7 +80,6 @@ function logContext(
   return {
     environment: env.ENVIRONMENT,
     job_id: eventKey,
-    ...(requestId ? { request_id: requestId } : {}),
     service: "automation",
     trace_id: eventKey,
     version: env.VERSION,
@@ -118,7 +109,6 @@ interface AssetEventDescriptor {
   eventKey: string;
   jobType: string;
   organizationId: string;
-  requestId?: string;
   topic: string;
 }
 
@@ -128,7 +118,6 @@ function descriptor(message: OutboxMessage): AssetEventDescriptor {
     eventKey: `outbox:${message.event_id}`,
     jobType: message.topic,
     organizationId: message.organization_id,
-    ...(message.request_id ? { requestId: message.request_id } : {}),
     topic: message.topic,
   };
 }
@@ -207,17 +196,6 @@ function markPermanentFailure(
   );
 }
 
-function asError(cause: unknown): Error {
-  return cause instanceof Error ? cause : new Error(String(cause));
-}
-
-function deleteObject(storage: ObjectStore, key: string): Effect.Effect<void, Error> {
-  return Effect.tryPromise({
-    catch: asError,
-    try: () => storage.delete(key),
-  });
-}
-
 function remainingLiveObjectCount(
   env: AutomationEnv,
   assetIds: readonly string[],
@@ -236,91 +214,84 @@ function remainingLiveObjectCount(
   );
 }
 
-export function claimObjectsForDeletion(
-  env: AutomationEnv,
-  options: {
-    assetIds?: readonly string[];
-    brandProfileIds?: readonly string[];
-  },
-): Effect.Effect<ClaimedAssetObject[], DatabaseError> {
-  const assetIds = options.assetIds ?? [];
-  const brandProfileIds = options.brandProfileIds ?? [];
-  if (assetIds.length === 0 && brandProfileIds.length === 0) {
-    return Effect.succeed([]);
-  }
-  return withSystemTransactionEffect(env, (client) =>
-    client
-      .query<ClaimedAssetObject>(
-        `UPDATE asset_objects AS object
-         SET status = 'deleting', updated_at = now()
-         WHERE object.status IN (
-                 'ready', 'superseded', 'writing', 'deleting'
-               )
-           AND (
-             object.write_hold_until IS NULL
-             OR object.write_hold_until <= now()
-           )
-           AND (
-             object.asset_id = ANY($1::uuid[])
-             OR object.asset_id IN (
-               SELECT asset.id
-               FROM assets AS asset
-               WHERE asset.brand_profile_id = ANY($2::uuid[])
-             )
-           )
-         RETURNING object.id, object.asset_id, object.org_id, object.kind,
-                   object.r2_key, object.bytes, object.reserved_bytes,
-                   object.status`,
-        [assetIds, brandProfileIds],
-      )
-      .pipe(Effect.map((result) => result.rows)),
-  );
-}
-
-export function settleDeletedObjects(
-  env: AutomationEnv,
-  rows: readonly { id: string }[],
-): Effect.Effect<{ deleted_objects: number; released_bytes: number }, DatabaseError> {
-  if (rows.length === 0) {
-    return Effect.succeed({ deleted_objects: 0, released_bytes: 0 });
-  }
-  return withSystemTransactionEffect(env, (client) =>
-    client
-      .query<{ deleted_objects: number; released_bytes: number }>(
-        `WITH settled AS (
-           UPDATE asset_objects AS object
-           SET status = 'deleted',
-               deleted_at = now(),
-               updated_at = now()
-           WHERE object.id = ANY($1::uuid[])
-             AND object.status = 'deleting'
-           RETURNING object.org_id,
-                     GREATEST(COALESCE(object.bytes, 0),
-                              COALESCE(object.reserved_bytes, 0))::bigint
-                       AS charged_bytes
-         ), released AS (
-           UPDATE usage_records AS usage
-           SET storage_bytes = GREATEST(
-                 usage.storage_bytes - release.charged_bytes, 0
-               ),
-               updated_at = now()
-           FROM (
-             SELECT settled.org_id,
-                    SUM(settled.charged_bytes)::bigint AS charged_bytes
-             FROM settled
-             GROUP BY settled.org_id
-           ) AS release
-           WHERE usage.org_id = release.org_id
-             AND usage.period = to_char(now(), 'YYYY-MM')
-           RETURNING release.charged_bytes
-         )
-         SELECT (SELECT COUNT(*)::integer FROM settled) AS deleted_objects,
-                (SELECT COALESCE(SUM(charged_bytes), 0)::bigint FROM settled)
-                  AS released_bytes`,
-        [rows.map((row) => row.id)],
-      )
-      .pipe(Effect.map((result) => result.rows[0] ?? { deleted_objects: 0, released_bytes: 0 })),
-  );
+function reclaimSessionStagingSql(options: {
+  readonly failureCodeSql: string;
+  readonly failureMessageSql: string;
+  readonly orphanGraceParam: string;
+  readonly selectSql: string;
+  readonly sessionCteName: string;
+  readonly sessionCteSql: string;
+  readonly stagingStatusesSql: string;
+  readonly writeHoldSql: string;
+}): string {
+  const cte = options.sessionCteName;
+  return `WITH ${options.sessionCteSql},
+          staged AS (
+            UPDATE asset_objects AS object
+            SET reserved_bytes = CASE
+                  WHEN object.r2_key = ${cte}.object_key
+                       AND object.bytes IS NULL
+                  THEN COALESCE(object.reserved_bytes, reservation.bytes)
+                  ELSE object.reserved_bytes
+                END,
+                status = 'deleting',
+                write_hold_until = ${options.writeHoldSql},
+                updated_at = now()
+            FROM ${cte}
+            LEFT JOIN asset_quota_reservations AS reservation
+              ON reservation.session_id = ${cte}.id
+             AND reservation.state = 'reserved'
+            WHERE object.asset_id = ${cte}.asset_id
+              AND object.kind = 'staging'
+              AND object.status ${options.stagingStatusesSql}
+            RETURNING object.id, object.asset_id, object.r2_key
+          ), released AS (
+            UPDATE asset_quota_reservations AS reservation
+            SET state = 'released', released_at = now()
+            FROM ${cte}
+            WHERE reservation.session_id = ${cte}.id
+              AND reservation.state = 'reserved'
+              AND (
+                EXISTS (
+                  SELECT 1 FROM staged
+                  WHERE staged.r2_key = ${cte}.object_key
+                )
+                OR NOT EXISTS (
+                  SELECT 1
+                    FROM asset_objects AS object
+                   WHERE object.asset_id = ${cte}.asset_id
+                     AND object.kind = 'staging'
+                     AND object.r2_key = ${cte}.object_key
+                     AND object.status <> 'deleted'
+                )
+              )
+            RETURNING reservation.session_id
+          ), failed AS (
+            UPDATE assets AS asset
+            SET status = 'failed',
+                failure_code = ${options.failureCodeSql},
+                failure_message = ${options.failureMessageSql},
+                failure_retryable = true,
+                failure_at = now(),
+                orphaned_at = CASE
+                  WHEN EXISTS (
+                    SELECT 1 FROM post_attachments WHERE asset_id = asset.id
+                  ) THEN NULL
+                  ELSE now()
+                END,
+                orphan_delete_after = CASE
+                  WHEN EXISTS (
+                    SELECT 1 FROM post_attachments WHERE asset_id = asset.id
+                  ) THEN NULL
+                  ELSE now() + make_interval(days => ${options.orphanGraceParam})
+                END,
+                updated_at = now()
+            FROM ${cte}
+            WHERE asset.id = ${cte}.asset_id
+              AND asset.status IN ('pending_upload', 'uploading')
+            RETURNING asset.id
+          )
+          ${options.selectSql}`;
 }
 
 export function rearmStuckAssetJobs(env: AutomationEnv): Effect.Effect<number, Error> {
@@ -373,22 +344,10 @@ export function createAssetJobProcessor(
       const claimed = yield* claimObjectsForDeletion(env, {
         assetIds: [row.id],
       }).pipe(Effect.mapError(asError));
-      const outcomes = yield* Effect.forEach(
-        claimed,
-        (object) =>
-          Effect.match(deleteObject(storage, object.r2_key), {
-            onFailure: (cause) => ({ error: cause, id: null as string | null }),
-            onSuccess: () => ({ error: undefined as Error | undefined, id: object.id }),
-          }),
-        { concurrency: 8 },
+      const cleanup = yield* deleteObjectsAndSettleEffect(env, storage, claimed).pipe(
+        Effect.mapError(asError),
       );
-      const reclaimed: Array<{ id: string }> = [];
-      let failure: Error | undefined;
-      for (const outcome of outcomes) {
-        if (outcome.id !== null) reclaimed.push({ id: outcome.id });
-        else failure ??= outcome.error;
-      }
-      const settled = yield* settleDeletedObjects(env, reclaimed).pipe(Effect.mapError(asError));
+      const failure = cleanup.firstError;
       const remaining = yield* remainingLiveObjectCount(env, [row.id]).pipe(
         Effect.mapError(asError),
       );
@@ -428,10 +387,10 @@ export function createAssetJobProcessor(
         {
           asset_id: row.id,
           claimed_objects: claimed.length,
-          deleted_objects: settled.deleted_objects,
+          deleted_objects: cleanup.deletedObjects,
           event: "asset_deletion_processed",
           outcome: completed && !failure ? "reclaimed" : "incomplete",
-          released_bytes: settled.released_bytes,
+          released_bytes: cleanup.releasedBytes,
           remaining_objects: remaining,
         },
         failure,
@@ -490,6 +449,23 @@ export function createAssetJobProcessor(
 
       let errors = 0;
       let sessions = 0;
+      const abortSql = reclaimSessionStagingSql({
+        failureCodeSql: "'upload_aborted'",
+        failureMessageSql: "'The upload was cancelled.'",
+        orphanGraceParam: "$2",
+        selectSql: `SELECT (SELECT COUNT(*)::integer FROM expired) AS sessions,
+                           (SELECT COUNT(*)::integer FROM staged) AS staged,
+                           (SELECT COUNT(*)::integer FROM failed) AS failed`,
+        sessionCteName: "expired",
+        sessionCteSql: `expired AS (
+            UPDATE asset_upload_sessions
+            SET status = 'aborted', aborted_at = now(), updated_at = now()
+            WHERE id = $1 AND status IN ('created', 'uploading')
+            RETURNING id, asset_id, object_key
+          )`,
+        stagingStatusesSql: "= 'writing'",
+        writeHoldSql: "now()",
+      });
       for (const row of abandoned) {
         const aborted = yield* Effect.match(
           Effect.tryPromise({
@@ -498,8 +474,20 @@ export function createAssetJobProcessor(
               storage.resumeMultipartUpload(row.object_key, row.multipart_upload_id).abort(),
           }),
           {
-            onFailure: () => {
+            onFailure: (cause) => {
               errors += 1;
+              emitLifecycleEvidence(
+                env,
+                "warn",
+                "asset-maintenance",
+                {
+                  asset_id: row.asset_id,
+                  event: "multipart_upload_abort_failed",
+                  outcome: "failed",
+                  session_id: row.id,
+                },
+                cause,
+              );
               return false;
             },
             onSuccess: () => true,
@@ -508,86 +496,26 @@ export function createAssetJobProcessor(
         if (!aborted) continue;
         const cleared = yield* Effect.match(
           withSystemTransactionEffect(env, (client) =>
-            client.query<{ failed: number; sessions: number; staged: number }>(
-              `WITH expired AS (
-                 UPDATE asset_upload_sessions
-                 SET status = 'aborted', aborted_at = now(), updated_at = now()
-                 WHERE id = $1 AND status IN ('created', 'uploading')
-                 RETURNING id, asset_id, object_key
-               ), staged AS (
-                 UPDATE asset_objects AS object
-                 SET reserved_bytes = CASE
-                       WHEN object.r2_key = expired.object_key
-                            AND object.bytes IS NULL
-                       THEN COALESCE(object.reserved_bytes, reservation.bytes)
-                       ELSE object.reserved_bytes
-                     END,
-                     status = 'deleting',
-                     write_hold_until = now(),
-                     updated_at = now()
-                 FROM expired
-                 LEFT JOIN asset_quota_reservations AS reservation
-                   ON reservation.session_id = expired.id
-                  AND reservation.state = 'reserved'
-                 WHERE object.asset_id = expired.asset_id
-                   AND object.kind = 'staging'
-                   AND object.status = 'writing'
-                 RETURNING object.id, object.r2_key
-               ), released AS (
-                 UPDATE asset_quota_reservations AS reservation
-                 SET state = 'released', released_at = now()
-                 FROM expired
-                 WHERE reservation.session_id = expired.id
-                   AND reservation.state = 'reserved'
-                   AND (
-                     EXISTS (
-                       SELECT 1 FROM staged
-                       WHERE staged.r2_key = expired.object_key
-                     )
-                     OR NOT EXISTS (
-                       SELECT 1
-                         FROM asset_objects AS object
-                        WHERE object.asset_id = expired.asset_id
-                          AND object.kind = 'staging'
-                          AND object.r2_key = expired.object_key
-                          AND object.status <> 'deleted'
-                     )
-                   )
-                 RETURNING reservation.session_id
-               ), failed AS (
-                 UPDATE assets AS asset
-                 SET status = 'failed',
-                     failure_code = 'upload_aborted',
-                     failure_message = 'The upload was cancelled.',
-                     failure_retryable = true,
-                     failure_at = now(),
-                     orphaned_at = CASE
-                       WHEN EXISTS (
-                         SELECT 1 FROM post_attachments WHERE asset_id = asset.id
-                       ) THEN NULL
-                       ELSE now()
-                     END,
-                     orphan_delete_after = CASE
-                       WHEN EXISTS (
-                         SELECT 1 FROM post_attachments WHERE asset_id = asset.id
-                       ) THEN NULL
-                       ELSE now() + make_interval(days => $2)
-                     END,
-                     updated_at = now()
-                 FROM expired
-                 WHERE asset.id = expired.asset_id
-                   AND asset.status IN ('pending_upload', 'uploading')
-                 RETURNING asset.id
-               )
-               SELECT (SELECT COUNT(*)::integer FROM expired) AS sessions,
-                      (SELECT COUNT(*)::integer FROM staged) AS staged,
-                      (SELECT COUNT(*)::integer FROM failed) AS failed`,
-              [row.id, orphanGraceDays],
-            ),
+            client.query<{ failed: number; sessions: number; staged: number }>(abortSql, [
+              row.id,
+              orphanGraceDays,
+            ]),
           ).pipe(Effect.mapError(asError)),
           {
-            onFailure: () => {
+            onFailure: (cause) => {
               errors += 1;
+              emitLifecycleEvidence(
+                env,
+                "warn",
+                "asset-maintenance",
+                {
+                  asset_id: row.asset_id,
+                  event: "multipart_upload_reclaim_failed",
+                  outcome: "failed",
+                  session_id: row.id,
+                },
+                cause,
+              );
               return undefined;
             },
             onSuccess: (result) => result,
@@ -604,106 +532,58 @@ export function createAssetJobProcessor(
     Error
   > {
     return Effect.gen(function* () {
+      const expireSql = reclaimSessionStagingSql({
+        failureCodeSql: "'upload_session_expired'",
+        failureMessageSql: "'The upload session expired before completion.'",
+        orphanGraceParam: "$2",
+        selectSql: `SELECT (SELECT COUNT(*)::integer FROM expired) AS sessions`,
+        sessionCteName: "expired",
+        sessionCteSql: `due AS (
+            SELECT session.id, session.asset_id, session.object_key,
+                   session.expires_at
+            FROM asset_upload_sessions AS session
+            WHERE (session.strategy = 'single' OR session.multipart_upload_id IS NULL)
+              AND session.expires_at <= now()
+              AND (
+                session.status IN ('created', 'uploading')
+                OR (
+                  session.status = 'completing'
+                  AND session.updated_at <= now() - ($3 * INTERVAL '1 second')
+                )
+              )
+            ORDER BY session.expires_at, session.id
+            LIMIT $1
+            FOR UPDATE OF session SKIP LOCKED
+          ), expired AS (
+            UPDATE asset_upload_sessions AS session
+            SET status = 'expired', updated_at = now()
+            FROM due
+            WHERE session.id = due.id
+            RETURNING session.id, session.asset_id, session.object_key,
+                      session.expires_at
+          )`,
+        stagingStatusesSql: "IN ('writing', 'ready')",
+        writeHoldSql: "GREATEST(COALESCE(object.write_hold_until, expired.expires_at), now())",
+      });
       const expired = yield* Effect.match(
         withSystemTransactionEffect(env, (client) =>
-          client.query<{ sessions: number }>(
-            `WITH due AS (
-               SELECT session.id, session.asset_id, session.object_key,
-                      session.expires_at
-               FROM asset_upload_sessions AS session
-               WHERE (session.strategy = 'single' OR session.multipart_upload_id IS NULL)
-                 AND session.expires_at <= now()
-                 AND (
-                   session.status IN ('created', 'uploading')
-                   OR (
-                     session.status = 'completing'
-                     AND session.updated_at <= now() - ($3 * INTERVAL '1 second')
-                   )
-                 )
-               ORDER BY session.expires_at, session.id
-               LIMIT $1
-               FOR UPDATE OF session SKIP LOCKED
-             ), expired AS (
-               UPDATE asset_upload_sessions AS session
-               SET status = 'expired', updated_at = now()
-               FROM due
-               WHERE session.id = due.id
-               RETURNING session.id, session.asset_id, session.object_key,
-                         session.expires_at
-             ), staged AS (
-               UPDATE asset_objects AS object
-               SET reserved_bytes = CASE
-                     WHEN object.r2_key = expired.object_key
-                          AND object.bytes IS NULL
-                     THEN COALESCE(object.reserved_bytes, reservation.bytes)
-                     ELSE object.reserved_bytes
-                   END,
-                   status = 'deleting',
-                   write_hold_until = GREATEST(
-                     COALESCE(object.write_hold_until, expired.expires_at),
-                     now()
-                   ),
-                   updated_at = now()
-               FROM expired
-               LEFT JOIN asset_quota_reservations AS reservation
-                 ON reservation.session_id = expired.id
-                AND reservation.state = 'reserved'
-               WHERE object.asset_id = expired.asset_id
-                 AND object.kind = 'staging'
-                 AND object.status IN ('writing', 'ready')
-               RETURNING object.id, object.asset_id, object.r2_key
-             ), released AS (
-               UPDATE asset_quota_reservations AS reservation
-               SET state = 'released', released_at = now()
-               FROM expired
-               WHERE reservation.session_id = expired.id
-                 AND reservation.state = 'reserved'
-                 AND (
-                   EXISTS (
-                     SELECT 1 FROM staged
-                     WHERE staged.r2_key = expired.object_key
-                   )
-                   OR NOT EXISTS (
-                     SELECT 1
-                     FROM asset_objects AS object
-                     WHERE object.asset_id = expired.asset_id
-                       AND object.kind = 'staging'
-                       AND object.r2_key = expired.object_key
-                       AND object.status <> 'deleted'
-                   )
-                 )
-               RETURNING reservation.session_id
-             ), failed AS (
-               UPDATE assets AS asset
-               SET status = 'failed',
-                   failure_code = 'upload_session_expired',
-                   failure_message = 'The upload session expired before completion.',
-                   failure_retryable = true,
-                   failure_at = now(),
-                   orphaned_at = CASE
-                     WHEN EXISTS (
-                       SELECT 1 FROM post_attachments WHERE asset_id = asset.id
-                     ) THEN NULL
-                     ELSE now()
-                   END,
-                   orphan_delete_after = CASE
-                     WHEN EXISTS (
-                       SELECT 1 FROM post_attachments WHERE asset_id = asset.id
-                     ) THEN NULL
-                     ELSE now() + make_interval(days => $2)
-                   END,
-                   updated_at = now()
-               FROM expired
-               WHERE asset.id = expired.asset_id
-                 AND asset.status IN ('pending_upload', 'uploading')
-               RETURNING asset.id
-             )
-             SELECT (SELECT COUNT(*)::integer FROM expired) AS sessions`,
-            [maintenanceBound, orphanGraceDays, staleWritingGraceSeconds],
-          ),
+          client.query<{ sessions: number }>(expireSql, [
+            maintenanceBound,
+            orphanGraceDays,
+            staleWritingGraceSeconds,
+          ]),
         ).pipe(Effect.mapError(asError)),
         {
-          onFailure: () => undefined,
+          onFailure: (cause) => {
+            emitLifecycleEvidence(
+              env,
+              "warn",
+              "asset-maintenance",
+              { event: "single_upload_expiry_failed", outcome: "failed" },
+              cause,
+            );
+            return undefined;
+          },
           onSuccess: (result) => result,
         },
       );
@@ -719,107 +599,48 @@ export function createAssetJobProcessor(
     Error
   > {
     return Effect.gen(function* () {
+      const reclaimSql = reclaimSessionStagingSql({
+        failureCodeSql: `CASE WHEN terminal.status = 'aborted' THEN 'upload_aborted' ELSE 'upload_session_expired' END`,
+        failureMessageSql: `CASE WHEN terminal.status = 'aborted' THEN 'The upload was cancelled.' ELSE 'The upload session expired before completion.' END`,
+        orphanGraceParam: "$2",
+        selectSql: `SELECT (SELECT COUNT(DISTINCT staged.asset_id)::integer FROM staged) AS sessions`,
+        sessionCteName: "terminal",
+        sessionCteSql: `terminal AS (
+            SELECT session.id, session.asset_id, session.expires_at,
+                   session.object_key, session.status
+            FROM asset_upload_sessions AS session
+            WHERE session.status IN ('completed', 'aborted', 'expired')
+              AND session.expires_at <= now()
+              AND EXISTS (
+                SELECT 1
+                FROM asset_objects AS object
+                WHERE object.asset_id = session.asset_id
+                  AND object.kind = 'staging'
+                  AND object.status = 'writing'
+              )
+            ORDER BY session.expires_at, session.id
+            LIMIT $1
+            FOR UPDATE OF session SKIP LOCKED
+          )`,
+        stagingStatusesSql: "= 'writing'",
+        writeHoldSql: "GREATEST(COALESCE(object.write_hold_until, terminal.expires_at), now())",
+      });
       const reclaimed = yield* Effect.match(
         withSystemTransactionEffect(env, (client) =>
-          client.query<{ failed: number; sessions: number }>(
-            `WITH terminal AS (
-               SELECT session.id, session.asset_id, session.expires_at,
-                      session.object_key, session.status
-               FROM asset_upload_sessions AS session
-               WHERE session.status IN ('completed', 'aborted', 'expired')
-                 AND session.expires_at <= now()
-                 AND EXISTS (
-                   SELECT 1
-                   FROM asset_objects AS object
-                   WHERE object.asset_id = session.asset_id
-                     AND object.kind = 'staging'
-                     AND object.status = 'writing'
-                 )
-               ORDER BY session.expires_at, session.id
-               LIMIT $1
-               FOR UPDATE OF session SKIP LOCKED
-             ), staged AS (
-               UPDATE asset_objects AS object
-               SET reserved_bytes = CASE
-                     WHEN object.r2_key = terminal.object_key
-                          AND object.bytes IS NULL
-                     THEN COALESCE(object.reserved_bytes, reservation.bytes)
-                     ELSE object.reserved_bytes
-                   END,
-                   status = 'deleting',
-                   write_hold_until = GREATEST(
-                     COALESCE(object.write_hold_until, terminal.expires_at),
-                     now()
-                   ),
-                   updated_at = now()
-               FROM terminal
-               LEFT JOIN asset_quota_reservations AS reservation
-                 ON reservation.session_id = terminal.id
-                AND reservation.state = 'reserved'
-               WHERE object.asset_id = terminal.asset_id
-                 AND object.kind = 'staging'
-                 AND object.status = 'writing'
-               RETURNING object.id, object.asset_id, object.r2_key
-             ), released AS (
-               UPDATE asset_quota_reservations AS reservation
-               SET state = 'released', released_at = now()
-               FROM terminal
-               WHERE reservation.session_id = terminal.id
-                 AND reservation.state = 'reserved'
-                 AND (
-                   EXISTS (
-                     SELECT 1 FROM staged
-                     WHERE staged.r2_key = terminal.object_key
-                   )
-                   OR NOT EXISTS (
-                     SELECT 1
-                       FROM asset_objects AS object
-                      WHERE object.asset_id = terminal.asset_id
-                        AND object.kind = 'staging'
-                        AND object.r2_key = terminal.object_key
-                        AND object.status <> 'deleted'
-                   )
-                 )
-               RETURNING reservation.session_id
-               ), failed AS (
-                 UPDATE assets AS asset
-                 SET status = 'failed',
-                     failure_code = CASE
-                       WHEN terminal.status = 'aborted' THEN 'upload_aborted'
-                       ELSE 'upload_session_expired'
-                     END,
-                     failure_message = CASE
-                       WHEN terminal.status = 'aborted'
-                         THEN 'The upload was cancelled.'
-                       ELSE 'The upload session expired before completion.'
-                     END,
-                     failure_retryable = true,
-                     failure_at = now(),
-                     orphaned_at = CASE
-                       WHEN EXISTS (
-                         SELECT 1 FROM post_attachments WHERE asset_id = asset.id
-                       ) THEN NULL
-                       ELSE now()
-                     END,
-                     orphan_delete_after = CASE
-                       WHEN EXISTS (
-                         SELECT 1 FROM post_attachments WHERE asset_id = asset.id
-                       ) THEN NULL
-                       ELSE now() + make_interval(days => $2)
-                     END,
-                     updated_at = now()
-                 FROM terminal
-                 WHERE asset.id = terminal.asset_id
-                   AND asset.status IN ('pending_upload', 'uploading')
-                 RETURNING asset.id
-               )
-               SELECT (SELECT COUNT(DISTINCT staged.asset_id)::integer
-                       FROM staged) AS sessions`,
-            [maintenanceBound, orphanGraceDays],
-          ),
+          client.query<{ failed: number; sessions: number }>(reclaimSql, [
+            maintenanceBound,
+            orphanGraceDays,
+          ]),
         ).pipe(Effect.mapError(asError)),
         {
-          onFailure: () => {
+          onFailure: (cause) => {
+            emitLifecycleEvidence(
+              env,
+              "warn",
+              "asset-maintenance",
+              { event: "terminal_session_reclaim_failed", outcome: "failed" },
+              cause,
+            );
             return undefined;
           },
           onSuccess: (result) => result,
@@ -883,36 +704,24 @@ export function createAssetJobProcessor(
           .pipe(Effect.map((result) => result.rows)),
       ).pipe(Effect.mapError(asError));
 
-      const outcomes = yield* Effect.forEach(
-        claimed,
-        (object) =>
-          Effect.match(deleteObject(storage, object.r2_key), {
-            onFailure: () => null,
-            onSuccess: () => object.id,
-          }),
-        { concurrency: 8 },
-      );
-      let deleted = 0;
-      let errors = 0;
-      const reclaimed: Array<{ id: string }> = [];
-      for (const id of outcomes) {
-        if (id !== null) reclaimed.push({ id });
-        else errors += 1;
-      }
-      if (reclaimed.length > 0) {
-        const settled = yield* Effect.match(
-          settleDeletedObjects(env, reclaimed).pipe(Effect.mapError(asError)),
+      const cleanup = yield* deleteObjectsAndSettleEffect(env, storage, claimed, {
+        failOnSettlementError: false,
+      }).pipe(Effect.mapError(asError));
+      if (cleanup.firstError) {
+        emitLifecycleEvidence(
+          env,
+          "warn",
+          "asset-maintenance",
           {
-            onFailure: () => {
-              errors += 1;
-              return undefined;
-            },
-            onSuccess: (result) => result,
+            deleted_objects: cleanup.deletedObjects,
+            errors: cleanup.errors,
+            event: "stale_writing_object_reclaim_failed",
+            outcome: "partial",
           },
+          cleanup.firstError,
         );
-        deleted = settled?.deleted_objects ?? 0;
       }
-      return { deleted, errors };
+      return { deleted: cleanup.deletedObjects, errors: cleanup.errors };
     });
   }
 
@@ -1013,7 +822,16 @@ export function createAssetJobProcessor(
         const releasedStaging = yield* Effect.match(
           releaseStaleProcessingStaging(env, storage, maintenanceBound),
           {
-            onFailure: () => ({ errors: 1, released: 0 }),
+            onFailure: (cause) => {
+              emitLifecycleEvidence(
+                env,
+                "warn",
+                "asset-maintenance",
+                { event: "stale_processing_staging_release_failed", outcome: "failed" },
+                cause,
+              );
+              return { errors: 1, released: 0 };
+            },
             onSuccess: (released) => ({ errors: 0, released }),
           },
         );

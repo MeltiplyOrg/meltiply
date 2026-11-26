@@ -7,7 +7,6 @@ import {
   type ProviderAdapterError,
   type ProviderRegistry,
 } from "@meltiply/providers";
-import type { CoreApiError } from "./core-types";
 import { withTenantTransactionEffect } from "./database";
 import type { ApiWorkerEnv } from "./env";
 import { tokenCipherFor } from "./token-credentials";
@@ -22,7 +21,7 @@ export function revokeOAuthConnectionEffect(
   session: SessionClaims,
   accountId: string,
   registry: ProviderRegistry,
-): Effect.Effect<void, CoreApiError | DatabaseError | ProviderAdapterError, ProviderService> {
+): Effect.Effect<void, DatabaseError | ProviderAdapterError, ProviderService> {
   return Effect.gen(function* () {
     const account = yield* withTenantTransactionEffect(env, session, (client) =>
       Effect.gen(function* () {

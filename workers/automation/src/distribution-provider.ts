@@ -20,7 +20,11 @@ import {
   type ProviderTransferMode,
   type PublishInput,
 } from "@meltiply/providers";
-import { executeProviderTokenRefreshEffect } from "./provider-sync-provider";
+import {
+  executeProviderTokenRefreshEffect,
+  hasUsableProviderCredentials,
+  safeProviderUrl,
+} from "./provider-sync-provider";
 import { normalizeIdentifier } from "./validation";
 
 export interface PublicationMediaCandidate {
@@ -181,21 +185,6 @@ function isSecureUrl(value: string): boolean {
   }
 }
 
-function safeProviderUrl(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  try {
-    const parsed = new URL(value.trim());
-    if (parsed.protocol !== "https:" || parsed.username !== "" || parsed.password !== "") {
-      return undefined;
-    }
-    parsed.search = "";
-    parsed.hash = "";
-    return parsed.toString();
-  } catch {
-    return undefined;
-  }
-}
-
 function candidateProbe(candidate: PublicationMediaCandidate): ProviderMedia {
   return {
     contentType: candidate.contentType ?? "",
@@ -212,15 +201,24 @@ function candidateProbe(candidate: PublicationMediaCandidate): ProviderMedia {
   };
 }
 
-function candidateConstraint(
+export function candidateConstraint(
   capability: ProviderAdapter["capability"],
-  candidate: PublicationMediaCandidate,
+  candidate: Pick<
+    PublicationMediaCandidate,
+    "contentType" | "durationSeconds" | "fileSize" | "height" | "width"
+  >,
 ): string | undefined {
   return validatePublishInput(capability, {
     caption: "",
     hashtags: [],
     idempotencyKey: "distribution-frozen-candidate",
-    media: [candidateProbe(candidate)],
+    media: [
+      candidateProbe({
+        ...candidate,
+        objectId: "",
+        objectKey: "",
+      }),
+    ],
   }).find((issue) => issue.field.startsWith("media[0]."))?.constraint;
 }
 
@@ -628,10 +626,7 @@ export function executeProviderCancelEffect(
   if (!adapter?.cancelPublication) {
     return Effect.succeed(failureResult("provider_cancel_unavailable", 422));
   }
-  if (
-    target.connectionStatus !== "connected" ||
-    (target.tokenExpiresAt !== null && target.tokenExpiresAt <= now)
-  ) {
+  if (!hasUsableProviderCredentials(target, now)) {
     return Effect.succeed(failureResult("provider_reconnect_required", 401));
   }
   if (!target.providerOperationId && !target.providerPostId) {
@@ -683,10 +678,7 @@ export function executeProviderReplyEffect(
   if (!adapter?.reply || !adapter.retryPolicy) {
     return Effect.succeed(failureResult("provider_reply_unavailable", 422));
   }
-  if (
-    target.connectionStatus !== "connected" ||
-    (target.tokenExpiresAt !== null && target.tokenExpiresAt <= now)
-  ) {
+  if (!hasUsableProviderCredentials(target, now)) {
     return Effect.succeed({
       ...failureResult("provider_reconnect_required", 401),
       retryPolicy: adapter.retryPolicy,
@@ -740,6 +732,20 @@ export function executeProviderReplyEffect(
   );
 }
 
+function lookupFailure(
+  code: string,
+  status?: number,
+  retryPolicy?: ProviderRetryPolicy,
+): DistributionLookupExecution {
+  return {
+    result: {
+      failure: classifyProviderFailure({ code, ...(status === undefined ? {} : { status }) }),
+      kind: "lookup_failure",
+    },
+    ...(retryPolicy ? { retryPolicy } : {}),
+  };
+}
+
 export function executeProviderLookupEffect(
   registry: ProviderRegistry,
   context: ProviderRequestContext,
@@ -749,30 +755,10 @@ export function executeProviderLookupEffect(
 ): Effect.Effect<DistributionLookupExecution, never, ProviderService> {
   const adapter = registry.get(target.platform);
   if (!adapter?.lookupPublication) {
-    return Effect.succeed({
-      result: {
-        failure: classifyProviderFailure({
-          code: "provider_lookup_unavailable",
-          status: 422,
-        }),
-        kind: "lookup_failure",
-      },
-    });
+    return Effect.succeed(lookupFailure("provider_lookup_unavailable", 422));
   }
-  if (
-    target.connectionStatus !== "connected" ||
-    (target.tokenExpiresAt !== null && target.tokenExpiresAt <= now)
-  ) {
-    return Effect.succeed({
-      result: {
-        failure: classifyProviderFailure({
-          code: "provider_reconnect_required",
-          status: 401,
-        }),
-        kind: "lookup_failure",
-      },
-      retryPolicy: adapter.retryPolicy,
-    });
+  if (!hasUsableProviderCredentials(target, now)) {
+    return Effect.succeed(lookupFailure("provider_reconnect_required", 401, adapter.retryPolicy));
   }
   const providerOperationId = target.providerOperationId
     ? normalizeIdentifier(target.providerOperationId)
@@ -785,76 +771,51 @@ export function executeProviderLookupEffect(
     (target.providerOperationId !== null && !providerOperationId) ||
     (target.providerPostId !== null && !providerPostId)
   ) {
-    return Effect.succeed<DistributionLookupExecution>({
-      result: {
-        failure: classifyProviderFailure({
-          code: "provider_lookup_evidence_unavailable",
-          status: 422,
-        }),
-        kind: "lookup_failure",
-      },
-      retryPolicy: adapter.retryPolicy,
-    });
+    return Effect.succeed(
+      lookupFailure("provider_lookup_evidence_unavailable", 422, adapter.retryPolicy),
+    );
   }
 
   context.metadata = undefined;
   return Effect.catch(
     Effect.gen(function* () {
       const accessToken = yield* Effect.tryPromise<string, DistributionLookupExecution>({
-        catch: (): DistributionLookupExecution => ({
-          result: {
-            failure: classifyProviderFailure({
-              code: "provider_preparation_failed",
-            }),
-            kind: "lookup_failure",
-          },
-          retryPolicy: adapter.retryPolicy,
-        }),
+        catch: () => lookupFailure("provider_preparation_failed", undefined, adapter.retryPolicy),
         try: () => decryptAccessToken(dependencies.decryptToken, target.storedAccessToken),
       });
       const media = yield* Effect.promise(() =>
         continuationMedia(adapter, target, providerOperationId, dependencies),
       );
-      const lookup = yield* Effect.map(
-        Effect.catch(
-          Effect.flatMap(ProviderService, (service) =>
-            service.lookupPublication(
-              target.platform,
-              context,
-              {
-                accessToken,
-                ...(target.providerAccountId ? { accountId: target.providerAccountId } : {}),
-              },
-              {
-                ...(media ? { media } : {}),
-                ...(providerOperationId ? { providerOperationId } : {}),
-                ...(providerPostId ? { providerPostId } : {}),
-              },
-            ),
-          ),
-          (cause: unknown) =>
-            Effect.fail(
+      const rawStatus = yield* Effect.flatMap(ProviderService, (service) =>
+        service.lookupPublication(
+          target.platform,
+          context,
+          {
+            accessToken,
+            ...(target.providerAccountId ? { accountId: target.providerAccountId } : {}),
+          },
+          {
+            ...(media ? { media } : {}),
+            ...(providerOperationId ? { providerOperationId } : {}),
+            ...(providerPostId ? { providerPostId } : {}),
+          },
+        ),
+      ).pipe(
+        Effect.mapError((cause: unknown): DistributionLookupExecution => ({
+          result: {
+            failure:
               cause instanceof ProviderAdapterError && cause.failure.code !== "provider_unexpected"
                 ? normalizeProviderFailure(cause.failure)
-                : classifyProviderFailure({
-                    code: "provider_lookup_failed",
-                  }),
-            ),
-        ),
-        (status: ProviderPublicationStatus) => ({ ok: true as const, status }),
-      ).pipe(
-        Effect.catch((failure: ProviderFailure) => Effect.succeed({ failure, ok: false as const })),
-      );
-      if (!lookup.ok) {
-        return {
-          result: { failure: lookup.failure, kind: "lookup_failure" as const },
+                : classifyProviderFailure({ code: "provider_lookup_failed" }),
+            kind: "lookup_failure",
+          },
           retryPolicy: adapter.retryPolicy,
-        };
-      }
-      const status = normalizePublicationStatus(lookup.status);
+        })),
+      );
+      const status = normalizePublicationStatus(rawStatus);
       return {
         result: {
-          kind: "publication",
+          kind: "publication" as const,
           status: context.metadata ? { ...status, metadata: context.metadata } : status,
         },
         metadata: context.metadata,

@@ -31,7 +31,6 @@ describe("ProviderRegistry", () => {
         accepted_mime_types: [],
         notes: [],
       },
-      extractRateLimitBudget: () => null,
       lookupPublication: async () => ({ state: "not_found" }),
       publish: async (context) => {
         context.metadata = {

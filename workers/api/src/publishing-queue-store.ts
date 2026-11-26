@@ -2,12 +2,12 @@ import type { components } from "@meltiply/contracts/schema";
 import { isoDateTime, type DatabaseError } from "@meltiply/domain";
 import { Effect } from "effect";
 import { requireActiveBrandProfileEffect } from "./brand-profile-guard";
-import { CoreApiError } from "./core-types";
+import { CoreApiError } from "./api-errors";
 import type { EffectTransactionClient } from "./database";
 
 type Schemas = components["schemas"];
 export type PublishingQueue = Schemas["PublishingQueue"];
-export type QueueMembership = Schemas["QueueMembership"];
+type QueueMembership = Schemas["QueueMembership"];
 export interface QueueRow extends Record<string, unknown> {
   id: string;
   org_id: string;
@@ -51,25 +51,6 @@ export function readQueueEffect(
       );
     yield* requireActiveBrandProfileEffect(client, row.org_id, row.brand_profile_id);
     return row;
-  });
-}
-
-export function requireQueueEffect(
-  client: EffectTransactionClient,
-  id: string,
-  brandProfileId: string,
-) {
-  return Effect.gen(function* () {
-    const result = yield* client.query<Pick<QueueRow, "org_id" | "brand_profile_id">>(
-      "SELECT org_id, brand_profile_id FROM publishing_queues WHERE id = $1 AND deleted_at IS NULL",
-      [id],
-    );
-    const row = result.rows[0];
-    if (!row || row.brand_profile_id !== brandProfileId)
-      return yield* Effect.fail(
-        new CoreApiError(404, "not_found", "The Queue was not found in this Brand Profile."),
-      );
-    yield* requireActiveBrandProfileEffect(client, row.org_id, row.brand_profile_id);
   });
 }
 

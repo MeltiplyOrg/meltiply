@@ -1,14 +1,8 @@
-import { malformed } from "../failures";
+import { malformed, requiredIdentifier } from "../failures";
 import type { ProviderErrorDiagnosis, ProviderHttpRequest, ProviderHttpResponse } from "../http";
 import { PROVIDER_LIMITS } from "../limits";
 import type { ProviderCredentials, ProviderRequestContext } from "../types";
-import {
-  boundedString,
-  providerIdentifier,
-  record,
-  requiredIdentifier,
-  secureUrl,
-} from "../values";
+import { boundedString, providerIdentifier, record, secureUrl } from "../values";
 
 export const YOUTUBE_API_ORIGIN = "https://www.googleapis.com";
 export const YOUTUBE_ANALYTICS_ORIGIN = "https://youtubeanalytics.googleapis.com";
@@ -32,15 +26,12 @@ export const YOUTUBE_PUBLISHING_SCOPES = [
   "https://www.googleapis.com/auth/youtube.readonly",
 ] as const;
 
-const analyticsScopes = ["https://www.googleapis.com/auth/yt-analytics.readonly"] as const;
-
 export const YOUTUBE_CONFIGURED_SCOPES = [
   ...YOUTUBE_PUBLISHING_SCOPES,
-  ...analyticsScopes,
+  "https://www.googleapis.com/auth/yt-analytics.readonly",
   "https://www.googleapis.com/auth/youtube.force-ssl",
 ] as const;
 
-/** A provider request whose error bodies are diagnosed with Google's documented error reasons. */
 export type GoogleRequest = (
   context: ProviderRequestContext,
   request: Omit<ProviderHttpRequest, "classifyErrorBody">,

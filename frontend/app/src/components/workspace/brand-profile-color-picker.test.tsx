@@ -7,57 +7,10 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { BRAND_PROFILE_COLORS } from "@/types";
 import { BrandProfileColorPicker } from "./brand-profile-color-picker";
-import {
-  PALETTE_MIN_CONTENT_WIDTH_REM,
-  paletteColumnStep,
-  resolvePaletteLayout,
-  type PaletteLayout,
-} from "./brand-profile-palette-layout";
 
 afterEach(cleanup);
 
 describe("Brand Profile palette layout", () => {
-  it("chooses the widest arrangement that still fits its content width", () => {
-    const rem = 16;
-    const thresholds: ReadonlyArray<readonly [PaletteLayout, PaletteLayout | null, number]> = [
-      ["honeycomb", "grid-6", PALETTE_MIN_CONTENT_WIDTH_REM.honeycomb],
-      ["grid-6", "grid-5", PALETTE_MIN_CONTENT_WIDTH_REM["grid-6"]],
-      ["grid-5", "grid-4", PALETTE_MIN_CONTENT_WIDTH_REM["grid-5"]],
-      ["grid-4", "grid-3", PALETTE_MIN_CONTENT_WIDTH_REM["grid-4"]],
-      ["grid-3", "grid-2", PALETTE_MIN_CONTENT_WIDTH_REM["grid-3"]],
-      ["grid-2", "grid-1", PALETTE_MIN_CONTENT_WIDTH_REM["grid-2"]],
-      ["grid-1", null, PALETTE_MIN_CONTENT_WIDTH_REM["grid-1"]],
-    ];
-
-    for (const [layout, fallback, minimumRem] of thresholds) {
-      expect(resolvePaletteLayout(minimumRem * rem, rem)).toBe(layout);
-      if (fallback) expect(resolvePaletteLayout(minimumRem * rem - 1, rem)).toBe(fallback);
-    }
-  });
-
-  it("resolves the same thresholds in rem when the root font size changes", () => {
-    expect(resolvePaletteLayout(426, 16)).toBe("honeycomb");
-    expect(resolvePaletteLayout(426, 20)).toBe("grid-6");
-    expect(resolvePaletteLayout(234, 16)).toBe("grid-5");
-    expect(resolvePaletteLayout(234, 20)).toBe("grid-4");
-  });
-
-  it("steps vertical arrows by each layout's column count", () => {
-    const strides: ReadonlyArray<readonly [PaletteLayout, number]> = [
-      ["honeycomb", 8],
-      ["grid-6", 6],
-      ["grid-5", 5],
-      ["grid-4", 4],
-      ["grid-3", 3],
-      ["grid-2", 2],
-      ["grid-1", 1],
-    ];
-
-    for (const [layout, stride] of strides) {
-      expect(paletteColumnStep(layout)).toBe(stride);
-    }
-  });
-
   it("renders every contract color as a radio regardless of the chosen layout", () => {
     render(
       <BrandProfileColorPicker

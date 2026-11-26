@@ -31,12 +31,6 @@ const EXPOSURE = [
   { key: "views", color: "var(--orange)", dash: "2 3" },
 ] as const;
 
-/**
- * One responsive, absolute-count timeline using the Analytics Recharts grammar
- * and canonical Card owner. Linear segments join observed measurements only;
- * dots preserve single-snapshot visibility. A hidden table exposes exact times
- * and counts without requiring hover or color perception.
- */
 function PostTimeline({
   title,
   data,
@@ -156,13 +150,6 @@ function PostTimeline({
   );
 }
 
-/**
- * Published Post totals and two stored-snapshot timelines: engagement counters,
- * then reach/impressions/media views. Reads histories only while a published Post is inspected;
- * loading and retry states never replace failures with a fabricated flat line.
- * Totals carry each Channel's last reported value forward between its syncs;
- * reach is reported across Channels, not a deduplicated audience.
- */
 export function PostAnalyticsSection({ analytics }: { analytics: PostAnalyticsSummary }) {
   const { t, language } = useI18n();
   const scope = useSessionScope();

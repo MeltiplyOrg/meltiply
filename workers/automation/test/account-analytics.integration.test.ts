@@ -23,23 +23,19 @@ const env = {
   VERSION: "account-analytics-test",
 } satisfies AutomationEnv;
 
-/** Fixture accounts sort before seeded accounts; every profile owns one Channel. */
 const accountIds = Array.from(
   { length: 32 },
   (_, index) => `01010000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
 );
 
-// The first 25 grants fail. Account 26 must still be captured on the next
-// sweep, while expiring, tokenless, expired, deleted-profile, unsupported, and
-// recently captured accounts (27–32) must never be claimed.
 describe("account analytics sweep with PostgreSQL", () => {
   beforeAll(async () => {
     const encryptedToken = await tokenCipherFor(env).encrypt("account-analytics-fixture-token");
     await runSystemTransaction(env, async (client) => {
       await client.query("DELETE FROM organizations WHERE id = $1", [organizationId]);
       await client.query(
-        `INSERT INTO organizations (id, name, slug, plan, billing_status)
-         VALUES ($1, 'Account analytics fixture', 'account-analytics-fixture', 'creator', 'free')`,
+        `INSERT INTO organizations (id, name, slug)
+         VALUES ($1, 'Account analytics fixture', 'account-analytics-fixture')`,
         [organizationId],
       );
       await client.query(
@@ -124,8 +120,6 @@ describe("account analytics sweep with PostgreSQL", () => {
     const next = await Effect.runPromise(sweepAccountAnalytics(env, dependencies));
     expect(next.recorded).toBe(1);
     await Effect.runPromise(sweepAccountAnalytics(env, dependencies));
-    // The system sweep also services seeded Workspaces; only this fixture's
-    // identities belong to the assertions about its grant failures and exclusions.
     expect(reads.filter((id) => id.startsWith("account-analytics-review-")).sort()).toEqual(
       Array.from({ length: 26 }, (_, index) => `account-analytics-review-${index + 1}`).sort(),
     );

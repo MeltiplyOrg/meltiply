@@ -60,9 +60,6 @@ describe("OAuthStateCoordinator", () => {
 
   it("rejects already-expired state", async () => {
     const coordinator = env.OAUTH_STATE.getByName("org-expired");
-    // runInDurableObject cannot infer the stub's class through
-    // DurableObjectStub's Provider mapping, so the callback declares
-    // OAuthStateCoordinator to reach the instance RPC methods.
     await expect(
       runInDurableObject(coordinator, (instance: OAuthStateCoordinator) =>
         instance.create("state-expired", {
@@ -78,8 +75,6 @@ describe("OAuthStateCoordinator", () => {
 
   it("rejects invalid create input with a TypeError instance", async () => {
     const coordinator = env.OAUTH_STATE.getByName("org-typeerror");
-    // RPC contract: invalid handoffs must reject as TypeError so the API
-    // Worker's fromPromise boundary maps to a 400-class error.
     await expect(
       runInDurableObject(coordinator, (instance: OAuthStateCoordinator) =>
         instance.create("", {
@@ -104,11 +99,8 @@ describe("OAuthStateCoordinator", () => {
       user_id: "user-live",
     };
     await coordinator.create("state-live", live);
-    // Seed expired records directly, bypassing create()'s expiry validation.
     await runInDurableObject(
       coordinator,
-      // ctx is the instance's DurableObjectState; the same object is protected
-      // as instance.ctx, so the callback parameter is the typed way in.
       async (instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
         const storage = ctx.storage;
         await storage.put("oauth:state-old-1", {
@@ -120,9 +112,6 @@ describe("OAuthStateCoordinator", () => {
           expires_at: Date.now() - 1,
         });
         await instance.alarm();
-        // The surviving record's deadline is the next sweep time: without this
-        // the expired entries would be deleted but never re-armed, so the live
-        // record would linger past its own expiry.
         await expect(storage.getAlarm()).resolves.toBe(liveExpiry);
       },
     );
@@ -164,7 +153,6 @@ describe("OAuthStateCoordinator", () => {
     ]);
     await coordinator.finalizeSelection(selectionId);
 
-    // Owned actor can retrieve sanitized public metadata
     const publicDto = await coordinator.getSelection(selectionId, {
       organizationId: "org-select-pub",
       userId: "user-select-pub",
@@ -187,7 +175,6 @@ describe("OAuthStateCoordinator", () => {
       },
     ]);
 
-    // Foreign organization or user receives null
     const foreignOrg = await coordinator.getSelection(selectionId, {
       organizationId: "foreign-org",
       userId: "user-select-pub",
@@ -233,7 +220,6 @@ describe("OAuthStateCoordinator", () => {
     ]);
     await coordinator.finalizeSelection(selectionId);
 
-    // Claiming an unlisted account rejects with invalid_account
     const unlisted = await coordinator.claimSelection(
       selectionId,
       "page-unknown",
@@ -246,7 +232,6 @@ describe("OAuthStateCoordinator", () => {
     );
     expect(unlisted.status).toBe("invalid_account");
 
-    // First claim on page-alpha succeeds and pins page-alpha
     const claim1 = await coordinator.claimSelection(
       selectionId,
       "page-alpha",
@@ -261,7 +246,6 @@ describe("OAuthStateCoordinator", () => {
     if (claim1.status !== "claimed") throw new Error("Expected claimed");
     expect(claim1.encryptedConnection).toBe("sealed-alpha-creds");
 
-    // Concurrent claim while active lease holds returns conflict claim_active
     const concurrent = await coordinator.claimSelection(
       selectionId,
       "page-alpha",
@@ -277,7 +261,6 @@ describe("OAuthStateCoordinator", () => {
       expect(concurrent.code).toBe("claim_active");
     }
 
-    // Cancel while active claim in progress rejects with conflict
     const cancelBusy = await coordinator.cancelSelection(
       selectionId,
       {
@@ -288,11 +271,9 @@ describe("OAuthStateCoordinator", () => {
     );
     expect(cancelBusy.status).toBe("conflict");
 
-    // Release claim (e.g. quota check failed deterministically)
     const released = await coordinator.releaseSelectionClaim(selectionId, claim1.claimToken);
     expect(released).toBe(true);
 
-    // After release, attempting to switch to page-beta violates crash invariant and rejects 409
     const switched = await coordinator.claimSelection(
       selectionId,
       "page-beta",
@@ -308,7 +289,6 @@ describe("OAuthStateCoordinator", () => {
       expect(switched.code).toBe("pinned_account_mismatch");
     }
 
-    // Same-Page retry succeeds
     const retryClaim = await coordinator.claimSelection(
       selectionId,
       "page-alpha",
@@ -322,7 +302,6 @@ describe("OAuthStateCoordinator", () => {
     expect(retryClaim.status).toBe("claimed");
     if (retryClaim.status !== "claimed") throw new Error("Expected claimed");
 
-    // Complete selection
     const completed = await coordinator.completeSelection(
       selectionId,
       "page-alpha",
@@ -331,7 +310,6 @@ describe("OAuthStateCoordinator", () => {
     );
     expect(completed).toBe(true);
 
-    // Replaying same key and account returns replayed 204 semantics
     const replay = await coordinator.claimSelection(
       selectionId,
       "page-alpha",
@@ -344,7 +322,6 @@ describe("OAuthStateCoordinator", () => {
     );
     expect(replay.status).toBe("replayed");
 
-    // Replaying with different key or account returns conflict
     const replayMismatch = await coordinator.claimSelection(
       selectionId,
       "page-alpha",
@@ -404,7 +381,6 @@ describe("OAuthStateCoordinator", () => {
     );
     expect(claim.status).toBe("claimed");
 
-    // Deterministically backdate the claim's expires_at via runInDurableObject to simulate lease expiry
     await runInDurableObject(
       coordinator,
       async (_instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
@@ -422,8 +398,6 @@ describe("OAuthStateCoordinator", () => {
       },
     );
 
-    // Even though lease has expired, cancellation MUST STILL REJECT
-    // because lease expiry does NOT prove the save has stopped!
     const cancelStale = await coordinator.cancelSelection(
       selectionId,
       { organizationId: "org-stale-fence", userId: "user-stale-fence" },
@@ -434,7 +408,6 @@ describe("OAuthStateCoordinator", () => {
       expect(cancelStale.message).toContain("in progress");
     }
 
-    // An expired lease is not proof the first save failed: it cannot change the destination.
     const changedProfile = await coordinator.claimSelection(
       selectionId,
       "page-fenced",
@@ -446,7 +419,6 @@ describe("OAuthStateCoordinator", () => {
       "idem-other-profile",
     );
     expect(changedProfile).toMatchObject({ status: "conflict", code: "pinned_profile_mismatch" });
-    // Same pinned Page CAN be retried after lease expiry
     const retryClaim = await coordinator.claimSelection(
       selectionId,
       "page-fenced",
@@ -460,10 +432,6 @@ describe("OAuthStateCoordinator", () => {
     expect(retryClaim.status).toBe("claimed");
   });
 
-  /**
-   * Expiry removes usable credentials without losing a late save's fence.
-   * Replay has its own bounded deadline, enforced even before the alarm runs.
-   */
   it("enforces the original ticket deadline while permitting bounded late completion", async () => {
     const coordinator = env.OAUTH_STATE.getByName("org-near-expiry");
     const selectionId = "org-near-expiry.nonce1234567890abcdef";
@@ -475,7 +443,6 @@ describe("OAuthStateCoordinator", () => {
       platform: "facebook",
       user_id: "user-near-expiry",
     });
-    // 130 small candidates exercise >128-key batched cleanup on the alarm path.
     const candidates: OAuthSelectionCandidate[] = [];
     for (let i = 0; i < 130; i++) {
       candidates.push({
@@ -491,7 +458,6 @@ describe("OAuthStateCoordinator", () => {
     await coordinator.appendSelectionCandidates(selectionId, candidates);
     await coordinator.finalizeSelection(selectionId);
 
-    // Claim acquired before the deadline keeps the original TTL.
     const claim = await coordinator.claimSelection(
       selectionId,
       "page-edge-7",
@@ -505,7 +471,6 @@ describe("OAuthStateCoordinator", () => {
     expect(claim.status).toBe("claimed");
     if (claim.status !== "claimed") throw new Error("Expected claimed");
 
-    // Simulate the deadline passing, then sweep.
     await runInDurableObject(
       coordinator,
       async (instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
@@ -517,8 +482,6 @@ describe("OAuthStateCoordinator", () => {
           expires_at: Date.now() - 100,
         });
         await instance.alarm();
-        // All candidate metadata and credentials are deleted at the deadline;
-        // only the secret-free master (claim + pin) remains.
         const metadata = await storage.list({
           prefix: `selection-account:${selectionId}:`,
         });
@@ -535,7 +498,6 @@ describe("OAuthStateCoordinator", () => {
       },
     );
 
-    // Expired tickets cannot be reclaimed, even for the pinned Page.
     const reclaim = await coordinator.claimSelection(
       selectionId,
       "page-edge-7",
@@ -548,7 +510,6 @@ describe("OAuthStateCoordinator", () => {
     );
     expect(reclaim.status).toBe("not_found");
 
-    // Cancellation never succeeds while a possibly in-flight save is fenced.
     const cancel = await coordinator.cancelSelection(
       selectionId,
       { organizationId: "org-near-expiry", userId: "user-near-expiry" },
@@ -556,7 +517,6 @@ describe("OAuthStateCoordinator", () => {
     );
     expect(cancel.status).toBe("conflict");
 
-    // A save that committed before its complete call can still be finalized.
     const completed = await coordinator.completeSelection(
       selectionId,
       "page-edge-7",
@@ -564,7 +524,6 @@ describe("OAuthStateCoordinator", () => {
       "idem-edge",
     );
     expect(completed).toBe(true);
-    // A completed ticket no longer reads back through GET.
     const afterComplete = await coordinator.getSelection(selectionId, {
       organizationId: "org-near-expiry",
       userId: "user-near-expiry",
@@ -583,7 +542,6 @@ describe("OAuthStateCoordinator", () => {
     );
     expect(replay.status).toBe("replayed");
 
-    // Evidence expires: the bounded retention window ends and the master is swept.
     await runInDurableObject(
       coordinator,
       async (instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
@@ -632,8 +590,6 @@ describe("OAuthStateCoordinator", () => {
       platform: "facebook",
       user_id: "user-interrupted",
     });
-    // Simulate a callback that crashed mid-append: candidate entries exist
-    // under both prefixes but the selection was never finalized.
     await runInDurableObject(
       coordinator,
       async (_instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
@@ -673,10 +629,6 @@ describe("OAuthStateCoordinator", () => {
     expect(after).toBeNull();
   });
 
-  /**
-   * Large selections survive a cleanup failure without losing retry credentials.
-   * A subsequent completion or cancellation removes every bounded candidate entry.
-   */
   it("stores, lists, claims, completes, and cancels large candidate sets without oversized storage ops", async () => {
     const coordinator = env.OAUTH_STATE.getByName("org-large-scale");
     const selectionId = "org-large-scale.nonce1234567890abcdef";
@@ -688,8 +640,6 @@ describe("OAuthStateCoordinator", () => {
       user_id: "user-large-scale",
     });
 
-    // 130 candidates with 20KB ciphertext each exceed the 128-key delete limit
-    // and total ~2.6MB, so no monolithic row or single delete call can hold them.
     const largePayload = "X".repeat(20_000);
     const buildBatch = (from: number, to: number): OAuthSelectionCandidate[] => {
       const batch: OAuthSelectionCandidate[] = [];
@@ -752,7 +702,6 @@ describe("OAuthStateCoordinator", () => {
         expect(recovered?.accounts).toHaveLength(130);
       },
     );
-    // Completion deletes all 260 candidate entries in bounded batches.
     const completed = await coordinator.completeSelection(
       selectionId,
       "page-85",
@@ -780,7 +729,6 @@ describe("OAuthStateCoordinator", () => {
       },
     );
 
-    // Cancellation has the same batched-delete bound.
     const cancelId = "org-large-scale.cancelled1234567890";
     await coordinator.createSelection(cancelId, {
       expires_at: Date.now() + 600_000,
@@ -842,7 +790,6 @@ describe("OAuthStateCoordinator", () => {
     ]);
     await coordinator.finalizeSelection(selectionId);
 
-    // Foreign actor cannot cancel
     const foreignCancel = await coordinator.cancelSelection(
       selectionId,
       { organizationId: "other-org", userId: "user-cancel" },
@@ -850,7 +797,6 @@ describe("OAuthStateCoordinator", () => {
     );
     expect(foreignCancel.status).toBe("not_found");
 
-    // Legitimate owner cancels successfully
     const cancelled = await coordinator.cancelSelection(
       selectionId,
       { organizationId: "org-cancel", userId: "user-cancel" },
@@ -858,14 +804,12 @@ describe("OAuthStateCoordinator", () => {
     );
     expect(cancelled.status).toBe("cancelled");
 
-    // Subsequent get returns null (not_found)
     const afterCancel = await coordinator.getSelection(selectionId, {
       organizationId: "org-cancel",
       userId: "user-cancel",
     });
     expect(afterCancel).toBeNull();
 
-    // Idempotent cancel replay returns cancelled
     const repeatCancel = await coordinator.cancelSelection(
       selectionId,
       { organizationId: "org-cancel", userId: "user-cancel" },
@@ -914,9 +858,6 @@ describe("OAuthStateCoordinator", () => {
     );
 
     await expect(coordinator.consume("state-expired")).resolves.toBeNull();
-    // The expired selection master is swept by the same pass as the OAuth
-    // state; asserting only the live ticket would pass a sweep that never
-    // touched `selection:` entries at all.
     await runInDurableObject(
       coordinator,
       async (_instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
@@ -928,6 +869,191 @@ describe("OAuthStateCoordinator", () => {
       userId: "u1",
     });
     expect(publicLive).not.toBeNull();
+  });
+
+  it("executes consume inside storage.transaction so read and delete cannot interleave", async () => {
+    const coordinator = env.OAUTH_STATE.getByName("org-consume-tx");
+    const record = {
+      expires_at: Date.now() + 60_000,
+      organization_id: "org-consume-tx",
+      provider: "tiktok",
+      redirect_path: "/channels",
+      user_id: "user-consume-tx",
+    };
+    await coordinator.create("state-tx", record);
+
+    await runInDurableObject(
+      coordinator,
+      async (instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
+        const txSpy = vi.spyOn(ctx.storage, "transaction");
+        try {
+          await expect(instance.consume("state-tx")).resolves.toEqual(record);
+          expect(txSpy).toHaveBeenCalledTimes(1);
+          await expect(instance.consume("state-tx")).resolves.toBeNull();
+          expect(txSpy).toHaveBeenCalledTimes(2);
+        } finally {
+          txSpy.mockRestore();
+        }
+      },
+    );
+  });
+
+  it("paginates candidate deletion via startAfter across >1000 keys", async () => {
+    const coordinator = env.OAUTH_STATE.getByName("org-paginated-delete");
+    const selectionId = "org-paginated-delete.nonce1234567890";
+    await coordinator.createSelection(selectionId, {
+      expires_at: Date.now() + 600_000,
+      id: selectionId,
+      organization_id: "org-paginated-delete",
+      platform: "facebook",
+      user_id: "user-paginated-delete",
+    });
+
+    const totalCandidates = 600;
+    const batchSize = 100;
+    for (let start = 0; start < totalCandidates; start += batchSize) {
+      const batch: OAuthSelectionCandidate[] = [];
+      for (let i = start; i < start + batchSize; i++) {
+        const id = `acct-${String(i).padStart(4, "0")}`;
+        batch.push({
+          account: {
+            avatar_url: null,
+            display_name: `Account ${i}`,
+            id,
+            username: null,
+          },
+          encryptedConnection: `sealed-${i}`,
+        });
+      }
+      await coordinator.appendSelectionCandidates(selectionId, batch);
+    }
+    await coordinator.finalizeSelection(selectionId);
+
+    await runInDurableObject(
+      coordinator,
+      async (instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
+        const listSpy = vi.spyOn(ctx.storage, "list");
+        try {
+          const cancelled = await instance.cancelSelection(
+            selectionId,
+            { organizationId: "org-paginated-delete", userId: "user-paginated-delete" },
+            "idem-paginated-cancel",
+          );
+          expect(cancelled.status).toBe("cancelled");
+
+          const cleanupCalls = listSpy.mock.calls
+            .map(([options]) => options)
+            .filter((options) => options?.prefix === `selection-account:${selectionId}:`);
+          expect(cleanupCalls).toHaveLength(5);
+          expect(cleanupCalls[0]?.limit).toBe(128);
+          expect(cleanupCalls[0]?.startAfter).toBeUndefined();
+          for (let page = 1; page < cleanupCalls.length; page++) {
+            expect(cleanupCalls[page]?.limit).toBe(128);
+            expect(cleanupCalls[page]?.startAfter).toMatch(
+              new RegExp(`^selection-account:${selectionId}:acct-\\d{4}$`),
+            );
+          }
+        } finally {
+          listSpy.mockRestore();
+        }
+
+        expect((await ctx.storage.list({ prefix: `selection-account:${selectionId}:` })).size).toBe(
+          0,
+        );
+        expect(
+          (await ctx.storage.list({ prefix: `selection-credential:${selectionId}:` })).size,
+        ).toBe(0);
+      },
+    );
+  });
+
+  it("rejects duplicate candidate account IDs and >1000-account appends before writing entries", async () => {
+    const coordinator = env.OAUTH_STATE.getByName("org-dedupe-candidates");
+    const selectionId = "org-dedupe-candidates.nonce1234567890";
+    await coordinator.createSelection(selectionId, {
+      expires_at: Date.now() + 600_000,
+      id: selectionId,
+      organization_id: "org-dedupe-candidates",
+      platform: "facebook",
+      user_id: "user-dedupe-candidates",
+    });
+
+    const candidate = (id: string, secret: string): OAuthSelectionCandidate => ({
+      account: {
+        avatar_url: null,
+        display_name: `Page ${id}`,
+        id,
+        username: null,
+      },
+      encryptedConnection: secret,
+    });
+
+    await expect(
+      runInDurableObject(coordinator, (instance: OAuthStateCoordinator) =>
+        instance.appendSelectionCandidates(selectionId, [
+          candidate("dup-1", "secret-a"),
+          candidate("dup-1", "secret-b"),
+        ]),
+      ),
+    ).rejects.toThrow(TypeError);
+
+    await runInDurableObject(
+      coordinator,
+      async (_instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
+        expect((await ctx.storage.list({ prefix: `selection-account:${selectionId}:` })).size).toBe(
+          0,
+        );
+        expect(
+          (await ctx.storage.list({ prefix: `selection-credential:${selectionId}:` })).size,
+        ).toBe(0);
+      },
+    );
+
+    await coordinator.appendSelectionCandidates(selectionId, [candidate("page-1", "secret-1")]);
+    await expect(
+      runInDurableObject(coordinator, (instance: OAuthStateCoordinator) =>
+        instance.appendSelectionCandidates(selectionId, [
+          candidate("page-2", "secret-2"),
+          candidate("page-1", "secret-overwrite"),
+        ]),
+      ),
+    ).rejects.toThrow("unique");
+
+    await runInDurableObject(
+      coordinator,
+      async (_instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
+        const record = await ctx.storage.get<OAuthSelectionRecord>(`selection:${selectionId}`);
+        expect(record?.account_ids).toEqual(["page-1"]);
+        expect(await ctx.storage.get(`selection-credential:${selectionId}:page-1`)).toEqual({
+          encrypted_connection: "secret-1",
+        });
+        expect(await ctx.storage.get(`selection-account:${selectionId}:page-2`)).toBeUndefined();
+      },
+    );
+
+    const overflowingBatch: OAuthSelectionCandidate[] = [];
+    for (let i = 0; i < 1000; i++) {
+      overflowingBatch.push(candidate(`overflow-${i}`, `secret-overflow-${i}`));
+    }
+    await expect(
+      runInDurableObject(coordinator, (instance: OAuthStateCoordinator) =>
+        instance.appendSelectionCandidates(selectionId, overflowingBatch),
+      ),
+    ).rejects.toThrow("1000");
+
+    await runInDurableObject(
+      coordinator,
+      async (_instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
+        const record = await ctx.storage.get<OAuthSelectionRecord>(`selection:${selectionId}`);
+        expect(record?.account_ids).toEqual(["page-1"]);
+        expect((await ctx.storage.list({ prefix: `selection-account:${selectionId}:` })).size).toBe(
+          1,
+        );
+        expect(
+          (await ctx.storage.list({ prefix: `selection-credential:${selectionId}:` })).size,
+        ).toBe(1);
+      },
+    );
   });
 });
 describe("OAuthState Effect programs", () => {
@@ -968,12 +1094,10 @@ describe("OAuthState Effect programs", () => {
       Effect.runPromise(validateOAuthSelectionCreateEffect("routing.nonce1234567890", validInit)),
     ).resolves.toBeUndefined();
 
-    // Too short selection ID
     await expect(
       Effect.runPromise(validateOAuthSelectionCreateEffect("short", validInit)),
     ).rejects.toMatchObject({ _tag: "InvalidOAuthStateError" });
 
-    // Expired expiry
     await expect(
       Effect.runPromise(
         validateOAuthSelectionCreateEffect("routing.nonce1234567890", {

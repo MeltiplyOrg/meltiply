@@ -14,7 +14,6 @@ import YAML from "yaml";
 
 import { breakingReviewToken, contractDigest, git, latestContractTag } from "./contract-source.mjs";
 
-/** Reports compatibility impact in logs and the existing CI job summary for PR reviewers. */
 function report(message) {
   console.log(message);
   if (process.env.GITHUB_STEP_SUMMARY) {
@@ -22,7 +21,6 @@ function report(message) {
   }
 }
 
-/** Reads an explicit option without treating a missing argument as a usable ref/path. */
 function option(name) {
   const index = process.argv.indexOf(name);
   if (index < 0) return undefined;
@@ -31,7 +29,6 @@ function option(name) {
   return value;
 }
 
-/** Selects the diff base and, for PRs, the latest release reachable from the target branch. */
 function ciBase() {
   const event = process.env.GITHUB_EVENT_PATH
     ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"))
@@ -60,11 +57,6 @@ function ciBase() {
   return {};
 }
 
-/**
- * Runs oasdiff from a baseline file and reports accepted breaking findings.
- * Returns true for breaking findings; false when compatible. Tool/parser failures throw because
- * they cannot be waived by a changelog token.
- */
 function breaking(baseFile, current) {
   const binary = process.env.OASDIFF_BIN;
   const args = ["breaking", "--fail-on", "ERR", "--format", "text", baseFile, current];
@@ -86,16 +78,11 @@ function breaking(baseFile, current) {
   }
   if (result.error) throw result.error;
   if (result.status === 0) return false;
-  // oasdiff exits 1 for breaking ERR findings; parser/tool errors cannot be waived.
   if (result.status !== 1 || !result.stdout.trim())
     throw new Error(`oasdiff failed (${result.status})`);
   return true;
 }
 
-/**
- * Compares contracts. A breaking PR diff and any breaking cumulative release span each require an
- * exact token in one fresh breaking bullet; identical spans share one token.
- */
 function main() {
   const ci = process.argv.includes("--ci");
   const explicitBase = option("--base");
@@ -135,7 +122,6 @@ function main() {
     report(`Contract compatibility: unchanged against ${base}.`);
     return 0;
   }
-  // A release already equal to the merge base has the same semantic diff; avoid a duplicate run.
   const cumulativeDistinct = releasedDigest !== undefined && releasedDigest !== beforeDigest;
   const directory = mkdtempSync(join(tmpdir(), "meltiply-contract-diff-"));
   try {
@@ -198,8 +184,6 @@ function main() {
             bullet,
           ).length > 40,
       );
-    // The PR-diff token must be new. An unchanged PR may inherit the exact cumulative token
-    // already present at its merge base; a different target always produces a different token.
     if (acknowledged && (!baseToken || !previous.includes(baseToken))) {
       report(
         `Contract compatibility: intentional breaking change reviewed in CHANGELOG.md ${tokens.map((required) => `[${required}]`).join(" ")}.`,

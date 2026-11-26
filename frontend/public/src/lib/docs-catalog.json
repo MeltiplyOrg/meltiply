@@ -1,0 +1,20 @@
+{
+  "sections": ["Getting started", "Publishing", "Workspace", "Help", "Legal"],
+  "allowedSlugs": [
+    "index",
+    "getting-started",
+    "workspaces",
+    "channels",
+    "media",
+    "publishing",
+    "analytics",
+    "inbox",
+    "resource-limits",
+    "agent",
+    "settings",
+    "troubleshooting",
+    "terms",
+    "privacy",
+    "cookies"
+  ]
+}

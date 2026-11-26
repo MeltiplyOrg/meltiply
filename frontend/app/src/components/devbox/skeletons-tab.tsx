@@ -48,16 +48,6 @@ interface SkeletonsTabProps {
   onAgentationChange: (enabled: boolean) => void;
 }
 
-/**
- * "Rendered | Skeleton" is the direct loading-state preview: Skeleton resets
- * the workspace cache then holds its reads so native query-backed skeletons
- * stay visible; Rendered releases the hold and refetches. The latency slider
- * merely delays `fetch` — it cannot alter component-local render state.
- * The 390px frame and breakpoint pill cover the responsive gate; Capture and
- * Compare record placeholder vs resolved geometry; the Agentation toggle
- * mounts the visual feedback tool from the same control surface.
- * Theme segments apply the same immediate Light/Dark/System preference as Settings.
- */
 export function SkeletonsTab({
   latency,
   onLatencyChange,
@@ -88,12 +78,6 @@ export function SkeletonsTab({
     return () => clsWatch.current?.stop();
   }, []);
 
-  /**
-   * Selects the visible query-backed state for the current workspace route.
-   * Skeleton clears cached query results before holding GET/HEAD refetches;
-   * Rendered releases them and invalidates the cache. The cache count is shown
-   * to distinguish “this route has no query skeleton” from a failed preview.
-   */
   const selectPreview = async (next: PreviewMode) => {
     if (!queryClient || next === preview) return;
     setPreview(next);
@@ -116,7 +100,6 @@ export function SkeletonsTab({
     setCls(clsWatch.current?.sample().score ?? null);
   };
 
-  // Second audit step: after the developer selects Rendered, measure the same slots.
   const runCompare = () => {
     if (audit) setDiffs(diffSkeletonRects(audit));
   };

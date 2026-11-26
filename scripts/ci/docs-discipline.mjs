@@ -1,18 +1,11 @@
-import { execFileSync } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const codeFencePattern = /^\s{0,3}(`{3,}|~{3,})/u;
+import { markdownLines, maskInlineCode, trackedMarkdownFiles } from "./markdown-source.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
-/**
- * Prose patterns that record change history instead of current truth. Each is a
- * defect under the documentation discipline in AGENTS.md: a dated note, a
- * revision marker, or an explicit supersession chain means the superseded text
- * should have been edited or deleted.
- */
 const forbiddenPatterns = [
   {
     pattern: /\bImplementation note\s*\(\d{4}-?\d{2}-?\d{2}/iu,
@@ -40,10 +33,6 @@ const forbiddenPatterns = [
   },
 ];
 
-/**
- * Documentation that must never be trimmed by heuristic or agent edits.
- * Legal notices and the verbatim license text are obligations, not prose.
- */
 const exempt = [
   /^LICENSE\.md$/u,
   /^THIRD_PARTY_NOTICES\.md$/u,
@@ -52,99 +41,21 @@ const exempt = [
   /^CHANGELOG\.md$/u,
 ];
 
-/**
- * Returns whether a path is exempt from the discipline scan.
- *
- * @param {string} path - Repository-relative path
- * @returns {boolean} True when the file is exempt
- */
 function isExempt(path) {
   return exempt.some((pattern) => pattern.test(path));
 }
 
-/**
- * Masks fenced code blocks and inline code so quoted examples cannot trip the scan.
- * Inline code is replaced with spaces, keeping offsets stable.
- *
- * A closing fence carries no info string: only a run of the same character that is at
- * least as long, followed by nothing but whitespace, ends the block. Treating
- * ```js as a closer would end the block early and expose its content to the scan.
- *
- * @param {string} content - Full Markdown content
- * @returns {Array<string>} Lines as `lineNumber:text`, or "" for fenced content
- */
-function markdownLines(content) {
-  let fence;
-  return content.split("\n").map((line, index) => {
-    const marker = line.match(codeFencePattern)?.[1];
-    if (marker) {
-      const isCloser =
-        fence !== undefined &&
-        marker[0] === fence.character &&
-        marker.length >= fence.length &&
-        line.trim() === marker;
-      if (!fence) fence = { character: marker[0], length: marker.length };
-      else if (isCloser) fence = undefined;
-      return "";
-    }
-    if (fence) return "";
-    return `${index + 1}:${maskInlineCode(line)}`;
-  });
-}
-
-/**
- * Replaces inline code spans with spaces of equal length. A span opens with a run of
- * backticks and closes with the next run of exactly the same length, so
- * ``a `b` c`` masks as one span instead of three fragments. Unmatched runs stay
- * literal.
- *
- * @param {string} line - Single Markdown line
- * @returns {string} Line with inline code blanked
- */
-function maskInlineCode(line) {
-  let masked = "";
-  let index = 0;
-  while (index < line.length) {
-    if (line[index] !== "`") {
-      masked += line[index];
-      index += 1;
-      continue;
-    }
-    let runLength = 0;
-    while (line[index + runLength] === "`") runLength += 1;
-    const delimiter = "`".repeat(runLength);
-    const close = line.indexOf(delimiter, index + runLength);
-    // The closing run must be exactly this long, so a longer run is a different span.
-    if (close === -1 || line[close + runLength] === "`") {
-      masked += delimiter;
-      index += runLength;
-      continue;
-    }
-    masked += " ".repeat(close + runLength - index);
-    index = close + runLength;
-  }
-  return masked;
-}
-
-/**
- * Scans tracked Markdown for documentation-discipline violations.
- *
- * @param {string} root - Repository root
- * @param {Array<string>} files - Repository-relative Markdown paths
- * @returns {Array<string>} Sorted `path:line: reason` findings
- */
 export function collectDisciplineFindings(root, files) {
   const findings = [];
   for (const file of files) {
     if (isExempt(file)) continue;
-    for (const entry of markdownLines(readFileSync(resolve(root, file), "utf8"))) {
-      if (!entry) continue;
-      const separator = entry.indexOf(":");
-      const lineNumber = entry.slice(0, separator);
-      const text = entry.slice(separator + 1);
+    const lines = markdownLines(readFileSync(resolve(root, file), "utf8"));
+    for (const [index, line] of lines.entries()) {
+      if (!line) continue;
+      const text = maskInlineCode(line);
       for (const { pattern, reason } of forbiddenPatterns) {
         if (pattern.test(text)) {
-          findings.push(`${file}:${lineNumber}: ${reason}`);
+          findings.push(`${file}:${index + 1}: ${reason}`);
           break;
         }
       }
@@ -153,44 +64,8 @@ export function collectDisciplineFindings(root, files) {
   return findings.sort();
 }
 
-/**
- * Lists Git-tracked Markdown files that exist in the working tree, collapsing
- * symlinked aliases (such as `CLAUDE.md` pointing at `AGENTS.md`) so one file
- * reports findings once.
- *
- * @returns {Array<string>} Repository-relative paths
- */
-function trackedMarkdownFiles() {
-  const seen = new Set();
-  return execFileSync("git", ["ls-files", "-z", "--", ":(glob)**/*.md"], {
-    cwd: repositoryRoot,
-    encoding: "utf8",
-  })
-    .split("\0")
-    .filter(Boolean)
-    .filter((file) => {
-      let identity;
-      try {
-        identity = realpathSync(resolve(repositoryRoot, file));
-      } catch {
-        // Tracked but absent from the working tree: a deletion or an unresolved
-        // rename. Scanning it would throw, so skip it.
-        return false;
-      }
-      if (seen.has(identity)) return false;
-      seen.add(identity);
-      return true;
-    });
-}
-
-/**
- * Gate entrypoint: fails when a doc records history instead of current truth.
- *
- * @returns {{ files: number }} Number of scanned files
- * @throws {Error} When findings exist
- */
 export function runDocumentationDisciplineGate() {
-  const files = trackedMarkdownFiles();
+  const files = trackedMarkdownFiles(repositoryRoot);
   const findings = collectDisciplineFindings(repositoryRoot, files);
   if (findings.length > 0) {
     throw new Error(

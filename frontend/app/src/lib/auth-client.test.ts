@@ -6,15 +6,9 @@ import { afterEach, describe, expect, it, vi, type Mock } from "vite-plus/test";
 const firstJwt = "session-jwt-1";
 const refreshedJwt = "session-jwt-2";
 
-/**
- * Builds a Better Auth `get-session` response carrying the JWT in the
- * `set-auth-jwt` response header, the only channel through which the session
- * lifecycle hands a bearer credential to the frontend.
- */
 function sessionResponse(jwt: string): Response {
   return new Response(
     JSON.stringify({
-      // A valid session: an already-expired one would exercise the refresh path instead.
       session: { expiresAt: "2099-07-18T16:00:00.000Z", id: "session-1", userId: "user-1" },
       user: { email: "user@example.com", id: "user-1" },
     }),
@@ -25,10 +19,6 @@ function sessionResponse(jwt: string): Response {
   );
 }
 
-/**
- * Successful empty JSON response standing in for any `/api/v1` endpoint; the
- * tests observe request credentials and headers, not response payloads.
- */
 function okJson(): Response {
   return new Response(JSON.stringify({}), {
     headers: { "content-type": "application/json" },
@@ -36,20 +26,11 @@ function okJson(): Response {
   });
 }
 
-/**
- * Resolves the effective credentials mode of one recorded fetch call whether
- * the client forwarded a `Request` object or a URL plus init.
- */
 function credentialsAt(fetchMock: Mock, index: number): RequestCredentials | undefined {
   const [input, init] = fetchMock.mock.calls[index] ?? [];
   return init?.credentials ?? (input instanceof Request ? input.credentials : undefined);
 }
 
-/**
- * Resolves one header from a recorded fetch call, merging `Request` headers
- * with any `init.headers` override so assertions hold regardless of which side
- * of the call carries the header.
- */
 function headerAt(fetchMock: Mock, index: number, name: string): string | null {
   const [input, init] = fetchMock.mock.calls[index] ?? [];
   const headers = new Headers(input instanceof Request ? input.headers : undefined);
@@ -57,13 +38,6 @@ function headerAt(fetchMock: Mock, index: number, name: string): string | null {
   return headers.get(name);
 }
 
-/**
- * Imports the auth client and API client against a fresh module registry so the
- * module-local bearer token holder starts empty for each test. Dynamic import is
- * required: a static import would bind the already-evaluated module graph and
- * leak token state between tests. The API request is the only observable
- * surface of the holder: no token getter exists.
- */
 async function importClients() {
   vi.resetModules();
   const { authClient } = await import("./auth-client");
@@ -92,8 +66,6 @@ describe("Better Auth JWT lifecycle", () => {
     await Effect.runPromise(api.getCurrentUser(null));
 
     expect(session?.user.email).toBe("user@example.com");
-    // The lifecycle request keeps the HttpOnly session cookie; only the JWT
-    // leaves the browser on API requests.
     expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8787/api/auth/get-session");
     expect(credentialsAt(fetchMock, 0)).toBe("include");
     expect(headerAt(fetchMock, 1, "Authorization")).toBe(`Bearer ${firstJwt}`);
@@ -134,8 +106,6 @@ describe("Better Auth JWT lifecycle", () => {
     await Effect.runPromise(api.getCurrentUser(null));
     expect(headerAt(fetchMock, 1, "Authorization")).toBe(`Bearer ${firstJwt}`);
 
-    // Sign-out may surface the server failure, but the local credential must be
-    // dropped either way so no stale JWT is forwarded afterwards.
     await authClient.signOut().catch(() => undefined);
     await Effect.runPromise(api.getCurrentUser(null));
 
@@ -184,8 +154,6 @@ describe("Better Auth JWT lifecycle", () => {
     await authClient.signOut().catch(() => undefined);
     await Effect.runPromise(api.getCurrentUser(null));
 
-    // A live bearer credential proves the token existed in module state while
-    // Web Storage stayed untouched; the second request shows it was dropped.
     expect(headerAt(fetchMock, 1, "Authorization")).toBe(`Bearer ${firstJwt}`);
     expect(headerAt(fetchMock, 3, "Authorization")).toBeNull();
     for (const spy of storageSpies) {

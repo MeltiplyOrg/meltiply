@@ -6,8 +6,6 @@ FRONTEND_DIR := frontend/app
 PUBLIC_SITE_DIR := frontend/public
 CLOUDFLARE_LOCAL_DIR := scripts/cloudflare-local
 
-# Make owns environment-aware development workflows. Package checks, database,
-# infrastructure, and release commands live directly in package.json (`bun run`).
 .PHONY: help setup install doctor dev test build check frontend-boot public-boot frontend-build public-build frontend-preview frontend-test-e2e frontend-e2e-install frontend-e2e-host-deps frontend-lighthouse
 
 help: ## Show daily workflows; use `bun run` for package and operational commands

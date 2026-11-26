@@ -83,21 +83,22 @@ vi.mock("@/lib/queries", () => ({
 }));
 
 beforeAll(() => {
-  class ResizeObserverMock {
+  class ResizeObserverMock implements ResizeObserver {
     disconnect() {}
     observe() {}
     unobserve() {}
   }
-  globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-  window.matchMedia = ((query: string) => ({
+  globalThis.ResizeObserver = ResizeObserverMock;
+  window.matchMedia = (query: string): MediaQueryList => ({
     addEventListener: () => {},
     addListener: () => {},
+    dispatchEvent: () => false,
     matches: false,
     media: query,
     onchange: null,
     removeEventListener: () => {},
     removeListener: () => {},
-  })) as unknown as typeof window.matchMedia;
+  });
 });
 
 function capability(platform: string, analytics: boolean) {
@@ -356,8 +357,6 @@ describe("analytics view", () => {
 
   it("omits the comparison card when the filter narrows to one platform", () => {
     state.searchParams = new URLSearchParams("metric=views&range=30d&platform=instagram");
-    // Placeholder data can still carry the aggregate rows while the filtered
-    // summary loads; the card must already be gone.
     state.summary = {
       data: summary({
         by_platform: [platformRow(), platformRow({ platform: "threads", views: 80 })],

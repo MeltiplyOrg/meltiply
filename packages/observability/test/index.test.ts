@@ -8,14 +8,10 @@ import {
   errorDiagnostic,
   exportOtlpSpan,
   log,
-  redact,
 } from "../src";
 
 afterEach(() => {
   vi.restoreAllMocks();
-  // `restoreAllMocks` does not undo `vi.stubGlobal`, so a test that replaced
-  // `fetch` would otherwise keep its double installed for every later test in
-  // this file (and mask a missing real fetch call).
   vi.unstubAllGlobals();
   configureLogSampling(undefined);
 });
@@ -28,17 +24,24 @@ describe("observability safety", () => {
     );
   });
 
-  it("redacts nested tokens, authorization, email, and signed URL queries", () => {
-    expect(
-      redact({
+  it("redacts nested tokens, authorization, email, and signed URL queries in log context", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    log(
+      "info",
+      { environment: "staging", service: "api", trace_id: "trace-redact", version: "test" },
+      {
         authorization: "Bearer secret",
+        event: "redaction",
         nested: {
           email: "person@example.test",
           source: "https://r2.example.test/object?X-Amz-Signature=secret",
         },
+        outcome: "ok",
+        retry_class: "none",
         safe: "visible",
-      }),
-    ).toEqual({
+      },
+    );
+    expect(JSON.parse(String(info.mock.calls[0]?.[0])).context).toMatchObject({
       authorization: "[REDACTED]",
       nested: {
         email: "[REDACTED]",
@@ -92,8 +95,6 @@ describe("observability safety", () => {
     expect(errorDiagnostic("private primitive").error.name).toBe("UnknownError");
   });
 
-  // Logs must preserve transport evidence across cause chains without exposing
-  // credential-bearing messages, URL credentials, or recursive thrown payloads.
   it("retains sanitized nested error evidence in the emitted JSON line", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const cause = new TypeError(
@@ -142,7 +143,6 @@ describe("observability safety", () => {
     expect(line).not.toContain("\n");
   });
 
-  // Arbitrary provider throws must not break logging when getters are unreadable.
   it("serializes thrown objects and unreadable error properties without losing other evidence", () => {
     const failure: Record<string, unknown> = {
       _tag: "ProviderError",
@@ -173,7 +173,6 @@ describe("observability safety", () => {
     expect(errorDiagnostic(error).error.stack).toBeUndefined();
   });
 
-  // Deep Error chains must be bounded without exposing the opaque tail payload.
   it("bounds exception cause chains", () => {
     let cause: unknown = { marker: "deep-private-detail" };
     for (let index = 0; index < 20; index++) {
@@ -375,6 +374,35 @@ describe("observability safety", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("handles circular span attributes without overflowing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const cyclic: Record<string, unknown> = { safe: "ok", token: "secret" };
+    cyclic.self = cyclic;
+    await exportOtlpSpan(
+      { ENVIRONMENT: "test" },
+      {
+        attributes: cyclic,
+        endTimeMs: 1000,
+        name: "cyclic",
+        service: "api",
+        startTimeMs: 500,
+        status: "ok",
+        traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+      },
+    );
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const attributes = Object.fromEntries(
+      body.resourceSpans[0].scopeSpans[0].spans[0].attributes.map(
+        (attr: { key: string; value: { stringValue?: string } }) => [
+          attr.key,
+          attr.value.stringValue,
+        ],
+      ),
+    );
+    expect(attributes).toMatchObject({ safe: "ok", self: "[Circular]", token: "[REDACTED]" });
   });
 
   it("preserves valid 16-hex span IDs in exportOtlpSpan without re-hashing", async () => {

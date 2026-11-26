@@ -1,22 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 
-/**
- * One published destination in the analytics browser fixture.
- *
- * `snapshot` omitted models a Distribution that has not synced yet; the UI must
- * render its metric cells as awaiting sync rather than a measured zero.
- */
 interface CohortDistribution {
   daysAgo: number;
   platform: string;
   snapshot?: { comments: number; likes: number; shares: number; views: number };
 }
 
-/**
- * Deterministic analytics values; each fixture run allocates independent identities
- * because browser journeys and retries share one Workspace.
- */
 const posts: readonly { distributions: readonly CohortDistribution[]; title: string }[] = [
   {
     title: "Analytics E2E launch",
@@ -66,23 +56,6 @@ const posts: readonly { distributions: readonly CohortDistribution[]; title: str
   })),
 ];
 
-/**
- * Inserts a deterministic analytics cohort for one isolated owner Brand Profile.
- *
- * The default local stack and the controlled acceptance stack both read stored
- * snapshots, not live provider counters, so the browser journey owns its
- * published history directly. The fixture deliberately includes:
- * - a Post with Instagram, Threads, and TikTok destinations (partial coverage),
- * - a Post on an unsupported Platform only,
- * - a published Post whose first snapshot has not arrived,
- * - one Post older than the 7-day preset but inside the default 30-day window,
- * - enough Posts for the initial ten-row page to report more.
- *
- * @param profileName - Active Brand Profile display name created by the journey.
- * @returns The seeded Post count and the profile id used for cleanup assertions.
- * @throws When the database is not the dedicated local test database or the
- *   profile cannot be resolved.
- */
 export async function seedAnalyticsCohort(profileName: string): Promise<{ profileId: string }> {
   const connectionString = process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL;
   if (!connectionString?.trim()) {

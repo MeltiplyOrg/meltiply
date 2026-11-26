@@ -1,4 +1,3 @@
-// @ts-check
 import { defineConfig } from "astro/config";
 import react from "@astrojs/react";
 import sitemap from "@astrojs/sitemap";
@@ -15,14 +14,12 @@ import {
 
 const publicUrl = process.env.PUBLIC_SITE_URL?.trim() || "https://meltiply.com";
 
-/** @type {import("@astrojs/markdown-remark").UnifiedProcessorOptions["remarkPlugins"]} */
 const remarkPlugins = [
   remarkHeading,
   remarkCodeTab,
   remarkNpm,
   [remarkStructure, { exportAs: "structuredData" }],
 ];
-/** @type {import("@astrojs/markdown-remark").UnifiedProcessorOptions["rehypePlugins"]} */
 const rehypePlugins = [rehypeCode];
 
 export default defineConfig({
@@ -31,7 +28,6 @@ export default defineConfig({
   server: { allowedHosts: [new URL(publicUrl).hostname] },
   prefetch: { prefetchAll: true, defaultStrategy: "viewport" },
   markdown: {
-    // Fumadocs owns heading ids, indexed structure, and highlighted code.
     syntaxHighlight: false,
     processor: unified({ remarkPlugins, rehypePlugins }),
   },

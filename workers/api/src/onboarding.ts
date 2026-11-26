@@ -13,25 +13,10 @@ import { hashIdempotencyRequestEffect } from "./idempotency";
 import { idempotencyHeaders } from "./idempotent-response";
 import { jsonResponse } from "./responses";
 import { idempotencyKey, jsonBody, onlyKeys } from "./validation";
-import { idempotentMutation } from "./workspace-lifecycle";
+import { idempotentInstallationMutation } from "./installation-mutation";
 
-/**
- * First-run onboarding progress for the current Installation Owner.
- *
- * `not_applicable` marks an installation whose canonical Workspace exists
- * without an onboarding record (an upgrade, or an Owner who inherited an
- * already-provisioned installation): its Owner keeps normal sign-in and is
- * never forced through setup. `in_progress` is the resumable state after the
- * first-run account exists and before the final screen completes; `completed`
- * is terminal, so the name is thereafter changed through Workspace settings.
- */
 interface OnboardingProgress {
   completed_at: string | null;
-  /**
-   * Optional screen the current Owner reached. A restart resumes here, and it is
-   * stored independently of consent, attribution and terminal completion because
-   * skipping or declining must still resume at the same place.
-   */
   step: "improvement" | "ready";
   status: "completed" | "in_progress" | "not_applicable";
   workspace_name: string | null;
@@ -45,19 +30,6 @@ interface OnboardingRow extends Record<string, unknown> {
   workspace_named: boolean | null;
 }
 
-/**
- * Reads onboarding progress for the caller's canonical shared Workspace.
- *
- * The reported name is the Workspace's current name, so a Settings rename is
- * reflected immediately; the onboarding row only carries the completion and
- * whether the setup name was settled. Actor resolution creates that row for a
- * bootstrapped Owner, and its absence is what identifies an upgraded
- * installation that must not be pushed back through setup.
- *
- * @param client - Active system transaction client.
- * @param actor - Resolved caller.
- * @returns Effect resolving the progress record.
- */
 function onboardingProgressEffect(
   client: EffectTransactionClient,
   actor: ResolvedActor,
@@ -95,8 +67,6 @@ function onboardingProgressEffect(
         return {
           completed_at: null,
           step: row.progress_step,
-          // A missing onboarding row is an upgraded installation, not a
-          // journey someone may resume.
           status: row.workspace_named === null ? "not_applicable" : "in_progress",
           workspace_name: row.workspace_name,
           workspace_named: row.workspace_named === true,
@@ -105,16 +75,6 @@ function onboardingProgressEffect(
     );
 }
 
-/**
- * Asserts the caller is the current Installation Owner.
- *
- * Ownership is read from the live session on every request, so authority moves
- * with an ownership transfer instead of staying with the account that started
- * setup.
- *
- * @param actor - Resolved request actor.
- * @returns Effect failing with 403 `installation_owner_required` for non-owners.
- */
 function requireCurrentOwner(actor: ResolvedActor): Effect.Effect<void, CoreApiError> {
   if (!actor.isInstallationOwner) {
     return Effect.fail(
@@ -128,7 +88,6 @@ function requireCurrentOwner(actor: ResolvedActor): Effect.Effect<void, CoreApiE
   return Effect.void;
 }
 
-/** Locks progress so completion and screen advances serialize; upgrades have no row. */
 function lockOnboardingRow(
   client: EffectTransactionClient,
   actor: ResolvedActor,
@@ -158,7 +117,6 @@ function lockOnboardingRow(
     );
 }
 
-/** Advances the reached screen without rewinding it or reopening completed setup. */
 function saveOnboardingStepEffect(
   client: EffectTransactionClient,
   actor: ResolvedActor,
@@ -183,26 +141,11 @@ function saveOnboardingStepEffect(
   });
 }
 
-/**
- * Marks first-run onboarding complete for the canonical shared Workspace.
- *
- * Completion records nothing else: optional screens, reporting choices, Channel
- * connection, and Invitations stay independent, so a skipped improvement screen
- * or a failed connection cannot block entering the Workspace. It never renames
- * the Workspace, so a name changed in Settings survives.
- *
- * @param client - Active system transaction client.
- * @param actor - Resolved Installation Owner.
- * @returns Effect resolving the completed progress.
- */
 function completeOnboardingEffect(
   client: EffectTransactionClient,
   actor: ResolvedActor,
 ): Effect.Effect<OnboardingProgress, CoreApiError | DatabaseError> {
   return Effect.gen(function* () {
-    // The row lock orders completion against a concurrent save: the save either
-    // commits its rename first (and completion keeps it) or sees the completion
-    // and refuses. Two completions serialize rather than racing the update.
     yield* lockOnboardingRow(client, actor);
     yield* client.query(
       `UPDATE installation_onboarding
@@ -214,27 +157,10 @@ function completeOnboardingEffect(
   });
 }
 
-/**
- * Reads the request identifier from the Hono context.
- *
- * @param c - Hono request context.
- * @returns Unique request identifier.
- */
 function requestId(c: Context<ApiWorkerEnvironment>): string {
   return c.get("requestId");
 }
 
-/**
- * Registers the first-run onboarding read, save, and complete routes.
- *
- * The surface is authenticated and Installation-Owner-only; it never mints a
- * privileged session, and the public setup status deliberately exposes none of
- * this state. Every read and mutation resolves the live actor, so the current
- * Owner resumes wherever the journey stopped, including after verification,
- * sign-in, or an ownership transfer.
- *
- * @param app - Hono application instance.
- */
 export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void {
   app.get("/api/v1/onboarding", (c) =>
     runRouteEffect(
@@ -270,7 +196,7 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
         });
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ step }));
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           actor.workspace.id,
           "installation.onboarding.save",
@@ -298,7 +224,7 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
         yield* requireCurrentOwner(actor);
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({}));
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           actor.workspace.id,
           "installation.onboarding.complete",

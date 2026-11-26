@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { releaseInternals } from "./release-lib.mjs";
+import { stableJson } from "../lib/stable-json.mjs";
+import { exactKeys, matchedString, plainObject } from "./validation.mjs";
 
 const approvalActorPattern = /^[A-Za-z0-9][A-Za-z0-9@._+ -]{0,127}$/;
 const approvalEnvironmentPattern = /^[a-z]+-[a-z0-9-]+-approval$/;
@@ -21,77 +22,22 @@ const approvalKeys = new Set([
 ]);
 const approvalJobKeys = new Set(["approved_by", "id", "name", "status"]);
 
-/**
- * Validates that a value is a non-null, non-array object record.
- *
- * @param {unknown} value - Value to test
- * @param {string} name - Contextual label for error reporting
- * @returns {object} The validated object
- * @throws {TypeError} If value is null, array, or not an object
- */
-function plainObject(value, name) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${name} must be an object`);
+export function assertReleaseBound(evidence, name, spec) {
+  const record = plainObject(evidence, name);
+  if (
+    record.schema_version !== 1 ||
+    record.release_id !== spec.release_id ||
+    record.git_sha !== spec.git_sha
+  ) {
+    throw new TypeError(`${name} does not match the release`);
   }
-  return value;
+  return record;
 }
 
-/**
- * Asserts that an object contains exactly the expected set of keys, with no extra or missing keys.
- *
- * @param {object} value - Object to inspect
- * @param {Set<string>} expected - Set of required key names
- * @param {string} name - Contextual label for error reporting
- * @returns {void}
- * @throws {TypeError} If any unknown or missing keys are detected
- */
-function exactKeys(value, expected, name) {
-  const actual = Object.keys(value);
-  const unknown = actual.filter((key) => !expected.has(key));
-  const missing = [...expected].filter((key) => !(key in value));
-  if (unknown.length > 0) {
-    throw new TypeError(`${name} contains unknown fields: ${unknown.join(", ")}`);
-  }
-  if (missing.length > 0) {
-    throw new TypeError(`${name} is missing fields: ${missing.join(", ")}`);
-  }
-}
-
-/**
- * Validates that a value is a string satisfying a specified regular expression pattern.
- *
- * @param {unknown} value - Value to validate
- * @param {RegExp} pattern - Regular expression to match
- * @param {string} name - Contextual label for error reporting
- * @returns {string} The validated string value
- * @throws {TypeError} If value is not a string or fails regex match
- */
-function matchedString(value, pattern, name) {
-  if (typeof value !== "string" || !pattern.test(value)) {
-    throw new TypeError(`${name} is invalid`);
-  }
-  return value;
-}
-
-/**
- * Computes a hexadecimal SHA-256 hash of a string or Buffer payload.
- *
- * @param {string | Buffer} value - Data to hash
- * @returns {string} 64-character lowercase hexadecimal hash
- */
 export function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-/**
- * Reads a JSON file from disk with strict size bounds and format validation.
- *
- * @param {string} filePath - Absolute or relative path to file
- * @param {string} name - Contextual label for error reporting
- * @param {number} [maximumBytes=65536] - Maximum allowable file size in bytes
- * @returns {Promise<any>} Parsed JSON content
- * @throws {TypeError} If file does not exist, exceeds size limits, is empty, or has invalid JSON syntax
- */
 export async function readJsonFile(filePath, name, maximumBytes = 64 * 1024) {
   const details = await stat(filePath);
   if (!details.isFile() || details.size === 0 || details.size > maximumBytes) {
@@ -104,16 +50,6 @@ export async function readJsonFile(filePath, name, maximumBytes = 64 * 1024) {
   }
 }
 
-/**
- * Validates an operator review record against release invariants.
- * Enforces schema version 1, a release-session UUID, a bounded operator label,
- * successful review, a valid phase name, and exact Git SHA parity with the release.
- *
- * @param {unknown} input - Raw parsed JSON approval metadata
- * @param {object} spec - Release specification object
- * @returns {object} Normalized, validated approval metadata record
- * @throws {TypeError} If schema, job naming, UUID formatting, or Git SHA validation fails
- */
 export function validateApprovalMetadata(input, spec) {
   const approval = plainObject(input, "approval metadata");
   exactKeys(approval, approvalKeys, "approval metadata");
@@ -158,19 +94,6 @@ export function validateApprovalMetadata(input, spec) {
   };
 }
 
-/**
- * Loads operator review files, requiring distinct phases in one release session
- * and the expected reviewed plan digest for each phase.
- *
- * @param {object} params - Loading options
- * @param {Set<string>} params.expectedNames - Set of required approval job names
- * @param {Array<string>} params.paths - File paths to approval metadata JSON files
- * @param {string} [params.planDigest] - Single expected OpenTofu plan digest
- * @param {Map<string, string>} [params.planDigests] - Per-job expected plan digests
- * @param {object} params.spec - Release specification object
- * @returns {Promise<Array<object>>} Sorted array of validated approval records
- * @throws {TypeError} If files are missing, duplicated, incomplete, or digests mismatch
- */
 export async function loadApprovalMetadata({
   expectedNames,
   paths,
@@ -238,20 +161,6 @@ export async function loadApprovalMetadata({
   );
 }
 
-/**
- * Asserts explicit human intent for mutating release commands.
- * Requires `--apply`, exact string confirmation matching `release <environment> <git_sha>`,
- * valid SHA-256 plan digest, and verifies working tree commit matches release SHA.
- *
- * @param {object} params - Confirmation parameters
- * @param {boolean} params.apply - Flag indicating mutation execution
- * @param {string} params.confirm - Explicit confirmation string
- * @param {string} [params.currentSha] - Checked-out Git commit SHA
- * @param {string} params.planDigest - SHA-256 digest of the reviewed OpenTofu plan
- * @param {object} params.spec - Release specification object
- * @returns {void}
- * @throws {TypeError} If apply is false, confirmation string does not match, or Git SHA differs
- */
 export function assertMutatingIntent({ apply, confirm, currentSha, planDigest, spec }) {
   if (apply !== true) {
     throw new TypeError("mutating release commands require --apply");
@@ -266,17 +175,6 @@ export function assertMutatingIntent({ apply, confirm, currentSha, planDigest, s
   }
 }
 
-/**
- * Verifies that the current Git repository working tree is clean and checked out
- * to the exact commit SHA designated in the release specification.
- *
- * @param {object} params - Checkout verification parameters
- * @param {string} params.repoRoot - Path to the root of the Git repository
- * @param {(cmd: string, args: Array<string>, opts?: object) => Promise<object>} params.runCommand - Subprocess command runner
- * @param {object} params.spec - Release specification object
- * @returns {Promise<string>} Verified HEAD commit SHA
- * @throws {TypeError} If working tree is dirty or HEAD does not match spec.git_sha
- */
 export async function verifyReleaseCheckout({ repoRoot, runCommand, spec }) {
   const [head, status] = await Promise.all([
     runCommand("git", ["rev-parse", "HEAD"], { cwd: repoRoot }),
@@ -294,22 +192,6 @@ export async function verifyReleaseCheckout({ repoRoot, runCommand, spec }) {
   return currentSha;
 }
 
-/**
- * Checks a clean checkout at the release SHA, explicit mutation intent, and
- * phase-scoped operator review records. This is an accident-prevention gate;
- * filesystem access and deployment credentials, not these JSON files, authorize the operator.
- *
- * @param {object} params - Authorization parameters
- * @param {boolean} params.apply - Apply flag
- * @param {Array<string>} params.approvalPaths - Paths to approval metadata JSON files
- * @param {string} params.confirm - User-supplied confirmation string
- * @param {Set<string>} params.expectedApprovalNames - Required approval job names
- * @param {string} params.planDigest - Reviewed OpenTofu plan digest
- * @param {string} params.repoRoot - Repository root directory path
- * @param {(cmd: string, args: Array<string>, opts?: object) => Promise<object>} params.runCommand - Subprocess command runner
- * @param {object} params.spec - Release specification object
- * @returns {Promise<Array<object>>} Loaded, verified approval records
- */
 export async function authorizeMutation({
   apply,
   approvalPaths,
@@ -334,12 +216,6 @@ export async function authorizeMutation({
   });
 }
 
-/**
- * Expected post-apply activation outputs for each IaC release phase, expressed
- * as [app_custom_domains_attached, queue_consumers_attached,
- * queue_delivery_paused]. Exported so manifest validation can cross-check
- * redacted plan summaries against the same phase contract the guard enforces.
- */
 export const iacPhaseStates = Object.freeze({
   active: [true, true, false],
   "consumers-paused": [false, true, true],
@@ -347,16 +223,6 @@ export const iacPhaseStates = Object.freeze({
   foundation: [false, false, true],
 });
 
-/**
- * Asserts that the post-apply OpenTofu IaC outputs match the exact expected state
- * for the target release phase (e.g., active, consumers-paused, domains-paused, foundation).
- *
- * @param {object} iac - Parsed post-apply IaC output object
- * @param {string} phase - Target release phase name
- * @param {object} spec - Release specification object
- * @returns {string} Confirmed release phase string
- * @throws {TypeError} If phase is invalid or IaC outputs do not match the phase specification
- */
 export function assertIacState(iac, phase, spec) {
   const expected = iacPhaseStates[phase];
   if (!expected) throw new TypeError(`unknown IaC release phase: ${phase}`);
@@ -378,16 +244,6 @@ export function assertIacState(iac, phase, spec) {
   return phase;
 }
 
-/**
- * Atomically writes an evidence record to a private directory (0o700) using a secure temporary file (0o600)
- * and atomic rename to prevent partial or corrupted reads by concurrent processes.
- *
- * @param {string} outDir - Target directory for evidence files
- * @param {string} filename - Base filename matching `^[a-z0-9][a-z0-9.-]*\.json$`
- * @param {unknown} value - JSON-serializable evidence data
- * @returns {Promise<string>} Absolute destination path of written evidence file
- * @throws {TypeError} If filename pattern is invalid
- */
 export async function writeEvidence(outDir, filename, value) {
   if (!evidenceFilenamePattern.test(filename)) {
     throw new TypeError("evidence filename is invalid");
@@ -395,7 +251,7 @@ export async function writeEvidence(outDir, filename, value) {
   await mkdir(outDir, { mode: 0o700, recursive: true });
   const target = path.join(outDir, filename);
   const temporary = `${target}.${process.pid}.tmp`;
-  await writeFile(temporary, releaseInternals.json(value), { mode: 0o600 });
+  await writeFile(temporary, stableJson(value), { mode: 0o600 });
   await rename(temporary, target);
   return target;
 }

@@ -48,6 +48,7 @@ describe("frontend telemetry boundary", () => {
       retryable: true,
       status: 503,
     });
+    expect(listener).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(detail.detail)).not.toContain("raw-response-secret");
     const fetchSpy = vi.mocked(globalThis.fetch);
     const body = JSON.stringify(fetchSpy.mock.calls[0]?.[1]?.body);

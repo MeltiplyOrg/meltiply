@@ -1,13 +1,3 @@
-// Processor HTTP behavior regression smoke (issue #284).
-// Runs INSIDE the engine image (node + ffprobe + vips) on the shared smoke
-// network so it can (a) drive the engine's private POST /process route and
-// (b) inspect the exact bytes the engine uploaded through the fixture
-// object service. Every assertion here observes real engine output: no mock
-// echo, no header-only trust. A red-green claim is not made here; the parent
-// integration owner runs this harness against a real container build.
-//
-// Env: BASE_URL (engine), FIXTURE_URL (object service), FIXTURE_DIR,
-//      PROCESSOR_JOB_TOKEN. Fixtures and engine uploads share one object dir.
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
@@ -43,10 +33,6 @@ const VIDEO_PROFILE = {
   effort: 4,
 };
 
-/**
- * Fails fast when a required environment variable is absent, so an incorrectly wired
- * harness never silently degrades into skipped assertions.
- */
 function required(name) {
   const value = process.env[name];
   if (!value) {
@@ -56,10 +42,6 @@ function required(name) {
   return value;
 }
 
-/**
- * Declared MIME type per fixture name, mirroring the accepted upload policy so
- * the engine sees the same declared type a real finalize would record.
- */
 const SOURCE_CONTENT_TYPES = {
   "anamorphic-hd.mp4": "video/mp4",
   "anamorphic.mp4": "video/mp4",
@@ -79,10 +61,6 @@ const SOURCE_CONTENT_TYPES = {
   "thin-animation.webp": "image/webp",
 };
 
-/**
- * Extension-based MIME fallback for objects the engine itself wrote, so a
- * re-processed rendition is declared with the same type the platform accepts.
- */
 const EXTENSION_CONTENT_TYPES = {
   ".gif": "image/gif",
   ".jpg": "image/jpeg",
@@ -93,12 +71,6 @@ const EXTENSION_CONTENT_TYPES = {
   ".webp": "image/webp",
 };
 
-/**
- * Magic-byte predicate for each media type the engine may report. An uploaded
- * rendition is checked against the type it claims, so a cross-format regression
- * (an MP4 labelled WebP, a flattened JPEG for an animation) cannot pass as
- * "some media file". Types without a predicate fail the assertion deliberately.
- */
 const MAGIC_FOR_CONTENT_TYPE = {
   "image/gif": (magic) => magic.startsWith("474946383761") || magic.startsWith("474946383961"),
   "image/jpeg": (magic) => magic.startsWith("ffd8ff"),
@@ -110,28 +82,16 @@ const MAGIC_FOR_CONTENT_TYPE = {
 
 const results = [];
 
-/**
- * Records one named assertion outcome; failures are collected so a single run
- * reports every behavioral regression instead of stopping at the first.
- */
 function record(name, ok, detail) {
   results.push({ name, ok, detail });
   console.log(`${ok ? "ok  " : "FAIL"} ${name}${ok ? "" : ` :: ${detail}`}`);
 }
 
-/**
- * Asserts a condition, recording `name` as failed with `detail` when it does
- * not hold. Returns the boolean so callers can guard dependent steps.
- */
 function assert(name, condition, detail) {
   record(name, Boolean(condition), detail ?? "condition was false");
   return Boolean(condition);
 }
 
-/**
- * Executes a binary with argv (never a shell string) and resolves its stdout,
- * rejecting with the exit code so callers can assert on failure.
- */
 function exec(bin, args, options = {}) {
   return new Promise((resolve, reject) => {
     execFile(bin, args, { maxBuffer: 64 * 1024 * 1024, ...options }, (error, stdout, stderr) => {
@@ -146,10 +106,6 @@ function exec(bin, args, options = {}) {
   });
 }
 
-/**
- * Fully probes a media file with ffprobe, decoding every frame when
- * `countFrames` is set so frame counts are measured, never estimated.
- */
 async function probe(file, { countFrames = false } = {}) {
   const args = ["-v", "error", "-print_format", "json", "-show_format", "-show_streams"];
   if (countFrames) args.push("-count_frames");
@@ -157,12 +113,6 @@ async function probe(file, { countFrames = false } = {}) {
   return summarize(parsed);
 }
 
-/**
- * Parses ffprobe's rational `sample_aspect_ratio` ("1:1", "15:16") into a number.
- * Implemented independently of the engine's parser on purpose: the harness must
- * measure the geometry from the container itself rather than trust the engine's
- * reading of the same header. Unknown markers ("0:1", "N/A", absent) are 1.
- */
 function sampleAspectOf(video) {
   const [numerator, denominator = "1"] = String(video?.sample_aspect_ratio ?? "1:1").split(":");
   const top = Number(numerator);
@@ -171,10 +121,6 @@ function sampleAspectOf(video) {
   return top / bottom;
 }
 
-/**
- * Reduces ffprobe JSON to the same media facts the engine reports, so the
- * harness compares engine metadata against an independent measurement.
- */
 function summarize(parsed) {
   const streams = parsed.streams ?? [];
   const video = streams.find((stream) => stream.codec_type === "video");
@@ -206,10 +152,6 @@ function summarize(parsed) {
   };
 }
 
-/**
- * Maps an ffprobe format/codec pair onto the MIME type the engine must report,
- * using the accepted upload policy (jpeg, png, gif, webp, mp4, mov).
- */
 function contentTypeFor(formatName, codecName) {
   const formats = new Set((formatName ?? "").split(","));
   if (formats.has("mov")) return "video/quicktime";
@@ -224,10 +166,6 @@ function contentTypeFor(formatName, codecName) {
   return "application/octet-stream";
 }
 
-/**
- * Computes the sha256 hex digest of a file by streaming it, so a 100 MiB+
- * fixture is never buffered in memory.
- */
 async function sha256(file) {
   const hash = createHash("sha256");
   await new Promise((resolve, reject) => {
@@ -239,10 +177,6 @@ async function sha256(file) {
   return hash.digest("hex");
 }
 
-/**
- * Reads the leading magic bytes of a file to prove the uploaded rendition is a
- * real container of the reported type, independent of ffprobe metadata.
- */
 async function signature(file) {
   const handle = await open(file, "r");
   try {
@@ -254,24 +188,13 @@ async function signature(file) {
   }
 }
 
-/**
- * Lists uploads the fixture object service recorded, newest last, so the
- * harness can assert which object the engine actually wrote.
- */
 async function recordedUploads() {
   const response = await fetch(`${fixtureUrl}/_recorded`);
   if (!response.ok) throw new Error(`fixture listing failed: ${response.status}`);
   return response.json();
 }
 
-/**
- * Creates an engine job payload for a source file, addressing the exact
- * objects through the fixture service rather than any bucket credential.
- */
 function jobFor(name, overrides = {}) {
-  // A complete, valid baseline payload. Every call site overrides only the
-  // field it wants to stress, so an omitted field can never collapse into an
-  // invalid_request for an unrelated reason.
   return {
     asset_id: "00000000-0000-4000-8000-000000000001",
     declared_content_type: SOURCE_CONTENT_TYPES[name] ?? "video/mp4",
@@ -288,13 +211,6 @@ function jobFor(name, overrides = {}) {
   };
 }
 
-/**
- * Reads an engine response over `node:http`.
- *
- * `fetch` would abort a still-progressing long job on its internal headers
- * timeout; this client sets only the socket timeout, which must therefore
- * exceed the engine's own per-job deadline.
- */
 function engineRequest(body, auth) {
   const url = new URL(`${baseUrl}/process`);
   return new Promise((resolve, reject) => {
@@ -329,10 +245,6 @@ function engineRequest(body, auth) {
 }
 
 async function processRequest(payload, { auth = true } = {}) {
-  // Native jobs legitimately run for minutes under emulation (a >100 MB source
-  // takes ~4 minutes), and `fetch`'s undici client caps its wait for response
-  // headers at 300 s with no option to raise it. The socket timeout below must
-  // therefore exceed the engine's own job deadline.
   const { status, text } = await engineRequest(JSON.stringify(payload), auth);
   let body;
   try {
@@ -343,13 +255,6 @@ async function processRequest(payload, { auth = true } = {}) {
   return { body, status };
 }
 
-/**
- * Fully decodes an uploaded image through libvips, proving the stored bytes are
- * pixel-complete rather than merely well-formed headers. `allFrames` loads every
- * frame of an animation, which is the only way to prove a truncated rendition
- * cannot survive; the JPEG and PNG loaders reject the page selector, so a still
- * is copied plainly.
- */
 async function vipsFullyDecodes(file, { allFrames = false } = {}) {
   const target = `${file}.decoded.v`;
   try {
@@ -362,15 +267,6 @@ async function vipsFullyDecodes(file, { allFrames = false } = {}) {
   }
 }
 
-/**
- * Reads the image facts libvips decodes from a file: the loader that read it,
- * one frame's dimensions, the real frame count and the per-frame delays in
- * milliseconds (one entry per frame, including the last). FFmpeg cannot decode
- * an animated WebP in this image at all — it reports "image data not found" —
- * so libvips is the only local source for these facts, and the harness measures
- * them itself rather than trusting the engine's report.
- * Input: a path. Output: the decoded facts, or null when libvips cannot read it.
- */
 async function vipsImageFacts(file) {
   const header = await exec("vipsheader", ["-a", file]).catch(() => null);
   if (header === null) return null;
@@ -380,9 +276,6 @@ async function vipsImageFacts(file) {
     if (match) fields.set(match[1].toLowerCase(), match[2].trim());
   }
   if (!fields.has("vips-loader")) return null;
-  // `width`/`height` are one frame's dimensions; for a loader that reports the
-  // strip instead the first line's `WxH` header is the reliable fallback, and
-  // `page-width`/`page-height` cover loaders that name the frame keys that way.
   const headerMatch = /(\d+)x(\d+)/.exec(header.split("\n")[0] ?? "");
   const firstDim = (key, fallback) => {
     const value = Number(fields.get(key));
@@ -401,15 +294,6 @@ async function vipsImageFacts(file) {
   };
 }
 
-/**
- * Reads an APNG's animation facts through FFmpeg, the only decoder in the image
- * that reads APNG frames (libvips' pngload returns the first frame only). The
- * harness measures the source itself so the engine's report is never trusted:
- * frame count from a counted decode, geometry from the stream, and per-frame
- * delays from `duration_time` so the rendition's pacing is compared against
- * the animation's real timing, last frame included.
- * Input: a path. Output: facts in the `vipsImageFacts` shape, or null.
- */
 async function apngFacts(file) {
   const counted = await probe(file, { countFrames: true }).catch(() => null);
   if (!counted || (counted.frameCount ?? 0) < 1) return null;
@@ -454,18 +338,6 @@ async function apngFacts(file) {
   };
 }
 
-/**
- * Measures the minimum and maximum of an APNG's alpha channel through FFmpeg,
- * the only decoder that reads every frame: `alphaextract` writes one raw gray
- * byte per pixel across the whole animation and the stream is scanned, so a
- * multi-frame file never lands in memory. `{min: 0}` proves real transparency;
- * `{min: 255}` is an opaque animation. The raw plane is written to scratch
- * first, which is acceptable here and only here: the harness measures its own
- * small proof fixture, whereas the engine scans a live stream because a real
- * upload's plane would not fit. Returns null when FFmpeg cannot decode the
- * animation, which fails an assertion instead of reading as "opaque".
- * Input: a path. Output: `{min, max}` measured over all frames, or null.
- */
 async function ffmpegAlphaRange(file) {
   const scratch = `${file}.alpha.raw`;
   try {
@@ -502,36 +374,18 @@ async function ffmpegAlphaRange(file) {
   }
 }
 
-/**
- * Compares two per-frame delay arrays the way a viewer would: the same number
- * of frames, each within a few milliseconds. Missing timing on either side is a
- * failure, never a pass, so a rendition whose pacing cannot be measured cannot
- * be reported as preserving the source's timing.
- */
 function sameDelays(source, candidate, tolerance = 4) {
   if (!Array.isArray(source) || !Array.isArray(candidate)) return false;
   if (source.length === 0 || source.length !== candidate.length) return false;
   return source.every((delay, index) => Math.abs((candidate[index] ?? 0) - delay) <= tolerance);
 }
 
-/**
- * Reads one field from `vipsheader -a` (for example `bands` for an RGBA PNG).
- * Returns null when the field is missing so an absent measurement fails an
- * assertion instead of being read as a falsy zero.
- */
 async function vipsField(file, field) {
   const output = await exec("vipsheader", ["-a", file]).catch(() => "");
   const match = new RegExp(`^${field}:\\s*(\\S+)`, "m").exec(output);
   return match ? match[1] : null;
 }
 
-/**
- * Measures the minimum and maximum of a file's alpha band through libvips, so
- * transparency is proven from pixel values instead of from the mere presence of
- * a fourth band: `{min: 0, max: 255}` is genuinely partial transparency,
- * `{min: 255}` an opaque RGBA frame. Returns null when the file has no readable
- * alpha band, which fails an assertion rather than reading as "opaque".
- */
 async function alphaRange(file) {
   const target = `${file}.alpha.v`;
   try {
@@ -554,10 +408,6 @@ async function alphaRange(file) {
   }
 }
 
-/**
- * Proves a video/animated output decoded every frame end to end by running a
- * null-output decode pass; a corrupt rendition cannot survive it.
- */
 async function fullyDecodes(file) {
   try {
     await exec("ffmpeg", [
@@ -605,7 +455,6 @@ async function main() {
     }
   }
 
-  // --- health + authentication -------------------------------------------------
   const health = await fetch(`${baseUrl}/healthz`);
   const healthBody = await health.json();
   assert(
@@ -638,7 +487,6 @@ async function main() {
     JSON.stringify(unauthorized.body),
   );
 
-  // --- bounded request policy --------------------------------------------------
   const oversized = await processRequest(
     jobFor("short.mp4", {
       expected_size: 900 * 1024 * 1024,
@@ -663,7 +511,6 @@ async function main() {
     JSON.stringify(badProfile.body),
   );
 
-  // --- corrupt / unsupported input --------------------------------------------
   const scratch = path.join(objectsDir, "corrupt");
   await mkdir(scratch, { recursive: true });
   const corruptVideo = path.join(scratch, "corrupt.mp4");
@@ -730,7 +577,6 @@ async function main() {
     JSON.stringify(mismatchResult.body),
   );
 
-  // --- still image optimization ------------------------------------------------
   const photo = await runJob({
     job_id: "smoke-photo",
     max: IMAGE_PROFILE.max_width,
@@ -768,11 +614,6 @@ async function main() {
     );
   }
 
-  // --- transparency ------------------------------------------------------------
-  // A JPEG-first profile must still refuse to flatten real transparency, while an
-  // RGBA source whose alpha band is fully opaque is a legitimate JPEG subject.
-  // Each fixture's own alpha range is measured before the engine ever sees it: a
-  // fourth band alone proves nothing, the decoded pixel values decide.
   const transparentAlpha = await alphaRange(path.join(objectsDir, "photo-alpha.png"));
   assert(
     "the transparent fixture has partially transparent pixels, not just a fourth band",
@@ -848,12 +689,6 @@ async function main() {
     record("an opaque RGBA source produced a rendition", false, JSON.stringify(opaque.result));
   }
 
-  // --- animated images ---------------------------------------------------------
-  // Measured with libvips, not ffprobe: FFmpeg cannot decode an animated WebP in
-  // this image, so frame count and pacing have to come from the loader that also
-  // writes the renditions. The per-frame delay array is what proves the timing
-  // survived — a rendition can keep every frame and still play at the wrong
-  // speed, which frame count alone would happily accept.
   for (const name of ["animation-alpha.png", "animation.gif", "animation.png", "animation.webp"]) {
     const animated = await runJob({
       job_id: `smoke-${name}`,
@@ -862,9 +697,6 @@ async function main() {
       profile: IMAGE_PROFILE,
     });
     if (!animated.ok) continue;
-    // APNG sources are measured through FFmpeg because libvips reads only their
-    // first frame; everything else is measured through the loader that also
-    // writes the renditions.
     const sourceInfo = name.endsWith(".png")
       ? await apngFacts(path.join(objectsDir, name))
       : await vipsImageFacts(path.join(objectsDir, name));
@@ -878,9 +710,6 @@ async function main() {
       sourceInfo?.delays?.length === sourceInfo?.frameCount,
       JSON.stringify(sourceInfo?.delays),
     );
-    // An APNG source must always produce a rendition: the engine normalizes it
-    // to verified animated WebP, and an opaque animation is not an excuse to
-    // keep the unprocessed PNG.
     if (name.endsWith(".png")) {
       assert(
         `${name} produced a verified animated rendition`,
@@ -918,17 +747,7 @@ async function main() {
         ) <= 0.05,
         `${animated.result.media.duration_seconds}s vs ${sourceInfo.delays.reduce((total, delay) => total + delay, 0) / 1000}s`,
       );
-      // Alpha on these fixtures is the opposite of an alpha-retention claim:
-      // they are generated from an opaque rgb24 pattern, so a rendition must
-      // not invent or destroy transparency. A band count alone cannot see that
-      // (libvips decodes palette GIFs into four bands regardless of content), so
-      // the decoded alpha plane decides — no alpha band, or a fully opaque one,
-      // is correct; partially transparent pixels would mean the rendition
-      // changed content the source never had. The APNG fixtures carry their own
-      // measured-alpha assertions below.
       if (!name.endsWith(".png")) {
-        // The band count only decides whether a plane exists to measure; when
-        // one does, an unreadable plane fails rather than reading as opaque.
         const renditionAlpha = outputInfo.bands >= 4 ? await alphaRange(animated.uploaded) : null;
         assert(
           `${name} rendition never introduces transparency the source lacks`,
@@ -942,8 +761,6 @@ async function main() {
         "multi-frame vips copy failed on the uploaded rendition",
       );
       if (name === "animation-alpha.png") {
-        // The transparent source must retain real transparency: decoded alpha
-        // spanning 0..255 on the rendition, not just a fourth band on paper.
         const sourceAlpha = await ffmpegAlphaRange(path.join(objectsDir, name));
         const renditionAlpha = await alphaRange(animated.uploaded);
         assert(
@@ -958,11 +775,6 @@ async function main() {
         );
       }
       if (name === "animation.png") {
-        // The opaque RGBA source may legitimately lose its alpha band; what is
-        // proven here is that the engine measured real opacity rather than
-        // assuming it — the fixture is asserted opaque on its own pixels, and
-        // the rendition is asserted opaque on its decoded pixels too: either
-        // no alpha band at all, or a band whose minimum is fully opaque.
         const sourceAlpha = await ffmpegAlphaRange(path.join(objectsDir, name));
         const renditionAlpha = outputInfo.bands >= 4 ? await alphaRange(animated.uploaded) : null;
         assert(
@@ -986,10 +798,6 @@ async function main() {
     }
   }
 
-  // --- tall animation bounds ---------------------------------------------------
-  // A frame that already fits in width but overflows the height bound must
-  // still be scaled: checking only the width would copy the strip unresized
-  // and stamp a page-height that describes frames which do not exist.
   const tall = await runJob({
     job_id: "smoke-tall-animation",
     max: 2048,
@@ -1037,12 +845,6 @@ async function main() {
     );
   }
 
-  // --- animation frame-grid rounding ------------------------------------------
-  // Halving 8192x203 yields a 101.5px frame height, which is 102 px on the
-  // nearest-integer grid libvips writes but 100 px on an even-pixel grid. If
-  // encoder and verifier ever disagree on the grid, the rendition is measured
-  // against a size it was never written at and discarded — a real bug, not a
-  // missing capability, so the fixture asserts the produced size exactly.
   const thin = await runJob({
     job_id: "smoke-thin-animation",
     max: 4096,
@@ -1092,12 +894,6 @@ async function main() {
     );
   }
 
-  // --- EXIF orientation --------------------------------------------------------
-  // The source is a 3000x4000 portrait carrying a real EXIF Orientation=6 tag,
-  // so its display geometry is 4000x3000. The rendition must therefore be fitted
-  // on those display axes with the rotation baked into the pixels: stripping the
-  // tag without turning the image would silently rotate the creator's photo back
-  // to landscape.
   const oriented = await runJob({
     job_id: "smoke-oriented",
     max: 2048,
@@ -1147,10 +943,6 @@ async function main() {
     record("an oriented source produced a rendition", false, JSON.stringify(oriented.result));
   }
 
-  // --- profile bounds ----------------------------------------------------------
-  // photo.jpg is 4000x3000, far beyond the 2048 bound this job asks for, so the
-  // only compliant rendition is a downscaled one. Nothing may be upscaled, and
-  // the display aspect ratio has to survive the fit.
   const bounded = await runJob({
     job_id: "smoke-photo-bounded",
     max: 2048,
@@ -1187,15 +979,6 @@ async function main() {
     );
   }
 
-  // --- no raw fallback ---------------------------------------------------------
-  // Two ways a job can end with no usable rendition. Neither may be reported as a
-  // success with the original handed back: a profile that allows no type able to
-  // carry this animation is unsupported, and a verified rendition that does not
-  // fit the reserved capacity is a real failure. Both must leave the store
-  // untouched, so an unprocessed source can never be mistaken for a processed one.
-  // Driven as raw requests rather than through runJob, because these jobs are
-  // expected to fail and a helper that records "job succeeds" would turn an
-  // expected failure into a suite failure.
   const beforeFailedUploads = (await recordedUploads()).map((entry) => entry.key);
   const animationSize = (await stat(path.join(objectsDir, "animation.gif"))).size;
   const noApplicableType = await processRequest({
@@ -1233,7 +1016,6 @@ async function main() {
     `${JSON.stringify(afterFailedUploads)} vs ${JSON.stringify(beforeFailedUploads)} before`,
   );
 
-  // --- video normalization -----------------------------------------------------
   for (const name of ["short.mp4", "high10.mp4", "bloated.mp4", "long.mp4", "long.mov"]) {
     const video = await runJob({
       job_id: `smoke-${name}`,
@@ -1243,9 +1025,6 @@ async function main() {
     });
     if (!video.ok) continue;
     const sourceInfo = await probe(path.join(objectsDir, name));
-    // An `original_compatible` verdict uploads nothing: the verified source is
-    // the result, so the assertions must be made against the fixture's own
-    // decoded facts and the absence of an output object, never a missing file.
     if (video.result.output === null) {
       assert(
         `${name} original is reported compatible only when it already is`,
@@ -1271,9 +1050,6 @@ async function main() {
         `${video.uploaded} unexpectedly exists`,
       );
       if (name === "long.mp4") {
-        // The no-benefit path is reached only after the lossless remux was
-        // produced, measured and found not smaller; the assertions that make
-        // this fixture meaningful still apply to the verified source itself.
         assert(
           "long.mp4 source exceeds the 100 MB short-video service input ceiling",
           video.result.input.bytes > 100 * 1024 * 1024,
@@ -1332,10 +1108,6 @@ async function main() {
       "size mismatch between engine report and stored object",
     );
     if (name === "high10.mp4") {
-      // HTTP strong ETags are quoted; R2 binding etags are not. Commit checks
-      // must compare the same opaque identifier rather than HTTP syntax, so the
-      // assertion uses the tag the object service actually issued for this
-      // upload — not a value the harness can derive from the file itself.
       const recorded = (await recordedUploads()).find(
         (entry) => entry.key === "rendition-smoke-high10.mp4",
       );
@@ -1344,10 +1116,6 @@ async function main() {
         recorded !== undefined && video.result.output.etag === recorded.etag.replace(/^"|"$/g, ""),
         `engine ${video.result.output.etag} vs origin ${recorded?.etag}`,
       );
-      // A 10-bit H.264 source is not browser-ready, so the verified rendition
-      // must be a re-encoded 8-bit 4:2:0 stream with AAC audio — proven from
-      // the uploaded bytes, not from the engine's report — even though the
-      // normalized output is larger than the high-efficiency original.
       assert(
         "high10.mp4 source really is a 10-bit H.264 stream",
         sourceInfo.codecs === "h264" &&
@@ -1369,9 +1137,6 @@ async function main() {
       );
     }
     if (name === "bloated.mp4") {
-      // A compliant stream padded with removable metadata is still worth
-      // optimizing: the remux drops the padding and must survive as the
-      // uploaded object, proven from its bytes and size rather than a report.
       assert(
         "bloated.mp4 source carries removable container padding",
         (await stat(path.join(objectsDir, name))).size - video.result.output.bytes > 512 * 1024,
@@ -1404,11 +1169,6 @@ async function main() {
     }
   }
 
-  // --- non-square source pixels ------------------------------------------------
-  // Real anamorphic MP4s: the sample aspect ratio comes from the container's
-  // pasp box, the rendition must come back on square pixels, and the display
-  // aspect ratio decoded from the uploaded bytes must still be the one the
-  // source displays at.
   for (const name of ["anamorphic.mp4", "anamorphic-hd.mp4"]) {
     const video = await runJob({
       job_id: `smoke-${name}`,
@@ -1442,8 +1202,6 @@ async function main() {
       outputInfo.sampleAspect === 1,
       `sample aspect ratio ${outputInfo.sampleAspectRatio}`,
     );
-    // Even dimensions can express a display aspect ratio only to the nearest
-    // pixel, so one pixel of width or height is the tolerance used here.
     const darTolerance = sourceInfo.displayAspect * (1 / outputInfo.width + 1 / outputInfo.height);
     assert(
       `${name} rendition preserves the source display aspect ratio`,
@@ -1474,11 +1232,6 @@ async function main() {
     );
   }
 
-  // --- compliant no-benefit path ------------------------------------------------
-  // The source is the anamorphic job's own rendition: it is guaranteed to exist
-  // (its job asserted the upload) and it is a verified compliant H.264/AAC MP4
-  // the engine itself produced, so a second pass must report the original as
-  // compatible instead of manufacturing another rendition.
   const uploadsBeforeSecondPass = (await recordedUploads()).map((entry) => entry.key);
   const secondPass = await runJob({
     job_id: "smoke-no-benefit",
@@ -1508,22 +1261,6 @@ async function main() {
     `${JSON.stringify(secondPassUploads)} new objects`,
   );
 
-  // --- replay lifecycle ----------------------------------------------------------
-  // A redelivered job id is never answered from the dedupe window alone: the
-  // Worker clears an unrecorded staging object before re-invoking, so an
-  // "optimized" verdict is distrusted and the job re-executes. The create-only
-  // PUT then proves what this delivery produced — a deleted object is recreated
-  // by the fresh upload, and any pre-existing object answers 412, after which a
-  // recomputed digest matching the recorded one restores the verdict while a
-  // differing one is a terminal conflict. The engine never reads the stored
-  // object — its grant is create-only — so telling its own bytes from a foreign
-  // impostor of the same size is the Worker's stored-digest commit check, which
-  // the swap scenario below exercises on real measured digests. None of this
-  // trusts the engine's report: deletes land through the object service, seeded
-  // objects are real files on the shared store, and stored digests are measured
-  // from the bytes themselves. The bounded rendition is the subject throughout:
-  // it exists, its exact job payload is available verbatim, and it is small
-  // enough to regenerate repeatedly under emulation.
   const boundedKey = "rendition-smoke-photo-bounded";
   const boundedFile = path.join(objectsDir, boundedKey);
   const boundedOutput = bounded.ok ? bounded.result.output : null;
@@ -1537,13 +1274,6 @@ async function main() {
     const uploadsFor = async (key) =>
       (await recordedUploads()).filter((entry) => entry.key === key);
 
-    // (1) The object the verdict recorded still exists: the redelivery
-    // re-executes, the create-only PUT refuses with 412, and the recomputed
-    // rendition's digest matching the recorded one restores the verdict. The
-    // engine never compared the stored bytes — it cannot read them — so the
-    // digest assertions below measure the stored object to confirm this
-    // fixture's bytes really are the rendition the verdict names, and that no
-    // second object was written.
     const replay = await processRequest(bounded.payload);
     const storedSha = await sha256(boundedFile);
     assert(
@@ -1562,10 +1292,6 @@ async function main() {
       JSON.stringify(await uploadsFor(boundedKey)),
     );
 
-    // (2) The Worker's staging-clear deleted the recorded object: the same
-    // redelivery must execute for real and recreate the bytes at the same
-    // key. A replayed verdict here would commit a rendition that does not
-    // exist; a refused upload would leave a recorded job with no output.
     const cleared = await fetch(`${fixtureUrl}/objects/${boundedKey}`, {
       method: "DELETE",
     });
@@ -1600,11 +1326,6 @@ async function main() {
       "vips copy failed on the regenerated rendition",
     );
 
-    // (3) A fresh job id granted a key that already holds a byte-identical
-    // object: without a distrusted verdict there is nothing to prove the
-    // bytes against, so the create-only conflict is terminal. Safe means
-    // refused — the engine must neither adopt the existing object into its
-    // verdict nor overwrite it.
     const identicalJob = await jobPayload(
       "photo.jpg",
       "smoke-identical-collision",
@@ -1627,12 +1348,6 @@ async function main() {
       `stored ${await sha256(boundedFile)} vs ${regeneratedSha}`,
     );
 
-    // (4) The maximal-confusion impostor: a foreign object of the exact same
-    // size and JPEG signature the real rendition has, differing only in
-    // content. Only the stored bytes can tell it apart, which is precisely
-    // the check the Worker's commit path performs — so the smoke proves the
-    // impostor fails it on real measured digests rather than asserting a
-    // shape the engine's create-only grant cannot see.
     const pristine = await readFile(boundedFile);
     const pristineSha = createHash("sha256").update(pristine).digest("hex");
     const foreignKey = "rendition-smoke-foreign-collision";
@@ -1669,14 +1384,6 @@ async function main() {
       (await sha256(foreignFile)) === impostorSha,
       `stored ${await sha256(foreignFile)} vs ${impostorSha}`,
     );
-    // (5) The produced-vs-recorded gap: the recorded key now holds foreign
-    // bytes of the same size. The engine's create-only grant cannot read the
-    // object, so it proves only that this delivery produced the recorded
-    // bytes — the verdict honestly replays — while the Worker-side commit
-    // check (stored digest vs verdict digest) is what refuses the impostor.
-    // The smoke asserts both halves on the real stored bytes: the engine's
-    // replay names the produced digest, and the stored digest does not match
-    // it, so the verdict must never reach the Asset.
     const swapped = Buffer.from(pristine);
     swapped[Math.floor(swapped.length / 2)] ^= 0xff;
     await writeFile(boundedFile, swapped);
@@ -1700,11 +1407,6 @@ async function main() {
       `stored ${await sha256(boundedFile)} vs ${swappedSha}`,
     );
 
-    // (6) A duplicate delivery while the job is still executing would race a
-    // second rendition PUT onto the same deterministic key, so the engine
-    // answers it retryable `busy` — or, if it lands only after the verdict
-    // was recorded, replays that verdict. What must never happen is a second
-    // fresh execution or a 412 surfacing as terminal failure.
     const raceJob = await jobPayload("photo.jpg", "smoke-race", IMAGE_PROFILE, 2048);
     const raceKey = "rendition-smoke-race";
     const [first, second] = await Promise.all([processRequest(raceJob), processRequest(raceJob)]);
@@ -1764,12 +1466,6 @@ async function main() {
   }
 }
 
-/**
- * Builds the exact job payload `runJob` sends for a fixture: measured size and
- * checksum, the derived rendition object key, and a reservation mirroring the
- * engine's ceiling. Returned alongside the outcome so the replay lifecycle can
- * re-deliver the byte-identical payload a queue retry would carry.
- */
 async function jobPayload(name, job_id, profile, max) {
   const source = path.join(objectsDir, name);
   const size = (await stat(source)).size;
@@ -1781,20 +1477,12 @@ async function jobPayload(name, job_id, profile, max) {
     expected_size: size,
     input_url: `${fixtureUrl}/objects/${name}`,
     job_id,
-    // The reservation mirrors the engine's 512 MiB ceiling exactly; a job above
-    // it is rejected as invalid_request, so the smoke never grants beyond it.
     maximum_output_bytes: Math.min(512 * 1024 * 1024, Math.max(size * 2, 32 * 1024 * 1024)),
     output_url: `${fixtureUrl}/objects/rendition-${job_id}`,
     profile: { ...profile, max_height: max, max_width: max },
   };
 }
 
-/**
- * Runs one engine job for a fixture and, when the engine uploaded a rendition,
- * asserts the upload landed at the exact granted key with matching size/digest.
- * Returns `{ ok: false }` so a failed job does not cascade into byte assertions.
- * Returns the submitted `payload` for redelivery assertions.
- */
 async function runJob({ job_id, name, profile, max }) {
   const payload = await jobPayload(name, job_id, profile, max);
   const response = await processRequest(payload);

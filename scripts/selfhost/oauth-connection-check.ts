@@ -1,6 +1,3 @@
-// Run against the disposable seeded full-gate database with the state Worker built. Real API,
-// SQLite Durable Object state, encryption and PostgreSQL persistence; only actor
-// authentication and external provider HTTP responses are controlled here.
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
@@ -44,7 +41,6 @@ const refreshRequests = { tiktok: 0, youtube: 0 };
 const requested = new Set<string>();
 let providerCallCount = 0;
 
-/** Serves first-party documented wire contracts, rejecting unknown requests instead of falling back to live services. */
 const providerFetch: typeof fetch = async (input, init = {}) => {
   providerCallCount++;
   const url = new URL(input.toString());
@@ -263,7 +259,6 @@ const app = createApiApp({
 });
 const profiles: string[] = [];
 
-/** Issues real API requests; schema decoding and assertions below fail closed on unexpected responses. */
 async function request(path: string, method = "GET", body?: unknown, key = randomUUID()) {
   return app.request(
     path,
@@ -282,7 +277,6 @@ async function request(path: string, method = "GET", body?: unknown, key = rando
   );
 }
 
-/** Starts real authorization with account choice and validates provider-specific redirect/PKCE settings. */
 async function startAuthorization(platform: Platform) {
   const start = await request(`/api/v1/platforms/${platform}/connect`);
   assert.equal(start.status, 200);
@@ -300,7 +294,6 @@ async function startAuthorization(platform: Platform) {
   return authorization;
 }
 
-/** Completes the actual OAuth state round trip; authorization cannot persist a Channel before explicit assignment. */
 async function authorize(platform: Platform) {
   const authorization = await startAuthorization(platform);
   const callback = `/api/v1/platforms/${platform}/callback?${new URLSearchParams({ state: z.string().parse(authorization.searchParams.get("state")), code: "controlled-code" })}`;
@@ -320,12 +313,6 @@ async function authorize(platform: Platform) {
   return selectionId;
 }
 
-/**
- * Exercises the real automation refresh consumer against encrypted persisted
- * credentials, including TikTok rotation, Google's omitted replacement, and
- * stale queue replay. Only external HTTP is controlled; no token-persistence
- * implementation or encryption boundary is mocked.
- */
 async function refreshConnectedAccount(platform: "tiktok" | "youtube", id: string) {
   const pool = systemPoolFor(env);
   const eventId = randomUUID();
@@ -379,7 +366,6 @@ async function refreshConnectedAccount(platform: "tiktok" | "youtube", id: strin
   console.log(`${platform}: encrypted refresh persistence and stale queue replay passed`);
 }
 
-/** Checks consent denial and forged-state callbacks never exchange tokens or stage accounts. */
 async function rejectInvalidAuthorization(platform: "tiktok" | "youtube") {
   const authorization = await startAuthorization(platform);
   const state = z.string().parse(authorization.searchParams.get("state"));
@@ -401,11 +387,6 @@ async function rejectInvalidAuthorization(platform: "tiktok" | "youtube") {
   assert.equal(providerCallCount, callsBefore);
 }
 
-/**
- * Exercises default/blank and explicit TikTok media prefixes through real Direct Post
- * validation. Only TikTok HTTP is controlled: the accepted media URL must reach init,
- * while the other origin must fail before any additional provider request.
- */
 async function verifyTikTokMediaConfiguration() {
   const defaultUrl = "https://api.oauth-smoke.example.test/api/v1/provider-media/smoke/video.mp4";
   const overrideUrl = "https://media.oauth-smoke.example.test/verified/video.mp4";
@@ -596,8 +577,6 @@ try {
       connected.map((account) => account.platform_user_id),
       [expectedIds[platform]],
     );
-    // TikTok and YouTube's fresh grants are already within the API's seven-day
-    // expiry-warning window; both statuses remain usable for publishing.
     assert.ok(
       connected.every(
         (account) =>

@@ -11,12 +11,6 @@ const localApiOrigin = process.env.MELTIPLY_E2E_API_BASE_URL?.trim() || "http://
 const reuseExistingServers = process.env.MELTIPLY_E2E_REUSE_SERVERS === "1";
 const publicPreview = process.env.MELTIPLY_E2E_START_PUBLIC === "1";
 const publicOrigin = "http://127.0.0.1:4321";
-// Opt-in acceptance mode boots the controlled-Provider acceptance Workers instead of
-// the production local entries. Controlled journeys (publication and channel-scoped
-// composer scenarios) need the controlled Provider on the far side of the Provider
-// boundary and the fixture endpoints mounted by `workers/api/test-support`. Default
-// production test runs keep `dev-backend.sh` and the production Worker mains, where
-// fixture endpoints are not mounted.
 const acceptanceMode =
   process.env.MELTIPLY_E2E_PUBLICATION === "1" || process.env.MELTIPLY_E2E_ACCEPTANCE === "1";
 
@@ -24,12 +18,6 @@ if (stagingBaseUrl && !stagingStorageState) {
   throw new Error("STAGING_E2E_STORAGE_STATE is required when STAGING_E2E_BASE_URL is set.");
 }
 
-/**
- * Title patterns matching composer journeys that exercise controlled-Provider Channels.
- * The production Worker stack (`dev-backend.sh`) does not mount the test fixture
- * endpoints (`/controlled-provider/v1/**`), so default production test runs must
- * exclude these scenarios to avoid provisioning 404s.
- */
 const controlledComposerPatterns = [
   /recovers independent profile copies and retries only unfinished publishing/,
   /replaces one attachment without changing the count, order, or channel selections/,
@@ -94,8 +82,6 @@ const acceptanceProjects = [
     use: { ...devices["Desktop Chrome"] },
   },
   {
-    // First-run onboarding and improvement-reporting consent, including the
-    // controlled reporting egress receiver the journey starts itself.
     name: "onboarding",
     testMatch: "**/onboarding-reporting.spec.ts",
     use: { ...devices["Desktop Chrome"] },
@@ -145,10 +131,6 @@ export default defineConfig({
     ? undefined
     : [
         {
-          // The acceptance launcher boots the `workers/*/test-support` entries,
-          // which are the production entries plus the controlled Provider on the
-          // existing dependency seam. Nothing else in this config changes, so a
-          // default run still boots the production Worker mains.
           command: acceptanceMode
             ? "bash scripts/cloudflare-local/dev-acceptance-backend.sh"
             : "bash scripts/cloudflare-local/dev-backend.sh",
@@ -159,18 +141,11 @@ export default defineConfig({
             WRANGLER_DEV_APP_URL: frontendOrigin,
           },
           reuseExistingServer: reuseExistingServers,
-          // Let the gateway forward shutdown to its detached Wrangler group;
-          // killing only the gateway leaves inherited output pipes open.
           gracefulShutdown: { signal: "SIGTERM", timeout: 5_000 },
-          // An acceptance boot may have to build the media-processor Container
-          // image on first use, which the production local stack also needs but
-          // has already paid for in a warm Docker cache.
           timeout: acceptanceMode ? 600_000 : 120_000,
           url: `${localApiOrigin}/api/v1/health`,
         },
         {
-          // Browser snapshots and Lighthouse must exercise the same production
-          // assets; development-only launchers are not part of that surface.
           command: `bun run --cwd frontend/app build:production && bun run --cwd frontend/app --no-install vp preview --host 127.0.0.1 --port ${frontendPort} --strictPort`,
           cwd: repositoryRoot,
           env: {

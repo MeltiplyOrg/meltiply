@@ -14,6 +14,7 @@ import type { AutomationEnv } from "../src/env";
 import type { OutboxMessage } from "../src/messages";
 import { providerMediaRetrievalLeaseSeconds } from "../src/provider-media";
 import { runSystemTransaction } from "./system-transaction";
+import { fakePlatformCapability } from "./test-doubles";
 
 const connectionString = process.env.MELTIPLY_DATABASE_TEST_URL;
 if (!connectionString) {
@@ -21,9 +22,6 @@ if (!connectionString) {
 }
 const describeIntegration = describe;
 
-// The seeded Alpha workspace owns the connected YouTube Channel these
-// publication fixtures use; brand_profile_id is mandatory and the composite
-// foreign keys require same-profile references throughout.
 const organizationId = "20000000-0000-4000-8000-000000000001";
 const seededAlphaProfileId = "a0000000-0000-4000-8000-000000000001";
 const seededChannelId = "50000000-0000-4000-8000-000000000001";
@@ -46,14 +44,6 @@ const firstRenditionKey = `${organizationId}/${firstAssetId}/rendition-webp`;
 const secondObjectKey = `${organizationId}/${secondAssetId}/original`;
 const secondRenditionKey = `${organizationId}/${secondAssetId}/rendition-webp`;
 
-// Capability-driven selection needs a Platform whose accepted media types
-// exclude the smallest ready object: Instagram takes JPEG and PNG, never the
-// WEBP rendition the image profile produces. `mixedAssetId` holds an approved
-// JPEG original behind a ready reference beside that smaller WEBP, so only the
-// original is deliverable; `jpegAssetId` holds an unreferenced JPEG original
-// beside an approved JPEG rendition, so only the rendition is deliverable. One
-// publication over both resolves one attachment to a verified original and the
-// next to an optimization output.
 const mixedAssetId = "9b000000-0000-4000-8000-000000000003";
 const mixedWebpObjectId = "9c000000-0000-4000-8000-000000000005";
 const mixedJpegObjectId = "9c000000-0000-4000-8000-000000000006";
@@ -68,12 +58,6 @@ const jpegRenditionId = "9d000000-0000-4000-8000-000000000008";
 const jpegOriginalKey = `${organizationId}/${jpegAssetId}/original`;
 const jpegRenditionKey = `${organizationId}/${jpegAssetId}/rendition-jpeg`;
 
-// An Asset in a lifecycle state processing has not approved can still hold a
-// ready object behind a ready rendition reference. Each state below must keep
-// that object out of a publication. Only attachable non-ready states appear:
-// the attachment trigger rejects 'deleting'/'deleted' media outright and the
-// delete-claim guard bars an attached Asset from entering them, so a
-// 'deleting' attachment cannot exist in a Post to be claimed.
 const unapprovedAssets = [
   {
     assetId: "9b000000-0000-4000-8000-000000000004",
@@ -102,11 +86,6 @@ const mixedDistributionId = "9e000000-0000-4000-8000-000000000006";
 const unapprovedPostId = "9a000000-0000-4000-8000-000000000005";
 const unapprovedDistributionId = "9e000000-0000-4000-8000-000000000007";
 const instagramAccountId = "50000000-0000-4000-8000-000000000002";
-// One Distribution per (Post, Channel): distributions_post_platform_account_unique
-// enforces it, so the partial-selection target and the rejected sibling target
-// in the same Post use distinct Providers. The canonical seeded YouTube account
-// owns the Post's YouTube target, leaving Threads for the partial target and
-// Facebook for the rejection.
 const partialChannelId = "50000000-0000-4000-8000-000000000003";
 const rejectedChannelId = "50000000-0000-4000-8000-000000000004";
 const distributionIds = [
@@ -144,15 +123,11 @@ const env = {
   VERSION: "1.0.0-target.0",
 } satisfies AutomationEnv;
 
-/**
- * Registers a publish-capable YouTube adapter that accepts one ordered media
- * item, so these fixtures exercise the real registry/capability checks rather
- * than a stubbed publish call.
- */
 function youtubeRegistry(publish: NonNullable<ProviderAdapter["publish"]>): ProviderRegistry {
   const registry = new ProviderRegistry();
   registry.register("youtube", {
     capability: {
+      ...fakePlatformCapability("youtube"),
       accepted_mime_types: ["image/webp", "video/mp4"],
       analytics: false,
       asset_types: ["image", "video"],
@@ -173,21 +148,15 @@ function youtubeRegistry(publish: NonNullable<ProviderAdapter["publish"]>): Prov
     publish,
     retryPolicy: { baseDelaySeconds: 15, maxAttempts: 5, maxDelaySeconds: 300 },
     transferModes: ["remote_ingest"],
-  } as unknown as ProviderAdapter);
+  });
   return registry;
 }
 
-/**
- * Registers a publish-capable Instagram adapter mirroring the production
- * capability: JPEG and PNG stills only, so a ready WEBP rendition is
- * undeliverable and only an approved JPEG object can be frozen for it. The
- * capability is real — the claim reads it through the registry, so a selection
- * that ignored it would freeze the WEBP and fail.
- */
 function instagramRegistry(publish: NonNullable<ProviderAdapter["publish"]>): ProviderRegistry {
   const registry = new ProviderRegistry();
   registry.register("instagram", {
     capability: {
+      ...fakePlatformCapability("instagram"),
       accepted_mime_types: ["image/jpeg", "image/png", "video/mp4"],
       analytics: false,
       asset_types: ["image", "video"],
@@ -208,19 +177,15 @@ function instagramRegistry(publish: NonNullable<ProviderAdapter["publish"]>): Pr
     publish,
     retryPolicy: { baseDelaySeconds: 15, maxAttempts: 5, maxDelaySeconds: 300 },
     transferModes: ["remote_ingest"],
-  } as unknown as ProviderAdapter);
+  });
   return registry;
 }
 
-/**
- * Registers a publish-capable Threads adapter mirroring the production
- * capability's stills support, so a frozen media object can reach the Provider
- * and only the Provider's own answer can reject it.
- */
 function threadsRegistry(publish: NonNullable<ProviderAdapter["publish"]>): ProviderRegistry {
   const registry = new ProviderRegistry();
   registry.register("threads", {
     capability: {
+      ...fakePlatformCapability("threads"),
       accepted_mime_types: ["image/jpeg", "image/png", "image/webp", "video/mp4"],
       analytics: false,
       asset_types: ["image", "video"],
@@ -241,18 +206,15 @@ function threadsRegistry(publish: NonNullable<ProviderAdapter["publish"]>): Prov
     publish,
     retryPolicy: { baseDelaySeconds: 15, maxAttempts: 5, maxDelaySeconds: 300 },
     transferModes: ["remote_ingest"],
-  } as unknown as ProviderAdapter);
+  });
   return registry;
 }
 
-/**
- * Registers a publish-capable Facebook adapter for the rejection fixture: it
- * accepts the frozen stills shape so the Provider call is the failure point.
- */
 function facebookRegistry(publish: NonNullable<ProviderAdapter["publish"]>): ProviderRegistry {
   const registry = new ProviderRegistry();
   registry.register("facebook", {
     capability: {
+      ...fakePlatformCapability("facebook"),
       accepted_mime_types: ["image/jpeg", "image/png", "image/webp", "video/mp4"],
       analytics: false,
       asset_types: ["image", "video"],
@@ -273,19 +235,10 @@ function facebookRegistry(publish: NonNullable<ProviderAdapter["publish"]>): Pro
     publish,
     retryPolicy: { baseDelaySeconds: 15, maxAttempts: 5, maxDelaySeconds: 300 },
     transferModes: ["remote_ingest"],
-  } as unknown as ProviderAdapter);
+  });
   return registry;
 }
 
-/**
- * The external bytes each seeded object stands for, keyed by object key.
- *
- * The resolver hands the Provider a real remote-ingest descriptor for the
- * frozen object rather than echoing the snapshot back, so an assertion on the
- * published media proves which stored object was selected rather than what the
- * fixture already recorded. An object with no entry here is a real failure:
- * the resolver throws instead of inventing a delivery.
- */
 const storedBytes: Record<string, { bytes: number; mediaType: string }> = {
   [firstObjectKey]: { bytes: 4096, mediaType: "image/webp" },
   [firstRenditionKey]: { bytes: 2048, mediaType: "image/webp" },
@@ -297,11 +250,6 @@ const storedBytes: Record<string, { bytes: number; mediaType: string }> = {
   [jpegRenditionKey]: { bytes: 3072, mediaType: "image/jpeg" },
 };
 
-/**
- * Resolves external delivery bytes for a frozen object from the stored-byte
- * fixture, so the descriptor the Provider receives is derived from the object
- * that was actually selected.
- */
 function byteResolver() {
   return vi.fn(async (request: { contentType: string; fileSize: number; objectKey: string }) => {
     const stored = storedBytes[request.objectKey];
@@ -317,7 +265,6 @@ function byteResolver() {
   });
 }
 
-/** Signs a remote-ingest URL for the object the snapshot froze. */
 function mediaResolver() {
   return vi.fn(async (request: { contentType: string; fileSize: number; objectKey: string }) => ({
     contentType: request.contentType,
@@ -388,21 +335,6 @@ async function mediaHolds(distributionId: string): Promise<HoldRow[]> {
   });
 }
 
-/**
- * Creates the Posts, their saved per-Channel targets, ordered attachments,
- * ready media objects, and pending Distributions these suites publish through.
- *
- * Every candidate object is reachable only through a ready `asset_renditions`
- * reference, because that reference is what records a decode approving the
- * object for publication. Each YouTube Asset carries both its verified original
- * and a smaller ready rendition, so claim-time selection is observable; the
- * Instagram fixtures add the states selection has to get right — an approved
- * original beside an incompatible rendition, an unreferenced original beside an
- * approved rendition, and ready bytes on an Asset processing never approved.
- * Targets reference real, profile-owned Channels, including the separate
- * Instagram account. Seed foreign keys in order and keep one Distribution per
- * (Post, Channel) pair, as required by the unique ownership contract.
- */
 async function seedCompositionFixtures(): Promise<void> {
   await runSystemTransaction(env, async (client) => {
     await client.query("DELETE FROM outbox_events WHERE aggregate_id = ANY($1::uuid[])", [
@@ -473,9 +405,6 @@ async function seedCompositionFixtures(): Promise<void> {
           'image/webp', 1200, 1200, 'ready'),
          ($5, $4, $7, $8, 'rendition', 'image_webp_1080_long_edge', $12, 3072,
           'etag-rendition-2', 'image/webp', 1200, 1200, 'ready'),
-         -- The mixed Asset's stored media type and size are deliberately
-         -- coarser than its objects: the verified JPEG original carries the
-         -- facts a publishable candidate must use.
          ($13, $4, $14, $8, 'rendition', 'image_webp_1080_long_edge', $15,
           1024, 'etag-mixed-webp', 'image/webp', 2048, 2048, 'ready'),
          ($16, $4, $14, $8, 'original', 'original', $17, 4096,
@@ -509,9 +438,6 @@ async function seedCompositionFixtures(): Promise<void> {
         jpegRenditionKey,
       ],
     );
-    // The unapproved Assets keep a ready object behind a ready rendition
-    // reference: only the Asset's own lifecycle state separates those bytes
-    // from media processing never approved for publication.
     for (const { assetId, objectId, objectKey, status } of unapprovedAssets) {
       await client.query(
         `INSERT INTO asset_objects
@@ -583,10 +509,6 @@ async function seedCompositionFixtures(): Promise<void> {
         unapprovedPostId,
       ],
     );
-    // The two sibling targets of `postId` need their own connected Channels: a
-    // Brand Profile owns at most one Channel per Provider, so the siblings
-    // differ by Platform, and one Distribution per (Post, Channel) is a
-    // database constraint anyway.
     await client.query(
       `INSERT INTO platform_accounts
          (id, org_id, brand_profile_id, platform, platform_user_id,
@@ -597,9 +519,6 @@ async function seedCompositionFixtures(): Promise<void> {
               ($4, $2, $3, 'facebook', 'local-distribution-integration-rejected',
                'Alpha Channel (rejected)', 'local-only-not-a-provider-credential',
                ARRAY['facebook_basic'], 'connected'),
-              -- Instagram owns its own connected Channel because its
-              -- capability is what makes the smaller WEBP rendition
-              -- undeliverable for these Assets.
               ($5, $2, $3, 'instagram', 'local-distribution-integration-instagram',
                'Alpha Studio IG', 'local-only-not-a-provider-credential',
                ARRAY['instagram_basic'], 'connected')`,
@@ -611,11 +530,6 @@ async function seedCompositionFixtures(): Promise<void> {
         instagramAccountId,
       ],
     );
-    // Every Channel a Distribution publishes through carries its saved target
-    // settings. The claim reads the resolved copy on the Distribution row, so
-    // these mirror what that row froze: a selection for the partial target, an
-    // empty array for the deliberate text-only target, and NULL where the
-    // target inherits the Post's own attachment order.
     await client.query(
       `INSERT INTO post_targets
          (post_id, platform_account_id, org_id, brand_profile_id,
@@ -663,8 +577,6 @@ async function seedCompositionFixtures(): Promise<void> {
         unapprovedAssets[1].assetId,
       ],
     );
-    // The stalled-publish fixture targets its own Post, so it holds a distinct
-    // (Post, Channel) pair rather than colliding with the queued publish.
     await client.query(
       `INSERT INTO distributions
          (id, org_id, brand_profile_id, post_id, platform_account_id, platform,
@@ -707,18 +619,6 @@ async function seedCompositionFixtures(): Promise<void> {
   });
 }
 
-/**
- * Returns every Distribution these suites mutate to its pre-attempt state.
- *
- * Two durable records make a repeated attempt impossible, so both are cleared
- * with the row: the publish intent is keyed by `(distribution, operation,
- * event id)`, and the job lease is keyed by event id alone and is only
- * re-claimable after a failure. Each test therefore starts from the state a
- * workspace that had never published would be in. Sanitized Provider warnings
- * are cleared with other publication evidence. The stalled-publish row is
- * deliberately left in its seeded `processing` state, because that in-flight
- * attempt is what the reconciliation specs depend on.
- */
 async function resetCompositions(): Promise<void> {
   await runSystemTransaction(env, async (client) => {
     await client.query(
@@ -737,10 +637,6 @@ async function resetCompositions(): Promise<void> {
        WHERE id IN ($1, $2)`,
       [postId, secondPostId],
     );
-    // The whole attachment set is cleared rather than one position: the
-    // composition specs detach and re-add attachments themselves, so restoring
-    // only the trailing position would collide with an attachment left at
-    // position 0.
     await client.query(`DELETE FROM post_attachments WHERE post_id = $1`, [postId]);
     await client.query(
       `INSERT INTO post_attachments
@@ -748,9 +644,6 @@ async function resetCompositions(): Promise<void> {
        VALUES ($1, $2, $3, $4, 0), ($1, $5, $3, $4, 1)`,
       [postId, firstAssetId, organizationId, seededAlphaProfileId, secondAssetId],
     );
-    // Only the never-attempted rows are reset. The stalled publish row keeps
-    // its `processing` status: a second publish trigger on it must keep
-    // no-oping so reconciliation, not a duplicate upload, owns its outcome.
     await client.query(
       `UPDATE distributions
        SET status = 'queued', attempt_count = 0, reconciliation_attempt_count = 0,
@@ -780,7 +673,7 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
     await runSystemTransaction(env, async (client) => {
       await client.query(
         `UPDATE organizations
-         SET plan = 'creator', billing_status = 'active', updated_at = now()
+         SET updated_at = now()
          WHERE id = $1`,
         [organizationId],
       );
@@ -806,8 +699,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       );
       await client.query("DELETE FROM post_attachments WHERE post_id = ANY($1::uuid[])", [postIds]);
       await client.query("DELETE FROM posts WHERE id = ANY($1::uuid[])", [postIds]);
-      // Saved targets cascade from their Post and their Channel, so clearing
-      // the fixture Posts and the fixture-owned Channels clears them too.
       await client.query(
         `DELETE FROM platform_accounts
          WHERE id = ANY($1::uuid[])
@@ -850,8 +741,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       ),
     ).resolves.toBe("processed");
 
-    // One Post with two ordered attachments exceeds the Channel's media count,
-    // so nothing is delivered and the Provider is never called.
     expect(mediaFor).not.toHaveBeenCalled();
     expect(publish).not.toHaveBeenCalled();
     const outcome = await runSystemTransaction(env, async (client) => {
@@ -865,8 +754,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       failure_code: "provider_media_count_limit",
       status: "failed",
     });
-    // The composition is still frozen: a later retry or reconciliation must
-    // see the same attachments this attempt resolved.
     expect((await publishSnapshot(youtubeDistributionId))?.media).toEqual([
       {
         asset_id: firstAssetId,
@@ -897,8 +784,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
         width: 1200,
       },
     ]);
-    // Even a refused attempt holds its frozen objects for the retrieval
-    // window: the cleanup sweep, not the outcome, releases them on expiry.
     expect(await mediaHolds(youtubeDistributionId)).toEqual([
       {
         asset_id: firstAssetId,
@@ -919,15 +804,13 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
 
   it("delivers the frozen rendition and keeps it held through the retrieval window", async () => {
     await resetCompositions();
-    const publish = vi.fn(async () => ({
+    const publish = vi.fn<NonNullable<ProviderAdapter["publish"]>>(async () => ({
       outcome: "confirmed_success" as const,
       providerPostId: "provider-post-2",
       providerUrl: "https://provider.example/watch/2?access_token=must-not-persist",
     }));
     const mediaFor = mediaResolver();
 
-    // Restrict this target to one attachment so the delivery path itself is
-    // exercised end to end, independently of the count-rejection fixture above.
     await runSystemTransaction(env, (client) =>
       client.query(
         `UPDATE distributions
@@ -947,16 +830,11 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       ),
     ).resolves.toBe("processed");
     expect(publish).toHaveBeenCalledOnce();
-    // The smaller ready rendition is preferred over the verified original.
     expect(mediaFor).toHaveBeenCalledTimes(1);
     expect(mediaFor.mock.calls[0]![0]).toMatchObject({
       objectKey: firstRenditionKey,
     });
-    const [, , input] = publish.mock.calls[0] as unknown as [
-      unknown,
-      unknown,
-      { caption: string; media: Array<{ metadata?: unknown; url: string }> },
-    ];
+    const input = publish.mock.calls[0]![2];
     expect(input.caption).toBe("Integration launch\n\nFirst caption");
     expect(input.media).toEqual([
       {
@@ -972,9 +850,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       text: "First caption",
       title: "Integration launch",
     });
-    // The hold is not dropped on success: the Provider may still fetch the
-    // handed-out URL for up to the retrieval window, so cleanup relies on
-    // `media_hold_until` expiring rather than on the attempt's status.
     const held = await mediaHolds(youtubeDistributionId);
     expect(held).toEqual([
       {
@@ -1026,16 +901,12 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
         }),
       ),
     ).resolves.toBe("processed");
-    // Only the attachment this target selected is resolved and delivered; the
-    // Post's other attachment never reaches the Channel.
     expect(mediaFor).toHaveBeenCalledTimes(1);
     expect(mediaFor.mock.calls[0]![0]).toMatchObject({
       objectKey: secondRenditionKey,
     });
     expect(publish).toHaveBeenCalledOnce();
     const snapshot = await publishSnapshot(partialDistributionId);
-    // The target selected one attachment; the Post's second attachment must
-    // not appear in this attempt's frozen media.
     expect(snapshot?.media).toEqual([
       {
         asset_id: secondAssetId,
@@ -1093,8 +964,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       },
     }));
 
-    // Two channels of the same Post: one accepts the attachment, one does not.
-    // A failure on one target must leave the other target's success intact.
     await expect(
       Effect.runPromise(
         processDistributionMessage(env, publishMessage(eventIds[1]!, partialDistributionId), {
@@ -1104,9 +973,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
         }),
       ),
     ).resolves.toBe("processed");
-    // A second Channel of the same Post on a different Provider: a Brand
-    // Profile owns at most one Channel per Provider, so the sibling differs by
-    // Platform and holds its own saved target.
     await runSystemTransaction(env, async (client) => {
       await client.query(
         `INSERT INTO distributions
@@ -1138,9 +1004,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
         ],
       );
     });
-    // The rejected Channel receives bytes that are valid for its own frozen
-    // object; it is the Platform that refuses them, so the refusal is the
-    // provider's answer rather than a preparation error.
     await expect(
       Effect.runPromise(
         processDistributionMessage(env, publishMessage(eventIds[4]!, rejectedDistributionId), {
@@ -1177,7 +1040,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
         status: "failed",
       },
     ]);
-    // Retrying the failed channel must not republish the successful one.
     expect(await publishSnapshot(rejectedDistributionId)).toMatchObject({
       post_id: postId,
     });
@@ -1190,11 +1052,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
     }));
     const eventId = eventIds[2]!;
 
-    // A publish trigger on a row that already records an attempt in flight is
-    // a no-op: the provider side effect is unknown, so the delivery must never
-    // reach the adapter. The intent, its frozen media, and its lease below are
-    // the durable evidence of that lost attempt, and the recovery test that
-    // follows reads them.
     await expect(
       Effect.runPromise(
         processDistributionMessage(env, publishMessage(eventId, leaseRecoveryDistributionId), {
@@ -1217,13 +1074,7 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
         [
           organizationId,
           leaseRecoveryDistributionId,
-          // The intent key the lost attempt claimed under, so a redelivery
-          // finds this row instead of opening a second publish intent.
           `queue:${eventId}`,
-          // The snapshot a lost attempt had already frozen: this Distribution
-          // publishes `secondPostId`, whose single attachment is the second
-          // Asset, so the retained bytes and the hold below are the ones that
-          // attempt was actually retrieving.
           JSON.stringify({
             version: 1,
             post_id: secondPostId,
@@ -1249,10 +1100,7 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
               },
             ],
           }),
-          // The hold window a live attempt really carries, so the assertion is
-          // about the production retrieval lease rather than a hand-picked one.
           providerMediaRetrievalLeaseSeconds,
-          // The indexed hold set cleanup probes without parsing the snapshot.
           [secondAssetId],
         ],
       ),
@@ -1277,10 +1125,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
         ],
       ),
     );
-    // The event that was claimed above has already reached its terminal
-    // outcome, so the lease row is re-armed rather than inserted again: this
-    // is what a delivery lost with the worker looks like, still `processing`
-    // under a lease that has not yet lapsed.
     await runSystemTransaction(env, (client) =>
       client.query(
         `INSERT INTO async_job_events
@@ -1323,8 +1167,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       ),
     );
 
-    // The scan is workspace-global, so its total may include other fixtures;
-    // the per-row evidence below is what proves this stalled row was claimed.
     await expect(Effect.runPromise(enqueueDueDistributions(env))).resolves.toBeGreaterThanOrEqual(
       1,
     );
@@ -1347,8 +1189,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       );
       return result.rows[0];
     });
-    // Exactly one reconcile trigger was armed: a duplicate-arming regression
-    // would leave two live events and still satisfy the scan's total.
     const reconcileEvents = await runSystemTransaction(env, (client) =>
       client.query<{ count: string }>(
         `SELECT COUNT(*)::text AS count FROM outbox_events
@@ -1357,13 +1197,9 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       ),
     );
     expect(reconcileEvents.rows[0]?.count).toBe("1");
-    // Recovery must not release the attempt's retrieval hold: the bytes may
-    // still be in flight at the Provider, so the hold stays until it lapses.
     const held = await mediaHolds(leaseRecoveryDistributionId);
     expect(held.map((row) => row.object_key)).toEqual([secondRenditionKey]);
     expect(held[0]!.media_hold_until!.getTime()).toBeGreaterThan(Date.now());
-    // The stalled row is armed for reconciliation and carries none of the
-    // evidence a republish would need: no second publish command exists for it.
     expect(recovered?.status).toBe("needs_reconciliation");
     expect(recovered?.failure_code).toBe("provider_outcome_ambiguous");
     expect(recovered?.topic).toBe("distribution.reconcile.requested");
@@ -1464,7 +1300,7 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
 
   it("freezes the approved JPEG when the smaller ready WEBP is undeliverable", async () => {
     await resetCompositions();
-    const publish = vi.fn(async () => ({
+    const publish = vi.fn<NonNullable<ProviderAdapter["publish"]>>(async () => ({
       outcome: "confirmed_success" as const,
       providerPostId: "provider-post-instagram",
     }));
@@ -1489,23 +1325,14 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       ),
     ).resolves.toBe("processed");
 
-    // Instagram rejects WEBP, so the smaller rendition is not a candidate and
-    // the approved JPEG original is what the attempt may deliver.
     expect(mediaFor).toHaveBeenCalledTimes(1);
     expect(mediaFor.mock.calls[0]![0]).toMatchObject({
       contentType: "image/jpeg",
       fileSize: 4096,
       objectKey: mixedJpegKey,
     });
-    const [, , input] = publish.mock.calls[0] as unknown as [
-      unknown,
-      unknown,
-      { caption: string; media: Array<{ metadata?: unknown; url: string }> },
-    ];
+    const input = publish.mock.calls[0]![2];
     expect(input.caption).toBe("Mixed launch\n\nMixed caption");
-    // The delivered descriptor names the JPEG's own external bytes, and the
-    // metadata is the object's verified geometry rather than the Asset row's
-    // coarser declared type and size.
     expect(input.media).toEqual([
       {
         contentType: "image/jpeg",
@@ -1515,8 +1342,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
         url: `https://media.example/${encodeURIComponent(mixedJpegKey)}`,
       },
     ]);
-    // The freeze records exactly the delivered object, so the attempt cannot
-    // drift onto the incompatible rendition on a later poll or reconciliation.
     expect((await publishSnapshot(mixedDistributionId))?.media).toEqual([
       {
         asset_id: mixedAssetId,
@@ -1546,7 +1371,7 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
 
   it("never falls back to an unreferenced original and holds each attachment's own object", async () => {
     await resetCompositions();
-    const publish = vi.fn(async () => ({
+    const publish = vi.fn<NonNullable<ProviderAdapter["publish"]>>(async () => ({
       outcome: "confirmed_success" as const,
       providerPostId: "provider-post-carousel",
     }));
@@ -1571,19 +1396,14 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       ),
     ).resolves.toBe("processed");
 
-    // The first attachment resolves to its verified original, the second to the
-    // approved optimization output — `jpegAssetId`'s unreferenced original is
-    // smaller but was never approved, so it is not a candidate at all.
     expect(mediaFor.mock.calls.map((call) => call[0])).toMatchObject([
       { objectKey: mixedJpegKey },
       { objectKey: jpegRenditionKey },
     ]);
-    const [, , input] = publish.mock.calls[0] as unknown as [
-      unknown,
-      unknown,
-      { media: Array<{ url: string }> },
-    ];
-    expect(input.media.map((media) => media.url)).toEqual([
+    const input = publish.mock.calls[0]![2];
+    expect(
+      (input.media ?? []).map((media) => (media.mode === "remote_ingest" ? media.url : undefined)),
+    ).toEqual([
       `https://media.example/${encodeURIComponent(mixedJpegKey)}`,
       `https://media.example/${encodeURIComponent(jpegRenditionKey)}`,
     ]);
@@ -1592,8 +1412,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       [0, mixedJpegKey],
       [1, jpegRenditionKey],
     ]);
-    // Both chosen objects are held in the order they were delivered, so cleanup
-    // cannot release bytes a still-running retrieval depends on.
     expect(await mediaHolds(mixedDistributionId)).toEqual([
       {
         asset_id: mixedAssetId,
@@ -1630,8 +1448,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       ),
     ).resolves.toBe("processed");
 
-    // Every attachment holds a ready object behind a ready rendition reference,
-    // yet none of those Assets is `ready`, so no object may be frozen or held.
     expect(mediaFor).not.toHaveBeenCalled();
     expect(publish).not.toHaveBeenCalled();
     const outcome = await runSystemTransaction(env, async (client) => {
@@ -1647,9 +1463,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       failure_code: "provider_media_unavailable",
       status: "failed",
     });
-    // The attachments keep their positions with no frozen object rather than
-    // leaving the composition, so the attempt fails instead of publishing
-    // fewer attachments than the creator composed.
     expect((await publishSnapshot(unapprovedDistributionId))?.media).toEqual(
       unapprovedAssets.map((asset, index) => ({
         asset_id: asset.assetId,
@@ -1676,7 +1489,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
     }));
     const mediaFor = mediaResolver();
 
-    // 1. Target selection B/A: ordered selection of secondAssetId (B) and firstAssetId (A).
     await runSystemTransaction(env, (client) =>
       client.query(
         `UPDATE distributions
@@ -1686,7 +1498,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       ),
     );
 
-    // 2. Remove A from Post: attachment-only Post edit that detaches firstAssetId (A).
     await runSystemTransaction(env, (client) =>
       client.query(
         `DELETE FROM post_attachments
@@ -1695,7 +1506,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       ),
     );
 
-    // 3. Attempt work through existing public distribution processing path.
     await expect(
       Effect.runPromise(
         processDistributionMessage(env, publishMessage(eventIds[0]!, youtubeDistributionId), {
@@ -1706,15 +1516,12 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       ),
     ).resolves.toBe("skipped");
 
-    // 4. Assert no external publish and no media resolution occurred.
     expect(publish).not.toHaveBeenCalled();
     expect(mediaFor).not.toHaveBeenCalled();
 
-    // 5. Assert no incomplete snapshot was frozen in provider_operations.
     expect(await publishSnapshot(youtubeDistributionId)).toBeUndefined();
     expect(await mediaHolds(youtubeDistributionId)).toEqual([]);
 
-    // 6. Assert correct failed outcome on the distribution record.
     const outcome = await runSystemTransaction(env, async (client) => {
       const result = await client.query<{
         attachment_ids: string[] | null;
@@ -1739,7 +1546,6 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
       next_attempt_at: null,
       status: "failed",
     });
-    // The target's ordered selection B/A is preserved in settled history.
     expect(outcome?.attachment_ids).toEqual([secondAssetId, firstAssetId]);
   });
 });

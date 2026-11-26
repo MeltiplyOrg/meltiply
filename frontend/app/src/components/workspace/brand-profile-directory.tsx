@@ -15,11 +15,6 @@ import { Trans, useI18n } from "@/lib/i18n";
 import { abbreviateRecordId } from "@/lib/format";
 import { brandProfileColorClass, type BrandProfile } from "@/types";
 
-/**
- * Gr8r Teams' grid adapted to actual Brand Profiles. Counts come from loaded
- * workspace accounts, never the filtered directory; viewing a card delegates
- * scope selection to the workspace owner. Editing is absent for non-admins.
- */
 export function BrandProfileDirectory({
   profiles,
   channelCounts,

@@ -6,7 +6,6 @@ import { frontendOrigin } from "./ports";
 
 export type GeneratedCredentials = Readonly<{ name: string; email: string; password: string }>;
 
-/** A test's selected Brand Profile and owner credentials, not an extra login account. */
 export interface IsolatedWorkspace {
   credentials: GeneratedCredentials;
   profileName: string;
@@ -14,7 +13,6 @@ export interface IsolatedWorkspace {
 
 const isolatedAuthPages = new WeakSet<Page>();
 
-/** Gives loopback Worker browser actors distinct edge-IP fixtures; never changes external requests. */
 async function isolateLocalAuthClient(page: Page) {
   if (isolatedAuthPages.has(page) || process.env.STAGING_E2E_BASE_URL) return;
   const apiOrigin = new URL(
@@ -34,7 +32,6 @@ async function isolateLocalAuthClient(page: Page) {
   isolatedAuthPages.add(page);
 }
 
-/** Uses the documented local-only owner fixture, with unique labels for each test's Brand Profile. */
 export function ownerCredentials(): GeneratedCredentials {
   return {
     name: `E2E ${randomUUID().slice(0, 8)}`,
@@ -43,7 +40,6 @@ export function ownerCredentials(): GeneratedCredentials {
   };
 }
 
-/** Grants the one optional purpose before boot so journeys start with an explicit saved decision. */
 async function allowFunctionalConsent(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const consent = encodeURIComponent(
@@ -57,28 +53,11 @@ async function allowFunctionalConsent(page: Page): Promise<void> {
   });
 }
 
-/**
- * Signs the seeded Installation Owner into the single shared Workspace.
- *
- * The shared Workspace and its seed fixtures are installation data, so a local
- * journey must not delete them. Auth tables, owner credentials, and other RLS
- * users are untouched. A second browser uses signIn, never a reset.
- */
 export async function openOwnerWorkspace(page: Page, credentials: GeneratedCredentials) {
   if (process.env.STAGING_E2E_BASE_URL) throw new Error("Owner fixture reset is local-only");
   await signIn(page, credentials);
 }
 
-/**
- * Clears sign-in rate-limit buckets in the disposable local database.
- *
- * Production allows ten sign-in attempts per email and per caller address in a
- * ten-minute window. The full browser suite signs the seeded members in far
- * more often, so without this reset later journeys receive a real 429 and never
- * reach the surface under test. Only the loopback test database is touched;
- * hosted staging runs without the admin URL skip the reset, and the production
- * limit stays enforced in production and in its integration coverage.
- */
 async function clearSignInRateLimits(): Promise<void> {
   const connectionString = process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL?.trim();
   if (!connectionString) return;
@@ -94,7 +73,6 @@ async function clearSignInRateLimits(): Promise<void> {
   }
 }
 
-/** Signs the existing owner in through the actual form without resetting saved work or session state. */
 export async function signIn(page: Page, credentials: GeneratedCredentials) {
   await allowFunctionalConsent(page);
   await isolateLocalAuthClient(page);
@@ -106,12 +84,10 @@ export async function signIn(page: Page, credentials: GeneratedCredentials) {
   await page.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
 }
 
-/** Waits for the hydrated Posts surface, not merely the route URL. */
 export async function waitForWorkspace(page: Page) {
   await expect(page.getByRole("heading", { name: "Posts" })).toBeVisible({ timeout: 30_000 });
 }
 
-/** Creates a uniquely named Brand Profile in the shared Workspace through the real Channels dialog. */
 export async function openIsolatedOwnerWorkspace(page: Page): Promise<IsolatedWorkspace> {
   const credentials = ownerCredentials();
   await openOwnerWorkspace(page, credentials);

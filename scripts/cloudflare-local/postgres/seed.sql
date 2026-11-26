@@ -1,38 +1,5 @@
--- Local development fixtures for the Cloudflare-target PostgreSQL stack.
--- Idempotent: every statement upserts on a stable key so `database.sh seed`,
--- `database.sh reset`, and cold-volume initialization can all re-run it.
---
--- Two layers, deliberately kept in disjoint id ranges:
---   * Canonical fixtures in the team workspaces (orgs …0001/…0002) are a
---     test contract — packages/database/test/rls.integration.test.ts and
---   * Personal-workspace fixtures (orgs …0005/…0006; ids in the c/d/e/f/aa/bb
---     ranges) are the day-to-day demo set: the API activates the personal
---     workspace by default, so signing in shows populated UI immediately. The
---     demo set at the end of this file widens Alpha's personal workspace to
---     every Posts outcome, the remaining connection states and Providers, a
---     third Brand Profile, and the media lifecycle variants — its ids stay in
---     fresh `49…`/`4b…` (Posts), `4c…`/`ac…` (objects and renditions),
---     `d7…`/`d8…` (media), `e3…`/`e4…` (accounts), `f8…` (distributions),
---     `a3…` (provider attempts), `ab…` (metrics), and `c4…` (profile) prefixes
---     that no fixture and no integration suite allocates.
--- Post-owned media adds two more ranges: Posts are 4800… (…0001 is pinned by
--- the API integration suite) and the per-object storage inventory is
--- 4100…/4200… for objects and their renditions.
---
--- Only Alpha is the installation owner and can sign in through Better Auth:
---   alpha@meltiply.local / MeltiplyLocal1!   (rich personal workspace)
--- Beta remains a database-only RLS isolation fixture, never a second login.
--- The account.password value is a scrypt hash (N=16384, r=16, p=1, dkLen=64,
--- "<salt-hex>:<key-hex>") of MeltiplyLocal1! in the exact format Better Auth's
--- verifyPassword expects; it is a local-only fixture, never a real credential.
-
 BEGIN;
 
--- Better Auth subjects backing the seeded internal users. The API worker and
--- RLS integration tests authenticate as these session subjects. Alpha is the
--- Installation Owner; Beta is a Workspace Admin; Gamma and Delta exercise the
--- Editor and Viewer roles; Epsilon is a suspended Viewer so the settings
--- surface shows suspension and reactivation.
 INSERT INTO "user" (id, name, email, "emailVerified")
 VALUES
   ('auth_user_local_alpha', 'Alpha Creator', 'alpha@meltiply.local', TRUE),
@@ -46,9 +13,6 @@ SET name = EXCLUDED.name,
     "emailVerified" = EXCLUDED."emailVerified",
     "updatedAt" = now();
 
--- Credential accounts so the seeded users can sign in through the real
--- /sign-in UI instead of bypassing auth. accountId mirrors Better Auth's
--- convention of storing the user id for credential providers.
 INSERT INTO "account" (id, "accountId", "providerId", "userId", password)
 VALUES
   (
@@ -124,54 +88,37 @@ UPDATE users
 SET installation_owner = TRUE
 WHERE id = '10000000-0000-4000-8000-000000000001';
 
-INSERT INTO organizations (
-  id, name, slug, plan, billing_status,
-  billing_customer_id, renews_at, cancel_at, billing_event_at
-)
+INSERT INTO organizations (id, name, slug)
 VALUES
-  ('20000000-0000-4000-8000-000000000001', 'Alpha Studio', 'alpha-studio', 'creator', 'free', NULL, NULL, NULL, NULL),
-  ('20000000-0000-4000-8000-000000000002', 'Beta Studio', 'beta-studio', 'free', 'free', NULL, NULL, NULL, NULL)
+  ('20000000-0000-4000-8000-000000000001', 'Alpha Studio', 'alpha-studio'),
+  ('20000000-0000-4000-8000-000000000002', 'Beta Studio', 'beta-studio')
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     slug = EXCLUDED.slug,
-    plan = EXCLUDED.plan,
-    billing_status = EXCLUDED.billing_status,
-    billing_customer_id = EXCLUDED.billing_customer_id,
-    renews_at = EXCLUDED.renews_at,
-    cancel_at = EXCLUDED.cancel_at,
-    billing_event_at = EXCLUDED.billing_event_at,
     updated_at = now();
 
--- Exactly one shared Workspace. The deterministic id …0005 remains the
--- day-to-day demo workspace and now holds every seeded role.
 UPDATE organizations
 SET is_shared = FALSE
 WHERE is_shared
   AND id <> '20000000-0000-4000-8000-000000000005';
 
-INSERT INTO organizations (id, name, slug, plan, billing_status, is_shared)
+INSERT INTO organizations (id, name, slug, is_shared)
 VALUES
   (
     '20000000-0000-4000-8000-000000000005',
     'Alpha Creator''s workspace',
     'workspace-10000000000040008000000000000001',
-    'creator',
-    'free',
     TRUE
   ),
   (
     '20000000-0000-4000-8000-000000000006',
     'Beta Studio Archive',
     'workspace-10000000000040008000000000000002',
-    'free',
-    'free',
     FALSE
   )
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     slug = EXCLUDED.slug,
-    plan = EXCLUDED.plan,
-    billing_status = EXCLUDED.billing_status,
     updated_at = now();
 
 INSERT INTO usage_reconciliation_state (org_id)
@@ -193,7 +140,6 @@ ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role;
 UPDATE organizations SET is_shared = TRUE
 WHERE id = '20000000-0000-4000-8000-000000000005';
 
--- A pending invitation demonstrates the reserved-Seat, resend, and revoke UI.
 INSERT INTO workspace_invitations (
   id, org_id, email, role, invited_by, token_hash, expires_at
 )
@@ -216,7 +162,6 @@ SET email = EXCLUDED.email,
     revoked_at = NULL,
     updated_at = now();
 
--- Recent administrative history so the Audit tab is meaningful on first load.
 INSERT INTO workspace_audit_entries (
   id, org_id, actor_user_id, actor_email, actor_display_name,
   action, target_type, target_id, before_state, after_state, request_id, created_at
@@ -294,12 +239,6 @@ VALUES
   )
 ON CONFLICT (id) DO NOTHING;
 
--- Brand Profiles are the mandatory ownership boundary for assets, platform
--- accounts, and distributions. The team-workspace profiles (a000…0001/0002)
--- are pinned by the integration tests; the c000… profiles belong to the
--- personal workspaces. Alpha's personal workspace gets two profiles so
--- profile switching shows real differences; colors come from the fixed
--- accessible palette enforced by brand_profiles_color_check.
 INSERT INTO brand_profiles (id, org_id, name, color)
 VALUES
   ('a0000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001', 'Alpha Brand', '#1d4ed8'),
@@ -312,24 +251,12 @@ SET name = EXCLUDED.name,
     color = EXCLUDED.color,
     updated_at = now();
 
--- LinkedIn is not a supported Provider — the roster, the API contract, and the
--- frontend label map carry the five platforms above — so retire the accounts an
--- earlier seed created with that slug. `platform` is part of the upsert key
--- below, so a retired row would collide on its primary key instead of
--- converging. Its Post targets cascade away and its Distributions are re-pointed
--- by the upserts later in this transaction; both ids are re-inserted on
--- supported platforms.
 DELETE FROM platform_accounts
 WHERE platform = 'linkedin'
   AND id IN (
     'e3000000-0000-4000-8000-000000000002',
     'e4000000-0000-4000-8000-000000000002'
   );
--- Platform accounts. The canonical account (5000…0001) is pinned by the
--- automation integration tests and stays in Alpha Studio. The e000… accounts
--- live in the personal workspaces and cover connected/expired states so
--- /channels shows more than a single happy-path row. access_token values are
--- marked fixtures and are never sent to a real provider.
 INSERT INTO platform_accounts (
   id, org_id, brand_profile_id, platform, platform_user_id, display_name,
   access_token, scopes, metadata, connection_status, last_synced_at
@@ -447,15 +374,6 @@ SET display_name = EXCLUDED.display_name,
     last_synced_at = EXCLUDED.last_synced_at,
     updated_at = now();
 
--- The canonical 4000…0001/0002 media pair belongs to team workspaces; d000…
--- fixtures cover personal-workspace media types and lifecycle states.
--- Captions belong to posts.default_text, never Assets. Each ready Asset has an
--- inventoried original and a ready rendition reference; failed media owns none.
---
--- `finalized_at` sits inside the current usage period for every row, so the
--- counters seeded in usage_records below are exactly what a usage
--- reconciliation recomputes. No seeded row carries an orphan deadline: the
--- hourly maintenance sweep must leave the demo fixtures alone.
 INSERT INTO assets (
   id, org_id, brand_profile_id, uploaded_by, asset_type, title,
   duration_sec, file_size, mime_type, width, height, status, original_filename,
@@ -601,17 +519,6 @@ SET asset_type = EXCLUDED.asset_type,
     finalized_at = EXCLUDED.finalized_at,
     updated_at = now();
 
--- Storage inventory. One ready `original` object per publishable Asset, keyed
--- <orgId>/<assetId>/original — the canonical protected layout readyObjectKey()
--- produces — so a signed preview, download, or Provider delivery can never name
--- an upload-writable path. No etag or sha256 is recorded: these fixtures have
--- no bytes in the bucket, and a pinned digest the processor could not
--- reproduce would fail a real verification for no reason.
---
--- 4000…0002 is the exception that carries no bytes at all: it is the
--- tenant-isolation row the RLS suite reads, not demo media, and a NULL
--- file_size with a zero-byte inventoried object keeps the pinned Beta usage
--- record (storage_bytes 0) authoritative after a reconciliation.
 INSERT INTO asset_objects (
   id, org_id, asset_id, brand_profile_id, kind, r2_key, bytes, content_type,
   width, height, duration_sec, status
@@ -680,9 +587,6 @@ SET bytes = EXCLUDED.bytes,
     status = EXCLUDED.status,
     updated_at = now();
 
--- One `original` rendition per approved object. This pairing is the only shape
--- preview, download, and publication accept: a ready object plus the ready
--- rendition that references it, on a ready image or video Asset.
 INSERT INTO asset_renditions (
   id, org_id, asset_id, brand_profile_id, profile, object_id, status
 )
@@ -746,14 +650,6 @@ SET object_id = EXCLUDED.object_id,
     status = EXCLUDED.status,
     updated_at = now();
 
--- Posts. A Distribution references a Post, never an Asset, so the seeded
--- publication history and its pending states hang off Post identities now.
--- 4800…0001 is the canonical Alpha Post the API integration suite pins, and
--- 4800…0002-0006 mirror the f000… distributions below one for one.
---
--- 4800…0005 is what the retired d000…0004 text Asset became: the caption is the
--- Post's default_text and it attaches no media, which is how a deliberate
--- text-only target is recorded.
 INSERT INTO posts (
   id, org_id, brand_profile_id, title, default_text, status
 )
@@ -828,9 +724,6 @@ SET title = EXCLUDED.title,
     status = EXCLUDED.status,
     updated_at = now();
 
--- Ordered Post attachments. Each seeded Post carries the single Asset its
--- Distribution used to reference directly; the text-only Post 4800…0005
--- attaches nothing at all.
 INSERT INTO post_attachments (
   post_id, asset_id, org_id, brand_profile_id, position
 )
@@ -843,9 +736,6 @@ VALUES
 ON CONFLICT (post_id, asset_id) DO UPDATE
 SET position = EXCLUDED.position;
 
--- Saved per-Channel target settings, one per seeded Distribution. A NULL
--- attachment_ids inherits the Post's own ordered selection; the empty array on
--- 4800…0005 is the deliberate text-only choice.
 INSERT INTO post_targets (
   post_id, platform_account_id, org_id, brand_profile_id, title_override,
   attachment_ids
@@ -862,17 +752,6 @@ SET title_override = EXCLUDED.title_override,
     attachment_ids = EXCLUDED.attachment_ids,
     updated_at = now();
 
--- Distributions. A row now names the Post it publishes, never a single Asset:
--- the media it delivers is that Post's ordered attachment subset. The canonical
--- 6000…0001 row (pinned by the automation tests) stays in Alpha Studio. The
--- f000… rows exercise every /posts and /calendar state in the personal
--- workspace: published history with metrics, an upcoming scheduled slot, a
--- queued item, and a failed send that can be retried from the UI.
---
--- `attachment_ids` freezes the ordered selection each Channel was scheduled
--- with: NULL inherits the Post's own order, and the empty array on the queued
--- row is the deliberate text-only target carried over from the retired text
--- Asset.
 INSERT INTO distributions (
   id, org_id, brand_profile_id, post_id, platform_account_id, platform, status,
   scheduled_at, published_at, platform_post_id, platform_url, title_override,
@@ -1017,9 +896,6 @@ VALUES
     NULL,
     NULL, 0, 1, now() - interval '2 days', NULL, NULL
   )
--- `post_id` and the frozen `attachment_ids` are re-asserted on reseed: a
--- database seeded before the Post-owned-media cutover holds distribution rows
--- that point somewhere else, and the fixture must win over that history.
 ON CONFLICT (id) DO UPDATE
 SET post_id = EXCLUDED.post_id,
     title_override = EXCLUDED.title_override,
@@ -1035,8 +911,6 @@ SET post_id = EXCLUDED.post_id,
     failure_retryable = EXCLUDED.failure_retryable,
     updated_at = now();
 
--- Analytics history across the last two weeks so /analytics charts render a
--- curve instead of a single point.
 INSERT INTO analytics_snapshots (
   id, distribution_id, org_id, views, likes, comments, shares,
   watch_time_sec, reach, impressions, snapshot_at
@@ -1062,9 +936,6 @@ SET views = EXCLUDED.views,
     impressions = EXCLUDED.impressions,
     snapshot_at = EXCLUDED.snapshot_at;
 
--- Inbox fixtures: unanswered, replied, and failed-reply comments so /inbox
--- shows each reply workflow state. The canonical 8000…0001 row is pinned by
--- the automation tests and stays in Alpha Studio.
 INSERT INTO comments (
   id, distribution_id, org_id, platform_comment_id, author_name, body,
   replied, reply_text, reply_status, reply_error, reply_attempted_at, commented_at
@@ -1146,25 +1017,12 @@ SET body = EXCLUDED.body,
     commented_at = EXCLUDED.commented_at,
     synced_at = now();
 
--- Current-month usage rows drive /billing meters; keyed by (org_id, period)
--- so reseeding in a new month adds a fresh period instead of conflicting on id.
--- uploads, distributions, and storage_bytes are exactly what a usage
--- reconciliation recomputes from the rows above — finalized Assets, stored
--- Distributions, and non-deleted `asset_objects` — so the hourly sweep never
--- rewrites the demo counters. api_calls is the one term only the request path
--- records.
 INSERT INTO usage_records (
   org_id, period, uploads, distributions, api_calls, storage_bytes
 )
 VALUES
   ('20000000-0000-4000-8000-000000000001', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM'), 1, 1, 12, 4096),
   ('20000000-0000-4000-8000-000000000002', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM'), 1, 0, 3, 0),
-  -- The demo workspace's numbers cover the canonical rows above plus the demo
-  -- set appended below this block: 7 finalized Assets and 20 stored
-  -- Distributions inside the current period — deliberately under the community
-  -- ceilings, so the demo workspace can still upload and publish — and
-  -- 18,317,312 resident inventory bytes, which is exactly what a reconciliation
-  -- recomputes for the current period.
   ('20000000-0000-4000-8000-000000000005', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM'), 7, 20, 214, 18317312),
   ('20000000-0000-4000-8000-000000000006', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM'), 0, 0, 3, 0),
   ('20000000-0000-4000-8000-000000000005', to_char((now() - interval '1 month') AT TIME ZONE 'UTC', 'YYYY-MM'), 3, 2, 96, 4194304)
@@ -1175,31 +1033,6 @@ SET uploads = EXCLUDED.uploads,
     storage_bytes = EXCLUDED.storage_bytes,
     updated_at = now();
 
--- ===========================================================================
--- Personal-workspace demo set: every Posts, Channels, and media variant.
---
--- Alpha's personal workspace (…0005) is the signed-in demo workspace, so its
--- fixtures are the sample data the UI is exercised against. The `4900…`/`4b00…`
--- Posts cover every outcome `/posts` can group by — draft, scheduled, queued,
--- processing, awaiting provider, published, failed, cancel requested, cancelled,
--- needs reconciliation — plus the shapes around them: a Post with no
--- Distribution, a saved Channel target with no outcome, five Channels on one
--- Post, a published + failed pair, a non-retryable failure, text-only and
--- media-only compositions, ordered multi-attachment Posts, a caption that is
--- only a long unbroken token, an empty caption, and attachments that are
--- processing or failed. The `e000…`/`e300…`/`e400…` accounts cover all five
--- connection states across all five Providers without giving any Brand Profile
--- two Channels on the same Provider, and `c400…0001` adds a third Brand Profile
--- so profile grouping and the profile scope have more than two rows to show.
---
--- Ids are disjoint from the canonical team fixtures (orgs …0001/…0002), from
--- every id the integration suites allocate, and from the retired ranges.
--- ===========================================================================
-
--- A third Brand Profile in the demo workspace: profile grouping, the profile
--- scope, and the Channels directory need more than the two profiles that
--- predate it. `#0f766e` is one of the fixed accessible palette values
--- `brand_profiles_color_check` accepts.
 INSERT INTO brand_profiles (id, org_id, name, color)
 VALUES
   ('c4000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'Alpha Labs', '#0f766e')
@@ -1208,19 +1041,6 @@ SET name = EXCLUDED.name,
     color = EXCLUDED.color,
     updated_at = now();
 
--- Additional Providers on the demo profiles, so /channels and the composer's
--- destination chips show expiring, expired, and reconnect-required accounts
--- alongside the revoked TikTok above. `e300…0002` deliberately carries no
--- display name: the directory must fall back to the platform user id rather
--- than rendering an empty name cell.
---
--- LinkedIn is not a supported Provider — the roster, the API contract, and the
--- frontend label map carry the five platforms above — so retire the accounts an
--- earlier seed created with that slug. `platform` is part of the upsert key
--- below, so a retired row would collide on its primary key instead of
--- converging. Its Post targets cascade away and its Distributions are re-pointed
--- by the upserts later in this transaction; both ids are re-inserted on
--- supported platforms.
 DELETE FROM platform_accounts
 WHERE platform = 'linkedin'
   AND id IN (
@@ -1340,10 +1160,6 @@ SET display_name = EXCLUDED.display_name,
     revoked_at = EXCLUDED.revoked_at,
     updated_at = now();
 
--- Media variants the demo Posts attach: two images and a video per shape, an
--- image with unknown dimensions, a ready asset with no measured size, a failed
--- upload, and an asset still processing. Ready assets own one original object
--- and one ready rendition below; the failed and processing rows own neither.
 INSERT INTO assets (
   id, org_id, brand_profile_id, uploaded_by, asset_type, title,
   duration_sec, file_size, mime_type, width, height, status, original_filename,
@@ -1461,8 +1277,6 @@ SET asset_type = EXCLUDED.asset_type,
     finalized_at = EXCLUDED.finalized_at,
     updated_at = now();
 
--- Originals for the ready demo media, keyed with the canonical protected
--- `<orgId>/<assetId>/original` layout a signed preview or delivery resolves.
 INSERT INTO asset_objects (
   id, org_id, asset_id, brand_profile_id, kind, r2_key, bytes, content_type,
   width, height, duration_sec, status
@@ -1500,10 +1314,6 @@ SET object_id = EXCLUDED.object_id,
     status = EXCLUDED.status,
     updated_at = now();
 
--- The demo Posts. `created_at` is explicit and varied so list ordering and the
--- "Newest/Oldest" sort have something real to order; `status` is the lifecycle
--- marker only, because every collection row's displayed status is aggregated
--- from its Distributions.
 INSERT INTO posts (id, org_id, brand_profile_id, title, default_text, status, created_at)
 VALUES
   (
@@ -1711,9 +1521,6 @@ SET title = EXCLUDED.title,
     created_at = EXCLUDED.created_at,
     updated_at = now();
 
--- Ordered attachments: one media-only Post, one three-attachment Post, one
--- two-attachment Post, one post whose media the frozen publication detached,
--- and Posts carrying a processing or failed Asset.
 INSERT INTO post_attachments (post_id, asset_id, org_id, brand_profile_id, position)
 VALUES
   ('49000000-0000-4000-8000-000000000001', 'd7000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 0),
@@ -1741,11 +1548,6 @@ VALUES
 ON CONFLICT (post_id, asset_id) DO UPDATE
 SET position = EXCLUDED.position;
 
--- Saved per-Channel targets. `description_override` carries a real custom
--- caption, `attachment_ids` carries a Channel-specific media subset and the
--- deliberate text-only empty array, and one target points at an expired and one
--- at a revoked account so the composer's unavailable-destination states are
--- reachable from demo data.
 INSERT INTO post_targets (
   post_id, platform_account_id, org_id, brand_profile_id, title_override,
   description_override, attachment_ids
@@ -1782,11 +1584,6 @@ SET title_override = EXCLUDED.title_override,
     attachment_ids = EXCLUDED.attachment_ids,
     updated_at = now();
 
--- One Distribution per outcome the collection can group by, with the timing
--- each one needs: published history in the past (including earlier today),
--- pending work scheduled in the future, and terminal failures with their own
--- retryability. `created_at` stays inside the current usage period so a
--- reconciliation recomputes exactly what the counters below record.
 INSERT INTO distributions (
   id, org_id, brand_profile_id, post_id, platform_account_id, platform, status,
   scheduled_at, published_at, platform_post_id, platform_url, title_override,
@@ -2201,13 +1998,6 @@ SET post_id = EXCLUDED.post_id,
     created_at = EXCLUDED.created_at,
     updated_at = now();
 
--- Claimed publish attempts. Three succeed and freeze the composition the
--- Channel published, which is what a row previews after later Post edits:
--- `…0001` froze two attachments, `…0002` one, and `…0003` a media-only
--- composition whose frozen Asset is no longer attached to its Post — the
--- detached slot the inspector and previews must keep showing as published
--- media rather than silently replacing with the Post's own order. `…0004`
--- failed verification and drives the needs-reconciliation fixture.
 INSERT INTO provider_operations (
   id, org_id, distribution_id, operation, idempotency_key, status,
   provider_operation_id, provider_post_id, provider_url, error_class, last_error,
@@ -2312,8 +2102,6 @@ SET status = EXCLUDED.status,
     completed_at = EXCLUDED.completed_at,
     updated_at = now();
 
--- The media inventory each frozen publication holds, including the detached
--- slot above, so cleanup can tell held media from reclaimable bytes.
 INSERT INTO provider_operation_media (
   operation_id, org_id, distribution_id, asset_id, brand_profile_id,
   rendition_id, object_id, object_key, position
@@ -2369,8 +2157,6 @@ SET asset_id = EXCLUDED.asset_id,
     object_id = EXCLUDED.object_id,
     object_key = EXCLUDED.object_key;
 
--- Metric history for the two published demo Distributions, so the analytics
--- projection has a multi-point curve instead of a single reading.
 INSERT INTO analytics_snapshots (
   id, distribution_id, org_id, views, likes, comments, shares,
   watch_time_sec, reach, impressions, snapshot_at
@@ -2392,16 +2178,6 @@ SET views = EXCLUDED.views,
     impressions = EXCLUDED.impressions,
     snapshot_at = EXCLUDED.snapshot_at;
 
--- The demo workspace has to stay *usable*, not merely populated: the community
--- policy caps a period at ten uploads and thirty Distributions, and a workspace
--- already at its ceiling cannot be used to try the very flows these fixtures
--- demonstrate. The older half of the demo set therefore keeps its creation and
--- finalization instants in the previous period, which the current-period counter
--- (and the quota check behind it) does not count. Nothing displayed changes: a
--- Distribution's creation instant is not a rendered field, and a ready Asset is
--- previewable whenever it was finalized. The rows the counters do include are
--- exactly what a reconciliation recomputes, so the seeded `usage_records` values
--- stay authoritative.
 UPDATE distributions
 SET created_at = now() - interval '40 days',
     updated_at = now()
@@ -2428,11 +2204,6 @@ WHERE id IN (
   'd8000000-0000-4000-8000-000000000002'
 );
 
--- Dense analytics campaign history. Only the personal demo workspace is touched;
--- stable 4f1/f9/ae ids leave canonical integration fixtures and outcome examples
--- alone. Thirty publications per Channel cover the last 90 days, with six older
--- campaign checkpoints for the annual range. UTC hours vary across weekdays.
--- A temporary roster keeps Posts, frozen media, targets, and metrics consistent.
 CREATE TEMP TABLE demo_analytics_campaign ON COMMIT DROP AS
 WITH channels (ordinal, account_id, campaign, multiplier) AS (
   VALUES
@@ -2476,8 +2247,6 @@ SELECT *,
     WHEN edition % 4 = 2 AND videos IS NOT NULL THEN videos[1:1]
     ELSE images[1:1]
   END AS attachment_ids,
-  -- Different campaign shapes: a rising baseline, repeatable weekly variation,
-  -- occasional breakout posts, and quieter releases, never random fixtures.
   (multiplier * (160 + (37 - edition) * 19 + (edition * 83 % 470))
     * CASE WHEN edition % 11 = 0 THEN 5 WHEN edition % 7 = 0 THEN 0.35 ELSE 1 END)::bigint
     AS final_views
@@ -2520,7 +2289,6 @@ SELECT distribution_id, org_id, brand_profile_id, post_id, account_id, platform,
   published_at, 'local-campaign-' || fixture_number,
   'https://example.invalid/' || platform || '/local-campaign-' || fixture_number,
   title, attachment_ids,
-  -- Historical imports must not consume the current period's publishing budget.
   LEAST(published_at - interval '2 days',
     date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' - interval '1 second')
 FROM demo_analytics_campaign
@@ -2529,10 +2297,6 @@ SET published_at = EXCLUDED.published_at, attachment_ids = EXCLUDED.attachment_i
     title_override = EXCLUDED.title_override, created_at = EXCLUDED.created_at,
     updated_at = now();
 
--- Three cumulative readings per publication show early pickup, growth, and the
--- latest stored outcome. Saves/clicks remain null: seeded Providers do not track
--- them. Recent posts compress checkpoints into their elapsed lifetime so even
--- a reseed just after UTC midnight keeps all three readings after publication.
 INSERT INTO analytics_snapshots (
   id, distribution_id, org_id, views, likes, comments, shares,
   watch_time_sec, reach, impressions, snapshot_at
@@ -2560,9 +2324,6 @@ SET views = EXCLUDED.views, likes = EXCLUDED.likes, comments = EXCLUDED.comments
     reach = EXCLUDED.reach, impressions = EXCLUDED.impressions,
     snapshot_at = EXCLUDED.snapshot_at;
 
--- Daily follower readings in the 90-day window, weekly before it. Stable ids
--- converge on reseed; history uses UTC midnight and today's reading is current.
--- Campaign bursts and small dips vary by Channel.
 INSERT INTO platform_account_snapshots
   (id, platform_account_id, org_id, followers, following, posts, captured_at, raw_data)
 SELECT
@@ -2599,31 +2360,6 @@ ON CONFLICT (id) DO UPDATE
 SET followers = EXCLUDED.followers, following = EXCLUDED.following,
     posts = EXCLUDED.posts, captured_at = EXCLUDED.captured_at,
     raw_data = EXCLUDED.raw_data;
-
--- Usage meters for the demo workspace are written once, by the `usage_records`
--- insert above the demo set: an hourly reconciliation recomputes them from the
--- rows in this file exactly, so the sweep never rewrites the demo counters.
-
--- ---------------------------------------------------------------------------
--- Publishing Queue demo set.
---
--- Four plans across Alpha's three demo Brand Profiles, each in a different
--- IANA timezone, so Month and Week show real filled chips next to open plan
--- slots. Every fourth occurrence of each plan is deliberately left unassigned
--- (the dashed "open slot" state), the newest past occurrence keeps a failed
--- Distribution, and four hand-scheduled Posts sit off-plan beside the slots.
---
--- Idempotent and self-pruning: the window is rebuilt from `now()` (weeks -2..+2)
--- and rows that fall outside it are deleted first. Every demo row carries its
--- own id prefix so cleanup can never touch real or test-fixture rows:
---   5a… plans, 5c… queued Posts, 5d… memberships, 5e… Distributions,
---   5f… off-plan Posts. Post/membership/Distribution ids are derived from
---   (plan, instant), so re-seeding updates rather than duplicates them.
---
--- Distribution `created_at` stays in the previous billing period, exactly like
--- the older half of the demo set, so current-period quota counters do not move
--- and the workspace stays usable for new publishing.
--- ---------------------------------------------------------------------------
 
 DELETE FROM publishing_queue_memberships
 WHERE left(id::text, 8) = '5d000000'
@@ -2682,8 +2418,6 @@ SET brand_profile_id = EXCLUDED.brand_profile_id,
     deleted_at = NULL,
     updated_at = now();
 
--- Each plan publishes through one connected account that already exists in the
--- same Brand Profile; the composer therefore opens a real Channel outcome.
 CREATE TEMP TABLE queue_demo_accounts ON COMMIT DROP AS
 SELECT *
 FROM (
@@ -2694,9 +2428,6 @@ FROM (
     ('5a000000-0000-4000-8000-000000000004'::uuid, 'e3000000-0000-4000-8000-000000000005'::uuid, 'youtube')
 ) AS accounts(queue_id, platform_account_id, platform);
 
--- Every configured occurrence in the displayed window. `wall_time` is the civil
--- wall clock in the plan's timezone; the round-trip predicate drops times that
--- do not exist (a DST gap), matching allocation's skip rule exactly.
 CREATE TEMP TABLE queue_demo_filled ON COMMIT DROP AS
 SELECT occurrence.*,
        row_number() OVER (PARTITION BY occurrence.queue_id ORDER BY occurrence.assigned_at) AS seq
@@ -2807,8 +2538,6 @@ SET status = EXCLUDED.status,
     last_attempt_at = EXCLUDED.last_attempt_at,
     updated_at = now();
 
--- The newest elapsed occurrence of each plan failed at the Provider, so Week
--- shows the failure treatment beside scheduled and published chips.
 UPDATE distributions AS distribution
 SET status = 'failed',
     published_at = NULL,
@@ -2832,8 +2561,6 @@ WHERE membership.post_id = distribution.post_id
       AND elapsed.assigned_at < now()
   );
 
--- Hand-scheduled Posts with no membership: they sit off-plan beside the slots,
--- which is why Month interleaves them by time rather than hiding them.
 CREATE TEMP TABLE queue_demo_off_plan ON COMMIT DROP AS
 SELECT *
 FROM (
@@ -2897,9 +2624,6 @@ SET status = 'scheduled',
     published_at = NULL,
     updated_at = now();
 
--- Publishing outcomes distinguish native handoffs from published copies with
--- partial-success warnings. Demo references contain no tokens or encoder
--- credentials; preview controls never contact a live Provider.
 INSERT INTO posts (id, org_id, brand_profile_id, title, default_text, status, created_at)
 VALUES
   ('4d000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Native Page draft', 'A native Page draft waiting for review in Facebook.', 'active', now()),

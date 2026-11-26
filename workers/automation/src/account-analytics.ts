@@ -9,6 +9,7 @@ import {
 } from "@meltiply/providers";
 
 import { withSystemTransactionEffect } from "./database";
+import { classifyJobError, type AutomationJobError } from "./effect/index";
 import { decryptStoredToken } from "./provider-credentials";
 import { executeProviderAccountAnalyticsEffect } from "./provider-sync-provider";
 import type { AutomationEnv } from "./env";
@@ -29,25 +30,13 @@ export interface AccountAnalyticsSweepResult {
   scanned: number;
 }
 
-/** Twenty-five accounts per hourly sweep keeps provider reads bounded. */
 const sweepBatchSize = 25;
-/** Captures and failed attempts both wait six hours before another provider read. */
 const sweepIntervalHours = 6;
 
-/**
- * Captures follower history for usable, configured accounts due for measurement.
- * Claims the oldest attempts atomically before provider I/O, so failures and crashes
- * back off for six hours instead of starving later accounts. Expiring credentials
- * wait for the token refresh path. Bounds each sweep to 25 accounts and four reads.
- *
- * @param env - Automation bindings containing the database and provider credentials.
- * @param dependencies - Optional registry override for tests.
- * @returns Effect resolving to scanned/recorded/failed counts.
- */
 export function sweepAccountAnalytics(
   env: AutomationEnv,
   dependencies: { providerRegistry?: ProviderRegistry } = {},
-): Effect.Effect<AccountAnalyticsSweepResult, never> {
+): Effect.Effect<AccountAnalyticsSweepResult, AutomationJobError> {
   return Effect.gen(function* () {
     const registry = dependencies.providerRegistry ?? cachedProviderRegistryFromEnvironment(env);
     const decryptToken = decryptStoredToken(env);
@@ -148,5 +137,5 @@ export function sweepAccountAnalytics(
       recorded: results.filter((result) => result === "recorded").length,
       scanned: rows.length,
     };
-  }).pipe(Effect.catch(() => Effect.succeed({ failed: 0, recorded: 0, scanned: 0 })));
+  }).pipe(Effect.mapError(classifyJobError));
 }

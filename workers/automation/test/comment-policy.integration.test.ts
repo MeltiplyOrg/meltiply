@@ -24,8 +24,6 @@ const delivered: ProviderSyncMessage[] = [];
 let failSend = false;
 let providerReads = 0;
 
-// Only the external Queue transport and Provider are controlled. Claims,
-// checkpointing, encryption, leases, and replay guards use real PostgreSQL.
 const queue: Queue<unknown> = {
   async metrics() {
     return {
@@ -84,12 +82,10 @@ registry.register("threads", {
 const dependencies = { providerRegistry: registry };
 const queueLayer = createQueuePublisherLive();
 
-/** Runs the real provider-sync handler with the live Queue publisher adapter. */
 function run<A, E>(program: Effect.Effect<A, E, QueuePublisher>) {
   return Effect.runPromise(Effect.provide(program, queueLayer));
 }
 
-/** Gives each scenario its own durable history and an already-armed recurring event. */
 beforeEach(async () => {
   delivered.length = 0;
   providerReads = 0;

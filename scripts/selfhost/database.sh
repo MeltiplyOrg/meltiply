@@ -3,8 +3,6 @@ set -eu
 : "${SELFHOST_DB_SYSTEM_PASSWORD:?Set the system database password}"
 : "${SELFHOST_DB_AUTHENTICATED_PASSWORD:?Set the authenticated database password}"
 
-# Reuse the canonical migrations, creating their roles with private credentials
-# before the development migrator can create its local-only defaults.
 psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --set ON_ERROR_STOP=1 <<'SQL'
 \getenv system_password SELFHOST_DB_SYSTEM_PASSWORD
 \getenv authenticated_password SELFHOST_DB_AUTHENTICATED_PASSWORD

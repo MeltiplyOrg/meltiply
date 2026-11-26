@@ -1,14 +1,18 @@
 import { useId, useMemo, useState } from "react";
 import { Popover, PopoverTrigger, PopoverContent } from "@meltiply/ui/popover";
 import { DayPicker, type ClassNames } from "react-day-picker";
-import { enUS, es } from "react-day-picker/locale";
+import { de, enUS, es, fr, it, ptBR, vi, zhCN } from "react-day-picker/locale";
 import { CalendarDays, ChevronDown, Globe2 } from "lucide-react";
 import { Button, buttonVariants } from "@meltiply/ui/button";
 import { toLocalDateKey } from "@/components/posts/posts-helpers";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, type Language } from "@/lib/i18n";
 import { TimeOfDayField } from "@/components/posts/time-of-day-field";
 
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
+const CALENDAR_LOCALES = { de, en: enUS, es, fr, it, "pt-BR": ptBR, vi, zh: zhCN } satisfies Record<
+  Language,
+  typeof enUS
+>;
 
 const CALENDAR_CLASSES: Partial<ClassNames> = {
   root: "min-w-0",
@@ -33,26 +37,11 @@ const CALENDAR_CLASSES: Partial<ClassNames> = {
   hidden: "invisible",
 };
 
-/** Reads a local calendar day without UTC conversion or accepting rolled-over dates. */
 function localDay(key: string): Date | undefined {
   const date = new Date(`${key}T12:00:00`);
   return !Number.isNaN(date.getTime()) && toLocalDateKey(date) === key ? date : undefined;
 }
 
-/**
- * Compact local scheduling row: a Radix date popover with React DayPicker and a
- * React Aria 24-hour segmented time field with an explicit clock-button chooser.
- * Button/input/select owners provide chrome; libraries own positioning, dismissal,
- * calendar navigation, and time editing. Clicking field padding starts at hours;
- * clicking a segment edits that segment, while the clock opens exact hour/minute
- * selects. Chooser selections commit immediately; Done or Escape closes it.
- * Accepts/emits minute-precision `YYYY-MM-DDTHH:mm`; the composer retains the
- * selected publishing timezone and converts to an ISO instant. Date changes
- * preserve time, complete time edits preserve the date (or use today when
- * unset), and browsing never commits. Choosing a date closes the popover and
- * restores its trigger. Hydration updates the visible month without stealing
- * focus. The publishing timezone stays visible.
- */
 export function ScheduleDateTime({
   value,
   onChange,
@@ -60,7 +49,6 @@ export function ScheduleDateTime({
 }: {
   value: string;
   onChange: (value: string) => void;
-  /** Publishing timezone the wall-clock value is interpreted in. */
   timeZone?: string;
 }) {
   const { t, language } = useI18n();
@@ -83,7 +71,6 @@ export function ScheduleDateTime({
     [language],
   );
 
-  /** Commits a complete HH:mm value without changing the selected local day. */
   function chooseTime(next: string) {
     onChange(`${selectedDate ? dateKey : toLocalDateKey(new Date())}T${next}`);
   }
@@ -135,7 +122,7 @@ export function ScheduleDateTime({
                   onChange(`${toLocalDateKey(day)}T${time}`);
                   setOpen(false);
                 }}
-                locale={language === "es" ? es : enUS}
+                locale={CALENDAR_LOCALES[language]}
                 weekStartsOn={1}
                 showOutsideDays
                 classNames={CALENDAR_CLASSES}

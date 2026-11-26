@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { createMutationKey, createMutationKeyTracker } from "./mutation-idempotency";
+import {
+  createMutationKey,
+  createMutationKeyTracker,
+  mutationFingerprint,
+} from "./mutation-idempotency";
 
 describe("mutation idempotency", () => {
   it("uses secure random values when randomUUID is unavailable", () => {
@@ -28,5 +32,44 @@ describe("mutation idempotency", () => {
     tracker.clear();
     expect(tracker.keyFor({ body: { text: "Changed", title: "Note" } })).toBe("mutation-key-3");
     expect(createKey).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps concurrent mutations on independent keys until each settles", () => {
+    const createKey = vi
+      .fn<() => string>()
+      .mockReturnValueOnce("key-a")
+      .mockReturnValueOnce("key-b")
+      .mockReturnValueOnce("key-c");
+    const tracker = createMutationKeyTracker(createKey);
+
+    const first = { post_id: "post-1", text: "First" };
+    const second = { post_id: "post-2", text: "Second" };
+
+    expect(tracker.keyFor(first)).toBe("key-a");
+    expect(tracker.keyFor(second)).toBe("key-b");
+    expect(tracker.keyFor(first)).toBe("key-a");
+    expect(tracker.keyFor(second)).toBe("key-b");
+    expect(createKey).toHaveBeenCalledTimes(2);
+
+    tracker.clear(mutationFingerprint(first));
+    expect(tracker.keyFor(second)).toBe("key-b");
+    expect(createKey).toHaveBeenCalledTimes(2);
+
+    expect(tracker.keyFor(first)).toBe("key-c");
+    expect(createKey).toHaveBeenCalledTimes(3);
+  });
+
+  it("evicts the oldest fingerprint once the active map reaches its cap", () => {
+    const createKey = vi.fn<() => string>(() => "key");
+    const tracker = createMutationKeyTracker(createKey);
+
+    for (let index = 0; index < 64; index += 1) {
+      tracker.keyFor({ index });
+    }
+    expect(createKey).toHaveBeenCalledTimes(64);
+
+    tracker.keyFor({ index: 64 });
+    tracker.keyFor({ index: 0 });
+    expect(createKey).toHaveBeenCalledTimes(66);
   });
 });

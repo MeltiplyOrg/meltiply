@@ -51,8 +51,6 @@ describe("collection toolbar interactions", () => {
     fireEvent.click(filter!);
     expect(screen.getByText("Status choices")).toBeVisible();
     fireEvent.keyDown(filter!.parentElement!, { key: "Escape" });
-    // Focus returns immediately; the disclosure itself stays mounted through the
-    // shared menu exit animation and closes when it finishes.
     expect(filter).toHaveFocus();
     const panel = document.querySelector<HTMLElement>("[data-menu-surface]");
     expect(panel?.dataset.state).toBe("closed");

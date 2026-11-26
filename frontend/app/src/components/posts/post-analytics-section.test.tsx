@@ -34,7 +34,6 @@ vi.mock("@/hooks/use-session-scope", () => ({
 }));
 vi.mock("@/lib/queries", () => ({ usePostAnalyticsHistory: () => state }));
 
-// jsdom has no layout observer; browser smoke covers the actual responsive SVG.
 beforeAll(() => {
   vi.stubGlobal(
     "ResizeObserver",
@@ -74,9 +73,6 @@ afterEach(() => {
   cleanup();
   state.isError = false;
   state.isPending = false;
-  // The hook mock is module-level and this file keeps mock call history
-  // (`clearMocks: false`), so a retry click in one test must not leak into the
-  // single-call assertion of another.
   state.refetch.mockClear();
 });
 

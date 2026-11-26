@@ -18,11 +18,6 @@ import { CalendarTimeGrid } from "./calendar-time-grid";
 import { calendarDateKey, type CalendarPeriod } from "./calendar-dates";
 import type { CalendarSlot } from "./calendar-slots";
 
-/**
- * Month-chip tint per canonical tone. The tone travels as `data-tone`, so the
- * class list stays statically analyzable by the design-system linter; neutral
- * remains legible without implying a schedule.
- */
 const MONTH_CHIP_TONE_CLASS = `
   border-line bg-inset hover:bg-inset/70
   data-[tone=accent]:border-accent/20 data-[tone=accent]:bg-accent-tint data-[tone=accent]:hover:bg-accent-tint/70
@@ -33,12 +28,6 @@ const MONTH_CHIP_TONE_CLASS = `
 
 export interface PostCalendarGridViewProps {
   posts: PostRow[];
-  /**
-   * Renders the month's real dates, weekday heading, and controls with
-   * placeholder chips in place of Post chips. The grid's dates come from the
-   * displayed month rather than the response, so only the chips are unknown
-   * while the calendar query resolves.
-   */
   isLoading: boolean;
   calendarMonth: Date;
   calendarDays: CalendarDayCell[];
@@ -50,9 +39,7 @@ export interface PostCalendarGridViewProps {
   onScheduleDate: (date: Date) => void;
   onViewDetails: (postId: string) => void;
   canSchedule: boolean;
-  /** Reserves space for the shared bulk bar; selection remains in day details. */
   selectionActive?: boolean;
-  /** Queue calendars control Month/Week in their own timezone; Posts retains its existing local-time contract. */
   timeline?: {
     mode: CalendarPeriod;
     onModeChange: (mode: CalendarPeriod) => void;
@@ -62,18 +49,8 @@ export interface PostCalendarGridViewProps {
   };
 }
 
-/**
- * Placeholder chips per calendar day while the calendar query resolves. The
- * three-day cycle keeps a realistic mix of busy and quiet days without random
- * values, so the grid reads the same on every render.
- */
 const PLACEHOLDER_CHIPS = [["chip-1", "chip-2"], ["chip-1"], []] as const;
 
-/**
- * Shared period bar with Today, stepping, a localized heading, and canonical
- * Month/Week selection for Posts and Queue calendars.
- * Navigation callbacks move the caller's civil query anchor, never Post times.
- */
 function CalendarToolbar({
   mode,
   onModeChange,
@@ -135,19 +112,6 @@ function CalendarToolbar({
   );
 }
 
-/**
- * Gr8r Calendar's flat Month grid and Week columns over real filtered Post rows.
- * Indexes once by local day; a Post appears once per affected day, not per Channel.
- * Post chips open inspection, day numbers/overflow open the selectable day list,
- * and explicit plus controls seed the real composer. No drag-to-reschedule or
- * task-only events are implied. Week navigation keeps the parent's query anchor
- * current, so crossing month/year boundaries fetches the displayed dates.
- * While `isLoading`, the real month heading, dates, and controls stay in place and
- * only the chips become placeholders.
- * Queue callers provide a timezone, a live clock and controlled Month/Week
- * state; their hourly canvas reuses the toolbar and month chips without changing
- * the existing Posts Week layout or its local-time scheduling behavior.
- */
 export const PostCalendarGridView = React.memo(function PostCalendarGridView({
   posts,
   isLoading,
@@ -168,7 +132,6 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
   const scrollRef = useSmoothScrollContainer();
   const [localMode, setLocalMode] = useState<CalendarPeriod>("month");
   const mode = timeline?.mode ?? localMode;
-  /** Morphs the named calendar/date snapshots without animating the toolbar or delaying state changes. */
   function changeMode(next: CalendarPeriod) {
     if (next === mode) return;
     const commit = () => flushSync(() => (timeline?.onModeChange ?? setLocalMode)(next));
@@ -229,7 +192,6 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
     });
   }, [calendarMonth]);
   const days = mode === "month" ? calendarDays : weekDays;
-  /** Only the seven days that survive into Week morph; naming all 35–42 Month cells would snapshot the whole grid. */
   const morphKeys = useMemo(
     () => new Set(weekDays.map((day) => toLocalDateKey(day.date))),
     [weekDays],
@@ -242,7 +204,6 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
       ? monthLabel.format(calendarMonth)
       : `${shortLabel.format(weekDays[0]!.date)} – ${shortLabel.format(weekDays[6]!.date)}, ${weekDays[6]!.date.getFullYear()}`;
   const postById = useMemo(() => new Map(posts.map((row) => [row.id, row])), [posts]);
-  /** Dashed unfilled-slot chip; elapsed occurrences stay muted so they cannot read as bookable. */
   function renderSlotChip(slot: CalendarSlot) {
     const elapsed = timeline ? new Date(slot.instant) <= timeline.now : false;
     return (
@@ -261,7 +222,6 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
       </div>
     );
   }
-  /** One real Post chip shared by both calendar lists; Month keeps its compact time-prefixed chip. */
   function renderPostChip(row: PostRow) {
     const caption = resolveRowCaption(row) || t("Untitled post");
     const status = normalizePostStatus(row);
@@ -388,7 +348,6 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                     const daySlots = timeline?.slots.get(key) ?? [];
                     const emptySlots = daySlots.filter((slot) => !slot.postId);
                     const filledSlots = daySlots.length - emptySlots.length;
-                    // Slots and off-plan Posts interleave in time order; filled slots render their real Post chip.
                     const monthEntries =
                       mode === "month" && timeline
                         ? [
@@ -542,7 +501,9 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                           ) : mode === "month" && timeline ? (
                             monthEntries.slice(0, 3)
                           ) : (
-                            dayPosts.map((row) => renderPostChip(row))
+                            (mode === "month" ? dayPosts.slice(0, 3) : dayPosts).map((row) =>
+                              renderPostChip(row),
+                            )
                           )}
                           {!isLoading &&
                             mode === "month" &&

@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# These Docker fixtures model host-mode Compose, not the editor's devcontainer.
-# Keep inherited topology from requesting an owner absent from the fixture.
 unset MELTIPLY_DEVCONTAINER
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -36,8 +34,6 @@ set -euo pipefail
 printf 'install-opentofu\n' >>"$COMMAND_LOG"
 EOF
 
-# setup.sh pulls images through the real shared boundary; give the fixture
-# checkout the real helper so the call shape matches production.
 cp "$repo_root/scripts/cloudflare-local/compose.sh" \
   "$fixture/scripts/cloudflare-local/compose.sh"
 cp "$repo_root/scripts/cloudflare-local/complete-env.mjs" \
@@ -110,7 +106,6 @@ if grep -Fq 'pull postgres' "$COMMAND_LOG"; then
   exit 1
 fi
 assert_logged "database seed"
-# Re-running setup must preserve generated signing/encryption/bootstrap material.
 cmp "$fixture/first-setup.env" "$fixture/.env"
 
 : >"$COMMAND_LOG"
@@ -127,13 +122,6 @@ if [[ -s "$COMMAND_LOG" ]]; then
   exit 1
 fi
 
-
-# A cold PostgreSQL volume briefly becomes ready during image initialization,
-# then restarts before the final server. Migration must wait through that gap.
-# The stub models the exact argv database.sh issues. The initialization marker
-# check arrives as `exec -T postgres sh -c 'test -f ...'`, so matching the
-# joined argv is what keeps that wait observable; an argument shape the stub
-# does not model fails loudly instead of exiting 0 through a fall-through case.
 cat >"$fixture/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -175,8 +163,6 @@ printf '0\n' >"$PG_READY_COUNT"
 "$repo_root/scripts/cloudflare-local/database.sh" start
 [[ "$(cat "$PG_READY_COUNT")" == "5" ]]
 [[ -f "$MIGRATION_RAN" ]]
-# The entrypoint-marker wait must run before migrations; a start() that skips it
-# would migrate into a volume whose initialization is still in flight.
 [[ -s "$INIT_CHECKS" ]]
 
 printf 'cloudflare local setup tests passed\n'

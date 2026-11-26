@@ -97,8 +97,6 @@ vi.mock("@/lib/queries", () => ({
           user_id: "10000000-0000-4000-8000-000000000005",
         },
         {
-          // A second, non-owner admin: only the Installation Owner may remove
-          // an admin, so this row is the one that actually exercises that guard.
           avatar_url: null,
           created_at: "2026-01-04T00:00:00.000Z",
           display_name: "Beta Admin",
@@ -168,14 +166,15 @@ vi.mock("@/lib/queries", () => ({
 }));
 
 import SettingsPage from "@/app/(dashboard)/settings/page";
+import { I18nProvider, useI18n } from "@/lib/i18n";
+
+function LanguageProbe() {
+  const { setLanguage } = useI18n();
+  return <button onClick={() => setLanguage("es")}>Use Spanish</button>;
+}
 
 afterEach(cleanup);
 
-/**
- * Renders the settings route with the router context the page expects.
- *
- * @returns Testing-library render result.
- */
 function renderSettings() {
   return render(
     <MemoryRouter initialEntries={["/settings"]}>
@@ -188,6 +187,22 @@ function renderSettings() {
 }
 
 describe("settings administration surface", () => {
+  it("formats invitation expiry dates in the selected application language", () => {
+    const { container } = render(
+      <I18nProvider>
+        <LanguageProbe />
+        <MemoryRouter>
+          <SettingsPage />
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Use Spanish" }));
+    const expiry = container.querySelector('time[datetime="2026-01-08T00:00:00.000Z"]');
+    expect(expiry).toHaveTextContent(
+      new Intl.DateTimeFormat("es").format(new Date("2026-01-08T00:00:00.000Z")),
+    );
+  });
+
   it("renders members, seats, and owner-only administration controls", () => {
     renderSettings();
 

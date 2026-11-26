@@ -1,6 +1,3 @@
-// Unit tests exercise resolveActor + service seams only: the database module
-// pulls in `pg`, which cannot load in the workers vitest pool. Mocking it
-// keeps actor resolution's dynamic database import from evaluating pg.
 import { describe, expect, it, vi } from "vite-plus/test";
 vi.mock("../src/database", () => ({}));
 import { Effect } from "effect";
@@ -12,6 +9,7 @@ import type { components } from "@meltiply/contracts/schema";
 import type { ResolvedActor } from "../src/actor-resolution";
 import { createApiApp } from "../src/app";
 import type { ApiWorkerEnv } from "../src/env";
+import { fakeEnv } from "../test-support/fakes";
 import {
   CurrentUserService,
   createCurrentUserServiceTest,
@@ -20,10 +18,6 @@ import {
 
 type UserProfile = components["schemas"]["UserProfile"];
 
-// Better Auth subject plus the internal Workspace membership the server
-// resolved from org_members, mirroring the confirmed actor claims contract:
-// subject = Better Auth user id, userId = internal users.id UUID,
-// organizationId = resolved workspace UUID, organizationRole = member role.
 const actor: ResolvedActor = {
   authUserId: "auth_user_alpha",
   claims: {
@@ -60,16 +54,12 @@ const mockProfile: UserProfile = {
   updated_at: "2026-09-12T12:00:00.000Z",
 };
 
-// Verified Better Auth JWT identity returned by the `verifyJwtToken` test
-// double; the bearer JWT is the only credential protected routes may accept.
 const jwtIdentity: JwtIdentity = {
   email: "alpha@example.test",
   name: "Alpha User",
   subject: actor.authUserId,
 };
 
-// JWT bearer Authorization header standing in for the Better Auth session
-// cookie on protected-route requests.
 const bearerAuthorization = "Bearer test-only.jwt";
 
 describe("CurrentUserService (Effect v4 application service)", () => {
@@ -130,7 +120,7 @@ describe("CurrentUserService (Effect v4 application service)", () => {
   });
 
   it("createCurrentUserServiceLive loads user successfully through loader", async () => {
-    const mockEnv = {} as unknown as ApiWorkerEnv;
+    const mockEnv = fakeEnv();
     const liveLayer = createCurrentUserServiceLive(mockEnv, actor.claims, async () => mockProfile);
 
     const program = Effect.gen(function* () {
@@ -143,7 +133,7 @@ describe("CurrentUserService (Effect v4 application service)", () => {
   });
 
   it("createCurrentUserServiceLive fails with ActiveOrganizationRequiredError when user is null", async () => {
-    const mockEnv = {} as unknown as ApiWorkerEnv;
+    const mockEnv = fakeEnv();
     const liveLayer = createCurrentUserServiceLive(mockEnv, actor.claims, async () => null);
 
     const program = Effect.gen(function* () {
@@ -159,7 +149,7 @@ describe("CurrentUserService (Effect v4 application service)", () => {
   });
 
   it("createCurrentUserServiceLive passes actor claims to the loader", async () => {
-    const mockEnv = {} as unknown as ApiWorkerEnv;
+    const mockEnv = fakeEnv();
     const loader = vi.fn(async () => mockProfile);
     const liveLayer = createCurrentUserServiceLive(mockEnv, actor.claims, loader);
 
@@ -173,7 +163,7 @@ describe("CurrentUserService (Effect v4 application service)", () => {
   });
 
   it("createCurrentUserServiceLive maps database exception to DatabaseError with cause preserved", async () => {
-    const mockEnv = {} as unknown as ApiWorkerEnv;
+    const mockEnv = fakeEnv();
     const originalError = new Error("connection terminated unexpectedly");
     const liveLayer = createCurrentUserServiceLive(mockEnv, actor.claims, async () => {
       throw originalError;
@@ -204,7 +194,7 @@ describe("CurrentUserService (Effect v4 application service)", () => {
   });
 
   it("createCurrentUserServiceLive wraps loader in current_user.load span with attributes", async () => {
-    const mockEnv = {} as unknown as ApiWorkerEnv;
+    const mockEnv = fakeEnv();
 
     const exportedSpans: OtlpSpanInput[] = [];
     const mockExporter = vi.fn(async (_env: unknown, span: OtlpSpanInput) => {
@@ -223,7 +213,10 @@ describe("CurrentUserService (Effect v4 application service)", () => {
     const program = Effect.gen(function* () {
       const service = yield* CurrentUserService;
       return yield* service.getCurrentUser();
-    }).pipe(Effect.provide(liveLayer), Effect.provide(effectTracerLayer(context, mockExporter)));
+    }).pipe(
+      Effect.provide(liveLayer),
+      Effect.provide(effectTracerLayer(context, { exporter: mockExporter })),
+    );
 
     const result = await Effect.runPromise(program);
     expect(result).toEqual(mockProfile);
@@ -271,7 +264,6 @@ describe("CurrentUserService (Effect v4 application service)", () => {
       email: "alpha@example.test",
     });
 
-    // Check OTLP trace exports to Tempo receiver
     const traceCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes("/v1/traces"));
     expect(traceCalls.length).toBeGreaterThanOrEqual(2);
 

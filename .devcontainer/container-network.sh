@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
-# Repair only the pinned workerd proxy's reverse-path filtering under DinD.
-# The inner daemon's PIDs are local, so nsenter needs no helper image or socket
-# forwarding. Never change the devcontainer's or outer host's network namespace.
+# The pinned workerd proxy needs reverse-path filtering relaxed inside its own
+# network namespace under DinD.
 set -euo pipefail
 
 sidecar_image='cloudflare/proxy-everything:3cb1195@sha256:0ef6716c52430096900b150d84a3302057d6cd2319dae7987128c85d0733e3c8'
 state_dir="${TMPDIR:-/tmp}/meltiply-container-network-${UID}"
 
-# Repairs a positively identified running proxy in its private network namespace.
-# A disappeared proxy is harmless; real sysctl failures are returned and logged
-# by the watcher. Namespace identity is rechecked after entering it to avoid
-# changing the daemon host namespace even if the proxy exits and its PID is reused.
 repair_sidecar() {
   local id=$1 metadata name image running network_mode pid namespace
   metadata="$(docker inspect --format '{{.Name}} {{.Config.Image}} {{.State.Running}} {{.HostConfig.NetworkMode}} {{.State.Pid}}' "$id" 2>/dev/null)" || return 0
@@ -22,15 +17,10 @@ repair_sidecar() {
     test "$(readlink /proc/self/ns/net)" = "$1"
     sysctl -w net.ipv4.conf.all.src_valid_mark=0
   ' _ "$namespace" || {
-    # A stop/restart during nsenter is not a persistent repair failure.
     [[ "$(docker inspect --format '{{.State.Pid}}' "$id" 2>/dev/null || true)" != "$pid" ]]
   }
 }
 
-# Watches starts and existing proxies, reconnecting after daemon interruptions.
-# One flock per devcontainer deduplicates lifecycle/manual invocations. Take the
-# event timestamp before scanning so starts between scan and subscribe are seen.
-# Repair failures stay visible in the log; later starts/scans retry them.
 watch_sidecars() {
   exec 9>"$state_dir/lock"
   flock --nonblock 9 || return 0
@@ -51,9 +41,6 @@ watch_sidecars() {
   done
 }
 
-# Starts a detached watcher without delaying the lifecycle hook. The watcher
-# holds its own flock, so concurrent starts cannot produce duplicate listeners.
-# Logs live inside this devcontainer rather than the outer Docker daemon.
 start_watching() {
   if ! flock --nonblock "$state_dir/lock" true; then
     printf 'Network watcher already running; log: %s/watcher.log\n' "$state_dir"
@@ -63,12 +50,10 @@ start_watching() {
   printf 'Watching pinned Cloudflare proxies; log: %s/watcher.log\n' "$state_dir"
 }
 
-# This script requires a local DinD daemon, never a forwarded host API socket.
 [[ "${MELTIPLY_DEVCONTAINER:-0}" == 1 && "${DOCKER_HOST:-unix:///var/run/docker.sock}" == unix:///var/run/docker.sock && ! -S /var/run/docker-host.sock && ! -L /var/run/docker.sock ]] || {
   printf 'container-network.sh requires the devcontainer local Docker-in-Docker daemon\n' >&2
   exit 1
 }
-# Lifecycle hooks may begin while the image entrypoint is still delegating cgroups.
 for attempt in {1..60}; do
   if docker info >/dev/null 2>&1; then break; fi
   if [[ "$attempt" == 60 ]]; then

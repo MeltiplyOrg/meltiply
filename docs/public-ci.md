@@ -39,9 +39,8 @@ fresh exact-change review token in one changelog bullet; missing initial-release
 baselines are reported explicitly. See the
 [contract upgrade procedure](../packages/contracts/README.md).
 
-`bun run test:tooling` discovers Node test files in CI helpers, local tooling,
-translations, infrastructure, releases, staging adapters, and self-hosted
-jobs. Shell regressions and PostgreSQL suites stay separate; none need deployment
+`bun run test:tooling` includes lint diagnostic regressions and Node tooling tests.
+Shell regressions and PostgreSQL suites stay separate; none need deployment
 credentials.
 
 Regression fixtures must isolate the rule a test names: clear independent upload limits
@@ -51,14 +50,11 @@ capability expiry must not let it outlive the persisted write hold.
 
 ## Manual lanes
 
-[`extended.yml`](../.github/workflows/extended.yml) exposes lanes selected by hand:
-`frontend-full`, `frontend-ui`, `cloudflare-full`, `cloudflare-integration`,
-`cloudflare-extended`, `publishing-flow`, `publishing-browser`, `publishing-queues`,
-`device-authorization`, `object-storage`, `portable-caching`, `portable-caching-smoke`,
-`performance-focused`, `performance-backend`, `performance-media`,
-`versioned-contract`, and `managed-release`. They run on
-GitHub-hosted machines without deployment secrets. A passing `ci-gate` does not imply
-a manual lane ran.
+[`extended.yml`](../.github/workflows/extended.yml) exposes manually selected lanes.
+The `lint-guardrails` lane isolates lint diagnostics, focused regressions, and
+pinned managed-skill verification from runtime acceptance. `composer-guardrails` runs the full application gate followed
+by composer save and recovery acceptance. All lanes run on GitHub-hosted machines without deployment
+secrets. A passing `ci-gate` does not imply a manual lane ran.
 
 Lanes use the real API, storage, processor, transport, and consumer with controlled
 external Provider responses; they do not certify live credentials, platform audit, or
@@ -120,15 +116,17 @@ Worker runtime tries to read host-only cache paths.
 [`install-quality-tool.sh`](../scripts/ci/install-quality-tool.sh) installs Gitleaks
 8.30.1 and typos 1.35.5 from versioned archives with pinned SHA-256 checksums.
 
-Spelling checks cover generated third-party notice bundles; a scoped dictionary
-preserves an upstream author's surname. Do not rewrite copyright attribution to satisfy
-a spelling suggestion.
+Spelling checks cover generated third-party notice bundles and localization tests.
+File-scoped dictionaries preserve an upstream author's surname and the German month
+names asserted by their owning tests. Real-checker controls ensure that other files,
+other month names, and ordinary misspellings remain checked. Preserve attribution and
+localization semantics rather than replacing them with English spellings.
 
-The secret scanner keeps a live synthetic detection canary. Its config excludes three
-proven false positives only when their exact source path and rule also match: the Argo
-guide's `YOUR_API_TOKEN`, the SQL column `r2_thumbnail`, and one example JWT whose
-signature is plain text. These are not file or commit exemptions — different
-credentials in the same files still fail.
+The secret scanner keeps a live synthetic detection canary and reports redacted
+finding details. Proven documentation and test false positives are matched by exact
+value, source path, and detector rule, not file or commit exemptions. Real-scanner
+controls verify that the processor fixture exception rejects different values,
+paths, and prefixed values; different credentials in the same files still fail.
 
 ## Runner costs and branch protection
 

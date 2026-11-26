@@ -11,6 +11,8 @@ import { allowedOriginsFor } from "./verifier-cache";
 import { mailSenderConfiguration } from "@meltiply/domain/mail-content";
 import { createCloudflareMailSender } from "./mail";
 import { authPolicyHandler } from "./auth-policy";
+import { lazySystemPoolFor } from "./database-module";
+import { clonedStringField } from "./request-json";
 
 let betterAuthCached:
   | {
@@ -28,40 +30,15 @@ let betterAuthCached:
     }
   | undefined;
 
-/**
- * Outcome of a single auth rate-limit check: `ok` admits the request, `limited`
- * rejects it with the seconds the caller should wait before retrying.
- */
 export interface AuthRateLimitResult {
   retryAfterSeconds?: number;
   status: "limited" | "ok";
 }
 
-/** Row shape returned by `public.auth_rate_limit_hit`. */
 interface RateLimitHitRow extends Record<string, unknown> {
   retry_after: number | null;
 }
 
-/**
- * Returns a cached Better Auth instance keyed by every binding it captures.
- * Local and explicitly request-owned pools are never cached because their
- * adapters belong to one invocation; managed isolates reuse the instance while
- * its secret, origins, mail configuration, policy, and database remain stable.
- *
- * Email verification is explicit: deployed environments require verified email
- * by default, while local/test allow unverified sign-in. Required verification
- * fails closed when the mail binding or sender is unusable.
- *
- * The installation application origin (`APP_URL`) is mandatory and validated
- * here because device-authorization verification links are absolute and pinned
- * to it; the API never derives consent URLs from a forwarded request host.
- *
- * @param env - Worker environment bindings containing database and auth configuration.
- * @returns Configured Better Auth instance.
- * @throws {Error} When the secret or application origin is missing/insecure in
- *   a deployed environment, or required email verification lacks a usable mail
- *   binding and sender.
- */
 export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstance> {
   const isLocalOrTest = env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test";
   const requestOwnedPool = env.ENVIRONMENT === "local" || env.DATABASE_POOL_MODE === "request";
@@ -73,9 +50,6 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
     throw new Error("BETTER_AUTH_SECRET must be configured in staging and production");
   }
   const baseURL = env.APP_URL?.trim() || undefined;
-  // Validate the installation origin and pin the consent URL to it. This
-  // throws before any auth instance exists when APP_URL is missing, insecure
-  // outside local development, or not a canonical origin.
   const deviceVerification = deviceVerificationUri(env);
   const origins = `${baseURL ?? ""}\n${env.ALLOWED_ORIGINS?.trim() || ""}`;
   const requireEmailVerification = requiresEmailVerification(env);
@@ -108,9 +82,7 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
   }
 
   const trustedOrigins = Array.from(allowedOriginsFor(env));
-  // Exception: dynamic import avoids loading pg in workerd unit test isolates.
-  const { systemPoolFor } = await import("./database");
-  const database = systemPoolFor(env);
+  const database = await lazySystemPoolFor(env);
   const auth = authPolicyHandler(
     env,
     await createBetterAuth({
@@ -161,19 +133,11 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
   return auth;
 }
 
-/**
- * Fixed-window abuse-control policy for a single Better Auth action.
- * `maxAttempts` requests per `windowSeconds` are allowed per identity bucket.
- */
 interface AuthRateLimitRule {
   maxAttempts: number;
   windowSeconds: number;
 }
 
-/**
- * Per-action auth rate limits. Email-bearing actions are keyed by the normalized
- * email and by caller IP; all other auth endpoints share a per-IP budget.
- */
 const AUTH_RATE_LIMITS: Record<string, AuthRateLimitRule> = {
   generic: { maxAttempts: 120, windowSeconds: 60 },
   "request-password-reset": { maxAttempts: 5, windowSeconds: 3600 },
@@ -184,27 +148,17 @@ const AUTH_RATE_LIMITS: Record<string, AuthRateLimitRule> = {
   "invitation-accept": { maxAttempts: 10, windowSeconds: 600 },
   "two-factor": { maxAttempts: 10, windowSeconds: 600 },
   "change-password": { maxAttempts: 10, windowSeconds: 600 },
-  // Device-flow abuse controls. Issuance and consent actions are per caller;
-  // token polling is additionally budgeted per device code so the advertised
-  // five-second interval is enforced across Worker isolates without relying on
-  // isolate-local state.
   "device-code": { maxAttempts: 20, windowSeconds: 600 },
   "device-verify": { maxAttempts: 30, windowSeconds: 600 },
   "device-approval": { maxAttempts: 20, windowSeconds: 600 },
   "device-token": { maxAttempts: 1, windowSeconds: 5 },
 };
 
-/**
- * Per-subject rate-limit budget. Token polling uses a tight per-device window
- * while retaining a looser per-caller ceiling, so one installation cannot be
- * flooded by many devices behind the same address.
- */
 interface AuthRateLimitSubject {
   rule: AuthRateLimitRule;
   subject: string;
 }
 
-/** Token polling callers may legitimately poll once per five seconds per device. */
 const DEVICE_TOKEN_IP_RULE: AuthRateLimitRule = { maxAttempts: 120, windowSeconds: 60 };
 
 const EMAIL_RATE_LIMIT_ACTIONS = new Set([
@@ -214,28 +168,14 @@ const EMAIL_RATE_LIMIT_ACTIONS = new Set([
   "sign-up",
 ]);
 
-/**
- * Atomically records one attempt against a fixed-window bucket and reports rejection.
- *
- * Calls `public.auth_rate_limit_hit(action, subject, window_seconds, max_attempts)`
- * on the system pool. The INSERT ... ON CONFLICT increment is atomic under
- * concurrency, so the returned denial is authoritative across Worker isolates.
- *
- * @param env - Worker environment bindings.
- * @param subject - Normalized subject (`email:<addr>` or `ip:<addr>`).
- * @param rule - Window size and attempt ceiling for the action.
- * @param action - Rate-limit action key stored in `auth_rate_limits.action`.
- * @returns Null when the attempt is allowed, or Retry-After seconds when denied.
- */
 async function authRateLimitHit(
   env: ApiWorkerEnv,
   action: string,
   subject: string,
   rule: AuthRateLimitRule,
 ): Promise<number | null> {
-  // Exception: dynamic import avoids loading pg in workerd unit test isolates
-  const { systemPoolFor } = await import("./database");
-  const client = await systemPoolFor(env).connect();
+  const pool = await lazySystemPoolFor(env);
+  const client = await pool.connect();
   try {
     const result = await client.query<RateLimitHitRow>(
       `SELECT public.auth_rate_limit_hit($1, $2, $3, $4) AS retry_after`,
@@ -248,71 +188,12 @@ async function authRateLimitHit(
   }
 }
 
-/**
- * Extracts only the edge-authenticated client IP. The self-hosted ingress strips
- * forwarding headers and writes its socket address; arbitrary X-Forwarded-For
- * is never trusted. Missing IPs deliberately share a conservative bucket.
- */
 function clientIp(request: Request): string | undefined {
   const connecting = request.headers.get("cf-connecting-ip")?.trim();
   if (connecting) return connecting;
   return undefined;
 }
 
-/**
- * Reads the normalized email from a JSON auth request body without consuming it.
- *
- * Clones the request before parsing so the downstream Better Auth handler still
- * receives the original body stream.
- *
- * @param request - Incoming auth request.
- * @returns Lowercased trimmed email, or undefined when absent or unparseable.
- */
-async function requestEmail(request: Request): Promise<string | undefined> {
-  const email = await requestStringField(request, "email");
-  return email?.toLowerCase();
-}
-
-/**
- * Reads a non-empty string field from a cloned JSON auth request body without
- * consuming it. Used to hash credential-bearing subjects before rate limiting,
- * so device codes and emails never reach the limit store in plaintext.
- *
- * @param request - Incoming auth request.
- * @param field - Top-level body field to read.
- * @returns Trimmed value, or undefined when absent or not a non-empty string.
- */
-async function requestStringField(request: Request, field: string): Promise<string | undefined> {
-  try {
-    const body: unknown = await request.clone().json();
-    if (body && typeof body === "object" && field in body) {
-      const value = (body as Record<string, unknown>)[field];
-      if (typeof value === "string" && value.trim()) return value.trim();
-    }
-  } catch {
-    // Non-JSON or missing bodies simply have no usable identity.
-  }
-  return undefined;
-}
-
-/**
- * Enforces the database-backed fixed-window rate limit for one Better Auth request.
- *
- * Records attempts through `public.auth_rate_limit_hit()` keyed by action plus a
- * SHA-256 subject (`email:<hash>` for credential endpoints, `device:<hash>` for
- * token polling, and always `ip:<hash>`), so limits are distributed across
- * isolates and cannot be bypassed by rotating any identity dimension. Token
- * polling checks and counts the caller IP before allocating or checking a
- * per-device bucket, so caller exhaustion bounds distinct-code ledger growth and
- * per-device throttling still consumes the caller budget. Fails closed: a
- * rate-limit store error propagates as a 500 rather than allowing unbounded
- * abuse.
- *
- * @param env - Worker environment bindings.
- * @param action - Rate-limit action key (e.g. `"sign-in"`, `"generic"`).
- * @param request - Incoming auth request.
- * @returns `"ok"` when within budget, or `"limited"` with a Retry-After hint.
- */
 export async function checkAuthRateLimit(
   env: ApiWorkerEnv,
   action: string,
@@ -327,7 +208,7 @@ export async function checkAuthRateLimit(
     if (callerRetryAfter !== null) {
       return { retryAfterSeconds: callerRetryAfter, status: "limited" };
     }
-    const deviceCode = await requestStringField(request, "device_code");
+    const deviceCode = await clonedStringField(request, "device_code");
     if (deviceCode) {
       const deviceRetryAfter = await authRateLimitHit(
         env,
@@ -344,7 +225,7 @@ export async function checkAuthRateLimit(
 
   const subjects: AuthRateLimitSubject[] = [];
   if (EMAIL_RATE_LIMIT_ACTIONS.has(action)) {
-    const email = await requestEmail(request);
+    const email = (await clonedStringField(request, "email"))?.toLowerCase();
     if (email) {
       subjects.push({ rule, subject: `email:${await sha256Hex(email)}` });
     }

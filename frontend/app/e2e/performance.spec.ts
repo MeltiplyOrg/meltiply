@@ -11,12 +11,6 @@ import {
 } from "./performance-harness";
 import { signIn, waitForWorkspace } from "./workspace-session";
 
-/**
- * Budgets are medians across repeated warm runs. They are deliberately far
- * above an idle local run so a shared GitHub runner gates structural
- * regressions (a failed request, a missing lazy chunk, a render loop) without
- * turning scheduling jitter into a flaky failure.
- */
 const budgets = {
   coldSignIn: { apiMs: 9_000, cls: 0.2, elapsedMs: 18_000, longTaskMs: 4_000 },
   composerOpen: { apiMs: 2_500, cls: 0.08, elapsedMs: 4_000, longTaskMs: 1_500 },
@@ -32,20 +26,15 @@ const credentials = {
   password: "MeltiplyLocal1!",
 };
 
-/** Waits for the real hydrated Posts surface after a navigation or reload. */
 async function waitForPosts(page: Page): Promise<void> {
   await waitForWorkspace(page);
   await expect(page.locator("main")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Posts", exact: true })).toBeVisible();
-  // A shell or a pending request is not a completed journey: wait for the
-  // deterministic seeded collection to render its first real Post row, not a
-  // skeleton row that shares the same data attribute.
   await expect(page.locator('[data-post-row]:not([aria-hidden="true"])').first()).toBeVisible({
     timeout: 20_000,
   });
 }
 
-/** Opens the first real Post row and waits for its media-bearing inspector. */
 async function openFirstPostMedia(page: Page): Promise<void> {
   const row = page.locator("[data-post-row]").first();
   await expect(row).toBeVisible();
@@ -55,13 +44,11 @@ async function openFirstPostMedia(page: Page): Promise<void> {
   });
 }
 
-/** Opens the composer through the same toolbar action a creator uses. */
 async function openComposer(page: Page): Promise<void> {
   await page.locator("main header").getByRole("button", { name: "Create post" }).click();
   await expect(page.getByPlaceholder(/what do you want to publish/i)).toBeVisible();
 }
 
-/** Repeats one measured action and returns the median attribution. */
 async function measureRepeated(
   page: Page,
   action: () => Promise<void>,
@@ -74,10 +61,6 @@ async function measureRepeated(
   return medianMetrics(samples);
 }
 
-/**
- * Retains a journey's JSON evidence before checking its budget. Awaiting the
- * attachment keeps the report intact even when the assertion fails.
- */
 async function assertJourneyBudget(
   attachmentName: string,
   metrics: JourneyMetrics,
@@ -202,9 +185,6 @@ test.describe("production publishing journeys", () => {
     await signIn(page, credentials);
     await waitForPosts(page);
 
-    // Delayed readiness: a fresh context has no memory cache and starts from
-    // the signed-in cookie, so the representative API delay reaches the real
-    // fetch and the journey cannot pass on already-rendered rows.
     const browser = page.context().browser();
     if (!browser) throw new Error("the performance journey needs a browser instance");
     const storage = await page.context().storageState();
@@ -235,13 +215,9 @@ test.describe("production publishing journeys", () => {
       `delayed readiness was not caught: ${JSON.stringify(delayed)}`,
     ).toBe(false);
 
-    // Lost input: the exact-content check fails when even one keystroke is
-    // missing, and passes for the untouched value.
     expect(typedContentMatches("launch copy", "launch copy")).toBe(true);
     expect(typedContentMatches("launch cpy", "launch copy")).toBe(false);
 
-    // Layout movement: inserting a large banner above the loaded collection
-    // shifts real layout; the same CLS budget must reject it.
     const shifted = await measureJourney(delayedPage, async () => {
       await delayedPage.evaluate(() => {
         const banner = document.createElement("div");

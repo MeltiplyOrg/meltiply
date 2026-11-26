@@ -23,8 +23,6 @@ function json(value: unknown, init: ResponseInit = {}) {
 }
 
 describe("ProviderHttpClient", () => {
-  // Workers fetch rejects a client instance as its receiver; model that native
-  // constraint to ensure valid provider responses remain reachable at runtime.
   it("supports a fetch implementation requiring the global receiver", async () => {
     const fetcher: typeof fetch = function (this: typeof globalThis) {
       if (this !== globalThis) {
@@ -32,7 +30,7 @@ describe("ProviderHttpClient", () => {
       }
       return Promise.resolve(json({ account_id: "facebook-page-1" }));
     };
-    const response = await client(fetcher).request<{ account_id: string }>(context, {
+    const response = await client(fetcher).request(context, {
       method: "GET",
       url: "https://api.provider.example/account",
     });
@@ -43,9 +41,7 @@ describe("ProviderHttpClient", () => {
     const fetcher = vi.fn<typeof fetch>(async () =>
       json({ items: [{ id: "item-1" }] }, { headers: { "X-Next-Cursor": "cursor-2" } }),
     );
-    const response = await client(fetcher).request<{
-      items: { id: string }[];
-    }>(context, {
+    const response = await client(fetcher).request(context, {
       headers: { Authorization: "Bearer provider-secret" },
       method: "GET",
       url: "https://api.provider.example/items?cursor=cursor-1",
@@ -64,23 +60,23 @@ describe("ProviderHttpClient", () => {
   });
 
   it("records extracted rate-limit metadata for success and error responses", async () => {
-    const extractor = vi.fn((headers: Headers) => {
-      const remaining = headers.get("X-RateLimit-Remaining");
-      return remaining === null
-        ? null
-        : {
-            percentUsed: null,
-            remaining: Number(remaining),
-            resetsInSeconds: 20,
-          };
-    });
     const requestContext: ProviderRequestContext = { ...context };
     const fetcher = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(json({ ok: true }, { headers: { "X-RateLimit-Remaining": "12" } }))
-      .mockResolvedValueOnce(json({}, { headers: { "X-RateLimit-Remaining": "0" }, status: 429 }))
+      .mockResolvedValueOnce(
+        json(
+          { ok: true },
+          { headers: { "X-RateLimit-Remaining": "12", "X-RateLimit-Reset": "20" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        json(
+          {},
+          { headers: { "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "20" }, status: 429 },
+        ),
+      )
       .mockResolvedValueOnce(json({ ok: true }));
-    const provider = client(fetcher, { rateLimitBudget: extractor });
+    const provider = client(fetcher, { platform: "tiktok" });
 
     await provider.request(requestContext, {
       method: "GET",
@@ -110,14 +106,13 @@ describe("ProviderHttpClient", () => {
       url: "https://api.provider.example/status",
     });
     expect(requestContext.metadata).toBeUndefined();
-    expect(extractor).toHaveBeenCalledTimes(3);
   });
 
   it("accepts an explicitly allowed empty protocol status", async () => {
     const fetcher = vi.fn<typeof fetch>(
       async () => new Response(null, { headers: { Range: "bytes=0-99" }, status: 308 }),
     );
-    const response = await client(fetcher).request<undefined>(context, {
+    const response = await client(fetcher).request(context, {
       acceptedStatuses: [308],
       method: "PUT",
       responseType: "json_or_empty",
@@ -196,9 +191,6 @@ describe("ProviderHttpClient", () => {
   });
 
   it("denies provider redirects instead of following them to an unapproved host", async () => {
-    // Each request needs its own response double: cancelling a body is
-    // one-shot, so sharing one Response would let the read case satisfy the
-    // write case's cancel assertion without the write path ever running.
     const redirectResponse = () => {
       const cancel = vi.fn();
       return {
@@ -226,8 +218,6 @@ describe("ProviderHttpClient", () => {
       url: "https://api.provider.example/publish",
     });
 
-    // The Workers runtime has no redirect: "error" mode, so denial is explicit.
-    // A redirect is a deterministic provider fault and never a retryable read.
     await expect(readOperation).rejects.toMatchObject({
       failure: {
         classification: "deterministic",
@@ -238,14 +228,10 @@ describe("ProviderHttpClient", () => {
     await expect(writeOperation).rejects.toMatchObject({
       failure: { code: "provider_http_redirect" },
     });
-    // The unapproved `Location` body must be released on both paths, not just
-    // the read one.
     expect(read.cancel).toHaveBeenCalledOnce();
     expect(write.cancel).toHaveBeenCalledOnce();
   });
 
-  // Native JSON.parse errors can embed response bytes; internal diagnostics
-  // retain the failure kind and request status, never that provider payload.
   it("does not retain malformed provider response bytes in exception diagnostics", async () => {
     const transport = client(
       async () =>
@@ -426,6 +412,48 @@ describe("ProviderHttpClient", () => {
     });
     expect(JSON.stringify(error)).not.toMatch(/must-not-leak|private\.example/);
     expect(classifyErrorBody).toHaveBeenCalledOnce();
+  });
+
+  it("streams multi-chunk JSON responses through bounded single-buffer growth", async () => {
+    const encoder = new TextEncoder();
+    const parts = ['{"items":[', '{"id":"1"},', '{"id":"2"},', '{"id":"3"}]}'];
+    const fetcher = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              for (const part of parts) controller.enqueue(encoder.encode(part));
+              controller.close();
+            },
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    const response = await client(fetcher).request(context, {
+      method: "GET",
+      url: "https://api.provider.example/chunked",
+    });
+    expect(response.body).toEqual({
+      items: [{ id: "1" }, { id: "2" }, { id: "3" }],
+    });
+  });
+
+  it("extracts rate-limit telemetry automatically when configured with platform", async () => {
+    const requestContext: ProviderRequestContext = { ...context };
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      json({ ok: true }, { headers: { "X-RateLimit-Remaining": "7", "X-RateLimit-Reset": "45" } }),
+    );
+    await client(fetcher, { platform: "tiktok" }).request(requestContext, {
+      method: "GET",
+      url: "https://api.provider.example/status",
+    });
+    expect(requestContext.metadata).toEqual({
+      rateLimitBudget: {
+        percentUsed: null,
+        remaining: 7,
+        resetsInSeconds: 45,
+      },
+    });
   });
 
   it("keeps status classification when the error body is absent or unusable", async () => {

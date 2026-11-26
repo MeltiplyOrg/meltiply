@@ -55,13 +55,11 @@ function renderDevBox() {
 
 const initialViewport = { width: window.innerWidth, height: window.innerHeight };
 
-/** Overrides layout dimensions that jsdom does not derive from CSS. */
 function setViewport(width: number, height: number): void {
   Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
   Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
 }
 
-/** Builds a DOMRect-shaped measurement for a mocked dock. */
 function rect(width: number, height: number, left = 0, top = 0): DOMRect {
   return {
     width,
@@ -76,7 +74,6 @@ function rect(width: number, height: number, left = 0, top = 0): DOMRect {
   } as DOMRect;
 }
 
-/** Replaces one dock's measured box without touching other elements. */
 function mockDockRect(panel: Element, box: DOMRect): void {
   Object.defineProperty(panel, "getBoundingClientRect", {
     configurable: true,
@@ -84,11 +81,6 @@ function mockDockRect(panel: Element, box: DOMRect): void {
   });
 }
 
-/**
- * Minimal query-backed view used to prove the DevBox exercises a component’s
- * native loading branch: cached data renders text, while a reset query held by
- * Skeleton preview renders the shared Skeleton component instead.
- */
 function QuerySkeletonFixture() {
   const query = useQuery({
     queryKey: ["devbox-preview-fixture"],
@@ -105,7 +97,6 @@ function QuerySkeletonFixture() {
   );
 }
 
-/** Starts each DevBox case with isolated storage and explicit functional consent. */
 beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
@@ -113,7 +104,6 @@ beforeEach(() => {
   seedDockState();
 });
 
-/** Clears browser state and global DevBox hooks so optional records cannot leak between cases. */
 afterEach(() => {
   cleanup();
   setViewport(initialViewport.width, initialViewport.height);
@@ -405,13 +395,8 @@ describe("Skeletons tab", () => {
       fireEvent.click(screen.getByRole("radio", { name: "Skeleton" }));
       await waitFor(() => expect(isSkeletonHoldActive()).toBe(true));
 
-      // A held GET never reaches the wrapped fetch; a POST passes through.
       const controller = new AbortController();
       const held = globalThis.fetch("https://api.test/x", { signal: controller.signal });
-      // Abort first, then await the rejection assertion directly: `.rejects`
-      // accepts an already-settled promise, so this still proves the held GET
-      // rejects with the signal's abort error without detaching the assertion
-      // from its await the way the two-step `rejection` variable did.
       controller.abort();
       await expect(held).rejects.toThrow();
       expect(base).not.toHaveBeenCalled();

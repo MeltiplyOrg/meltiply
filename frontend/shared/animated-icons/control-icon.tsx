@@ -2,14 +2,6 @@ import { useEffect, useRef, useState, type ComponentType, type ReactElement } fr
 
 import type { AnimatedIconProps } from "./types";
 
-/**
- * Properties for the {@link ControlIcon} adapter.
- *
- * @property icon - Animated icon component rendered inside the wrapper.
- * @property control - CSS selector resolved via `closest()` from the icon's DOM node; defaults to
- *   common interactive containers. Pointer and keyboard focus on that control drive `isHovered`.
- * @property iconProps - Props forwarded to the icon (`size`, `strokeWidth`, `className`, ARIA).
- */
 export interface ControlIconProps {
   icon: ComponentType<AnimatedIconProps>;
   control?: string;
@@ -18,23 +10,6 @@ export interface ControlIconProps {
 
 const defaultControlSelector = "a, button, [role='tab'], .feature-card";
 
-/**
- * Drives an animated icon's `isHovered` state from the containing control rather than the glyph.
- *
- * Server-rendered landing markup mounts icons as provider-free islands whose parent `<a>`/`<button>`
- * is authored in Astro, so the icon cannot inherit hover through React props. This adapter resolves
- * the nearest interactive ancestor with `closest()` after mount and combines
- * pointer and keyboard focus, so leaving with the pointer does not cancel a
- * still-focused control. A first-frame check also covers interaction before
- * lazy hydration. Wrapping the icon keeps the parent's
- * semantics, labels, and focus order untouched; `useIconLoop` gates playback on
- * the native OS accessibility preference, without an app motion mode.
- *
- * The bound control is captured once per mount; Astro islands never reparent without remounting.
- *
- * @param props - Icon component plus optional ancestor selector and forwarded icon props.
- * @returns The animated icon element with control-bound hover state.
- */
 export function ControlIcon({
   icon: Icon,
   control = defaultControlSelector,

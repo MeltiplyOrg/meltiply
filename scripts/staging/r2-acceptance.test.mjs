@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { crc32, inflateSync } from "node:zlib";
 
 import {
   parseR2AcceptanceArguments,
@@ -12,11 +13,7 @@ import {
   uploadSignedPart,
   verifySignedPutCors,
 } from "./r2-acceptance.mjs";
-import {
-  releaseInternals,
-  validateIacOutputs,
-  validateReleaseSpec,
-} from "../release/release-lib.mjs";
+import { queueBindings, validateIacOutputs, validateReleaseSpec } from "../release/release-lib.mjs";
 
 const gitSha = "a".repeat(40);
 const accountId = "b".repeat(32);
@@ -80,10 +77,7 @@ function releaseInput(overrides = {}) {
 
 function queueNames() {
   return Object.fromEntries(
-    Object.keys(releaseInternals.queueBindings).map((workload) => [
-      workload,
-      `meltiply-${workload}-staging`,
-    ]),
+    Object.keys(queueBindings).map((workload) => [workload, `meltiply-${workload}-staging`]),
   );
 }
 
@@ -463,8 +457,6 @@ function acceptanceFetch({
       const objectPath = url.pathname.replace(`/${bucketName}`, "");
       if (method === "OPTIONS") {
         assert.equal(headers.get("origin"), browserOrigin);
-        // R2 only answers the preflight the browser sends; a probe that omits
-        // these headers exercises nothing on the live service.
         assert.equal(headers.get("access-control-request-method"), "PUT");
         return new Response(null, {
           headers: {
@@ -635,8 +627,6 @@ describe("signed R2 requests", () => {
     assert.equal(observed.init.method, "OPTIONS");
     const preflight = new Headers(observed.init.headers);
     assert.equal(preflight.get("origin"), browserOrigin);
-    // A preflight that omits the requested method or headers asks R2 nothing;
-    // the browser then blocks the PUT that the probe is meant to prove.
     assert.equal(preflight.get("access-control-request-method"), "PUT");
     assert.equal(preflight.get("access-control-request-headers"), "content-type");
     assert.equal(preflight.get("authorization"), null);
@@ -762,9 +752,6 @@ it("runs the credential-gated lifecycle and emits redacted mode-0600 evidence", 
   );
   assert.ok([...harness.assets.values()].every((asset) => asset.deleted));
   assert.equal(harness.objects.size, 0);
-  // Each asset poll and each deletion poll sleeps exactly once in this harness:
-  // single upload (ready + deleted), multipart complete (ready + deleted), and
-  // multipart abort (deleted).
   assert.deepEqual(sleeps, [1_000, 1_000, 1_000, 1_000, 1_000]);
   assert.ok(result.api_request_ids.every((value) => /^api-\d+$/.test(value)));
   assert.ok(result.r2_request_ids.every((value) => /^r2-\d+$/.test(value)));
@@ -877,8 +864,6 @@ it("polls cleanup and writes failed evidence when verification fails", async () 
   );
   assert.ok([...harness.assets.values()].every((asset) => asset.deleted));
   assert.equal(harness.objects.size, 0);
-  // One poll before the corrupted download is detected, one before cleanup
-  // confirms deletion.
   assert.deepEqual(sleeps, [1_000, 1_000]);
 
   const evidenceText = await readFile(options.outputPath, "utf8");
@@ -951,4 +936,40 @@ it("replaces stale success with unresolved-resource failure evidence", async () 
 it("gives a 500 MiB transfer a bounded size-aware deadline", () => {
   assert.equal(r2AcceptanceInternals.transferTimeoutForBytes(1), 60_000);
   assert.equal(r2AcceptanceInternals.transferTimeoutForBytes(500 * 1024 * 1024), 530_000);
+});
+
+it("emits a valid 67-byte 1x1 PNG fixture with valid chunk CRCs and canonical input digests", () => {
+  const bytes = Buffer.from(r2AcceptanceInternals.pngFixture());
+  assert.equal(bytes.byteLength, 67);
+  assert.deepEqual([...bytes.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+
+  const chunks = [];
+  let offset = 8;
+  while (offset < bytes.byteLength) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.subarray(offset + 4, offset + 8).toString("ascii");
+    const data = bytes.subarray(offset + 8, offset + 8 + length);
+    const recordedCrc = bytes.readUInt32BE(offset + 8 + length);
+    const computedCrc = crc32(bytes.subarray(offset + 4, offset + 8 + length)) >>> 0;
+    assert.equal(recordedCrc, computedCrc, `${type} CRC mismatch`);
+    chunks.push({ data, type });
+    offset += 12 + length;
+  }
+  assert.equal(offset, bytes.byteLength);
+  assert.deepEqual(
+    chunks.map((entry) => entry.type),
+    ["IHDR", "IDAT", "IEND"],
+  );
+  assert.equal(chunks[0].data.readUInt32BE(0), 1);
+  assert.equal(chunks[0].data.readUInt32BE(4), 1);
+  assert.deepEqual([...inflateSync(chunks[1].data)], [0, 0]);
+
+  const parsed = parsedArguments();
+  const baseInputs = releaseInputs();
+  const reorderedSpec = Object.fromEntries(Object.entries(baseInputs.spec).reverse());
+  const reorderedIac = Object.fromEntries(Object.entries(baseInputs.iac).reverse());
+  const first = prepareR2AcceptanceOptions(parsed, baseInputs);
+  const second = prepareR2AcceptanceOptions(parsed, { iac: reorderedIac, spec: reorderedSpec });
+  assert.equal(first.releaseInputSha256, second.releaseInputSha256);
+  assert.equal(first.iacOutputsSha256, second.iacOutputsSha256);
 });

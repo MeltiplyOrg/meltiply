@@ -4,10 +4,6 @@ import { test } from "node:test";
 import { alertQueue } from "./queue-alert.mjs";
 import { parseQueueArguments } from "./queue-ops.mjs";
 
-// A fixed epoch keeps the age threshold deterministic: the fixture's
-// "oldest message" and the monitor's own clock are the same process, so a
-// mocked Date makes the 120-second age independent of how long the test runs.
-// Only the Date API is faked; fetch timeouts stay on real timers.
 test("unsampled Queue alerts reach the webhook; metrics or delivery failures cannot appear healthy", async (t) => {
   const now = Date.parse("2026-01-01T00:02:00Z");
   t.mock.timers.enable({ apis: ["Date"], now });
@@ -60,7 +56,6 @@ test("unsampled Queue alerts reach the webhook; metrics or delivery failures can
       CLOUDFLARE_API_TOKEN: "never-report-token",
       MELTIPLY_ALERT_WEBHOOK_URL: `${origin}/notify`,
     },
-    // External transport adapter routes the Cloudflare API to a real HTTP fixture.
     fetchImpl: (url, init) =>
       fetch(
         String(url).startsWith("https://api.cloudflare.com/")

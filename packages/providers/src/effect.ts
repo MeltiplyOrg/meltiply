@@ -61,12 +61,6 @@ export function providerCallEffect<A>(
   });
 }
 
-/**
- * Fails with a deterministic non-retryable `provider_unsupported` error.
- * Used when an adapter does not implement an optional capability method, so
- * Effect callers observe a typed failure instead of a TypeError on undefined.
- * Returns a failing Effect; never resolves.
- */
 function unsupported(method: string): Effect.Effect<never, ProviderAdapterError> {
   return Effect.fail(
     new ProviderAdapterError(
@@ -76,6 +70,16 @@ function unsupported(method: string): Effect.Effect<never, ProviderAdapterError>
       }),
     ),
   );
+}
+
+function withAdapterMethod<M, A>(
+  method: M | undefined,
+  label: string,
+  context: ProviderRequestContext,
+  invoke: (fn: M, child: ProviderRequestContext) => Promise<A>,
+): Effect.Effect<A, ProviderAdapterError> {
+  if (!method) return unsupported(label);
+  return providerCallEffect(context, (child) => invoke(method, child));
 }
 
 /**
@@ -94,8 +98,9 @@ export function publishEffect(
   credentials: ProviderCredentials,
   input: PublishInput,
 ): Effect.Effect<ProviderOperationResult, ProviderAdapterError> {
-  if (!adapter.publish) return unsupported("publish");
-  return providerCallEffect(context, (child) => adapter.publish!(child, credentials, input));
+  return withAdapterMethod(adapter.publish, "publish", context, (publish, child) =>
+    publish(child, credentials, input),
+  );
 }
 
 /**
@@ -111,9 +116,11 @@ export function lookupPublicationEffect(
   credentials: ProviderCredentials,
   lookup: ProviderPublicationLookup,
 ): Effect.Effect<ProviderPublicationStatus, ProviderAdapterError> {
-  if (!adapter.lookupPublication) return unsupported("lookup_publication");
-  return providerCallEffect(context, (child) =>
-    adapter.lookupPublication!(child, credentials, lookup),
+  return withAdapterMethod(
+    adapter.lookupPublication,
+    "lookup_publication",
+    context,
+    (lookupPublication, child) => lookupPublication(child, credentials, lookup),
   );
 }
 
@@ -130,9 +137,11 @@ export function cancelPublicationEffect(
   credentials: ProviderCredentials,
   lookup: ProviderPublicationLookup,
 ): Effect.Effect<ProviderOperationResult, ProviderAdapterError> {
-  if (!adapter.cancelPublication) return unsupported("cancel_publication");
-  return providerCallEffect(context, (child) =>
-    adapter.cancelPublication!(child, credentials, lookup),
+  return withAdapterMethod(
+    adapter.cancelPublication,
+    "cancel_publication",
+    context,
+    (cancelPublication, child) => cancelPublication(child, credentials, lookup),
   );
 }
 
@@ -150,8 +159,9 @@ export function replyEffect(
   credentials: ProviderCredentials,
   input: ProviderReplyInput,
 ): Effect.Effect<ProviderOperationResult, ProviderAdapterError> {
-  if (!adapter.reply) return unsupported("reply");
-  return providerCallEffect(context, (child) => adapter.reply!(child, credentials, input));
+  return withAdapterMethod(adapter.reply, "reply", context, (reply, child) =>
+    reply(child, credentials, input),
+  );
 }
 
 /**
@@ -163,8 +173,12 @@ export function getAccountAnalyticsEffect(
   context: ProviderRequestContext,
   credentials: ProviderCredentials,
 ): Effect.Effect<ProviderAccountAnalytics, ProviderAdapterError> {
-  if (!adapter.getAccountAnalytics) return unsupported("account_analytics");
-  return providerCallEffect(context, (child) => adapter.getAccountAnalytics!(child, credentials));
+  return withAdapterMethod(
+    adapter.getAccountAnalytics,
+    "account_analytics",
+    context,
+    (getAccountAnalytics, child) => getAccountAnalytics(child, credentials),
+  );
 }
 
 /**
@@ -181,9 +195,11 @@ export function listAnalyticsEffect(
   lookup: ProviderPublicationLookup,
   page: ProviderPageInput,
 ): Effect.Effect<ProviderPage<ProviderAnalyticsRecord>, ProviderAdapterError> {
-  if (!adapter.listAnalytics) return unsupported("list_analytics");
-  return providerCallEffect(context, (child) =>
-    adapter.listAnalytics!(child, credentials, lookup, page),
+  return withAdapterMethod(
+    adapter.listAnalytics,
+    "list_analytics",
+    context,
+    (listAnalytics, child) => listAnalytics(child, credentials, lookup, page),
   );
 }
 
@@ -201,9 +217,8 @@ export function listCommentsEffect(
   lookup: ProviderPublicationLookup,
   page: ProviderPageInput,
 ): Effect.Effect<ProviderPage<ProviderCommentRecord>, ProviderAdapterError> {
-  if (!adapter.listComments) return unsupported("list_comments");
-  return providerCallEffect(context, (child) =>
-    adapter.listComments!(child, credentials, lookup, page),
+  return withAdapterMethod(adapter.listComments, "list_comments", context, (listComments, child) =>
+    listComments(child, credentials, lookup, page),
   );
 }
 
@@ -217,11 +232,11 @@ export function getPublicationRequirementsEffect(
   context: ProviderRequestContext,
   credentials: ProviderCredentials,
 ): Effect.Effect<ProviderPublicationRequirements, ProviderAdapterError> {
-  if (!adapter.getPublicationRequirements) {
-    return unsupported("publication_requirements");
-  }
-  return providerCallEffect(context, (child) =>
-    adapter.getPublicationRequirements!(child, credentials),
+  return withAdapterMethod(
+    adapter.getPublicationRequirements,
+    "publication_requirements",
+    context,
+    (getPublicationRequirements, child) => getPublicationRequirements(child, credentials),
   );
 }
 
@@ -238,10 +253,12 @@ export function exchangeAuthorizationCodeEffect(
   context: ProviderRequestContext,
   input: OAuthExchangeInput,
 ): Effect.Effect<OAuthExchangeResult, ProviderAdapterError> {
-  if (!adapter.exchangeAuthorizationCode) {
-    return unsupported("exchange_authorization_code");
-  }
-  return providerCallEffect(context, (child) => adapter.exchangeAuthorizationCode!(child, input));
+  return withAdapterMethod(
+    adapter.exchangeAuthorizationCode,
+    "exchange_authorization_code",
+    context,
+    (exchangeAuthorizationCode, child) => exchangeAuthorizationCode(child, input),
+  );
 }
 
 /**
@@ -256,8 +273,12 @@ export function refreshAccessTokenEffect(
   context: ProviderRequestContext,
   refreshToken: string,
 ): Effect.Effect<ProviderTokenSet, ProviderAdapterError> {
-  if (!adapter.refreshAccessToken) return unsupported("refresh_access_token");
-  return providerCallEffect(context, (child) => adapter.refreshAccessToken!(child, refreshToken));
+  return withAdapterMethod(
+    adapter.refreshAccessToken,
+    "refresh_access_token",
+    context,
+    (refreshAccessToken, child) => refreshAccessToken(child, refreshToken),
+  );
 }
 
 /**
@@ -269,9 +290,11 @@ export function revokeEffect(
   adapter: ProviderAdapter,
   accessToken: string,
 ): Effect.Effect<void, ProviderAdapterError> {
-  if (!adapter.revoke) return unsupported("revoke");
-  return providerCallEffect({ operationId: "oauth-revoke", requestId: "oauth-revoke" }, (context) =>
-    adapter.revoke!(accessToken, context),
+  return withAdapterMethod(
+    adapter.revoke,
+    "revoke",
+    { operationId: "oauth-revoke", requestId: "oauth-revoke" },
+    (revoke, child) => revoke(accessToken, child),
   );
 }
 
@@ -340,32 +363,6 @@ export function withReadRetry<A>(
 }
 
 /**
- * Projects a provider failure into a log-safe diagnostic record.
- * Projects only canonical failure fields and credential-free request metadata.
- * Raw causes remain on the Error for the shared error serializer, never in this
- * context record. Returns classification, code, retryability, request facts, and
- * any missing public OAuth scope names so a grant problem is named in logs.
- */
-export function failureDiagnostic(error: ProviderAdapterError): {
-  classification: ProviderAdapterError["failure"]["classification"];
-  code: string;
-  retryable: boolean;
-  retryAfterSeconds?: number;
-  request?: ProviderAdapterError["request"];
-  missing_scopes?: readonly string[];
-} {
-  const { classification, code, retryable, retryAfterSeconds } = error.failure;
-  return {
-    classification,
-    code,
-    retryable,
-    ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
-    ...(error.request ? { request: error.request } : {}),
-    ...(error.missingScopes ? { missing_scopes: error.missingScopes } : {}),
-  };
-}
-
-/**
  * Effect service shape exposing worker-facing provider operations.
  * Keeps provider-specific branching inside `packages/providers`: generic
  * workers select a platform and compose Effects without learning per-provider
@@ -374,14 +371,12 @@ export function failureDiagnostic(error: ProviderAdapterError): {
  * transient/timeout failures.
  */
 export interface ProviderServiceShape {
-  /** Reads secret encoder details only at an explicitly authorized, no-store API boundary. */
   readonly getBroadcastInfo: (
     platform: Platform,
     context: ProviderRequestContext,
     credentials: ProviderCredentials,
     lookup: ProviderPublicationLookup,
   ) => Effect.Effect<ProviderBroadcastInfo, ProviderAdapterError>;
-  /** Ends one broadcast exactly once; ambiguous writes must be reconciled, not retried. */
   readonly endBroadcast: (
     platform: Platform,
     context: ProviderRequestContext,
@@ -467,12 +462,6 @@ export interface ProviderAdapterSource {
   get(platform: Platform): ProviderAdapter | undefined;
 }
 
-/**
- * Resolves the adapter for a platform or fails typed when unconfigured.
- * Missing platforms surface as deterministic non-retryable
- * `provider_not_configured` failures rather than undefined dereferences.
- * Returns Effect resolving to the registered adapter.
- */
 function resolveAdapter(
   source: ProviderAdapterSource,
   platform: Platform,
@@ -490,75 +479,48 @@ function resolveAdapter(
       );
 }
 
-/**
- * Builds the ProviderService implementation over an adapter source.
- * Each method resolves the platform adapter then delegates to the matching
- * Effect wrapper, so provider-specific logic stays inside the adapters while
- * workers compose a uniform Effect interface.
- * Returns the service implementation.
- */
 function makeProviderService(source: ProviderAdapterSource): ProviderServiceShape {
+  const on = <A>(
+    platform: Platform,
+    run: (adapter: ProviderAdapter) => Effect.Effect<A, ProviderAdapterError>,
+  ): Effect.Effect<A, ProviderAdapterError> =>
+    Effect.flatMap(resolveAdapter(source, platform), run);
+
   return {
     getBroadcastInfo: (platform, context, credentials, lookup) =>
-      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
-        adapter.getBroadcastInfo
-          ? providerCallEffect(context, (child) =>
-              adapter.getBroadcastInfo!(child, credentials, lookup),
-            )
-          : unsupported("broadcast_info"),
+      on(platform, (adapter) =>
+        withAdapterMethod(adapter.getBroadcastInfo, "broadcast_info", context, (fn, child) =>
+          fn(child, credentials, lookup),
+        ),
       ),
     endBroadcast: (platform, context, credentials, lookup) =>
-      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
-        adapter.endBroadcast
-          ? providerCallEffect(context, (child) =>
-              adapter.endBroadcast!(child, credentials, lookup),
-            )
-          : unsupported("end_broadcast"),
+      on(platform, (adapter) =>
+        withAdapterMethod(adapter.endBroadcast, "end_broadcast", context, (fn, child) =>
+          fn(child, credentials, lookup),
+        ),
       ),
     cancelPublication: (platform, context, credentials, lookup) =>
-      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
-        cancelPublicationEffect(adapter, context, credentials, lookup),
-      ),
+      on(platform, (adapter) => cancelPublicationEffect(adapter, context, credentials, lookup)),
     exchangeAuthorizationCode: (platform, context, input) =>
-      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
-        exchangeAuthorizationCodeEffect(adapter, context, input),
-      ),
+      on(platform, (adapter) => exchangeAuthorizationCodeEffect(adapter, context, input)),
     getAccountAnalytics: (platform, context, credentials) =>
-      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
-        getAccountAnalyticsEffect(adapter, context, credentials),
-      ),
+      on(platform, (adapter) => getAccountAnalyticsEffect(adapter, context, credentials)),
     getPublicationRequirements: (platform, context, credentials) =>
-      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
-        getPublicationRequirementsEffect(adapter, context, credentials),
-      ),
+      on(platform, (adapter) => getPublicationRequirementsEffect(adapter, context, credentials)),
     listAnalytics: (platform, context, credentials, lookup, page) =>
-      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
-        listAnalyticsEffect(adapter, context, credentials, lookup, page),
-      ),
+      on(platform, (adapter) => listAnalyticsEffect(adapter, context, credentials, lookup, page)),
     listComments: (platform, context, credentials, lookup, page) =>
-      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
-        listCommentsEffect(adapter, context, credentials, lookup, page),
-      ),
+      on(platform, (adapter) => listCommentsEffect(adapter, context, credentials, lookup, page)),
     lookupPublication: (platform, context, credentials, lookup) =>
-      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
-        lookupPublicationEffect(adapter, context, credentials, lookup),
-      ),
+      on(platform, (adapter) => lookupPublicationEffect(adapter, context, credentials, lookup)),
     publish: (platform, context, credentials, input) =>
-      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
-        publishEffect(adapter, context, credentials, input),
-      ),
+      on(platform, (adapter) => publishEffect(adapter, context, credentials, input)),
     refreshAccessToken: (platform, context, refreshToken) =>
-      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
-        refreshAccessTokenEffect(adapter, context, refreshToken),
-      ),
+      on(platform, (adapter) => refreshAccessTokenEffect(adapter, context, refreshToken)),
     reply: (platform, context, credentials, input) =>
-      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
-        replyEffect(adapter, context, credentials, input),
-      ),
+      on(platform, (adapter) => replyEffect(adapter, context, credentials, input)),
     revoke: (platform, accessToken) =>
-      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
-        revokeEffect(adapter, accessToken),
-      ),
+      on(platform, (adapter) => revokeEffect(adapter, accessToken)),
   };
 }
 

@@ -3,7 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   ASSET_UPLOAD_POLICY,
   type AssetPolicyError,
-  isoDateTime,
   mediaUploadMaximum,
   uploadLayout,
   validateUpload,
@@ -34,13 +33,6 @@ describe("asset upload policy", () => {
       fileSize: 42,
       filename: "cover.JPEG",
     });
-  });
-
-  it("normalizes Date and database timestamp values consistently", () => {
-    const timestamp = "2026-07-22T12:34:56.789Z";
-
-    expect(isoDateTime(new Date(timestamp))).toBe(timestamp);
-    expect(isoDateTime(timestamp)).toBe(timestamp);
   });
 
   it.each([
@@ -162,9 +154,6 @@ describe("asset upload policy", () => {
       const layout = uploadLayout(fileSize);
       expect(layout.strategy).toBe("multipart");
       if (layout.strategy !== "multipart") throw new Error("expected multipart layout");
-      // The inequality pair pins the count without restating the implementation's
-      // own `ceil(fileSize / partSize)` expression: the parts must cover the
-      // whole file and dropping the last one must leave a shortfall.
       expect(layout.partSize * layout.partCount).toBeGreaterThanOrEqual(fileSize);
       expect(layout.partSize * (layout.partCount - 1)).toBeLessThan(fileSize);
       expect(layout.maxParallelParts).toBe(ASSET_UPLOAD_POLICY.maxParallelParts);

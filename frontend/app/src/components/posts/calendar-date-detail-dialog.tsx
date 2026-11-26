@@ -26,36 +26,14 @@ import type { PostRow, PostSelectionProps } from "./types";
 export interface CalendarDateDetailDialogProps extends PostSelectionProps {
   selectedDate: Date | null;
   posts: PostRow[];
-  /**
-   * Whether scope-owned mutations are allowed; `false` in the aggregate
-   * "All Brand Profiles" view. Deletion no longer consumes this flag — the
-   * Post's own `brand_profile_id` authorizes it — so only edit and
-   * schedule-for-this-date stay gated.
-   */
   canMutate: boolean;
   onClose: () => void;
   onEdit: (postId: string) => void;
   onDelete: (postId: string) => void;
   onScheduleNew: () => void;
-  /**
-   * Opens the right-side post detail dialog for a Post listed in this day.
-   * This button stays mounted while the panel opens so focus returns to it.
-   */
   onViewDetails: (postId: string) => void;
 }
 
-/**
- * Presenter component for Date Detail modal: expands a calendar cell to inspect
- * and manage the Posts that land on that day, one card per durable `Post.id`.
- * Creating a Post for the date uses the normal primary treatment; destructive
- * styling is reserved for deleting an existing Post.
- * The day list doubles as the Calendar mode's selection surface: a header
- * checkbox selects all rows shown for this day and each card carries its own
- * toggle, so multi-select stays reachable in every view mode.
- * Wrapped in `React.memo` to avoid re-rendering unless the selected date or post list changes.
- * `selectedDate === null` closes it; the last day and its posts stay rendered
- * through the exit animation instead of blanking to an empty list.
- */
 export const CalendarDateDetailDialog = React.memo(function CalendarDateDetailDialog({
   selectedDate: liveDate,
   posts: livePosts,
@@ -71,8 +49,7 @@ export const CalendarDateDetailDialog = React.memo(function CalendarDateDetailDi
   selectionDisabled,
   canSelect,
 }: CalendarDateDetailDialogProps) {
-  const { t } = useI18n();
-  // Closing clears the date and empties `posts`; keep both through the pop-out.
+  const { t, language } = useI18n();
   const selectedDate = useLatchedValue(liveDate);
   const posts = useLatchedValue(liveDate ? livePosts : null) ?? livePosts;
   const selectableIds = (canSelect ? posts.filter(canSelect) : posts).map((row) => row.id);
@@ -85,7 +62,7 @@ export const CalendarDateDetailDialog = React.memo(function CalendarDateDetailDi
           <CenterDialogTitle className="flex items-center gap-2 text-lg">
             <CalendarDays className="size-5 text-accent" />
             {t("Posts for")}{" "}
-            {selectedDate?.toLocaleString("en-US", {
+            {selectedDate?.toLocaleString(language, {
               month: "long",
               day: "numeric",
               year: "numeric",

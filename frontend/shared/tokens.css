@@ -27,11 +27,6 @@
   src: url("@meltiply/ui/fonts/geist-mono-400.woff2") format("woff2");
 }
 
-/*
- * Gr8r's palette and visual tokens adapted for Meltiply.
- * Semantic names remain framework-neutral so React and Astro share one palette.
- * Light/dark geometry is identical; the host owns theme selection and consent.
- */
 :root,
 [data-palette="light"] {
   color-scheme: light;
@@ -48,21 +43,17 @@
   --font-size-micro: 11px;
   --icon-stroke: 1.8;
 
-  /* Shared wall-clock calendar geometry; event chips represent instants, not durations. */
   --calendar-hour-height: 4rem;
   --calendar-day-height: calc(var(--calendar-hour-height) * 24);
 
-  /* Viewport cutouts and home indicators, shared by shell and dialog frames. */
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-right: env(safe-area-inset-right, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-left: env(safe-area-inset-left, 0px);
   --safe-control-bottom: max(0.625rem, var(--safe-area-bottom));
   --safe-content-bottom: max(2.5rem, var(--safe-area-bottom));
-  /* Viewport-anchored overlays keep a 1rem breathing edge on the vertical axis. */
   --overlay-max-height: calc(100dvh - 1rem);
 
-  /* DevBox sits above application surfaces; its body-portalled controls derive one layer above the dock. */
   --z-devbox: 2147483000;
   --z-devbox-overlay: calc(var(--z-devbox) + 1);
 
@@ -94,15 +85,12 @@
   --green-tint: color-mix(in srgb, var(--green) 11%, transparent);
   --orange-tint: color-mix(in srgb, var(--orange) 12%, transparent);
   --red-tint: color-mix(in srgb, var(--red) 10%, transparent);
-  /* Opaque twins for chips laid over a canvas (the hourly grid): the
-     translucent tints above would let hour rules show through the chip. */
   --accent-tint-solid: color-mix(in srgb, var(--accent) 10%, var(--surface));
   --green-tint-solid: color-mix(in srgb, var(--green) 11%, var(--surface));
   --red-tint-solid: color-mix(in srgb, var(--red) 10%, var(--surface));
   --overlay: #181613;
   --ink-inverse: #ffffff;
 
-  /* External platform identity is not a product-state palette. */
   --platform-facebook: #1877f2;
   --platform-instagram: #e4405f;
   --platform-tiktok: #000000;
@@ -150,7 +138,6 @@
   --ring: var(--accent);
 }
 
-:root[data-theme="dark"],
 .dark,
 [data-palette="dark"] {
   color-scheme: dark;

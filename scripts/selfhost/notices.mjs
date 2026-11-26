@@ -14,15 +14,10 @@ const output = resolve(root, "dist/selfhost/notices");
 const policy = JSON.parse(readFileSync(join(root, "scripts/ci/allowed-licenses.json"), "utf8"));
 const components = [];
 
-/**
- * Canonical texts for native packages whose prebuilt platform artifacts omit a
- * license file. LGPLv3 incorporates GPLv3 by reference, so both ship together.
- */
 const fallbackLicenses = {
   "LGPL-3.0-or-later": ["LGPL-3.0-or-later.txt", "GPL-3.0-or-later.txt"],
 };
 
-/** Retains original upstream notices and metadata for every reachable production dependency, never development tool code. */
 function onPackage({ manifestPath, metadata, license }) {
   const directory = dirname(manifestPath);
   const destination = join(output, `${encodeURIComponent(metadata.name)}@${metadata.version}`);

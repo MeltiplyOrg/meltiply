@@ -14,7 +14,6 @@ const claimsSchema = z.object({
   iat: z.number().int(),
 });
 
-/** Decodes base64url JWT segments; malformed encodings reject before verification. */
 function decode(segment: string) {
   if (!base64UrlPattern.test(segment)) throw new TypeError("Malformed operator token");
   return Uint8Array.from(atob(segment.replaceAll("-", "+").replaceAll("_", "/")), (character) =>
@@ -23,7 +22,6 @@ function decode(segment: string) {
 }
 
 const app = createApiApp({
-  /** Validates short-lived locally minted operator credentials; no unsigned identity headers are trusted. */
   verifyAccessToken: async (env, token) => {
     const config = z.object({ SELFHOST_OPERATOR_SECRET: z.string().min(32) }).parse(env);
     const [header, payload, signature] = z
@@ -62,7 +60,6 @@ const app = createApiApp({
 });
 
 export default {
-  /** Validates bindings and scopes database/auth adapters to this invocation; only operator verification differs from managed Workers. */
   fetch(request: Request, env: SelfhostEnv, ctx: ExecutionContext) {
     validateProductionBindings(env);
     return app.fetch(request, { ...env }, ctx);

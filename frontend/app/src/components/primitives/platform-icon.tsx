@@ -3,9 +3,7 @@ import { Share2 } from "lucide-react";
 import { cn } from "@meltiply/ui/utils";
 
 export interface PlatformIconProps {
-  /** Platform identifier or provider slug, including legacy aliases and suffixes. */
   provider: string;
-  /** Optional sizing classes; defaults to a 16px square. */
   className?: string;
 }
 
@@ -28,13 +26,6 @@ const platformIcons = [
   ["linkedin", "linkedin"],
 ] as const;
 
-/**
- * Identifies providers with local, unmodified theSVG brand assets; case-insensitive
- * containment preserves legacy suffixes and Twitter → X. Unknown providers use
- * the sharing glyph. Decorative marks inherit caller sizing without adding focus
- * or motion. CSS follows the app's explicit theme, including theme-transition
- * snapshots: Threads/TikTok select supplied variants; black X/Medium invert on dark.
- */
 export const PlatformIcon = React.memo(function PlatformIcon({
   provider,
   className = "size-4",

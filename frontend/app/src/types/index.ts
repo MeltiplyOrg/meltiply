@@ -1,16 +1,9 @@
 import type { components, operations } from "@meltiply/contracts/schema";
 export type BrandProfile = components["schemas"]["BrandProfile"];
 export type BrandProfileColor = components["schemas"]["BrandProfileColor"];
-export type BrandProfileListResponse = components["schemas"]["BrandProfileListResponse"];
 export type CreateBrandProfileInput = components["schemas"]["CreateBrandProfileRequest"];
 export type UpdateBrandProfileInput = components["schemas"]["UpdateBrandProfileRequest"];
 
-/**
- * Fixed accessible palette for Brand Profile color labels, mirroring the
- * `BrandProfileColor` enum in the OpenAPI contract. The compile-time exhaustiveness
- * check below fails the build if the contract palette gains a color this list
- * does not carry; `satisfies` rejects values outside the contract.
- */
 export const BRAND_PROFILE_COLORS = [
   "#b91c1c",
   "#991b1b",
@@ -65,7 +58,6 @@ export const BRAND_PROFILE_COLORS = [
   "#111827",
 ] as const satisfies readonly BrandProfileColor[];
 
-/** Compile-time proof that {@link BRAND_PROFILE_COLORS} covers the whole contract palette. */
 type MissingPaletteColors = Exclude<BrandProfileColor, (typeof BRAND_PROFILE_COLORS)[number]>;
 const _paletteIsExhaustive: MissingPaletteColors extends never ? true : never = true;
 void _paletteIsExhaustive;
@@ -124,7 +116,6 @@ const BRAND_PROFILE_COLOR_CLASSES: Record<BrandProfileColor, string> = {
   "#c2410c": "bg-[#c2410c]",
 };
 
-/** Resolves the contract color label to a statically discoverable Tailwind class. */
 export function brandProfileColorClass(color: BrandProfileColor): string {
   return BRAND_PROFILE_COLOR_CLASSES[color];
 }
@@ -137,14 +128,7 @@ export type DiscoverySource = components["schemas"]["DiscoverySource"];
 export type UserProfile = components["schemas"]["UserProfile"];
 export type WorkspaceRole = components["schemas"]["WorkspaceRole"];
 export type WorkspaceMember = components["schemas"]["WorkspaceMember"];
-export type WorkspaceMemberListResponse = components["schemas"]["WorkspaceMemberListResponse"];
-export type WorkspaceInvitation = components["schemas"]["WorkspaceInvitation"];
-export type WorkspaceInvitationListResponse =
-  components["schemas"]["WorkspaceInvitationListResponse"];
-export type InvitationPreview = components["schemas"]["InvitationPreview"];
-export type InstallationSummary = components["schemas"]["InstallationSummary"];
-export type AccountLifecycle = components["schemas"]["AccountLifecycle"];
-export type AuditListResponse = components["schemas"]["AuditListResponse"];
+type AuditListResponse = components["schemas"]["AuditListResponse"];
 export type AuditEntry = AuditListResponse["entries"][number];
 export type AuditQueryParams = NonNullable<operations["listWorkspaceAudit"]["parameters"]["query"]>;
 
@@ -165,12 +149,6 @@ export type OAuthSelectionAccount = components["schemas"]["OAuthSelectionAccount
 export type OAuthSelection = components["schemas"]["OAuthSelection"];
 export type OAuthSelectionConfirmRequest = components["schemas"]["OAuthSelectionConfirmRequest"];
 
-/**
- * Uploaded media owned by a Post attachment. Assets are internal infrastructure:
- * they are reachable only through the composer's attachment upload, the
- * per-Post ordered attachment list, and scoped read/preview/download helpers —
- * there is no browsable Asset library and no text Asset.
- */
 export type Asset = components["schemas"]["Asset"];
 export type CreateUploadSessionInput = components["schemas"]["CreateUploadSessionRequest"];
 export type UploadSession = components["schemas"]["UploadSession"];
@@ -181,38 +159,19 @@ export type CreateUploadPartsResponse = components["schemas"]["CreateUploadParts
 export type CompleteUploadInput = components["schemas"]["CompleteUploadRequest"];
 export type CompletedPart = components["schemas"]["CompletedPart"];
 
-/**
- * Durable composition identity. One Post owns its default content, its ordered
- * attachment relationships, its saved per-Channel target settings, and the
- * independent per-Channel publication outcomes; scheduling, editing, and
- * publishing all preserve `Post.id`. Publication success is never derived from
- * `Post.status`, which only marks draft versus active lifecycle.
- */
 export type Post = components["schemas"]["Post"];
 export type PostListResponse = components["schemas"]["PostListResponse"];
-/**
- * One ordered Post-to-Asset relationship. `position` is the creator's
- * zero-based ordering and `asset` carries the current upload/processing state
- * so a draft can persist while its media is still preparing.
- */
 export type PostAttachment = components["schemas"]["PostAttachment"];
-/**
- * Saved per-Channel settings for one Platform account on a Post. A null
- * `attachment_ids` inherits the Post's ordered attachments, `[]` publishes
- * text only, and a list overrides membership and order for that Channel.
- */
 export type PostTarget = components["schemas"]["PostTarget"];
 export type PostTargetInput = components["schemas"]["PostTargetInput"];
 export type CreatePostInput = components["schemas"]["CreatePostRequest"];
 export type UpdatePostInput = components["schemas"]["UpdatePostRequest"];
 export type SchedulePostInput = components["schemas"]["SchedulePostRequest"];
 export type PublishingQueue = components["schemas"]["PublishingQueue"];
-export type QueueListResponse = components["schemas"]["QueueListResponse"];
 export type CreateQueueInput = components["schemas"]["CreateQueueRequest"];
 export type UpdateQueueInput = components["schemas"]["UpdateQueueRequest"];
 export type QueueQueryParams = NonNullable<operations["listQueues"]["parameters"]["query"]>;
 
-/** Persistent owner choices shared by the scheduling surface and composer. */
 export type PublishingPreferences = components["schemas"]["PublishingPreferences"];
 export type PublishingPreferencesUpdate = components["schemas"]["PublishingPreferencesUpdate"];
 export type SignatureTemplate = components["schemas"]["SignatureTemplate"];
@@ -225,17 +184,11 @@ export type DistributionQueryParams = NonNullable<
 >;
 
 export type CalendarEvent = components["schemas"]["CalendarEvent"];
-export type CalendarResponse = components["schemas"]["CalendarResponse"];
 export type CalendarQueryParams = NonNullable<
   operations["listCalendarEvents"]["parameters"]["query"]
 >;
 
-/**
- * One stored metric the Analytics page may rank and chart. The page never
- * derives engagement rates or offers metrics the Providers do not report.
- */
 export type AnalyticsMetric = components["schemas"]["AnalyticsMetric"];
-/** Range presets offered by the Analytics toolbar and URL state. */
 export type AnalyticsRangePreset = "7d" | "30d" | "90d" | "366d";
 export type PlatformMetrics = components["schemas"]["PlatformMetrics"];
 export type AnalyticsSummary = components["schemas"]["AnalyticsSummary"];
@@ -253,11 +206,6 @@ export type AnalyticsPostsQueryParams = NonNullable<
   operations["getAnalyticsPosts"]["parameters"]["query"]
 >;
 
-/**
- * Cache-key inputs shared by both Analytics reads. `range` is part of the key
- * but never sent to the API; the rolling start/end window is recomputed inside
- * each query function so the key stays stable between renders.
- */
 export interface AnalyticsScopeParams {
   account_id?: string;
   brand_profile_id?: string;
@@ -266,11 +214,8 @@ export interface AnalyticsScopeParams {
   range: AnalyticsRangePreset;
 }
 
-/** Analytics Post read inputs plus the ranking metric and requested page. */
 export interface AnalyticsPostScopeParams extends AnalyticsScopeParams {
   limit: number;
   metric: AnalyticsMetric;
   offset?: number;
 }
-
-export type SignedUrlResponse = components["schemas"]["SignedUrlResponse"];

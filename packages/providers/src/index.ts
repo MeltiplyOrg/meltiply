@@ -5,11 +5,11 @@ import {
   type PlatformCapability,
 } from "@meltiply/domain";
 
-import { assertHttpsOrLoopbackUrl } from "./meta-common";
-import { createFacebookAdapter } from "./facebook";
-import { createInstagramAdapter, INSTAGRAM_MAX_CAPTION_LENGTH } from "./instagram";
-import { createThreadsAdapter, THREADS_MAX_CAPTION_LENGTH } from "./threads";
-import { createTikTokAdapter, TIKTOK_MAX_CAPTION_LENGTH } from "./tiktok";
+import { createFacebookAdapter } from "./facebook/adapter";
+import { createInstagramAdapter } from "./instagram/adapter";
+import { PROVIDER_LIMITS } from "./limits";
+import { createThreadsAdapter } from "./threads/adapter";
+import { createTikTokAdapter } from "./tiktok/adapter";
 import type {
   ProviderAdapter,
   ProviderAnalyticsMetric,
@@ -17,54 +17,191 @@ import type {
   ProviderPublicationStatus,
   ProviderRequestContext,
 } from "./types";
-import { createYouTubeAdapter, YOUTUBE_MAX_CAPTION_LENGTH } from "./youtube";
+import { assertHttpsOrLoopbackUrl } from "./values";
+import { createYouTubeAdapter } from "./youtube/adapter";
 
-/** Draft caption constraints are independent of credentials and runtime activation. */
 const captionLimits: Readonly<Record<Platform, number | null>> = {
-  facebook: null,
-  instagram: INSTAGRAM_MAX_CAPTION_LENGTH,
-  threads: THREADS_MAX_CAPTION_LENGTH,
-  tiktok: TIKTOK_MAX_CAPTION_LENGTH,
-  youtube: YOUTUBE_MAX_CAPTION_LENGTH,
+  facebook: PROVIDER_LIMITS.facebook.maxCaptionCodePoints,
+  instagram: PROVIDER_LIMITS.instagram.maxCaptionCodePoints,
+  threads: PROVIDER_LIMITS.threads.maxCaptionCodePoints,
+  tiktok: PROVIDER_LIMITS.tiktok.maxCaptionCodePoints,
+  youtube: PROVIDER_LIMITS.youtube.maxCaptionCodePoints,
 };
 
-export * from "./effect";
-export * from "./failures";
-export * from "./facebook";
-export * from "./facebook-options";
-export * from "./threads-options";
-export * from "./instagram-content";
-export * from "./http";
-export * from "./instagram";
-export * from "./instagram-options";
-export * from "./rate-limit";
-export * from "./threads";
-export * from "./tiktok";
-export type * from "./types";
-export * from "./validator";
-export * from "./youtube";
-
-/**
- * Attaches extracted provider telemetry metadata from the request context to an operation result.
- * Preserves rate limit budget headers discovered during execution in the returned result object.
- * Returns operation result with metadata attached if present, or original result otherwise.
- */
-function operationResultWithMetadata(
-  context: ProviderRequestContext,
-  result: ProviderOperationResult,
-): ProviderOperationResult {
-  return context.metadata ? { ...result, metadata: context.metadata } : result;
+function freezeCapability(capability: PlatformCapability): PlatformCapability {
+  Object.freeze(capability.accepted_mime_types);
+  Object.freeze(capability.asset_types);
+  if (capability.multi_asset_types) Object.freeze(capability.multi_asset_types);
+  Object.freeze(capability.notes);
+  return Object.freeze(capability);
 }
 
-/**
- * Attaches extracted provider telemetry metadata from the request context to a publication status record.
- * Returns publication status record with rate limit metadata attached if present.
- */
-function publicationStatusWithMetadata(
-  context: ProviderRequestContext,
-  result: ProviderPublicationStatus,
-): ProviderPublicationStatus {
-  return context.metadata ? { ...result, metadata: context.metadata } : result;
+function makeUnconfiguredCapabilities(
+  analytics: boolean,
+): Readonly<Record<Platform, PlatformCapability>> {
+  const map = {} as Record<Platform, PlatformCapability>;
+  for (const platform of PLATFORM_IDS) {
+    map[platform] = freezeCapability({
+      accepted_mime_types: [],
+      analytics,
+      asset_types: [],
+      comments: false,
+      connect_available: false,
+      max_caption_length: captionLimits[platform],
+      max_file_size: null,
+      max_hashtags: null,
+      max_media_count: null,
+      max_video_duration_sec: null,
+      min_media_count: 0,
+      multi_asset_types: [],
+      notes: ["Provider adapter is not configured."],
+      platform,
+      publish: false,
+      reply: false,
+    });
+  }
+  return Object.freeze(map);
+}
+
+const unconfiguredWithAnalytics = makeUnconfiguredCapabilities(true);
+const unconfiguredWithoutAnalytics = makeUnconfiguredCapabilities(false);
+
+export {
+  cancelPublicationEffect,
+  createProviderServiceLive,
+  createProviderServiceTest,
+  exchangeAuthorizationCodeEffect,
+  getAccountAnalyticsEffect,
+  getPublicationRequirementsEffect,
+  isRetryableFailure,
+  listAnalyticsEffect,
+  listCommentsEffect,
+  lookupPublicationEffect,
+  providerCallEffect,
+  ProviderService,
+  publishEffect,
+  readRetrySchedule,
+  refreshAccessTokenEffect,
+  replyEffect,
+  revokeEffect,
+  withReadRetry,
+  type ProviderAdapterSource,
+  type ProviderServiceShape,
+} from "./effect";
+export {
+  classifyProviderFailure,
+  failureDiagnostic,
+  normalizeProviderFailure,
+  ProviderAdapterError,
+  type ProviderAdapterErrorOptions,
+  type ProviderFailureInput,
+  type ProviderRequestDiagnostic,
+} from "./failures";
+export { createFacebookAdapter, type FacebookAdapterOptions } from "./facebook/adapter";
+export {
+  facebookOptimizationGoals,
+  facebookOptionsToWire,
+  resolveFacebookPostType,
+} from "./facebook/options";
+export {
+  ProviderHttpClient,
+  type ProviderErrorDiagnosis,
+  type ProviderHttpClientOptions,
+  type ProviderHttpMethod,
+  type ProviderHttpRequest,
+  type ProviderHttpResponse,
+  type ProviderHttpResponseType,
+} from "./http";
+export { createInstagramAdapter, type InstagramAdapterOptions } from "./instagram/adapter";
+export {
+  applyInstagramContent,
+  defaultInstagramPostType,
+  instagramContentIssue,
+  parseInstagramContent,
+  resolveInstagramOptions,
+  type InstagramContentOptions,
+  type InstagramMediaKind,
+  type ResolvedInstagramOptions,
+} from "./instagram/options";
+export { PROVIDER_LIMITS } from "./limits";
+export { extractRateLimitBudget, type RateLimitBudget } from "./rate-limit";
+export { createThreadsAdapter, type ThreadsAdapterOptions } from "./threads/adapter";
+export {
+  applyThreadsOptions,
+  parseThreadsOptions,
+  parseThreadsPostOptions,
+  threadsOptionsIssue,
+  type ThreadsPostOptions,
+  type ThreadsPublishOptions,
+} from "./threads/options";
+export { createTikTokAdapter, type TikTokAdapterOptions } from "./tiktok/adapter";
+export type {
+  FacebookABTestOptions,
+  FacebookLinkCard,
+  FacebookOptimizationGoal,
+  FacebookPostType,
+  FacebookPublishOptions,
+  InstagramPostType,
+  InstagramPublishOptions,
+  InstagramTrialGraduation,
+  OAuthAccountSelection,
+  OAuthAuthorizationInput,
+  OAuthConnection,
+  OAuthExchangeInput,
+  OAuthExchangeResult,
+  ProviderAccountAnalytics,
+  ProviderAdapter,
+  ProviderAnalyticsMetric,
+  ProviderAnalyticsRecord,
+  ProviderBroadcastInfo,
+  ProviderCommentRecord,
+  ProviderCredentials,
+  ProviderFailure,
+  ProviderFailureClass,
+  ProviderMedia,
+  ProviderMediaMetadata,
+  ProviderOperationMetadata,
+  ProviderOperationResult,
+  ProviderPage,
+  ProviderPageInput,
+  ProviderPublicationLookup,
+  ProviderPublicationRequirements,
+  ProviderPublicationStatus,
+  ProviderPublishOptions,
+  ProviderRemoteMedia,
+  ProviderReplyInput,
+  ProviderRequestContext,
+  ProviderRetryPolicy,
+  ProviderStreamMedia,
+  ProviderTokenSet,
+  ProviderTransferMode,
+  PublishInput,
+  TikTokPrivacyLevel,
+  TikTokPublicationRequirements,
+  TikTokPublishOptions,
+  YouTubePrivacyStatus,
+  YouTubePublishOptions,
+} from "./types";
+export {
+  captionLength,
+  composeCaption,
+  validatePublishInput,
+  type CaptionSource,
+  type ValidationIssue,
+} from "./validator";
+export { createYouTubeAdapter, type YouTubeAdapterOptions } from "./youtube/adapter";
+
+function wrapWithMetadata<
+  Args extends readonly unknown[],
+  R extends ProviderOperationResult | ProviderPublicationStatus,
+>(
+  fn: (context: ProviderRequestContext, ...args: Args) => Promise<R>,
+): (context: ProviderRequestContext, ...args: Args) => Promise<R> {
+  return async (context, ...args) => {
+    context.metadata = undefined;
+    const result = await fn(context, ...args);
+    return context.metadata ? { ...result, metadata: context.metadata } : result;
+  };
 }
 
 export interface ProviderRegistryEnvironment {
@@ -130,12 +267,6 @@ const registryCache = new WeakMap<object, RegistryCacheEntry>();
 export class ProviderRegistry {
   readonly #adapters = new Map<Platform, ProviderAdapter>();
 
-  /**
-   * Registers and wraps an initialized ProviderAdapter for a specific social media platform.
-   * Enforces strict capability validation, required lifecycle methods, retry policy bounds (1-10 attempts, up to 24h),
-   * and wraps mutation operations to attach telemetry context metadata to operation results.
-   * Throws TypeError if the platform is already registered, capabilities mismatch, or contracts are violated.
-   */
   register(platform: Platform, adapter: ProviderAdapter): void {
     if (this.#adapters.has(platform)) {
       throw new TypeError(`provider adapter is already registered: ${platform}`);
@@ -194,111 +325,67 @@ export class ProviderRegistry {
     if (adapter.capability.reply && !adapter.reply) {
       throw new TypeError("reply capability requires a reply adapter");
     }
-    const registered: ProviderAdapter = { ...adapter };
-    if (adapter.publish) {
-      registered.publish = async (context, credentials, input) => {
-        context.metadata = undefined;
-        return operationResultWithMetadata(
-          context,
-          await adapter.publish!(context, credentials, input),
-        );
-      };
-    }
-    if (adapter.cancelPublication) {
-      registered.cancelPublication = async (context, credentials, lookup) => {
-        context.metadata = undefined;
-        return operationResultWithMetadata(
-          context,
-          await adapter.cancelPublication!(context, credentials, lookup),
-        );
-      };
-    }
-    if (adapter.reply) {
-      registered.reply = async (context, credentials, input) => {
-        context.metadata = undefined;
-        return operationResultWithMetadata(
-          context,
-          await adapter.reply!(context, credentials, input),
-        );
-      };
-    }
-    if (adapter.lookupPublication) {
-      registered.lookupPublication = async (context, credentials, lookup) => {
-        context.metadata = undefined;
-        return publicationStatusWithMetadata(
-          context,
-          await adapter.lookupPublication!(context, credentials, lookup),
-        );
-      };
-    }
+    const frozenCapability = freezeCapability(structuredClone(adapter.capability));
+    const registered: ProviderAdapter = {
+      ...adapter,
+      capability: frozenCapability,
+      ...(adapter.publish
+        ? {
+            publish: wrapWithMetadata((context, credentials, input) => {
+              const fn = adapter.publish;
+              if (!fn) throw new TypeError("publish adapter method was removed");
+              return fn(context, credentials, input);
+            }),
+          }
+        : {}),
+      ...(adapter.cancelPublication
+        ? {
+            cancelPublication: wrapWithMetadata((context, credentials, lookup) => {
+              const fn = adapter.cancelPublication;
+              if (!fn) throw new TypeError("cancelPublication adapter method was removed");
+              return fn(context, credentials, lookup);
+            }),
+          }
+        : {}),
+      ...(adapter.reply
+        ? {
+            reply: wrapWithMetadata((context, credentials, input) => {
+              const fn = adapter.reply;
+              if (!fn) throw new TypeError("reply adapter method was removed");
+              return fn(context, credentials, input);
+            }),
+          }
+        : {}),
+      ...(adapter.lookupPublication
+        ? {
+            lookupPublication: wrapWithMetadata((context, credentials, lookup) => {
+              const fn = adapter.lookupPublication;
+              if (!fn) throw new TypeError("lookupPublication adapter method was removed");
+              return fn(context, credentials, lookup);
+            }),
+          }
+        : {}),
+    };
     this.#adapters.set(platform, registered);
   }
 
-  /**
-   * Retrieves the registered ProviderAdapter instance for a platform.
-   * Returns the ProviderAdapter if registered, or undefined if unconfigured.
-   */
   get(platform: Platform): ProviderAdapter | undefined {
     return this.#adapters.get(platform);
   }
 
-  /**
-   * Returns the metrics whose stored zero this Platform's adapter cannot vouch for.
-   *
-   * A missing adapter declares nothing ambiguous: it reports no analytics at all,
-   * which coverage states separately.
-   *
-   * @param platform - Platform whose adapter is consulted.
-   * @returns Ambiguous metric names, empty when the adapter sets none.
-   */
   ambiguousZeroMetrics(platform: Platform): readonly ProviderAnalyticsMetric[] {
     return this.#adapters.get(platform)?.ambiguousZeroMetrics ?? [];
   }
 
-  /**
-   * Returns capability descriptors for all platforms defined in PLATFORM_IDS.
-   * Registered adapters supply their active descriptors. Unconfigured providers
-   * retain their declared caption ceilings while every runtime operation remains
-   * unavailable. Analytics follows the configured set: when no adapter is
-   * configured at all (the local fixture stack), every supported Platform keeps
-   * its declared analytics support so stored snapshots stay readable. Once any
-   * adapter exists, an unconfigured Platform reports no analytics and coverage
-   * fails closed. Returned descriptors are isolated and follow canonical
-   * platform order.
-   */
   capabilities(): PlatformCapability[] {
-    const anyConfigured = this.#adapters.size > 0;
-    return PLATFORM_IDS.map((platform) => {
-      const adapter = this.#adapters.get(platform);
-      return adapter
-        ? structuredClone(adapter.capability)
-        : {
-            accepted_mime_types: [],
-            analytics: !anyConfigured,
-            asset_types: [],
-            comments: false,
-            connect_available: false,
-            max_caption_length: captionLimits[platform],
-            max_file_size: null,
-            max_hashtags: null,
-            max_media_count: null,
-            max_video_duration_sec: null,
-            min_media_count: 0,
-            multi_asset_types: [],
-            notes: ["Provider adapter is not configured."],
-            platform,
-            publish: false,
-            reply: false,
-          };
-    });
+    const fallbacks =
+      this.#adapters.size > 0 ? unconfiguredWithoutAnalytics : unconfiguredWithAnalytics;
+    return PLATFORM_IDS.map(
+      (platform) => this.#adapters.get(platform)?.capability ?? fallbacks[platform],
+    );
   }
 }
 
-/**
- * Parses and validates an environment boolean acceptance flag.
- * Requires value to be 'true', 'false', or empty/undefined (defaults to false).
- * Returns true if value is 'true', false otherwise. Throws TypeError if value contains invalid text.
- */
 function acceptanceFlag(name: string, value: string | undefined): boolean {
   const normalized = value?.trim() ?? "false";
   if (!["", "false", "true"].includes(normalized)) {
@@ -307,11 +394,6 @@ function acceptanceFlag(name: string, value: string | undefined): boolean {
   return normalized === "true";
 }
 
-/**
- * Validates that the public API base URL is a non-empty, credential-free HTTPS or loopback URL.
- * Required for deriving canonical OAuth callback URLs for provider redirect registrations.
- * Returns validated URL object. Throws TypeError if empty, malformed, or untrusted.
- */
 function trustedPublicUrl(value: string | undefined): URL {
   if (!value?.trim()) {
     throw new TypeError("accepted provider configuration is incomplete");
@@ -408,59 +490,59 @@ export function createProviderRegistryFromEnvironment(
       : { timeoutMilliseconds: options.timeoutMilliseconds }),
   };
 
-  if (facebookAccepted) {
+  if (facebookAccepted && facebookClientId && facebookClientSecret) {
     registry.register(
       "facebook",
       createFacebookAdapter({
-        clientId: facebookClientId!,
-        clientSecret: facebookClientSecret!,
+        clientId: facebookClientId,
+        clientSecret: facebookClientSecret,
         redirectUri: `${publicUrl.origin}${oauthCallbackPath("facebook")}`,
         ...commonOptions,
       }),
     );
   }
-  if (instagramAccepted) {
+  if (instagramAccepted && instagramClientId && instagramClientSecret) {
     registry.register(
       "instagram",
       createInstagramAdapter({
-        clientId: instagramClientId!,
-        clientSecret: instagramClientSecret!,
+        clientId: instagramClientId,
+        clientSecret: instagramClientSecret,
         engagementEnabled: instagramEngagementAccepted,
         redirectUri: `${publicUrl.origin}${oauthCallbackPath("instagram")}`,
         ...commonOptions,
       }),
     );
   }
-  if (threadsAccepted) {
+  if (threadsAccepted && threadsClientId && threadsClientSecret) {
     registry.register(
       "threads",
       createThreadsAdapter({
-        clientId: threadsClientId!,
-        clientSecret: threadsClientSecret!,
+        clientId: threadsClientId,
+        clientSecret: threadsClientSecret,
         engagementEnabled: threadsEngagementAccepted,
         redirectUri: `${publicUrl.origin}${oauthCallbackPath("threads")}`,
         ...commonOptions,
       }),
     );
   }
-  if (tiktokAccepted) {
+  if (tiktokAccepted && tiktokClientKey && tiktokClientSecret) {
     registry.register(
       "tiktok",
       createTikTokAdapter({
-        clientKey: tiktokClientKey!,
-        clientSecret: tiktokClientSecret!,
+        clientId: tiktokClientKey,
+        clientSecret: tiktokClientSecret,
         mediaUrlPrefix: tiktokMediaUrlPrefix || `${publicUrl.origin}/api/v1/provider-media/`,
         redirectUri: `${publicUrl.origin}${oauthCallbackPath("tiktok")}`,
         ...commonOptions,
       }),
     );
   }
-  if (youtubeAccepted) {
+  if (youtubeAccepted && youtubeClientId && youtubeClientSecret) {
     registry.register(
       "youtube",
       createYouTubeAdapter({
-        clientId: youtubeClientId!,
-        clientSecret: youtubeClientSecret!,
+        clientId: youtubeClientId,
+        clientSecret: youtubeClientSecret,
         redirectUri: `${publicUrl.origin}${oauthCallbackPath("youtube")}`,
         ...commonOptions,
       }),

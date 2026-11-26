@@ -18,10 +18,6 @@ const SPDX_LICENSE_URLS = {
   "MPL-2.0": "https://spdx.org/licenses/MPL-2.0.html",
 };
 
-/**
- * Canonical texts for licenses whose installed platform packages omit a license
- * file. LGPLv3 incorporates GPLv3 by reference, so both texts ship together.
- */
 const CANONICAL_LICENSE_FILES = {
   "LGPL-3.0-or-later": ["LICENSES/LGPL-3.0-or-later.txt", "LICENSES/GPL-3.0-or-later.txt"],
 };
@@ -39,12 +35,6 @@ const LICENSE_FILE_PATTERNS = [
   "LICENSES/**",
 ];
 
-/**
- * Copied or adapted interface code that is not represented by an installed npm
- * package. The generated dependency section already covers lucide-react; this
- * list keeps the copied geometry and the Gr8r-derived adaptation visible in every
- * distributed notice bundle.
- */
 const COPIED_INTERFACE_NOTICES = [
   {
     name: "shadcn/ui",
@@ -72,23 +62,10 @@ const COPIED_INTERFACE_NOTICES = [
   },
 ];
 
-/**
- * Normalizes line endings and trailing whitespace so the generated bundle is
- * stable across platforms and can be compared byte-for-byte in checks.
- *
- * @param {string} text - License or notice text.
- * @returns {string} Normalized text without a trailing newline.
- */
 function normalizeText(text) {
   return text.replaceAll("\r\n", "\n").replace(trailingWhitespacePattern, "").trimEnd();
 }
 
-/**
- * Finds every license-like file shipped inside an installed package.
- *
- * @param {string} directory - Absolute installed package directory.
- * @returns {Array<string>} Sorted package-relative file paths.
- */
 function licenseFiles(directory) {
   const files = new Set();
   for (const pattern of LICENSE_FILE_PATTERNS) {
@@ -99,38 +76,17 @@ function licenseFiles(directory) {
   return [...files].sort((left, right) => left.localeCompare(right));
 }
 
-/**
- * Renders the repository URL from the shapes used by npm package metadata.
- *
- * @param {string | { url?: string } | undefined} repository - Package repository metadata.
- * @returns {string | undefined} Repository URL when present.
- */
 function repositoryUrl(repository) {
   if (typeof repository === "string") return repository;
   return repository?.url;
 }
 
-/**
- * Renders a package author from the string or object forms used by npm.
- *
- * @param {string | { name?: string, email?: string } | undefined} author - Package author metadata.
- * @returns {string | undefined} Author label when present.
- */
 function authorLabel(author) {
   if (typeof author === "string") return author;
   if (!author) return undefined;
   return [author.name, author.email && `<${author.email}>`].filter(Boolean).join(" ");
 }
 
-/**
- * Converts one installed package into a self-contained notice section. Repeats
- * identical license texts by reference so standard MIT/Apache files do not grow
- * the bundle unnecessarily while each package keeps its own copyright header.
- *
- * @param {object} entry - Collected package metadata.
- * @param {Map<string, string>} seenTexts - Hash to first package/file label.
- * @returns {string} Notice section.
- */
 function packageSection(entry, seenTexts) {
   const lines = ["=".repeat(80), `${entry.name}@${entry.version}`, `License: ${entry.license}`];
   const repository = repositoryUrl(entry.repository);
@@ -185,14 +141,6 @@ function packageSection(entry, seenTexts) {
   return lines.join("\n");
 }
 
-/**
- * Reproduces Meltiply's own license ahead of the third-party notices so a
- * recipient cannot mistake the permissive dependency grants for a grant to the
- * project. The full text is embedded rather than linked because compiled
- * artifacts are distributed without the repository.
- *
- * @returns {string} Project license section.
- */
 function projectLicenseSection() {
   return [
     "=".repeat(80),
@@ -213,13 +161,6 @@ function projectLicenseSection() {
   ].join("\n");
 }
 
-/**
- * Renders the copied-code section, embedding the preserved license text when
- * the repository ships one. Gr8r has no public license, so it records the
- * permission basis instead of inventing terms.
- *
- * @returns {string} Copied-interface notice section.
- */
 function copiedInterfaceSection() {
   const sections = COPIED_INTERFACE_NOTICES.map((notice) => {
     const lines = [
@@ -245,16 +186,6 @@ function copiedInterfaceSection() {
   return ["Copied interface code", "", ...sections].join("\n");
 }
 
-/**
- * Builds a deterministic third-party notice bundle for one production project.
- *
- * @param {string} project - Repository-relative or absolute project directory.
- * @param {object} [options] - Overrides for tests and alternate checkouts.
- * @param {string} [options.workspaceRoot=repositoryRoot] - Repository root used to identify private workspace packages.
- * @param {string} [options.policyPath] - License policy file.
- * @returns {string} Complete text bundle.
- * @throws {Error} If the project has no manifest, a production license is unapproved, or required metadata is missing.
- */
 export function buildNoticeBundle(
   project,
   {
@@ -324,13 +255,6 @@ export function buildNoticeBundle(
     .concat("\n");
 }
 
-/**
- * Parses the two required CLI paths.
- *
- * @param {Array<string>} argv - CLI arguments.
- * @returns {{ project: string, output: string }} Parsed paths.
- * @throws {TypeError} If arguments are missing or unknown.
- */
 export function parseNoticeArgs(argv) {
   let project;
   let output;
@@ -350,12 +274,6 @@ export function parseNoticeArgs(argv) {
   return { project, output };
 }
 
-/**
- * Builds and writes one notice bundle.
- *
- * @param {Array<string>} argv - CLI arguments.
- * @returns {{ bytes: number, output: string, project: string }} Written bundle metadata.
- */
 export function writeNoticeBundle(argv) {
   const { project, output } = parseNoticeArgs(argv);
   const text = buildNoticeBundle(project);

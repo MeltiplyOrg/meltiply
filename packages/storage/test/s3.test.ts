@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { S3ObjectStore, S3SigV4Signer } from "../src";
 
-/** Records every request the store issues so assertions can inspect wire shape. */
 interface RecordedRequest {
   body: string | null;
   headers: Headers;
@@ -10,20 +9,12 @@ interface RecordedRequest {
   url: URL;
 }
 
-/** Decodes a request body into text for assertions; null when the call had none. */
 async function readBody(body: BodyInit | null | undefined): Promise<string | null> {
   if (body === undefined || body === null) return null;
   if (typeof body === "string") return body;
   return new TextDecoder().decode(await new Response(body).arrayBuffer());
 }
 
-/**
- * Builds an S3 origin double.
- *
- * `respond` receives the request in order and returns the canned response, so a
- * test can model the exact protocol exchange (including empty bodies and the
- * XML documents the multipart API returns) without a real server.
- */
 function fakeOrigin(
   respond: (request: RecordedRequest, index: number) => Response | Promise<Response>,
 ): { requests: RecordedRequest[]; store: S3ObjectStore } {
@@ -50,7 +41,6 @@ function fakeOrigin(
   return { requests, store };
 }
 
-/** A `HEAD`-shaped response with the metadata headers S3 reports. */
 function headResponse(overrides: Record<string, string> = {}, status = 200): Response {
   return new Response(null, {
     headers: {
@@ -68,9 +58,6 @@ describe("S3ObjectStore metadata", () => {
   it("normalizes origin headers into ObjectMetadata", async () => {
     const { requests, store } = fakeOrigin(() =>
       headResponse({
-        // A real 32-byte SHA-256 digest in the base64 form S3 sends. It carries
-        // `+`, `/`, and `=` and starts with 0x06, so both the base64 decoding
-        // and the zero-padded hex conversion are exercised.
         "x-amz-checksum-sha256": "BsCuUn6yITEdlC7KOO9YQiLL6NuLUdp/p+Ze2Ex2xWg=",
         "x-amz-version-id": "version-one",
       }),
@@ -79,8 +66,6 @@ describe("S3ObjectStore metadata", () => {
     await expect(store.head("org/asset/image.png")).resolves.toEqual({
       contentType: "image/png",
       customMetadata: null,
-      // S3 quotes its ETag and base64-encodes checksums; Meltiply stores both
-      // unquoted and as the hex digest its R2 adapter reports.
       etag: "abc123",
       key: "org/asset/image.png",
       sha256: "06c0ae527eb221311d942eca38ef584222cbe8db8b51da7fa7e65ed84c76c568",
@@ -93,7 +78,6 @@ describe("S3ObjectStore metadata", () => {
     expect(requests[0]?.headers.get("authorization")).toContain(
       "Credential=minioadmin/20260718/eu-west-1/s3/aws4_request",
     );
-    // `host` is derived by the runtime, never sent as a literal header.
     expect(requests[0]?.headers.has("host")).toBe(false);
   });
 
@@ -143,12 +127,8 @@ describe("S3ObjectStore reads", () => {
   });
 
   it("admits exactly 1 MiB and rejects out-of-range reads before touching the origin", async () => {
-    // A satisfied byte range is answered with 206, so the accepted ceiling read
-    // is modeled with the same status a real origin sends.
     const { requests, store } = fakeOrigin(() => new Response(new Uint8Array(), { status: 206 }));
     await expect(store.readPrefix("org/asset/image.png", 0)).rejects.toThrow("maximumBytes");
-    // 1 MiB is the inclusive ceiling: the exact limit is issued, one byte more
-    // is refused, so the bound is neither exclusive nor unbounded.
     await expect(store.readPrefix("org/asset/image.png", 1024 * 1024)).resolves.toEqual(
       new Uint8Array(),
     );
@@ -175,18 +155,10 @@ describe("S3ObjectStore writes", () => {
 });
 
 describe("S3ObjectStore copy", () => {
-  /**
-   * Promotion is the one copy the product depends on: the source generation is
-   * pinned so a staging key rewritten by a still-valid upload grant can never be
-   * promoted, and the destination is written only when absent so a replayed
-   * copy adopts the bytes an interrupted attempt already wrote.
-   */
   it("copies server-side under a pinned source ETag", async () => {
     const { requests, store } = fakeOrigin((_request, index) => {
       if (index === 0) return new Response(null, { status: 404 });
       if (index === 1) {
-        // Real S3/MinIO copy responses are namespaced documents with a quoted
-        // ETag and a LastModified element.
         return new Response(
           '<?xml version="1.0" encoding="UTF-8"?><CopyObjectResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ETag>"ready-etag"</ETag><LastModified>2026-07-18T12:00:00.000Z</LastModified></CopyObjectResult>',
           { headers: { "content-type": "application/xml" } },
@@ -206,7 +178,6 @@ describe("S3ObjectStore copy", () => {
     const [probe, copy] = requests;
     expect(probe?.method).toBe("HEAD");
     expect(copy?.method).toBe("PUT");
-    // The copy never carries bytes through the worker.
     expect(copy?.body).toBeNull();
     expect(copy?.headers.get("x-amz-copy-source")).toBe(
       "/meltiply-assets/staging/org/asset/session/image.png",
@@ -214,8 +185,6 @@ describe("S3ObjectStore copy", () => {
     expect(copy?.headers.get("x-amz-copy-source-if-match")).toBe('"staged-etag"');
     expect(copy?.headers.get("if-none-match")).toBe("*");
     expect(copy?.headers.get("content-type")).toBe("image/png");
-    // Without REPLACE the origin keeps the staging object's metadata, so the
-    // promoted key would be served back with the staging content type.
     expect(copy?.headers.get("x-amz-metadata-directive")).toBe("REPLACE");
   });
 
@@ -245,8 +214,6 @@ describe("S3ObjectStore copy", () => {
   });
 
   it("surfaces a copy origin failure instead of reporting no promotion", async () => {
-    // Only the precondition statuses mean "did not apply"; a 500 is an origin
-    // fault, and collapsing it into null would silently drop the asset.
     const { store } = fakeOrigin((_request, index) =>
       index === 0 ? new Response(null, { status: 404 }) : new Response("boom", { status: 500 }),
     );
@@ -317,8 +284,6 @@ describe("S3ObjectStore multipart uploads", () => {
     expect(requests[0]?.url.searchParams.get("uploads")).toBe("");
     expect(requests[1]?.url.searchParams.get("partNumber")).toBe("1");
     expect(requests[1]?.url.searchParams.get("uploadId")).toBe("upload-9");
-    // The completion document carries the part number and the ETag normalized
-    // to the unquoted form Meltiply stores, not the quoted wire ETag.
     expect(requests[2]?.body).toBe(
       "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>part-one-etag</ETag></Part></CompleteMultipartUpload>",
     );

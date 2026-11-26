@@ -22,7 +22,6 @@ const direct = await fetch(`${origin}/api/v1/users/me`);
 assert.equal(direct.status, 503, "the Worker has no API when browser interception is absent");
 assert.match(direct.headers.get("content-security-policy"), /connect-src 'self'/);
 
-/** Opens the canonical developer dock and its preview-only tab, including after scenario reloads reset consent-free dock state. */
 async function openPreviewControls(page) {
   const expand = page.getByRole("button", { name: "Expand DevBox", exact: true });
   await expect(page.getByRole("region", { name: "Meltiply DevBox", exact: true })).toBeVisible();
@@ -36,7 +35,6 @@ async function openPreviewControls(page) {
   return page.getByRole("region", { name: "Preview controls", exact: true });
 }
 
-/** Opens the dev-only Routes tab, which lists the new device consent surface. */
 async function openRoutesTab(page) {
   const expand = page.getByRole("button", { name: "Expand DevBox", exact: true });
   await expect(page.getByRole("region", { name: "Meltiply DevBox", exact: true })).toBeVisible();
@@ -46,7 +44,6 @@ async function openRoutesTab(page) {
 }
 const browser = await chromium.launch();
 try {
-  // Ordinary development must boot without requesting any preview module or its virtual manifest, even without a backend.
   const developmentPage = await browser.newPage();
   try {
     const previewRequests = [];
@@ -65,7 +62,6 @@ try {
   } finally {
     await developmentPage.close();
   }
-  // Block application modules to prove transferred palettes commit before React can hydrate, without consuming preview parameters.
   const shellContext = await browser.newContext({ colorScheme: "light" });
   try {
     await shellContext.route(/\/assets\/.*\.js(?:\?|$)/, (route) => route.abort());
@@ -101,7 +97,6 @@ try {
   await page.goto(`${origin}/posts`);
   await expect(page.getByRole("heading", { name: "Posts", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Reject optional", exact: true }).click();
-  // Published rows can show frozen Channel copy instead of the current Post text; select a rendered caption without assuming API/display ordering.
   const candidates = await page.evaluate(
     async () => (await fetch("/api/v1/posts").then((response) => response.json())).posts,
   );
@@ -115,7 +110,6 @@ try {
   const original = candidates.find((post) => visibleCaptions.includes(post.default_text));
   assert.ok(original, "the Posts table must render a record from the compiled seed");
 
-  // Verify local file effects: completion returns an Asset; session state is read separately, and decoded bytes stay attached after saving.
   const upload = await page.evaluate(
     async ({ bytes, profileId }) => {
       const created = await fetch("/api/v1/asset-upload-sessions", {
@@ -206,7 +200,6 @@ try {
   assert.equal(reset.default_text, original.default_text);
 
   let dialog = await openPreviewControls(page);
-  // Every body-portalled selector must remain clickable above the dock in both palettes and viewport sizes.
   await dialog.getByRole("combobox", { name: "Preview operation", exact: true }).click();
   await page.getByRole("option", { name: "GET listPosts", exact: true }).click();
   for (const dark of [false, true])
@@ -231,14 +224,11 @@ try {
     }
   await dialog.getByRole("combobox", { name: "Preview operation", exact: true }).click();
   await page.getByRole("option", { name: "*", exact: true }).click();
-  // The route list comes from the real router; adding a literal frontend route automatically extends this browser smoke.
   await dialog.getByRole("combobox", { name: "Preview route", exact: true }).click();
   const routes = await page.getByRole("option").allTextContents();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Collapse DevBox", exact: true }).click();
 
-  // The Routes tab starts a synthetic device request and renders the real
-  // consent page, including both terminal decisions.
   await page.goto(`${origin}/posts`);
   const routesTab = await openRoutesTab(page);
   await routesTab.getByRole("button", { name: "Start device request", exact: true }).click();
@@ -311,7 +301,6 @@ try {
       }
   }
 
-  // Apply an empty state through the real controls, including a scoped operation. No query-cache or auth state may leak across the reload.
   await page.goto(`${origin}/posts`);
   dialog = await openPreviewControls(page);
   await dialog.getByRole("combobox", { name: "Preview scenario", exact: true }).click();
@@ -413,7 +402,6 @@ try {
   await browser.close();
 }
 
-/** Proves the mock runtime and canonical sample identities never ship in the production app. */
 async function inspectProduction(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = `${directory}/${entry.name}`;

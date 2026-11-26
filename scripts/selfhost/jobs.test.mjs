@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JobStore } from "./jobs.mjs";
 
-/** Provides isolated disk state and a deterministic clock; every handle closes before cleanup. */
 function fixture(t, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), "meltiply-jobs-"));
   let time = 1000000;

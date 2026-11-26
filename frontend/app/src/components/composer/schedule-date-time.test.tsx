@@ -3,13 +3,13 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { I18nProvider } from "@/lib/i18n";
+import { useLayoutEffect } from "react";
+import { I18nProvider, useI18n } from "@/lib/i18n";
 import { SideDialog } from "@meltiply/ui/side-dialog";
 import { ScheduleDateTime } from "./schedule-date-time";
 
 afterEach(cleanup);
 
-/** Mounts the real picker with the same localization owner used by the composer. */
 function picker(value: string, onChange: (value: string) => void) {
   return (
     <I18nProvider>
@@ -18,14 +18,31 @@ function picker(value: string, onChange: (value: string) => void) {
   );
 }
 
-/** These labels are local calendar dates, never UTC-derived ISO dates. */
 function dateName(year: number, month: number, day: number): string {
   return new Intl.DateTimeFormat("en", { dateStyle: "full" }).format(
     new Date(year, month, day, 12),
   );
 }
 
+function InGerman({ children }: { children: React.ReactNode }) {
+  const { language, setLanguage } = useI18n();
+  useLayoutEffect(() => setLanguage("de"), [setLanguage]);
+  return language === "de" ? children : null;
+}
+
 describe("ScheduleDateTime", () => {
+  it("names calendar months in the active language", async () => {
+    render(
+      <I18nProvider>
+        <InGerman>
+          <ScheduleDateTime value="2028-01-31T23:47" onChange={() => {}} />
+        </InGerman>
+      </I18nProvider>,
+    );
+    fireEvent.click(screen.getAllByRole("button")[0]!);
+    expect(await screen.findByText("Januar 2028")).toBeInTheDocument();
+  });
+
   it("browses into leap February without committing and preserves time when a day is chosen", async () => {
     const onChange = vi.fn();
     render(picker("2028-01-31T23:47", onChange));

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { calendarSlots } from "./calendar-slots";
 
-/** Supplies a civil date label, not an instant in the Queue's timezone. */
 function day(year: number, month: number, date: number) {
   return { date: new Date(year, month - 1, date, 12), dayNumber: date, isCurrentMonth: true };
 }

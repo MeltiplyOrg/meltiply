@@ -8,11 +8,6 @@ import { FilterSelect } from "@meltiply/ui/select";
 
 afterEach(cleanup);
 
-/**
- * Verifies the shared filter contract exposed to users: the aggregate choice is
- * available beside concrete choices and selecting a concrete row emits its typed
- * value through the controlled callback.
- */
 it("selects a concrete filter value", () => {
   const onValueChange = vi.fn();
 

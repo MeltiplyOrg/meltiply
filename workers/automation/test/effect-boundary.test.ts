@@ -24,10 +24,8 @@ import { makeJobContext } from "../src/effect/job-context";
 import { unwrapJobError } from "../src/effect/job-errors";
 import { JobInProgressError } from "../src/job-lease";
 
-const automationEnv = env as unknown as AutomationEnv;
+const automationEnv: AutomationEnv = { ...env };
 
-// Each boundary test receives fresh correlation and logger layers, preventing
-// one execution's context from leaking into another test's job.
 function scope() {
   return jobScope(
     { ENVIRONMENT: "test", VERSION: "1" },
@@ -65,9 +63,6 @@ describe("automation Effect boundary mapping", () => {
     expect(mapped.diagnostic?.error).toMatchObject({ name: "Error" });
   });
 
-  // Lease-conflict retries must keep the original error name: classification
-  // stores it in the wrapper's `cause`, and unwrapJobError restores it so
-  // diagnostics group under "JobInProgressError", not the wrapper tag.
   it("keeps the JobInProgressError name through classification and unwrap", () => {
     const classified = classifyJobError(new JobInProgressError());
     expect(classified).toBeInstanceOf(RetryableJobError);
@@ -174,8 +169,6 @@ describe("automation queue duplicate delivery", () => {
     version: 1,
   } as const;
 
-  // Reuses the same durable payload with a chosen delivery ID to exercise
-  // Cloudflare acknowledgement and redelivery behavior at the worker seam.
   function batch(messageId: string) {
     return createMessageBatch("meltiply-asset-processing-test", [
       {
@@ -214,7 +207,6 @@ describe("automation queue duplicate delivery", () => {
       retryMessages: [],
     });
 
-    // At-least-once redelivery of the same message reprocesses safely and acks.
     const second = batch("asset-duplicate");
     const secondContext = createExecutionContext();
     await handler.queue?.(second, automationEnv, secondContext);
@@ -224,8 +216,6 @@ describe("automation queue duplicate delivery", () => {
     });
   });
 
-  // Valid deliveries must survive transport TypeErrors and complete on redelivery;
-  // only explicit payload validation failures may take the terminal ack path.
   it("retries a transport TypeError and acks the redelivery on success", async () => {
     const process = vi
       .fn()
@@ -265,8 +255,6 @@ describe("automation queue duplicate delivery", () => {
     });
   });
 
-  // Queue-binding failures must remain failed Effects until the worker chooses
-  // retry; the same payload is acknowledged only after delivery succeeds.
   it("retries failed queue publishing and acks a successful redelivery", async () => {
     const destination = {
       send: vi
@@ -325,8 +313,6 @@ describe("automation queue duplicate delivery", () => {
     });
   });
 
-  // Missing test overrides must not silently acknowledge undelivered work.
-  // Each case isolates a distinct unconfigured method while supplying the others.
   it.each(["routing", "send", "sendBatch"] as const)(
     "retries work when test %s is unconfigured",
     async (missing) => {

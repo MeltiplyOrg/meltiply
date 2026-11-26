@@ -52,13 +52,6 @@ describe("OAuth connection token refresh arming", () => {
     scopes: ["publish"],
   };
 
-  /**
-   * Fake transaction client recording queries and answering the fixed
-   * organization, membership, active-profile, lock, and existing-account
-   * lookups the persistence path issues before the platform_accounts upsert.
-   * `profileChannel` makes the Brand-Profile-scoped Provider read report an
-   * existing Channel so the duplicate-Provider refusal can be asserted.
-   */
   function clientReturning(
     queries: Array<{ sql: string; params?: unknown[] }>,
     profileChannel = false,
@@ -102,8 +95,6 @@ describe("OAuth connection token refresh arming", () => {
     };
   }
 
-  // The persisted schedule remains the final bound parameter after Brand
-  // Profile ownership and the connecting user are recorded in the upsert.
   it("arms token_refresh_next_attempt_at when the grant carries an expiry", async () => {
     const queries: Array<{ sql: string; params?: unknown[] }> = [];
     withSystemTransactionEffect.mockImplementation((_env, operation) =>
@@ -121,13 +112,10 @@ describe("OAuth connection token refresh arming", () => {
     );
     const armed = upsert?.params?.[11];
     expect(armed).toBeInstanceOf(Date);
-    // max(now + 1h, expiresAt - 7d): the 2027 expiry resolves to expiry - 7d.
     expect((armed as Date).toISOString()).toBe("2026-12-25T00:00:00.000Z");
     expect(upsert?.params?.[6]).toMatch(/^meltiply:v2:primary:/);
   });
 
-  // An expiry-free grant still writes the same profile-scoped upsert shape,
-  // with its final refresh-schedule parameter deliberately null.
   it("leaves the refresh schedule unarmed when the grant has no expiry", async () => {
     const queries: Array<{ sql: string; params?: unknown[] }> = [];
     withSystemTransactionEffect.mockImplementation((_env, operation) =>
@@ -145,8 +133,6 @@ describe("OAuth connection token refresh arming", () => {
     expect(upsert?.params?.[11]).toBeNull();
   });
 
-  // A Brand Profile owns at most one Channel per Provider, so a second
-  // provider account is refused before any token is written.
   it("rejects a second Channel of the same Provider on one Brand Profile", async () => {
     const queries: Array<{ sql: string; params?: unknown[] }> = [];
     withSystemTransactionEffect.mockImplementation((_env, operation) =>

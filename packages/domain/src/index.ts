@@ -1,6 +1,35 @@
 import type { components } from "@meltiply/contracts/schema";
 
-const unsafeFilenamePattern = /(^\.{1,2}$)|[\\/\u0000-\u001f\u007f]/;
+/** Matches `.`, `..`, slashes, and control characters, which no single path segment may contain. */
+export const UNSAFE_PATH_SEGMENT_PATTERN = /(^\.{1,2}$)|[\\/\u0000-\u001f\u007f]/;
+
+/** The message of a non-empty `Error`, otherwise `fallback`. */
+export function errorMessage(cause: unknown, fallback: string): string {
+  return cause instanceof Error && cause.message.length > 0 ? cause.message : fallback;
+}
+
+/** Counts Unicode code points without allocating an intermediate character array. */
+export function codePointLength(text: string): number {
+  let count = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff && index + 1 < text.length) {
+      const next = text.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) index += 1;
+    }
+    count += 1;
+  }
+  return count;
+}
+
+/** Valid runtime environment labels shared by API and automation Workers. */
+export type WorkerEnvironment =
+  | "local"
+  | "preview"
+  | "production"
+  | "selfhost"
+  | "staging"
+  | "test";
 
 export {
   analyticsTerminalAgeSeconds,
@@ -8,8 +37,27 @@ export {
   maximumDelayedDeliverySeconds,
   overdueRecoveryGraceSeconds,
 } from "./due-work";
-export * from "./capabilities";
-export * from "./effect";
+export {
+  can,
+  INSTALLATION_SEAT_LIMIT,
+  isWorkspaceRole,
+  WORKSPACE_ROLES,
+  type WorkspaceCapability,
+  type WorkspaceRole,
+} from "./capabilities";
+export {
+  ActiveOrganizationRequiredError,
+  AuthenticationRequiredError,
+  DatabaseError,
+  ForbiddenError,
+  InvalidRequestError,
+  MailSubmissionError,
+  NotFoundError,
+  RequestContext,
+  StorageUnavailableError,
+  type MailSubmissionClassification,
+  type RequestContextData,
+} from "./effect";
 
 export const rateLimitBudgetFreshSeconds = 2 * 60 * 60;
 
@@ -24,71 +72,26 @@ export type PostAttachment = components["schemas"]["PostAttachment"];
 export type PostTarget = components["schemas"]["PostTarget"];
 export type ReplyStatus = components["schemas"]["ReplyStatus"];
 
-/**
- * Domain errors — thrown by persistence and service modules to express
- * domain-meaningful failures without coupling to HTTP semantics. The route
- * layer (or any caller) maps these to transport codes; the persistence layer
- * never mentions HTTP.
- */
-
-export type DomainErrorCode = "active_organization_required" | "service_unavailable";
-
-export class DomainError extends Error {
-  constructor(
-    readonly code: DomainErrorCode,
-    message: string,
-  ) {
-    super(message);
-    this.name = "DomainError";
-  }
-}
-
-export class AccessDenied extends DomainError {
-  constructor(message = "Access denied.") {
-    super("active_organization_required", message);
-    this.name = "AccessDenied";
-  }
-}
-
-export class StorageUnavailable extends DomainError {
-  constructor(message = "Storage is unavailable.") {
-    super("service_unavailable", message);
-    this.name = "StorageUnavailable";
-  }
-}
-
-/**
- * The canonical Platform roster — the single source of truth for which
- * Platforms Meltiply supports. Every consumer that needs the list (providers,
- * routes, automation, frontend) imports this rather than re-declaring it.
- */
 export const PLATFORM_IDS: readonly Platform[] = [
   "tiktok",
   "youtube",
   "instagram",
   "facebook",
   "threads",
-] as const;
+];
 
-/**
- * Construct the OAuth callback path for a Platform. This is the canonical
- * source of the callback URL shape — providers and route registration both
- * derive from this rather than hard-coding it.
- *
- * @param platform - Target social media platform identifier.
- * @returns Relative URL callback path (e.g. "/api/v1/platforms/tiktok/callback").
- */
+const PLATFORM_ID_SET: ReadonlySet<string> = new Set(PLATFORM_IDS);
+
+export function isPlatform(value: unknown): value is Platform {
+  return typeof value === "string" && PLATFORM_ID_SET.has(value);
+}
+
+/** OAuth callback path shared by Provider redirect URIs and route registration. */
 export function oauthCallbackPath(platform: Platform): string {
   return `/api/v1/platforms/${platform}/callback`;
 }
 
-/**
- * Constructs fallback PlatformCapability descriptors for all supported platforms
- * with publishing, connection, analytics, and comments disabled.
- * Used when provider adapters are unconfigured or live capability acceptance is pending.
- *
- * @returns List of default unconfigured PlatformCapability objects for each canonical platform.
- */
+/** One fully disabled capability row per Platform, reported while a Provider is unconfigured. */
 export function unavailableCapabilities(): PlatformCapability[] {
   return PLATFORM_IDS.map((platform) => ({
     accepted_mime_types: [],
@@ -111,14 +114,8 @@ export function unavailableCapabilities(): PlatformCapability[] {
 }
 
 /**
- * How long a completed upload with no retained Post attachment stays eligible
- * for reclamation — seven elapsed days. The clock starts at upload
- * finalization and restarts when the last retained attachment is removed, so a
- * recently detached older upload is not reclaimed immediately. Saved drafts and
- * retained scheduled or published Posts hold their attachments indefinitely;
- * this grace only governs media no retained Post references. Reclamation also
- * requires no live processing, Provider retrieval, retry, or Reconciliation
- * hold, so the deadline is an eligibility floor rather than an exact promise.
+ * Minimum age before an upload no retained Post references may be reclaimed. The clock starts at
+ * finalization and restarts when the last retained attachment is removed.
  */
 export const assetOrphanGraceSeconds = 7 * 24 * 60 * 60;
 
@@ -131,19 +128,13 @@ export const ASSET_UPLOAD_POLICY = {
   signedUrlTtlSeconds: 15 * 60,
 } as const;
 
-/** Optional resource ceilings; `null` leaves that resource unrestricted. */
-export interface CommunityLimits {
+interface CommunityLimits {
   readonly max_distributions: number | null;
   readonly max_platforms: number | null;
   readonly max_storage_bytes: number | null;
   readonly max_uploads: number | null;
 }
 
-/**
- * Community deployments impose no resource quotas: operators own capacity and
- * costs. Keep the nullable policy and enforcement machinery for bounded hosted
- * policies; `null` disables only the corresponding resource allowance.
- */
 export const COMMUNITY_LIMITS: CommunityLimits = Object.freeze({
   max_distributions: null,
   max_platforms: null,
@@ -151,18 +142,15 @@ export const COMMUNITY_LIMITS: CommunityLimits = Object.freeze({
   max_uploads: null,
 });
 
-/**
- * Normalize database and runtime timestamps to the API's canonical ISO form.
- *
- * Database drivers may return either a Date instance or an ISO-compatible
- * string. Keeping this conversion in one shared helper prevents each Worker
- * service from drifting on timestamp serialization semantics.
- *
- * @param value - Date instance or ISO-compatible date string.
- * @returns Standardized ISO-8601 UTC timestamp string.
- */
+export function isoDateTimeOrNull(value: Date | string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+/** Throws `RangeError` for an unparseable value. */
 export function isoDateTime(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+  return (value instanceof Date ? value : new Date(value)).toISOString();
 }
 
 const mediaRules = {
@@ -198,34 +186,22 @@ const mediaRules = {
   },
 } as const;
 
-export type AcceptedMediaType = keyof typeof mediaRules;
+type AcceptedMediaType = keyof typeof mediaRules;
 
-/**
- * Returns the per-file upload ceiling in bytes for one accepted media MIME
- * type (25 MiB for images, 500 MiB for video), or null when the type is not an
- * accepted media rule. Processing reservations size against this ceiling —
- * never against the uploaded size — because normalization can legitimately
- * produce larger bytes (an opaque PNG becoming the required JPEG) and the
- * output must fit the same per-file quota the upload itself obeyed.
- *
- * @param contentType - Declared media MIME type; unvalidated input returns null.
- * @returns The maximum byte ceiling, or null for an unknown media type.
- */
-export function mediaUploadMaximum(contentType: string | null | undefined): number | null {
-  if (!contentType || !Object.hasOwn(mediaRules, contentType)) return null;
-  // Own-key membership validates the MIME union without allocating an entries
-  // array for every upload/output reservation or accepting prototype members.
-  return mediaRules[contentType as AcceptedMediaType].maximum;
+export function isAcceptedMediaType(
+  contentType: string | null | undefined,
+): contentType is AcceptedMediaType {
+  return typeof contentType === "string" && Object.hasOwn(mediaRules, contentType);
 }
 
-/**
- * Resolves the canonical upload extension for an accepted media MIME type.
- * Used when restoring original bytes whose display title has no file suffix.
- * Exact own MIME keys only; unknown types return null rather than guessing.
- */
+export function mediaUploadMaximum(contentType: string | null | undefined): number | null {
+  if (!isAcceptedMediaType(contentType)) return null;
+  return mediaRules[contentType].maximum;
+}
+
 export function mediaUploadExtension(contentType: string): string | null {
-  if (!Object.hasOwn(mediaRules, contentType)) return null;
-  return mediaRules[contentType as AcceptedMediaType].extensions[0];
+  if (!isAcceptedMediaType(contentType)) return null;
+  return mediaRules[contentType].extensions[0];
 }
 
 export class AssetPolicyError extends Error {
@@ -242,33 +218,25 @@ export class AssetPolicyError extends Error {
   }
 }
 
-export interface ValidatedUpload {
+interface ValidatedUpload {
   assetType: "image" | "video";
   contentType: AcceptedMediaType;
   fileSize: number;
   filename: string;
 }
 
-export interface MultipartLayout {
+interface MultipartLayout {
   maxParallelParts: number;
   partCount: number;
   partSize: number;
   strategy: "multipart";
 }
 
-export interface SingleLayout {
+interface SingleLayout {
   strategy: "single";
 }
 
-/**
- * Validates upload parameters against canonical media MIME, extension, and file size policies.
- * Ensures filename is a safe single path segment (<= 255 chars without path traversals or control chars),
- * fileSize is a positive safe integer within the media rule's ceiling, and extension matches content type.
- *
- * @param input - Raw upload parameters (assetType, contentType, fileSize, filename).
- * @returns ValidatedUpload descriptor with normalized assetType and contentType.
- * @throws {AssetPolicyError} If filename, media type, size, or extension violates asset policy.
- */
+/** Normalizes and checks an upload request; throws `AssetPolicyError` on any policy violation. */
 export function validateUpload(input: {
   assetType: string;
   contentType: string;
@@ -276,7 +244,7 @@ export function validateUpload(input: {
   filename: string;
 }): ValidatedUpload {
   const filename = input.filename.trim();
-  if (!filename || filename.length > 255 || unsafeFilenamePattern.test(filename)) {
+  if (!filename || filename.length > 255 || UNSAFE_PATH_SEGMENT_PATTERN.test(filename)) {
     throw new AssetPolicyError(
       "invalid_filename",
       "filename must be a safe single path segment of at most 255 characters",
@@ -285,18 +253,17 @@ export function validateUpload(input: {
   if (!Number.isSafeInteger(input.fileSize) || input.fileSize < 1) {
     throw new AssetPolicyError("validation_error", "file_size must be a positive safe integer");
   }
-  const contentType = input.contentType.split(";", 1)[0]!.trim().toLowerCase() as AcceptedMediaType;
-  const rule = mediaRules[contentType];
-  if (!rule) {
+  const contentType = (input.contentType.split(";", 1)[0] ?? "").trim().toLowerCase();
+  if (!isAcceptedMediaType(contentType)) {
     throw new AssetPolicyError("unsupported_media_type", "content_type is not supported");
   }
+  const rule = mediaRules[contentType];
   if (input.assetType !== rule.assetType) {
     throw new AssetPolicyError("unsupported_media_type", "asset_type does not match content_type");
   }
-  const extension = filename.includes(".")
-    ? filename.slice(filename.lastIndexOf(".") + 1).toLowerCase()
-    : "";
-  if (!(rule.extensions as readonly string[]).includes(extension)) {
+  const dot = filename.lastIndexOf(".");
+  const extension = dot === -1 ? "" : filename.slice(dot + 1).toLowerCase();
+  if (!rule.extensions.some((accepted) => accepted === extension)) {
     throw new AssetPolicyError(
       "unsupported_media_type",
       "filename extension does not match content_type",
@@ -316,14 +283,7 @@ export function validateUpload(input: {
   };
 }
 
-/**
- * Determines whether an asset upload should proceed as a direct single PUT or an R2 multipart upload session.
- * Files up to 25 MiB use single PUT; larger files use 8 MiB multipart parts up to a 10,000 part ceiling.
- *
- * @param fileSize - Total asset file size in bytes (positive safe integer).
- * @returns SingleLayout or MultipartLayout descriptor including partCount and partSize.
- * @throws {AssetPolicyError} If fileSize is invalid or would exceed the 10,000 multipart parts ceiling.
- */
+/** Chooses single PUT or multipart upload; throws `AssetPolicyError` past the 10,000-part object-store ceiling. */
 export function uploadLayout(fileSize: number): SingleLayout | MultipartLayout {
   if (!Number.isSafeInteger(fileSize) || fileSize < 1) {
     throw new AssetPolicyError("validation_error", "file size must be a positive safe integer");

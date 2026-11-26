@@ -1,5 +1,3 @@
-// Drives real codec jobs before and after Docker restarts the engine. Only the
-// object transport is a fixture; the engine's in-memory replay map is lost.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
@@ -14,7 +12,6 @@ const token = process.env.PROCESSOR_JOB_TOKEN;
 assert.ok(directory && origin && objects && token);
 const checkpoint = join(directory, "restart-checkpoint.json");
 
-/** Runs the actual engine and captures its explicit verdict; errors never substitute a success payload. */
 async function processJob(job) {
   const response = await fetch(`${origin}/process`, {
     method: "POST",
@@ -59,12 +56,10 @@ if (mode === "prepare") {
 } else if (mode === "verify") {
   const deadline = Date.now() + 60_000;
   for (;;) {
-    try {
-      const health = await fetch(`${origin}/healthz`, { signal: AbortSignal.timeout(2_000) });
-      if (health.ok) break;
-    } catch {
-      /* The restarted engine has not opened its socket yet. */
-    }
+    const health = await fetch(`${origin}/healthz`, { signal: AbortSignal.timeout(2_000) }).catch(
+      () => null,
+    );
+    if (health?.ok) break;
     if (Date.now() >= deadline) throw new Error("Restarted engine did not become ready");
     await delay(250);
   }
@@ -75,8 +70,6 @@ if (mode === "prepare") {
   assert.equal(refused.body.output, undefined);
   const retained = await readFile(join(directory, "objects", "restart-rendition"));
   assert.equal(createHash("sha256").update(retained).digest("hex"), saved.sha256);
-  // The Worker clears unrecorded staging bytes before retrying. With memory
-  // gone, this must really recreate the output, not return a cached verdict.
   const cleared = await fetch(saved.job.output_url, { method: "DELETE" });
   assert.equal(cleared.status, 204);
   const recreated = await processJob(saved.job);

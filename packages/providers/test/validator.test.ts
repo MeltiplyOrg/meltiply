@@ -12,7 +12,6 @@ import {
   type ValidationIssue,
 } from "../src";
 
-/** A Threads-shaped capability: text-only allowed, images and videos combinable. */
 function capability(patch: Partial<PlatformCapability> = {}): PlatformCapability {
   return {
     accepted_mime_types: ["video/mp4", "image/jpeg"],
@@ -77,7 +76,6 @@ const tiktokOptions: TikTokPublishOptions = {
   privacyLevel: "PUBLIC_TO_EVERYONE",
 };
 
-/** Assert a single issue was reported and return it. */
 function only(issues: ValidationIssue[]): ValidationIssue {
   expect(issues).toHaveLength(1);
   return issues[0]!;
@@ -89,7 +87,6 @@ describe("captionLength", () => {
     expect(captionLength("héllo")).toBe(5);
     expect("🚀🚀".length).toBe(4);
     expect(captionLength("🚀🚀")).toBe(2);
-    // A ZWJ sequence is one grapheme but five codepoints.
     expect(captionLength("👨‍👩‍👧")).toBe(5);
   });
 

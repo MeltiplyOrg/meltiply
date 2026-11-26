@@ -18,21 +18,6 @@ const BRAND_PROFILE_PREFIX = "/api/v1/brand-profiles";
 const CHANNEL_PREFIXES = ["/api/v1/oauth-selections", "/api/v1/platforms"] as const;
 const CHANNEL_CONNECT_PATTERN = /^\/api\/v1\/platforms\/[^/]+\/connect$/;
 
-/**
- * Enforces the Workspace capability map on content and configuration routes.
- *
- * This is a routing guard, not the authorization authority: services re-check
- * the role inside transactions and PostgreSQL RLS is the final boundary. The
- * guard exists so a Viewer or Editor receives an immediate, stable
- * `forbidden_role` error for an operation their role cannot perform instead of
- * relying on incidental service behavior. Reads are always allowed; the
- * role-specific read rules (Audit, deleted Brand Profiles) live in their
- * services.
- *
- * @param c - Hono request context carrying the resolved actor.
- * @param next - Downstream request handler.
- * @returns Promise resolving after the request or the 403 response.
- */
 export async function enforceWorkspaceCapabilities(
   c: Context<ApiWorkerEnvironment>,
   next: () => Promise<void>,

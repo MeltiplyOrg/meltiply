@@ -20,7 +20,6 @@ import { navigate } from "astro:transitions/client";
 import { Search } from "lucide-react";
 import { useRef } from "react";
 
-/** Opens the canonical article-index dialog from either public search entrypoint. */
 export function DocumentationSearchTrigger() {
   const { setOpenSearch } = useSearchContext();
   return (
@@ -37,11 +36,6 @@ export function DocumentationSearchTrigger() {
   );
 }
 
-/**
- * Makes the existing static-index dialog and Ctrl/Meta+K shortcut available on
- * the homepage. Fumadocs owns focus trapping, result keyboard navigation, and
- * heading selection; both public surfaces fetch the same /search.json index.
- */
 export function HomeSearch() {
   return (
     <RootProvider
@@ -55,15 +49,6 @@ export function HomeSearch() {
   );
 }
 
-/**
- * Search dialog backed by the build-time index emitted at /search.json
- * (src/pages/search.json.ts). `staticClient` downloads that prerendered file
- * once, so search works from a purely static deploy with no API backend; the
- * index only contains pages from the public `docs` collection. The opener is
- * restored on dismissal because Fumadocs' context triggers are outside Radix's
- * DialogTrigger tree; disconnected openers after result navigation are ignored.
- * Only the browser creates the body portal; static rendering never reads the DOM.
- */
 export default function DefaultSearchDialog(props: SharedProps) {
   const { locale } = useI18n();
   const opener = useRef<HTMLElement | null>(null);

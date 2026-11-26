@@ -1,4 +1,3 @@
-// Disposable smoke entry only; production Worker entries never import this file.
 import { ProviderHttpClient, ProviderRegistry } from "@meltiply/providers";
 import { z } from "zod";
 import type { Hono } from "hono";
@@ -26,12 +25,6 @@ const requirementsSchema = z.object({
 let app: Hono<ApiWorkerEnvironment> | undefined;
 
 export default {
-  /**
-   * Dispatches independently arriving HTTP requests through real actor resolution, RLS,
-   * credential decryption and the production route. Only JWT verification and the external
-   * Provider are controlled; the bounded Provider HTTP client still owns deadlines and decoding.
-   * The one registry is deployment-owned, so requests can share pending work, not request resources.
-   */
   fetch(
     request: Request,
     env: RequirementsSmokeEnv,
@@ -58,7 +51,7 @@ export default {
         },
         transferModes: [],
         getPublicationRequirements: async (context) => {
-          const response = await http.request<unknown>(context, {
+          const response = await http.request(context, {
             url: "https://controlled-requirements.test/requirements",
             method: "GET",
             headers: { "X-Request-ID": context.requestId },

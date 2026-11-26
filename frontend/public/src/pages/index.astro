@@ -154,9 +154,6 @@ const posts = [
     </header>
 
     <nav class="landing-rail" aria-label="Page sections">
-      <span class="landing-rail-track" aria-hidden="true">
-        <span class="landing-rail-fill"></span>
-      </span>
       <ul class="landing-rail-list">
         <li><a href="#product" data-rail-item><span class="rail-label">Product</span></a></li>
         <li><a href="#features" data-rail-item><span class="rail-label">Why Meltiply</span></a></li>
@@ -811,11 +808,6 @@ const posts = [
         animateDisclosure,
       } from "../scripts/motion";
 
-      /**
-       * Rebinds landing interactions after each Astro navigation. Detached
-       * observers and document listeners are released before the next swap;
-       * demo tabs and mobile disclosure retain their keyboard contracts.
-       */
       function initializeLanding() {
         if (!document.querySelector(".hero")) return;
         const cleanupMotion = initializeMotion();
@@ -827,7 +819,6 @@ const posts = [
         const menuButton =
           document.querySelector<HTMLButtonElement>(".menu-toggle");
         const mobileNav = document.querySelector<HTMLElement>("#mobile-nav");
-        // Keep disclosure state and visibility aligned; closing by Escape returns trigger focus.
         function closeMenu(returnFocus = false) {
           if (!mobileNav || !menuButton) return;
           mobileNav.hidden = true;
@@ -835,8 +826,6 @@ const posts = [
           menuButton.setAttribute("aria-label", "Open navigation");
           if (returnFocus) menuButton.focus();
         }
-        // Native disclosure keeps links accessible immediately; its entrance
-        // never delays Escape or focus restoration on closing.
         menuButton?.addEventListener("click", () => {
           if (!mobileNav || !menuButton) return;
           const open = mobileNav.hidden;
@@ -859,8 +848,6 @@ const posts = [
         const tabs = Array.from(
           document.querySelectorAll<HTMLButtonElement>(".preview-tab"),
         );
-        // Switch demo panels without remounting controls; reselecting is a no-op.
-        // Preserve roving focus and morph height only when effective motion permits it.
         function selectTab(tab: HTMLButtonElement) {
           if (tab.getAttribute("aria-selected") === "true") return;
           const previewHeight =
@@ -879,7 +866,6 @@ const posts = [
           );
           if (selectedPanel) animatePanel(selectedPanel, previewHeight);
         }
-        // Implement roving focus with horizontal/vertical arrows and Home/End for this tablist.
         tabs.forEach((tab, index) => {
           tab.addEventListener("click", () => selectTab(tab));
           tab.addEventListener("keydown", (event) => {
@@ -900,12 +886,6 @@ const posts = [
           });
         });
       }
-      /**
-       * Spreads the header's logo and Get started action toward opposite screen
-       * edges as the page scrolls, mirroring cuelume's header but in reverse:
-       * the chrome stays put while the elements drift outward. A smoothed 0–1
-       * progress drives both the transforms and the scrolled state.
-       */
       function bindHeaderScroll() {
         const header = document.querySelector<HTMLElement>(".site-header");
         if (!header) return;
@@ -940,10 +920,9 @@ const posts = [
           header.style.setProperty("--header-p", smoothstep(current).toFixed(4));
           header.toggleAttribute("data-scrolled", current > 0.5);
         };
-        setTarget();
-        window.addEventListener("scroll", setTarget, { passive: true });
         header.style.setProperty("--header-p", "0");
         setTarget();
+        window.addEventListener("scroll", setTarget, { passive: true });
         document.addEventListener(
           "astro:before-swap",
           () => {
@@ -953,15 +932,9 @@ const posts = [
           { once: true },
         );
       }
-      /**
-       * Shows a section-linked rail on the right edge once the hero has scrolled
-       * away. The rail reuses the header's in-page anchors for navigation and
-       * fills a vertical progress track with overall page scroll position.
-       */
       function bindLandingRail() {
         const rail = document.querySelector<HTMLElement>(".landing-rail");
         if (!rail) return;
-        const fill = rail.querySelector<HTMLElement>(".landing-rail-fill");
         const items = Array.from(
           rail.querySelectorAll<HTMLAnchorElement>("[data-rail-item]"),
         );
@@ -980,15 +953,6 @@ const posts = [
         let frame = 0;
         const update = () => {
           frame = 0;
-          const maxScroll = Math.max(
-            1,
-            document.documentElement.scrollHeight - window.innerHeight,
-          );
-          const progress = Math.min(
-            1,
-            Math.max(0, window.scrollY / maxScroll),
-          );
-          if (fill) fill.style.height = `${(progress * 100).toFixed(2)}%`;
           rail.classList.toggle("is-visible", window.scrollY > 120);
           const probe = window.scrollY + window.innerHeight * 0.3;
           let activeId: string | null = null;

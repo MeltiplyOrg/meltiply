@@ -22,35 +22,14 @@ const accepted: CookieConsent = { functional: true };
 const confirmationDurationMs = 1800;
 const confirmationExitMs = 400;
 
-/**
- * Returns a primitive JSON snapshot of the stored cookie consent so
- * `useSyncExternalStore` compares values by string identity without looping.
- *
- * @returns Serialized `CookieConsent | null` string.
- */
 function consentSnapshot(): string {
   return JSON.stringify(readCookieConsent());
 }
 
-/**
- * Supplies the `"null"` SSR snapshot before hydration; the pre-paint
- * `data-cookie-decided` attribute hides the first-visit toast for returning visitors.
- *
- * @returns Literal `"null"` JSON string.
- */
 function serverConsentSnapshot(): string {
   return "null";
 }
 
-/**
- * Presents the initial consent prompt and its brief confirmation on every site.
- * A valid saved decision hides all consent controls; there is no reopen action.
- * Only the implemented optional purpose is offered, so no choice implies tracking
- * that is not installed. Its focus handoff avoids scrolling, and confirmation
- * dismissal never moves focus to an unrelated control.
- * @param props.policyUrl - Cookie-policy destination.
- * @returns The initial consent/confirmation surface, or an empty container after a saved decision.
- */
 export function CookieNotice({
   policyUrl = "https://meltiply.com/docs/cookies",
 }: {
@@ -72,10 +51,8 @@ export function CookieNotice({
   const pendingFocusRef = useRef<"categories" | "status" | null>(null);
   const visible = consent === null;
   const showToast = visible || Boolean(message);
-  // Records the active surface for pre-paint consent suppression and styling.
   const toastKind = visible ? (managing ? "manage" : "prompt") : "status";
 
-  /** Focuses the optional-purpose option when Sileo actually mounts it after its content transition. */
   const focusCategories = useCallback((element: HTMLFieldSetElement | null) => {
     categoriesRef.current = element;
     if (element && pendingFocusRef.current === "categories") {
@@ -97,8 +74,6 @@ export function CookieNotice({
     };
   }, [message]);
 
-  // The optional-purpose option and the confirmation receive focus after their DOM is mounted.
-  // Dismissal removes only the transient surface, never focusing another control.
   useLayoutEffect(() => {
     const target = pendingFocusRef.current;
     if (!target) return;
@@ -108,7 +83,6 @@ export function CookieNotice({
     element.focus({ preventScroll: true });
   });
 
-  /** Opens the unchecked optional purpose without granting consent and focuses the option. */
   const manage = () => {
     setDraft(denied);
     setExiting(false);
@@ -117,7 +91,6 @@ export function CookieNotice({
     pendingFocusRef.current = "categories";
   };
 
-  /** Commits the explicit choice, morphs the Sileo toast into a confirmation status, and parks focus on that region. */
   const save = (choice: CookieConsent) => {
     setExiting(false);
     writeCookieConsent(choice);

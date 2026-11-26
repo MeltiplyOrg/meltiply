@@ -2,7 +2,6 @@ import { m as motion } from "motion/react";
 import type { AnimatedIconProps } from "./types";
 import { IconMotionFrame } from "./icon-motion-frame";
 
-/** Plus SVG with a quarter-turn loop; stroke defaults to 2 and IconMotionFrame owns interaction. */
 export function AnimatedPlus({ strokeWidth = 2, ...props }: AnimatedIconProps) {
   return (
     <IconMotionFrame {...props}>
@@ -31,7 +30,6 @@ export function AnimatedPlus({ strokeWidth = 2, ...props }: AnimatedIconProps) {
   );
 }
 
-/** Calendar SVG with dipping binder rings; stroke defaults to 2 and overflow stays unclipped. */
 export function AnimatedCalendar({ strokeWidth = 2, ...props }: AnimatedIconProps) {
   return (
     <IconMotionFrame {...props}>
@@ -66,7 +64,6 @@ export function AnimatedCalendar({ strokeWidth = 2, ...props }: AnimatedIconProp
   );
 }
 
-/** Clock SVG with one full hand rotation; stroke defaults to 2 and IconMotionFrame owns interaction. */
 export function AnimatedClock({ strokeWidth = 2, ...props }: AnimatedIconProps) {
   return (
     <IconMotionFrame {...props}>

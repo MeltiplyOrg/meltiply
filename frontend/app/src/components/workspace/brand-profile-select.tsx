@@ -10,65 +10,16 @@ import {
 } from "@meltiply/ui/select";
 import { FilterChecklist } from "@meltiply/ui/dropdown-menu";
 
-/**
- * Props for {@link BrandProfileSelect}, the canonical Brand Profile picker
- * shared by the Channels and Posts toolbars.
- */
 export interface BrandProfileSelectProps {
-  /**
-   * Currently selected option value. `"all"` selects the aggregate
-   * "All Brand Profiles" row; any other value is a profile id.
-   */
   value: string;
-  /** Invoked with the chosen value (`"all"` or a profile id) when selection changes. */
   onValueChange: (value: string) => void;
-  /** Resolved workspace Brand Profiles rendered first, in input order. */
   brandProfiles: BrandProfile[];
-  /**
-   * Profile ids still referenced by visible content but absent from
-   * `brandProfiles`; each renders once as a name-only "Unknown profile" row so
-   * stale references stay selectable instead of silently dropping out.
-   */
   unresolvedProfileIds?: readonly string[];
-  /**
-   * Trigger element rendered inside `SelectTrigger asChild` (typically a
-   * `TopToolbarButton`), preserving each screen's toolbar trigger geometry.
-   * Its `label` prop — the visible selected-value text — doubles as the
-   * trigger's accessible name: `role="combobox"` forbids name-from-content,
-   * so the name must be supplied explicitly, and reusing the rendered label
-   * keeps name and visible text identical instead of masking the selected
-   * profile behind a generic field label.
-   */
   trigger: ReactElement<{ label?: string }>;
-  /**
-   * Accessible name applied as `aria-label` on the dropdown listbox content;
-   * also the trigger-name fallback when the trigger element exposes no
-   * `label` prop.
-   */
   label: string;
-  /**
-   * Whether the aggregate "All Brand Profiles" row stays in the list. Filters
-   * keep it so a view can show every profile at once; surfaces that must act on
-   * one profile (composing or publishing) pass `false` and let the trigger
-   * state the profile instead.
-   */
   includeAggregate?: boolean;
 }
 
-/**
- * Resolves the visible trigger label for a Brand Profile filter selection.
- *
- * Single label contract shared by the Channels and Posts toolbars so both render
- * identical text for the same selection state. The aggregate sentinels — `null`
- * (Channels) and `"all"` (Posts) — map to "All Brand Profiles"; a concrete id maps
- * to the profile's name, or "Unknown profile" when the id is absent from
- * `brandProfiles` (matching the unresolved rows {@link BrandProfileSelect} renders).
- *
- * @param selection - Selected profile id, `"all"`, or `null` for the aggregate option.
- * @param brandProfiles - Resolved workspace Brand Profiles available for naming.
- * @param t - Translation function from `useI18n`.
- * @returns Localized label text for the filter trigger.
- */
 export function brandProfileFilterLabel(
   selection: string | null,
   brandProfiles: readonly BrandProfile[],
@@ -80,31 +31,11 @@ export function brandProfileFilterLabel(
   return brandProfiles.find((profile) => profile.id === selection)?.name ?? t("Unknown profile");
 }
 
-/** One selectable Brand Profile row: the aggregate choice, a profile, or an unresolved id. */
 interface BrandProfileOption {
   id: string;
   name: string;
 }
 
-/**
- * Canonical controlled Brand Profile Select for the Channels and Posts toolbars.
- *
- * Owns the dropdown's whole construction: the `Select` root, the caller-supplied
- * trigger, the aggregate "All Brand Profiles" row, the separator, and one
- * plain option per profile. Selection is the only interaction — profile
- * details and editing live in the Channels directory cards and the
- * profile editor, never inside this list.
- *
- * Options are built here as the single construction path — resolved profiles in
- * input order followed by unique unresolved ids as name-only "Unknown profile"
- * rows — so both screens share identical ordering and layout semantics. The
- * trigger's accessible name is the trigger element's own `label` (the
- * selected-value text); `label` names the listbox instead of masking that
- * selection.
- *
- * @param props - Selection state, profile data, trigger, and label.
- * @returns A complete Select dropdown ready to drop into a toolbar.
- */
 export function BrandProfileSelect({
   value,
   onValueChange,
@@ -142,7 +73,6 @@ export function BrandProfileSelect({
   );
 }
 
-/** Builds resolved profiles followed by unique unknown references for either selection mode. */
 function useBrandProfileOptions(
   brandProfiles: readonly BrandProfile[],
   unresolvedProfileIds?: readonly string[],
@@ -164,11 +94,6 @@ function useBrandProfileOptions(
   }, [brandProfiles, unresolvedProfileIds, t]);
 }
 
-/**
- * Multi-profile checklist sharing the canonical resolved/unknown option roster.
- * Collection filters include aggregate clearing (empty means all). Composition
- * omits it: empty means no profiles, and each selected profile owns its own Post.
- */
 export function BrandProfileFilterSelect({
   value,
   onValueChange,

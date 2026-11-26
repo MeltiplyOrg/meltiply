@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
-# Select the original image's bundled DinD daemon without rebuilding the image.
-# The config masks its inherited host-socket mount with /dev/null. Prepare private
-# cgroups and stop the image's inert DooD proxy before starting its local daemon.
 set -euo pipefail
 
-# Enables the available controllers under this container's cgroup namespace root.
-# Move startup processes to a leaf first: cgroup v2 domain controllers require an
-# empty parent. This prevents BuildKit creating a threaded /docker cgroup that
-# later rejects processor CPU/memory limits. v1 needs no preparation. Concurrent
-# CLI execs can briefly repopulate the root, so startup is bounded and failures
-# stay visible instead of silently running Docker without resource isolation.
+# cgroup v2 domain controllers require an empty parent; otherwise BuildKit creates
+# a threaded /docker cgroup that rejects CPU/memory limits.
 prepare_cgroups() {
   local root=/sys/fs/cgroup pid controllers attempt
   [[ -f "$root/cgroup.controllers" ]] || return 0
@@ -33,15 +26,13 @@ if [[ "${1:-}" == --prepare-cgroups ]]; then
   prepare_cgroups
   exit
 fi
-# Refuse to bootstrap against a real host socket. The expected mount is /dev/null.
 [[ -c /var/run/docker-host.sock && "$(stat -c '%t:%T' /var/run/docker-host.sock)" == "$(stat -c '%t:%T' /dev/null)" ]] || {
   printf 'DinD startup requires the inherited host socket to be masked with /dev/null\n' >&2
   exit 1
 }
 
-# Hooks can begin before the image's synchronous metadata entrypoint finishes.
-# Only its direct child of the CLI's /bin/sh is startup work: the image also
-# leaves detached Bash shells supervising its proxy, which must not be awaited.
+# Lifecycle hooks can begin before the image's synchronous entrypoint finishes; its
+# detached proxy-supervising shells must not be awaited.
 for attempt in {1..60}; do
   initializing=false
   while read -r pid; do
@@ -58,8 +49,7 @@ if [[ ! -L /var/run/docker.sock ]] && docker --host unix:///var/run/docker.sock 
 fi
 sudo -n bash "$(realpath "${BASH_SOURCE[0]}")" --prepare-cgroups
 
-# The upstream entrypoint may have started a proxy against the inert mount.
-# Stop only that exact proxy; pkill status 1 means there is no matching process.
+# pkill exits 1 when no process matches.
 if sudo -n pkill --full '^socat UNIX-LISTEN:/var/run/docker.sock,.* UNIX-CONNECT:/var/run/docker-host.sock$'; then
   :
 else

@@ -3,7 +3,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { Effect, Schema } from "effect";
-import { DatabaseError, INSTALLATION_SEAT_LIMIT } from "../../packages/domain/src/index";
+import {
+  DatabaseError,
+  errorMessage,
+  INSTALLATION_SEAT_LIMIT,
+} from "../../packages/domain/src/index";
 import { ProviderRegistry } from "../../packages/providers/src/index";
 import type { EffectTransactionClient } from "../../packages/database/src/index";
 import { assemblePostsEffect } from "../../workers/api/src/post-service";
@@ -30,7 +34,6 @@ interface SeedSnapshot {
   fixtures: PreviewObject;
 }
 
-/** Evaluates the actual migrations and seed.sql in disposable build-process memory, under the seeded Owner's tenant role. Reuses production read projections, exports only public JSON, closes Postgres on every exit, and never opens a network listener or reads live database configuration. */
 async function compileSeedSnapshot(): Promise<SeedSnapshot> {
   const db = new PGlite();
   try {
@@ -43,7 +46,6 @@ async function compileSeedSnapshot(): Promise<SeedSnapshot> {
     for (const name of migrations)
       await db.exec(await readFile(join(migrationDirectory, name), "utf8"));
     await db.exec(await readFile(seedPath, "utf8"));
-    /** Serializes explicit projection columns; to_jsonb retains SQL-generated arrays and timestamps without exporting driver objects or private credential tables. */
     async function rows(sql: string, values: unknown[] = []): Promise<PreviewObject[]> {
       const result = await db.query<{ value: unknown }>(
         `SELECT to_jsonb(seed_row) AS value FROM (${sql}) AS seed_row`,
@@ -95,7 +97,7 @@ async function compileSeedSnapshot(): Promise<SeedSnapshot> {
           catch: (cause) =>
             new DatabaseError({
               cause,
-              message: cause instanceof Error ? cause.message : "Seed projection query failed",
+              message: errorMessage(cause, "Seed projection query failed"),
             }),
         }),
     };
@@ -298,8 +300,6 @@ async function compileSeedSnapshot(): Promise<SeedSnapshot> {
 try {
   process.stdout.write(JSON.stringify(await compileSeedSnapshot()));
 } catch (error) {
-  console.error(
-    error instanceof Error ? error.message : "Could not compile the canonical development seed",
-  );
+  console.error(errorMessage(error, "Could not compile the canonical development seed"));
   process.exitCode = 1;
 }

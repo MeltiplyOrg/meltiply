@@ -24,7 +24,7 @@ const env = {
 
 const mailEnv = {
   ...env,
-  MAIL: { send: async () => ({ messageId: "mail_test" }) } as unknown as SendEmail,
+  MAIL: { send: async () => ({ messageId: "mail_test" }) } satisfies SendEmail,
   MAIL_FROM_ADDRESS: "notifications@meltiply.test",
 } satisfies ApiWorkerEnv;
 

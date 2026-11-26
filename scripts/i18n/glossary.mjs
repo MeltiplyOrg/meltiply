@@ -2,41 +2,19 @@ import { readFileSync } from "node:fs";
 
 const SUPPORTED_VERSION = 1;
 
-/**
- * Raised when the shared glossary is missing required sections or contains an
- * entry the check wrapper cannot pass to Shipi18n safely.
- */
 export class GlossaryError extends Error {
-  /**
-   * @param {string} message Actionable validation failure.
-   */
   constructor(message) {
     super(message);
     this.name = "GlossaryError";
   }
 }
 
-/**
- * Requires a non-empty string, used for prose notes, styles, and translations.
- *
- * @param {unknown} value Candidate value.
- * @param {string} description Field description for the error.
- * @throws {GlossaryError} When the value is not a non-empty string.
- */
 function assertNonEmptyString(value, description) {
   if (typeof value !== "string" || value.trim() === "") {
     throw new GlossaryError(`${description} must be a non-empty string`);
   }
 }
 
-/**
- * Requires a non-empty string that can be passed through Shipi18n's
- * comma-separated `--ignore-keys` list.
- *
- * @param {unknown} value Candidate term.
- * @param {string} description Field description for the error.
- * @throws {GlossaryError} When the term is empty or contains a comma.
- */
 function assertTerm(value, description) {
   assertNonEmptyString(value, description);
   if (value.includes(",")) {
@@ -44,29 +22,12 @@ function assertTerm(value, description) {
   }
 }
 
-/**
- * Requires a plain object (not null or an array).
- *
- * @param {unknown} value Candidate value.
- * @param {string} description Field description for the error.
- * @throws {GlossaryError} When the value is not an object.
- */
 function assertRecord(value, description) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new GlossaryError(`${description} must be an object`);
   }
 }
 
-/**
- * Reads and validates the glossary shared by generation, the Shipi18n check,
- * and the catalog test. Rejects commas in every term because Shipi18n splits
- * `--ignore-keys` on commas; rejecting once here is clearer than silently
- * dropping half of a pattern.
- *
- * @param {string} path Absolute or repository-relative glossary JSON path.
- * @returns {{version: number, style: Record<string, string>, keepVerbatim: Record<string, string>, preferredTranslations: Record<string, Record<string, string>>, intentionallyIdentical: string[]}}
- * @throws {GlossaryError} When the file is unreadable or malformed.
- */
 export function loadGlossary(path) {
   let glossary;
   try {
@@ -108,28 +69,10 @@ export function loadGlossary(path) {
   return glossary;
 }
 
-/**
- * Lists every term that stays identical in a target language. This is the
- * Shipi18n ignore-key set (so intentionally identical values do not report as
- * untranslated) and the catalog test's allowlist.
- *
- * @param {ReturnType<typeof loadGlossary>} glossary Validated glossary.
- * @returns {string[]} Keep-verbatim and intentionally identical terms.
- */
 export function identicalTerms(glossary) {
   return [...Object.keys(glossary.keepVerbatim), ...glossary.intentionallyIdentical];
 }
 
-/**
- * Builds the system message prepended to every Shipi18n translation batch:
- * product context, target-language style, keep-verbatim terms, and preferred
- * domain vocabulary. Shipi18n's own user message still supplies the JSON-array
- * contract and placeholder rules.
- *
- * @param {ReturnType<typeof loadGlossary>} glossary Validated glossary.
- * @param {string} targetLanguage Target locale code, e.g. `"es"`.
- * @returns {string} System message for the Workers AI chat request.
- */
 export function buildSystemPrompt(glossary, targetLanguage) {
   const style =
     glossary.style[targetLanguage] ??

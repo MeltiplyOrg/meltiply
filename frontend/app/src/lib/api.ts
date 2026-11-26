@@ -3,101 +3,71 @@ import type { components, operations } from "@meltiply/contracts/schema";
 import { Effect } from "effect";
 
 import type {
-  AccountLifecycle,
+  AnalyticsDashboardQueryParams,
   AnalyticsPostsQueryParams,
-  AnalyticsPostsResponse,
-  Asset,
-  AuditListResponse,
   AuditQueryParams,
-  BrandProfile,
-  BrandProfileListResponse,
   CalendarQueryParams,
-  CalendarResponse,
   CompleteUploadInput,
   CreateBrandProfileInput,
   CreatePostInput,
+  CreateQueueInput,
   CreateUploadPartsInput,
-  CreateUploadPartsResponse,
   CreateUploadSessionInput,
   DiscoverySource,
-  Distribution,
-  InstallationSummary,
-  InvitationPreview,
-  OnboardingProgress,
-  OAuthSelection,
   OAuthSelectionConfirmRequest,
   Platform,
-  PlatformAccountsResponse,
-  AnalyticsDashboard,
-  AnalyticsDashboardQueryParams,
-  PlatformCapabilitiesResponse,
   PlatformQueryParams,
-  Post,
-  PostListResponse,
   PostQueryParams,
-  PublishingRequirements,
-  PublishingPreferences,
   PublishingPreferencesUpdate,
-  SchedulePostInput,
-  PublishingQueue,
-  QueueListResponse,
-  ReportingFeedback,
-  ReportingPolicy,
-  CreateQueueInput,
-  UpdateQueueInput,
   QueueQueryParams,
-  SignedUrlResponse,
+  SchedulePostInput,
   UpdateBrandProfileInput,
   UpdateDistributionInput,
   UpdatePostInput,
-  UploadSessionDetailResponse,
-  UploadSessionResponse,
-  UserProfile,
-  WorkspaceInvitation,
-  WorkspaceInvitationListResponse,
-  WorkspaceMember,
-  WorkspaceMemberListResponse,
+  UpdateQueueInput,
   WorkspaceRole,
 } from "@/types";
 import { applyAuthJwt } from "./auth-token";
-import { getApiBaseUrl, type PublicEnvSource } from "./env";
-import { reportFrontendApiError, reportFrontendError } from "./frontend-telemetry";
+import { getApiBaseUrl } from "./env";
+import { reportFrontendApiError } from "./frontend-telemetry";
 import { createMutationKey } from "./mutation-idempotency";
 
-const apiVersionPrefix = "/api/v1";
-const absoluteUrlPattern = /^[a-z][a-z\d+\-.]*:\/\//i;
 const unknownErrorCode = "unknown_error";
 
 type ErrorEnvelope = components["schemas"]["ErrorEnvelope"];
 type ErrorDetail = components["schemas"]["ErrorDetail"];
-type OAuthStartResponse = components["schemas"]["OAuthStartResponse"];
 
 type ApiResult<T> = {
   data?: T;
   error?: unknown;
   response: Response;
 };
+
+type SuccessStatus = 200 | 201 | 202;
+type JsonResponse<Op extends keyof operations> = {
+  [S in SuccessStatus & keyof operations[Op]["responses"]]: operations[Op]["responses"][S] extends {
+    content: { "application/json": infer Body };
+  }
+    ? Body
+    : never;
+}[SuccessStatus & keyof operations[Op]["responses"]];
+type HasNoContent<Op extends keyof operations> = 204 extends keyof operations[Op]["responses"]
+  ? true
+  : false;
+type OperationSuccess<Op extends keyof operations> = [JsonResponse<Op>] extends [never]
+  ? void
+  : HasNoContent<Op> extends true
+    ? JsonResponse<Op> | undefined
+    : JsonResponse<Op>;
+
 let cachedClient: { baseUrl: string; value: MeltiplyClient } | undefined;
 
-/**
- * Fetch implementation bound to the generated OpenAPI client.
- * Merges caller-supplied headers (whether carried on a `Request` input or via
- * `init`), stamps `Authorization: Bearer <jwt>` from the in-memory holder when
- * one is held, and uses `credentials: "same-origin"` so Cloudflare Access on
- * protected dev tunnels can see the visitor's session cookie. The Better Auth
- * session cookie is never allowed to reach the API Worker: the frontend Worker
- * strips it from `/api/v1/*` proxy requests before forwarding them. Callers
- * cannot override the credential mode.
- */
 const runtimeFetch: typeof globalThis.fetch = (input, init) => {
   const headers = new Headers(input instanceof Request ? input.headers : undefined);
   new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
   applyAuthJwt(headers);
   return globalThis.fetch(input, { ...init, credentials: "same-origin", headers });
 };
-
-export type ApiPath = string;
-export type NormalizedApiPath = `/${string}`;
 
 export interface ApiRequestOptions {
   idempotencyKey?: string;
@@ -113,13 +83,6 @@ export class ApiError extends Error {
   readonly retryable: boolean;
   readonly status: number;
 
-  /**
-   * Constructs an `ApiError` from a failed HTTP Response and optional parsed ErrorEnvelope payload.
-   * Dispatches frontend telemetry and captures request ID, retry headers, and error codes.
-   *
-   * @param response The non-ok Fetch Response object.
-   * @param payload Parsed JSON error payload or raw response body.
-   */
   constructor(response: Response, payload: unknown) {
     const envelope = isErrorEnvelope(payload) ? payload : null;
     const message =
@@ -139,16 +102,9 @@ export class ApiError extends Error {
       retryable: this.retryable,
       status: this.status,
     });
-    reportFrontendError(this, "api-error");
   }
 }
 
-/**
- * Type guard checking whether a value conforms to the standard OpenAPI `ErrorEnvelope` schema.
- *
- * @param value Arbitrary payload to inspect.
- * @returns `true` if value is a valid `ErrorEnvelope`.
- */
 function isErrorEnvelope(value: unknown): value is ErrorEnvelope {
   if (!value || typeof value !== "object" || !("error" in value)) {
     return false;
@@ -173,13 +129,6 @@ function isErrorEnvelope(value: unknown): value is ErrorEnvelope {
   );
 }
 
-/**
- * Parses an HTTP `Retry-After` header value into seconds from the present moment.
- * Supports both integer seconds and HTTP date strings.
- *
- * @param value Header value string or null.
- * @returns Non-negative seconds to wait, or `null` if header is absent or invalid.
- */
 function parseRetryAfter(value: string | null): number | null {
   if (!value) return null;
 
@@ -193,66 +142,41 @@ function parseRetryAfter(value: string | null): number | null {
   return Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
 }
 
-/**
- * Builds the request-scoped workspace selection header for one API call.
- * The `X-Workspace-ID` header carries an explicit workspace UUID chosen by the
- * caller; the server verifies membership before resolving the actor. A null or
- * blank value omits the header so the request resolves to the caller's personal
- * workspace. No module-global workspace state exists: selection is per request.
- *
- * @param workspaceId Workspace UUID for this request, or null for the personal workspace.
- * @returns Header record containing `X-Workspace-ID` when a workspace is selected.
- */
 function workspaceHeaders(workspaceId: string | null) {
   const selected = workspaceId?.trim();
   return selected ? { "X-Workspace-ID": selected } : {};
 }
 
-/**
- * Resolves or generates a UUID idempotency key for state-mutating requests.
- *
- * @param key Optional user-provided or tracker-provided idempotency key.
- * @returns Verified idempotency key string.
- */
 function mutationKey(key?: string) {
   return key ?? createMutationKey();
 }
 
-/**
- * Lifts one generated OpenAPI client operation into an Effect.
- *
- * The thunk keeps the request lazy: the fetch fires when the Effect executes,
- * not when the operation is constructed, so retries and interruption behave
- * correctly. `Effect.promise` supplies an AbortSignal bound to fiber
- * interruption, which is forwarded to the client so cancelling a query aborts
- * the in-flight request. A caller-supplied `options.signal` (e.g. an upload
- * task's own AbortController) takes precedence when present. Non-2xx responses
- * fail with a typed `ApiError`; transport rejections (network failures, aborts)
- * surface as defects so they are never misclassified as typed API errors.
- *
- * @param execute Operation factory receiving the fiber-bound AbortSignal.
- * @param signal Optional caller-provided abort signal override.
- * @returns Effect resolving to response data or failing with `ApiError`.
- */
-function unwrap<T>(
-  execute: (signal: AbortSignal) => Promise<ApiResult<T>>,
+function unwrapOp<Op extends keyof operations>(
+  execute: (signal: AbortSignal) => Promise<ApiResult<OperationSuccess<Op>>>,
   signal?: AbortSignal,
-): Effect.Effect<T, ApiError> {
+): Effect.Effect<OperationSuccess<Op>, ApiError> {
   return Effect.flatMap(
     Effect.promise((fiberSignal) => execute(signal ?? fiberSignal)),
     (result) =>
       result.response.ok
-        ? Effect.succeed(result.data as T)
+        ? Effect.succeed(result.data as OperationSuccess<Op>)
         : Effect.fail(new ApiError(result.response, result.error)),
   );
 }
 
-/**
- * Returns a cached singleton instance of the generated OpenAPI Meltiply client.
- * Recreates the client instance if the configured base URL changes.
- *
- * @returns Initialized OpenAPI client.
- */
+function unwrapBinary(
+  execute: (signal: AbortSignal) => Promise<ApiResult<Blob>>,
+  signal?: AbortSignal,
+): Effect.Effect<Blob, ApiError> {
+  return Effect.flatMap(
+    Effect.promise((fiberSignal) => execute(signal ?? fiberSignal)),
+    (result) =>
+      result.response.ok && result.data !== undefined
+        ? Effect.succeed(result.data)
+        : Effect.fail(new ApiError(result.response, result.error)),
+  );
+}
+
 function client() {
   const baseUrl = getApiBaseUrl();
   if (cachedClient?.baseUrl === baseUrl) {
@@ -264,48 +188,8 @@ function client() {
   return value;
 }
 
-/**
- * Normalizes and validates an API endpoint path relative to the API root.
- * Ensures the path begins with `/` and is not an absolute URL.
- *
- * @param path Relative API path string.
- * @returns Normalized API path starting with `/`.
- */
-function normalizeApiPath(path: ApiPath): NormalizedApiPath {
-  if (typeof path !== "string" || path.trim().length === 0) {
-    throw new Error("API path is required");
-  }
-  const trimmed = path.trim();
-  if (absoluteUrlPattern.test(trimmed)) {
-    throw new Error("Use a relative API path, not an absolute URL");
-  }
-  return (trimmed.startsWith("/") ? trimmed : `/${trimmed}`) as NormalizedApiPath;
-}
-
-/**
- * Builds a complete absolute URL for an API endpoint, automatically prefixing `/api/v1`
- * if not already included in the relative path.
- *
- * @param path Endpoint path relative to API root.
- * @param source Optional environment variable overrides.
- * @returns Complete absolute API endpoint URL.
- */
-export function apiUrl(path: ApiPath, source?: PublicEnvSource) {
-  const normalizedPath = normalizeApiPath(path);
-  const versionPrefix = normalizedPath.startsWith(apiVersionPrefix) ? "" : apiVersionPrefix;
-
-  return `${getApiBaseUrl(source)}${versionPrefix}${normalizedPath}`;
-}
-
-/**
- * Fetches the profile and active organization context for the authenticated user.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the user profile and organization details.
- */
 export function getCurrentUser(workspaceId: string | null, options?: ApiRequestOptions) {
-  return unwrap<UserProfile>(
+  return unwrapOp<"getCurrentUser">(
     (signal) =>
       client().GET("/users/me", {
         headers: workspaceHeaders(workspaceId),
@@ -315,15 +199,8 @@ export function getCurrentUser(workspaceId: string | null, options?: ApiRequestO
   );
 }
 
-/**
- * Lists the active Brand Profiles in the active workspace, ordered by name.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the active brand profile list response.
- */
 export function listBrandProfiles(workspaceId: string | null, options?: ApiRequestOptions) {
-  return unwrap<BrandProfileListResponse>(
+  return unwrapOp<"listBrandProfiles">(
     (signal) =>
       client().GET("/brand-profiles", {
         headers: workspaceHeaders(workspaceId),
@@ -333,20 +210,12 @@ export function listBrandProfiles(workspaceId: string | null, options?: ApiReque
   );
 }
 
-/**
- * Creates a Brand Profile in the active workspace. Workspace admins only.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param input Profile name and fixed-palette color label.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the created Brand Profile.
- */
 export function createBrandProfile(
   workspaceId: string | null,
   input: CreateBrandProfileInput,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<BrandProfile>(
+  return unwrapOp<"createBrandProfile">(
     (signal) =>
       client().POST("/brand-profiles", {
         body: input,
@@ -360,22 +229,13 @@ export function createBrandProfile(
   );
 }
 
-/**
- * Renames or recolors an existing Brand Profile. Workspace admins only.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param profileId Brand Profile UUID within the active workspace.
- * @param input Partial name/color patch.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the updated Brand Profile.
- */
 export function updateBrandProfile(
   workspaceId: string | null,
   profileId: string,
   input: UpdateBrandProfileInput,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<BrandProfile>(
+  return unwrapOp<"updateBrandProfile">(
     (signal) =>
       client().PATCH("/brand-profiles/{profile_id}", {
         headers: workspaceHeaders(workspaceId),
@@ -390,23 +250,12 @@ export function updateBrandProfile(
   );
 }
 
-/**
- * Permanently deletes a Brand Profile and its owned records. Workspace admins only.
- *
- * Channels are locally disconnected before ownership cascades remove Posts,
- * Assets, and Distributions. The app has no undo or retention window.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param profileId Brand Profile UUID within the active workspace.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the removed Brand Profile's final record.
- */
 export function deleteBrandProfile(
   workspaceId: string | null,
   profileId: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<BrandProfile>(
+  return unwrapOp<"deleteBrandProfile">(
     (signal) =>
       client().DELETE("/brand-profiles/{profile_id}", {
         headers: workspaceHeaders(workspaceId),
@@ -420,23 +269,12 @@ export function deleteBrandProfile(
   );
 }
 
-/**
- * Lists Posts in stable identity order, each carrying its ordered attachments,
- * saved target settings, and independent per-Channel publication outcomes.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param params Optional filters: lifecycle `status` (draft|active), owning
- *   Brand Profile, and the limit/offset window. Omitting `brand_profile_id`
- *   requests the read-only workspace aggregate.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the paginated Post list response.
- */
 export function listPosts(
   workspaceId: string | null,
   params?: PostQueryParams,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<PostListResponse>(
+  return unwrapOp<"listPosts">(
     (signal) =>
       client().GET("/posts", {
         headers: workspaceHeaders(workspaceId),
@@ -447,13 +285,12 @@ export function listPosts(
   );
 }
 
-/** Lists one bounded page of reusable plans for an explicit Brand Profile; forwards cancellation to the generated client. */
 export function listQueues(
   workspaceId: string | null,
   params: QueueQueryParams,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<QueueListResponse>(
+  return unwrapOp<"listQueues">(
     (signal) =>
       client().GET("/queues", {
         headers: workspaceHeaders(workspaceId),
@@ -464,18 +301,8 @@ export function listQueues(
   );
 }
 
-/**
- * Reads the Workspace's persistent timezone, signature templates, and
- * notification choices. An untouched Workspace returns null timezone, no
- * templates, both events disabled, an empty email recipient list, and
- * `email_available` reflecting the real mail capability.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param options Request options with optional abort signal.
- * @returns Effect resolving to the current publishing preferences.
- */
 export function getPublishingPreferences(workspaceId: string | null, options?: ApiRequestOptions) {
-  return unwrap<PublishingPreferences>(
+  return unwrapOp<"getPublishingPreferences">(
     (signal) =>
       client().GET("/publishing-preferences", {
         headers: workspaceHeaders(workspaceId),
@@ -485,22 +312,12 @@ export function getPublishingPreferences(workspaceId: string | null, options?: A
   );
 }
 
-/**
- * Replaces the complete publishing-preference document. Template create, edit,
- * reorder, delete, and default selection all travel as one list so the server
- * can enforce one default and contiguous positions atomically.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param input Complete replacement document.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the stored preferences.
- */
 export function updatePublishingPreferences(
   workspaceId: string | null,
   input: PublishingPreferencesUpdate,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<PublishingPreferences>(
+  return unwrapOp<"updatePublishingPreferences">(
     (signal) =>
       client().PUT("/publishing-preferences", {
         body: input,
@@ -512,13 +329,12 @@ export function updatePublishingPreferences(
   );
 }
 
-/** Creates a validated recurring plan; one stable mutation key makes retries return the original Queue. */
 export function createQueue(
   workspaceId: string | null,
   input: CreateQueueInput,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<PublishingQueue>(
+  return unwrapOp<"createQueue">(
     (signal) =>
       client().POST("/queues", {
         body: input,
@@ -530,14 +346,13 @@ export function createQueue(
   );
 }
 
-/** Edits future allocation configuration without changing any previously reserved instant. */
 export function updateQueue(
   workspaceId: string | null,
   id: string,
   input: UpdateQueueInput,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<PublishingQueue>(
+  return unwrapOp<"updateQueue">(
     (signal) =>
       client().PATCH("/queues/{queue_id}", {
         body: input,
@@ -552,14 +367,13 @@ export function updateQueue(
   );
 }
 
-/** Retires an idle Queue; pending or in-flight memberships are a recoverable conflict, never silently moved. */
 export function deleteQueue(
   workspaceId: string | null,
   id: string,
   brandProfileId: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<void>(
+  return unwrapOp<"deleteQueue">(
     (signal) =>
       client().DELETE("/queues/{queue_id}", {
         body: { brand_profile_id: brandProfileId },
@@ -574,7 +388,6 @@ export function deleteQueue(
   );
 }
 
-/** Cancels only editable pending Channel intents and releases the reservation while retaining composition and settings. */
 export function removePostFromQueue(
   workspaceId: string | null,
   queueId: string,
@@ -582,7 +395,7 @@ export function removePostFromQueue(
   brandProfileId: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<Post>(
+  return unwrapOp<"removePostFromQueue">(
     (signal) =>
       client().DELETE("/queues/{queue_id}/posts/{post_id}", {
         body: { brand_profile_id: brandProfileId },
@@ -597,18 +410,8 @@ export function removePostFromQueue(
   );
 }
 
-/**
- * Hydrates one Post with its ordered attachments, saved target settings, and
- * per-Channel outcomes. Composer editing keys off this identity rather than
- * reconstructing a composition from Asset and timestamp pairings.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param id Unique Post identifier.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the complete Post entity.
- */
 export function getPost(workspaceId: string | null, id: string, options?: ApiRequestOptions) {
-  return unwrap<Post>(
+  return unwrapOp<"getPost">(
     (signal) =>
       client().GET("/posts/{post_id}", {
         headers: workspaceHeaders(workspaceId),
@@ -619,25 +422,12 @@ export function getPost(workspaceId: string | null, id: string, options?: ApiReq
   );
 }
 
-/**
- * Creates one nonempty authoritative draft Post. The request must carry
- * `default_text` or at least one ordered `attachment_ids` entry so opening a
- * composer never persists an empty Post. Saving the same composition again is
- * an `updatePost` call on the returned id, not another create, and the
- * idempotency key makes a repeated create of one payload return the same Post.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param input Owning Brand Profile, default content, ordered attachment ids,
- *   and optional saved per-Channel targets.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the created draft Post.
- */
 export function createPost(
   workspaceId: string | null,
   input: CreatePostInput,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<Post>(
+  return unwrapOp<"createPost">(
     (signal) =>
       client().POST("/posts", {
         body: input,
@@ -649,25 +439,13 @@ export function createPost(
   );
 }
 
-/**
- * Saves the same Post's draft surface: default text, the whole ordered
- * attachment set, and the saved per-Channel targets. No target Channel is
- * required, attachments may still be uploading or processing, and already
- * claimed or published Distribution outcomes are never rewritten.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param id Post identifier being saved.
- * @param input Owning Brand Profile plus the fields to change.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the saved Post.
- */
 export function updatePost(
   workspaceId: string | null,
   id: string,
   input: UpdatePostInput,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<Post>(
+  return unwrapOp<"updatePost">(
     (signal) =>
       client().PATCH("/posts/{post_id}", {
         body: input,
@@ -682,26 +460,13 @@ export function updatePost(
   );
 }
 
-/**
- * Schedules the Post to its target Channels, or publishes immediately when
- * `scheduled_at` is null. Repeating one scheduling intent cannot create a
- * second Post or duplicate Distribution rows, and only still-editable pending
- * outcomes are created or updated.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param id Post identifier being scheduled.
- * @param input Owning Brand Profile, required publication instant (null =
- *   immediate), and optional target replacement defining the pending diff.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the Post with updated pending outcomes.
- */
 export function schedulePost(
   workspaceId: string | null,
   id: string,
   input: SchedulePostInput,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<Post>(
+  return unwrapOp<"schedulePost">(
     (signal) =>
       client().POST("/posts/{post_id}/schedule", {
         body: input,
@@ -716,24 +481,13 @@ export function schedulePost(
   );
 }
 
-/**
- * Soft-deletes a Post: its draft surface and pending publications stop, its
- * attachment references are released into the orphan grace period, and
- * already-delivered Channel copies remain immutable history.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param id Post identifier to delete.
- * @param brandProfileId Selected Brand Profile; the server rejects another profile or an aggregate selection.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the deleted Post snapshot.
- */
 export function deletePost(
   workspaceId: string | null,
   id: string,
   brandProfileId: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<Post>(
+  return unwrapOp<"deletePost">(
     (signal) =>
       client().DELETE("/posts/{post_id}", {
         body: { brand_profile_id: brandProfileId },
@@ -748,16 +502,8 @@ export function deletePost(
   );
 }
 
-/**
- * Fetches detailed metadata for a specific asset by ID.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param id Unique asset identifier.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the complete Asset entity.
- */
 export function getAsset(workspaceId: string | null, id: string, options?: ApiRequestOptions) {
-  return unwrap<Asset>(
+  return unwrapOp<"getAsset">(
     (signal) =>
       client().GET("/assets/{asset_id}", {
         headers: workspaceHeaders(workspaceId),
@@ -768,20 +514,12 @@ export function getAsset(workspaceId: string | null, id: string, options?: ApiRe
   );
 }
 
-/**
- * Requests a short-lived presigned URL to stream or preview the asset's media file.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param id Unique asset identifier.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the presigned preview URL response.
- */
 export function getAssetPreviewUrl(
   workspaceId: string | null,
   id: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<SignedUrlResponse>(
+  return unwrapOp<"getAssetPreviewUrl">(
     (signal) =>
       client().GET("/assets/{asset_id}/preview-url", {
         headers: workspaceHeaders(workspaceId),
@@ -792,16 +530,8 @@ export function getAssetPreviewUrl(
   );
 }
 
-/**
- * Requests a secure presigned URL configured for direct browser download of the original asset media.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param id Unique asset identifier.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the presigned download URL response.
- */
 function getAssetDownloadUrl(workspaceId: string | null, id: string, options?: ApiRequestOptions) {
-  return unwrap<SignedUrlResponse>(
+  return unwrapOp<"getAssetDownloadUrl">(
     (signal) =>
       client().GET("/assets/{asset_id}/download-url", {
         headers: workspaceHeaders(workspaceId),
@@ -812,40 +542,25 @@ function getAssetDownloadUrl(workspaceId: string | null, id: string, options?: A
   );
 }
 
-/**
- * Reads original Asset bytes through its authorized, short-lived download URL.
- * Workspace/id select the source Asset; object storage receives no API bearer
- * header or cookies. Non-2xx downloads fail with ApiError, while transport/body
- * failures follow the canonical adapter defect boundary. Cancellation covers
- * both URL acquisition and the binary transfer.
- */
 export function getAssetBlob(
   workspaceId: string | null,
   id: string,
   options?: ApiRequestOptions,
 ): Effect.Effect<Blob, ApiError> {
   return Effect.flatMap(getAssetDownloadUrl(workspaceId, id, options), ({ url }) =>
-    unwrap<Blob>(async (signal) => {
+    unwrapBinary(async (signal) => {
       const response = await globalThis.fetch(url, { credentials: "omit", signal });
       return response.ok ? { response, data: await response.blob() } : { response };
     }, options?.signal),
   );
 }
 
-/**
- * Initiates an upload session for a media file, determining single or multipart upload strategy.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param input File metadata including filename, file size, MIME type, and asset title.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the upload session configuration and initial presigned upload URLs.
- */
 export function createUploadSession(
   workspaceId: string | null,
   input: CreateUploadSessionInput,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<UploadSessionResponse>(
+  return unwrapOp<"createUploadSession">(
     (signal) =>
       client().POST("/asset-upload-sessions", {
         body: input,
@@ -859,20 +574,12 @@ export function createUploadSession(
   );
 }
 
-/**
- * Retrieves the current state and progress of an active upload session.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param sessionId Upload session ID.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the upload session details and list of completed parts.
- */
 export function getUploadSession(
   workspaceId: string | null,
   sessionId: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<UploadSessionDetailResponse>(
+  return unwrapOp<"getUploadSession">(
     (signal) =>
       client().GET("/asset-upload-sessions/{session_id}", {
         headers: workspaceHeaders(workspaceId),
@@ -883,22 +590,13 @@ export function getUploadSession(
   );
 }
 
-/**
- * Requests signed upload URLs for specific part numbers in a multipart upload session.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param sessionId Multipart upload session ID.
- * @param input Array of part numbers to generate URLs for.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the array of signed part upload URLs.
- */
 export function createUploadPartUrls(
   workspaceId: string | null,
   sessionId: string,
   input: CreateUploadPartsInput,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<CreateUploadPartsResponse>(
+  return unwrapOp<"createUploadPartUrls">(
     (signal) =>
       client().POST("/asset-upload-sessions/{session_id}/parts", {
         body: input,
@@ -913,22 +611,13 @@ export function createUploadPartUrls(
   );
 }
 
-/**
- * Completes an upload session after all parts have finished uploading, triggering server verification.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param sessionId Upload session ID.
- * @param input Completed parts list with part numbers and ETags.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the resulting Asset entity in processing or ready status.
- */
 export function completeUploadSession(
   workspaceId: string | null,
   sessionId: string,
   input: CompleteUploadInput = {},
   options?: ApiRequestOptions,
 ) {
-  return unwrap<Asset>(
+  return unwrapOp<"completeUploadSession">(
     (signal) =>
       client().POST("/asset-upload-sessions/{session_id}/complete", {
         body: input,
@@ -943,20 +632,12 @@ export function completeUploadSession(
   );
 }
 
-/**
- * Aborts an upload session and cleans up partially uploaded chunks from R2 storage.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param sessionId Upload session ID to abort.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving once the session is aborted.
- */
 export function abortUploadSession(
   workspaceId: string | null,
   sessionId: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<void>(
+  return unwrapOp<"abortUploadSession">(
     (signal) =>
       client().DELETE("/asset-upload-sessions/{session_id}", {
         headers: workspaceHeaders(workspaceId),
@@ -970,20 +651,12 @@ export function abortUploadSession(
   );
 }
 
-/**
- * Lists connected social platform accounts for the active organization.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param params Optional `brand_profile_id` filter; omitted returns every account in the workspace.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the connected platform accounts response.
- */
 export function listPlatforms(
   workspaceId: string | null,
   params?: PlatformQueryParams,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<PlatformAccountsResponse>(
+  return unwrapOp<"listPlatformAccounts">(
     (signal) =>
       client().GET("/platforms", {
         headers: workspaceHeaders(workspaceId),
@@ -994,15 +667,8 @@ export function listPlatforms(
   );
 }
 
-/**
- * Lists global publishing and media capabilities for all supported social platforms.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the platform capabilities specifications.
- */
 export function listPlatformCapabilities(workspaceId: string | null, options?: ApiRequestOptions) {
-  return unwrap<PlatformCapabilitiesResponse>(
+  return unwrapOp<"listPlatformCapabilities">(
     (signal) =>
       client().GET("/platforms/capabilities", {
         headers: workspaceHeaders(workspaceId),
@@ -1012,24 +678,12 @@ export function listPlatformCapabilities(workspaceId: string | null, options?: A
   );
 }
 
-/**
- * Initiates the OAuth authorization handshake for a social media provider.
- *
- * No Brand Profile is chosen here: the callback stages the authorized
- * account(s), and the assignment view selects the owning profile immediately
- * before persistence.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param platform Target social platform to connect.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the response containing the external provider OAuth authorization URL.
- */
 export function startPlatformOAuth(
   workspaceId: string | null,
   platform: Platform,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<OAuthStartResponse>(
+  return unwrapOp<"startPlatformOAuth">(
     (signal) =>
       client().GET("/platforms/{platform}/connect", {
         headers: { ...workspaceHeaders(workspaceId), Accept: "application/json" },
@@ -1040,17 +694,12 @@ export function startPlatformOAuth(
   );
 }
 
-/**
- * Reads an owner-bound ticket's public Page choices without exposing credentials.
- * Uses the scoped transport (null selects the server's default Workspace); expired or foreign
- * tickets fail with ApiError. The returned Effect observes the optional abort signal.
- */
 export function getOAuthSelection(
   workspaceId: string | null,
   selectionId: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<OAuthSelection>(
+  return unwrapOp<"getOAuthSelection">(
     (signal) =>
       client().GET("/oauth-selections/{selection_id}", {
         headers: workspaceHeaders(workspaceId),
@@ -1061,18 +710,13 @@ export function getOAuthSelection(
   );
 }
 
-/**
- * Saves only the supplied candidate account ID from an active, owner-bound selection.
- * Uses a supplied/generated idempotency key and abort signal; the Effect returns void on 204
- * and preserves API failures such as expired tickets, conflicting choices, or plan limits.
- */
 export function confirmOAuthSelection(
   workspaceId: string | null,
   selectionId: string,
   input: OAuthSelectionConfirmRequest,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<void>(
+  return unwrapOp<"confirmOAuthSelection">(
     (signal) =>
       client().POST("/oauth-selections/{selection_id}/confirm", {
         headers: workspaceHeaders(workspaceId),
@@ -1087,16 +731,12 @@ export function confirmOAuthSelection(
   );
 }
 
-/**
- * Discards an unconfirmed owner-bound ticket using the shared scoped, idempotent transport.
- * The Effect returns void on 204; in-flight confirmations cannot be reported as cancelled.
- */
 export function cancelOAuthSelection(
   workspaceId: string | null,
   selectionId: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<void>(
+  return unwrapOp<"cancelOAuthSelection">(
     (signal) =>
       client().DELETE("/oauth-selections/{selection_id}", {
         headers: workspaceHeaders(workspaceId),
@@ -1110,21 +750,12 @@ export function cancelOAuthSelection(
   );
 }
 
-/**
- * Fetches dynamic creator publishing requirements (e.g. TikTok privacy settings, creator profile)
- * for a connected platform account.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param id Platform account ID.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the publishing requirements and privacy configuration.
- */
 export function getPlatformPublishingRequirements(
   workspaceId: string | null,
   id: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<PublishingRequirements>(
+  return unwrapOp<"getPlatformPublishingRequirements">(
     (signal) =>
       client().GET("/platforms/{account_id}/publishing-requirements", {
         headers: workspaceHeaders(workspaceId),
@@ -1135,20 +766,12 @@ export function getPlatformPublishingRequirements(
   );
 }
 
-/**
- * Disconnects a platform account from the workspace and revokes tokens.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param id Platform account ID to disconnect.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving once the account is disconnected.
- */
 export function disconnectPlatform(
   workspaceId: string | null,
   id: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<void>(
+  return unwrapOp<"disconnectPlatformAccount">(
     (signal) =>
       client().DELETE("/platforms/{account_id}", {
         headers: workspaceHeaders(workspaceId),
@@ -1162,12 +785,10 @@ export function disconnectPlatform(
   );
 }
 
-export type BroadcastInfo =
-  operations["getBroadcast"]["responses"][200]["content"]["application/json"];
+export type BroadcastInfo = OperationSuccess<"getBroadcast">;
 
-/** Reads no-store encoder credentials on explicit writer demand; callers must not put the result in a query cache. */
 export function getBroadcast(workspaceId: string | null, id: string, options?: ApiRequestOptions) {
-  return unwrap<BroadcastInfo>(
+  return unwrapOp<"getBroadcast">(
     (signal) =>
       client().GET("/distributions/{distribution_id}/broadcast", {
         headers: workspaceHeaders(workspaceId),
@@ -1179,9 +800,8 @@ export function getBroadcast(workspaceId: string | null, id: string, options?: A
   );
 }
 
-/** Ends an existing broadcast with a stable mutation key; no automatic retry creates or restarts media. */
 export function endBroadcast(workspaceId: string | null, id: string, options?: ApiRequestOptions) {
-  return unwrap<{ ended: true }>(
+  return unwrapOp<"endBroadcast">(
     (signal) =>
       client().POST("/distributions/{distribution_id}/broadcast/end", {
         headers: workspaceHeaders(workspaceId),
@@ -1195,20 +815,12 @@ export function endBroadcast(workspaceId: string | null, id: string, options?: A
   );
 }
 
-/**
- * Fetches status, logs, and attempts for a specific distribution intent.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param id Distribution identifier.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the distribution entity.
- */
 export function getDistribution(
   workspaceId: string | null,
   id: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<Distribution>(
+  return unwrapOp<"getDistribution">(
     (signal) =>
       client().GET("/distributions/{distribution_id}", {
         headers: workspaceHeaders(workspaceId),
@@ -1219,22 +831,13 @@ export function getDistribution(
   );
 }
 
-/**
- * Updates the scheduled publication time or content overrides for a pending distribution.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param id Distribution identifier.
- * @param input Updated schedule time and text overrides.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the updated distribution record.
- */
 export function updateScheduledDistribution(
   workspaceId: string | null,
   id: string,
   input: UpdateDistributionInput,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<Distribution>(
+  return unwrapOp<"updateScheduledDistribution">(
     (signal) =>
       client().PATCH("/distributions/{distribution_id}", {
         body: input,
@@ -1249,20 +852,12 @@ export function updateScheduledDistribution(
   );
 }
 
-/**
- * Requests cancellation of a scheduled or queued distribution before provider delivery.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param id Distribution identifier.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the cancelled distribution record.
- */
 export function cancelDistribution(
   workspaceId: string | null,
   id: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<Distribution | undefined>(
+  return unwrapOp<"cancelDistribution">(
     (signal) =>
       client().DELETE("/distributions/{distribution_id}", {
         headers: workspaceHeaders(workspaceId),
@@ -1276,20 +871,12 @@ export function cancelDistribution(
   );
 }
 
-/**
- * Retries a failed distribution intent, preserving the original idempotency guarantees.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param id Distribution identifier.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the re-enqueued distribution record.
- */
 export function retryDistribution(
   workspaceId: string | null,
   id: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<Distribution>(
+  return unwrapOp<"retryDistribution">(
     (signal) =>
       client().POST("/distributions/{distribution_id}/retry", {
         headers: workspaceHeaders(workspaceId),
@@ -1303,20 +890,12 @@ export function retryDistribution(
   );
 }
 
-/**
- * Fetches calendar events representing scheduled and published distributions within a date range.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param params Date range query parameters (start, end).
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the calendar events list response.
- */
 export function getCalendar(
   workspaceId: string | null,
   params: CalendarQueryParams,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<CalendarResponse>(
+  return unwrapOp<"listCalendarEvents">(
     (signal) =>
       client().GET("/calendar", {
         headers: workspaceHeaders(workspaceId),
@@ -1327,15 +906,8 @@ export function getCalendar(
   );
 }
 
-/**
- * Lists Workspace members with role, account status, and join date.
- *
- * @param workspaceId Shared Workspace UUID.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the member list.
- */
 export function listWorkspaceMembers(workspaceId: string, options?: ApiRequestOptions) {
-  return unwrap<WorkspaceMemberListResponse>(
+  return unwrapOp<"listWorkspaceMembers">(
     (signal) =>
       client().GET("/workspaces/{workspaceId}/members", {
         headers: workspaceHeaders(workspaceId),
@@ -1346,21 +918,12 @@ export function listWorkspaceMembers(workspaceId: string, options?: ApiRequestOp
   );
 }
 
-/**
- * Reads the dashboard's daily series, best-time cells, format and platform
- * breakdowns, follower history, and engagement accumulation.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param params Cohort bounds plus optional Platform, account, format, and Brand Profile scope.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the stored-snapshot dashboard aggregates.
- */
 export function getAnalyticsDashboard(
   workspaceId: string | null,
   params: AnalyticsDashboardQueryParams,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<AnalyticsDashboard>(
+  return unwrapOp<"getAnalyticsDashboard">(
     (signal) =>
       client().GET("/analytics/dashboard", {
         headers: workspaceHeaders(workspaceId),
@@ -1371,15 +934,8 @@ export function getAnalyticsDashboard(
   );
 }
 
-/**
- * Lists pending, unexpired Workspace invitations.
- *
- * @param workspaceId Shared Workspace UUID.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the pending invitation list.
- */
 export function listWorkspaceInvitations(workspaceId: string, options?: ApiRequestOptions) {
-  return unwrap<WorkspaceInvitationListResponse>(
+  return unwrapOp<"listWorkspaceInvitations">(
     (signal) =>
       client().GET("/workspaces/{workspaceId}/invitations", {
         headers: workspaceHeaders(workspaceId),
@@ -1390,25 +946,12 @@ export function listWorkspaceInvitations(workspaceId: string, options?: ApiReque
   );
 }
 
-/**
- * Reads the ranked per-Post analytics rows for a published cohort.
- *
- * Ranking uses the requested stored metric; each row carries its platforms,
- * unsupported subset, destination count, and latest sync time so unsupported or
- * unsynced values are never rendered as measured zero.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param params Cohort bounds, optional Platform/Brand Profile scope, ranking
- *   metric, and limit/offset pagination.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the ranked Posts and pagination metadata.
- */
 export function getAnalyticsPosts(
   workspaceId: string | null,
   params: AnalyticsPostsQueryParams,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<AnalyticsPostsResponse>(
+  return unwrapOp<"getAnalyticsPosts">(
     (signal) =>
       client().GET("/analytics/posts", {
         headers: workspaceHeaders(workspaceId),
@@ -1419,16 +962,12 @@ export function getAnalyticsPosts(
   );
 }
 
-/**
- * Reads up to 500 chronological stored snapshots for one Distribution.
- * Workspace authorization and cancellation follow the normal API boundary.
- */
 export function getDistributionAnalytics(
   workspaceId: string | null,
   id: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<components["schemas"]["AnalyticsSnapshotsResponse"]>(
+  return unwrapOp<"getDistributionAnalytics">(
     (signal) =>
       client().GET("/analytics/{distribution_id}", {
         headers: workspaceHeaders(workspaceId),
@@ -1439,20 +978,12 @@ export function getDistributionAnalytics(
   );
 }
 
-/**
- * Invites an email address with an assignable Workspace role.
- *
- * @param workspaceId Shared Workspace UUID.
- * @param input Invited email and role.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the pending invitation.
- */
 export function createWorkspaceInvitation(
   workspaceId: string,
   input: { email: string; role: WorkspaceRole },
   options?: ApiRequestOptions,
 ) {
-  return unwrap<WorkspaceInvitation>(
+  return unwrapOp<"createWorkspaceInvitation">(
     (signal) =>
       client().POST("/workspaces/{workspaceId}/invitations", {
         body: input,
@@ -1467,20 +998,12 @@ export function createWorkspaceInvitation(
   );
 }
 
-/**
- * Rotates an invitation token and resends the acceptance email.
- *
- * @param workspaceId Shared Workspace UUID.
- * @param invitationId Invitation UUID.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the reissued invitation.
- */
 export function resendWorkspaceInvitation(
   workspaceId: string,
   invitationId: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<WorkspaceInvitation>(
+  return unwrapOp<"resendWorkspaceInvitation">(
     (signal) =>
       client().POST("/workspaces/{workspaceId}/invitations/{invitationId}/resend", {
         headers: workspaceHeaders(workspaceId),
@@ -1494,20 +1017,12 @@ export function resendWorkspaceInvitation(
   );
 }
 
-/**
- * Revokes a pending invitation and frees its reserved Seat.
- *
- * @param workspaceId Shared Workspace UUID.
- * @param invitationId Invitation UUID.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving when the invitation is revoked.
- */
 export function revokeWorkspaceInvitation(
   workspaceId: string,
   invitationId: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<void>(
+  return unwrapOp<"revokeWorkspaceInvitation">(
     (signal) =>
       client().DELETE("/workspaces/{workspaceId}/invitations/{invitationId}", {
         headers: workspaceHeaders(workspaceId),
@@ -1521,22 +1036,13 @@ export function revokeWorkspaceInvitation(
   );
 }
 
-/**
- * Changes a member's Workspace role.
- *
- * @param workspaceId Shared Workspace UUID.
- * @param memberId Internal user UUID.
- * @param role New role.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the updated member.
- */
 export function updateWorkspaceMember(
   workspaceId: string,
   memberId: string,
   role: WorkspaceRole,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<WorkspaceMember>(
+  return unwrapOp<"updateWorkspaceMember">(
     (signal) =>
       client().PATCH("/workspaces/{workspaceId}/members/{memberId}", {
         body: { role },
@@ -1551,20 +1057,12 @@ export function updateWorkspaceMember(
   );
 }
 
-/**
- * Removes a member's Workspace membership.
- *
- * @param workspaceId Shared Workspace UUID.
- * @param memberId Internal user UUID.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving when the membership is removed.
- */
 export function removeWorkspaceMember(
   workspaceId: string,
   memberId: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<void>(
+  return unwrapOp<"removeWorkspaceMember">(
     (signal) =>
       client().DELETE("/workspaces/{workspaceId}/members/{memberId}", {
         headers: workspaceHeaders(workspaceId),
@@ -1578,20 +1076,12 @@ export function removeWorkspaceMember(
   );
 }
 
-/**
- * Renames the shared Workspace.
- *
- * @param workspaceId Shared Workspace UUID.
- * @param input New display name.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the updated Workspace.
- */
 export function updateWorkspaceName(
   workspaceId: string,
   input: { name: string },
   options?: ApiRequestOptions,
 ) {
-  return unwrap<{ id: string; name: string; slug: string; role: WorkspaceRole }>(
+  return unwrapOp<"updateWorkspace">(
     (signal) =>
       client().PATCH("/workspaces/{workspaceId}", {
         body: input,
@@ -1606,15 +1096,8 @@ export function updateWorkspaceName(
   );
 }
 
-/**
- * Reads Seat usage, the shared Workspace, and the current Installation Owner.
- *
- * @param workspaceId Shared Workspace UUID.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the installation summary.
- */
 export function getInstallation(workspaceId: string, options?: ApiRequestOptions) {
-  return unwrap<InstallationSummary>(
+  return unwrapOp<"getInstallation">(
     (signal) =>
       client().GET("/installation", {
         headers: workspaceHeaders(workspaceId),
@@ -1624,22 +1107,13 @@ export function getInstallation(workspaceId: string, options?: ApiRequestOptions
   );
 }
 
-/**
- * Suspends a member, revoking sessions and releasing their Seat.
- *
- * @param workspaceId Shared Workspace UUID.
- * @param memberId Internal user UUID.
- * @param reason Optional administrative reason recorded in the audit trail.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the suspended account state.
- */
 export function suspendInstallationMember(
   workspaceId: string,
   memberId: string,
   reason: string | undefined,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<AccountLifecycle>(
+  return unwrapOp<"suspendInstallationMember">(
     (signal) =>
       client().POST("/installation/members/{memberId}/suspend", {
         body: reason === undefined ? {} : { reason },
@@ -1654,20 +1128,12 @@ export function suspendInstallationMember(
   );
 }
 
-/**
- * Reactivates a suspended member when a Seat is free.
- *
- * @param workspaceId Shared Workspace UUID.
- * @param memberId Internal user UUID.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the active account state.
- */
 export function reactivateInstallationMember(
   workspaceId: string,
   memberId: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<AccountLifecycle>(
+  return unwrapOp<"reactivateInstallationMember">(
     (signal) =>
       client().POST("/installation/members/{memberId}/reactivate", {
         headers: workspaceHeaders(workspaceId),
@@ -1681,22 +1147,13 @@ export function reactivateInstallationMember(
   );
 }
 
-/**
- * Permanently deletes a member account after email confirmation.
- *
- * @param workspaceId Shared Workspace UUID.
- * @param memberId Internal user UUID.
- * @param confirmEmail Exact member email required by the server.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving when the account is deleted.
- */
 export function deleteInstallationMember(
   workspaceId: string,
   memberId: string,
   confirmEmail: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<void>(
+  return unwrapOp<"deleteInstallationMember">(
     (signal) =>
       client().DELETE("/installation/members/{memberId}", {
         body: { confirm_email: confirmEmail },
@@ -1711,23 +1168,13 @@ export function deleteInstallationMember(
   );
 }
 
-/**
- * Transfers installation ownership to an active Workspace Admin after
- * reauthenticating the current Owner.
- *
- * @param workspaceId Shared Workspace UUID.
- * @param targetUserId Receiving member's internal user UUID.
- * @param password Current Owner's password.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the new owner id.
- */
 export function transferInstallationOwnership(
   workspaceId: string,
   targetUserId: string,
   password: string,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<{ installation_owner_user_id: string }>(
+  return unwrapOp<"transferInstallationOwnership">(
     (signal) =>
       client().POST("/installation/ownership-transfer", {
         body: { password, target_user_id: targetUserId },
@@ -1741,20 +1188,12 @@ export function transferInstallationOwnership(
   );
 }
 
-/**
- * Reads the reverse-chronological Workspace Audit trail.
- *
- * @param workspaceId Shared Workspace UUID.
- * @param params Pagination window.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the audit entries.
- */
 export function listWorkspaceAudit(
   workspaceId: string,
   params: AuditQueryParams,
   options?: ApiRequestOptions,
 ) {
-  return unwrap<AuditListResponse>(
+  return unwrapOp<"listWorkspaceAudit">(
     (signal) =>
       client().GET("/workspaces/{workspaceId}/audit", {
         headers: workspaceHeaders(workspaceId),
@@ -1765,15 +1204,8 @@ export function listWorkspaceAudit(
   );
 }
 
-/**
- * Inspects an invitation token before sign-in. The token is the credential.
- *
- * @param token Raw invitation token from the email link.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the invitation preview.
- */
 export function getInvitationPreview(token: string, options?: ApiRequestOptions) {
-  return unwrap<InvitationPreview>(
+  return unwrapOp<"getWorkspaceInvitation">(
     (signal) =>
       client().GET("/workspace-invitations/{token}", {
         params: { path: { token } },
@@ -1783,19 +1215,8 @@ export function getInvitationPreview(token: string, options?: ApiRequestOptions)
   );
 }
 
-/**
- * Accepts an invitation for the authenticated account. The token is the
- * idempotency credential and the caller's email must match the invitation.
- *
- * @param token Raw invitation token from the email link.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the joined Workspace and member.
- */
 export function acceptWorkspaceInvitation(token: string, options?: ApiRequestOptions) {
-  return unwrap<{
-    member: WorkspaceMember;
-    workspace: { id: string; name: string; role: WorkspaceRole; slug: string };
-  }>(
+  return unwrapOp<"acceptWorkspaceInvitation">(
     (signal) =>
       client().POST("/workspace-invitations/{token}/accept", {
         params: { path: { token } },
@@ -1805,20 +1226,18 @@ export function acceptWorkspaceInvitation(token: string, options?: ApiRequestOpt
   );
 }
 
-/** Reads Owner-only progress; upgrades report `not_applicable`. */
 export function getOnboarding(options?: ApiRequestOptions) {
-  return unwrap<OnboardingProgress>(
+  return unwrapOp<"getOnboarding">(
     (signal) => client().GET("/onboarding", { signal }),
     options?.signal,
   );
 }
 
-/** Persists the reached screen idempotently; completed journeys reject further saves. */
 export function saveOnboarding(
   input: { step: "improvement" | "ready" },
   options?: ApiRequestOptions,
 ) {
-  return unwrap<OnboardingProgress>(
+  return unwrapOp<"saveOnboarding">(
     (signal) =>
       client().PATCH("/onboarding", {
         body: input,
@@ -1831,9 +1250,8 @@ export function saveOnboarding(
   );
 }
 
-/** Completes setup idempotently without changing the Workspace name. */
 export function completeOnboarding(options?: ApiRequestOptions) {
-  return unwrap<OnboardingProgress>(
+  return unwrapOp<"completeOnboarding">(
     (signal) =>
       client().POST("/onboarding/complete", {
         params: {
@@ -1845,35 +1263,18 @@ export function completeOnboarding(options?: ApiRequestOptions) {
   );
 }
 
-/**
- * Reads the installation improvement-reporting policy. Every active member may
- * read it, so the Owner's choices and the effective outbound state stay
- * visible to the team; only the current Installation Owner may mutate it.
- *
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the requested and effective policy.
- */
 export function getReportingPolicy(options?: ApiRequestOptions) {
-  return unwrap<ReportingPolicy>(
+  return unwrapOp<"getReportingPolicy">(
     (signal) => client().GET("/installation/reporting", { signal }),
     options?.signal,
   );
 }
 
-/**
- * Replaces both reporting choices. Only the current Installation Owner may
- * call it; the response carries the effective state, so a disabled destination
- * or operator override is never reported as working consent.
- *
- * @param input Independent usage and diagnostics choices.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the updated policy.
- */
 export function updateReportingPreferences(
   input: { usage: boolean; diagnostics: boolean },
   options?: ApiRequestOptions,
 ) {
-  return unwrap<ReportingPolicy>(
+  return unwrapOp<"updateReportingPreferences">(
     (signal) =>
       client().PUT("/installation/reporting", {
         body: input,
@@ -1886,34 +1287,18 @@ export function updateReportingPreferences(
   );
 }
 
-/**
- * Reads the one-time discovery-source answer and its delivery state. Owner
- * only: the answer belongs to the installation rather than to a member.
- *
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the attribution state.
- */
 export function getReportingFeedback(options?: ApiRequestOptions) {
-  return unwrap<ReportingFeedback>(
+  return unwrapOp<"getReportingFeedback">(
     (signal) => client().GET("/installation/reporting/feedback", { signal }),
     options?.signal,
   );
 }
 
-/**
- * Shares the fixed-enum discovery-source answer. Separate from the reporting
- * switches: submitting feedback never enables a category, and skipping or
- * choosing `prefer_not_to_say` records a local decision with no event.
- *
- * @param input Fixed discovery-source value.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the attribution state, including delivery status.
- */
 export function submitReportingFeedback(
   input: { discovery_source: DiscoverySource },
   options?: ApiRequestOptions,
 ) {
-  return unwrap<ReportingFeedback>(
+  return unwrapOp<"submitReportingFeedback">(
     (signal) =>
       client().POST("/installation/reporting/feedback", {
         body: input,

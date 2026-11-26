@@ -1,5 +1,4 @@
-# Supply this file from a protected CI workspace. Do not commit a populated
-# copy. Use TF_HTTP_USERNAME and TF_HTTP_PASSWORD for credentials.
+# Credentials come from TF_HTTP_USERNAME and TF_HTTP_PASSWORD.
 address        = "https://state.example.com/meltiply/cloudflare/staging"
 lock_address   = "https://state.example.com/meltiply/cloudflare/staging/lock"
 unlock_address = "https://state.example.com/meltiply/cloudflare/staging/lock"

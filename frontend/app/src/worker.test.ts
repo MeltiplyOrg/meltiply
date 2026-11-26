@@ -51,7 +51,7 @@ describe("frontend Worker telemetry boundary", () => {
 
     expect(response.status).toBe(204);
     expect(logger).toHaveBeenCalledTimes(1);
-    const event = JSON.parse(logger.mock.calls[0]?.[0] as string) as Record<string, unknown>;
+    const event: unknown = JSON.parse(logger.mock.calls[0]?.[0] as string);
     expect(event).toMatchObject({
       context: expect.objectContaining({
         configuration_key: "APP_URL",
@@ -129,7 +129,7 @@ describe("frontend Worker telemetry boundary", () => {
     expect(response.status).toBe(500);
     await expect(response.text()).resolves.toBe("An error has occurred.");
     expect(logger).toHaveBeenCalledTimes(1);
-    const event = JSON.parse(logger.mock.calls[0]?.[0] as string) as Record<string, unknown>;
+    const event: unknown = JSON.parse(logger.mock.calls[0]?.[0] as string);
     expect(event).toMatchObject({
       context: expect.objectContaining({
         error_code: "asset_fetch_failed",
@@ -253,7 +253,7 @@ describe("frontend Worker API proxy", () => {
     expect(response.status).toBe(502);
     await expect(response.text()).resolves.toBe("The API is unavailable.");
     expect(logger).toHaveBeenCalledTimes(1);
-    const event = JSON.parse(logger.mock.calls[0]?.[0] as string) as Record<string, unknown>;
+    const event: unknown = JSON.parse(logger.mock.calls[0]?.[0] as string);
     expect(event).toMatchObject({
       context: expect.objectContaining({
         error_code: "api_proxy_failed",
@@ -315,6 +315,26 @@ describe("frontend Worker diagnostic relay", () => {
     });
   });
 
+  it.each(["constructor", "__proto__"])(
+    "relays the inherited field name %s with the fallback operation",
+    async (field) => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      vi.spyOn(console, "debug").mockImplementation(() => undefined);
+      const api = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })) };
+
+      await worker.fetch(
+        telemetryRequest(
+          { field, kind: "frontend-error", valueType: "TypeError" },
+          { Authorization: "Bearer session-jwt" },
+        ),
+        { ...environment, API: api },
+      );
+
+      const relayed = api.fetch.mock.calls[0]?.[0] as Request;
+      expect(JSON.parse(await relayed.text())).toMatchObject({ operation: "other" });
+    },
+  );
+
   it("forwards nothing without a bearer, so pre-sign-in failures stay local", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const api = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })) };
@@ -335,6 +355,22 @@ describe("frontend Worker diagnostic relay", () => {
     const response = await worker.fetch(
       telemetryRequest(
         { code: "internal_error", kind: "api-error", status: 500 },
+        { Authorization: "Bearer session-jwt" },
+      ),
+      { ...environment, API: api },
+    );
+
+    expect(response.status).toBe(204);
+    expect(api.fetch).not.toHaveBeenCalled();
+  });
+
+  it("forwards nothing for a client exception tagged as an API error", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const api = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })) };
+
+    const response = await worker.fetch(
+      telemetryRequest(
+        { field: "api-error", kind: "frontend-error", valueType: "ApiError" },
         { Authorization: "Bearer session-jwt" },
       ),
       { ...environment, API: api },
@@ -379,9 +415,6 @@ describe("frontend Worker diagnostic relay", () => {
     );
     expect(crossOrigin.status).toBe(403);
 
-    // A payload that parses but violates the approved schema is a 400: the stack
-    // is within the request-size limit and only exceeds the relayed-stack bound.
-    // (An oversized body is a separate 413 case covered above.)
     const malformed = await worker.fetch(
       telemetryRequest(
         { kind: "frontend-error", stack: "x".repeat(2_000) },

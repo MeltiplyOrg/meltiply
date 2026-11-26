@@ -26,7 +26,6 @@ const bootstrapOperations: Record<string, true> = {
   listPlatformCapabilities: true,
 };
 
-/** Converts a scenario result into an HTTP response without forwarding credentials, redirects, or requests to an upstream service. */
 function responseFor(result: PreviewResponse, operationId: string): Response {
   const headers = { "Content-Type": "application/json", "X-Preview-Operation": operationId };
   return new HttpResponse(
@@ -37,7 +36,6 @@ function responseFor(result: PreviewResponse, operationId: string): Response {
   );
 }
 
-/** Registers contract-driven, tab-local previews without upstream effects. Initialized Workspaces start past setup; only `first-run` creates an unfinished journey. */
 export function createPreviewHandlers(options: PreviewOptions = {}) {
   const now = Date.now();
   const fixtures = Object.assign(
@@ -98,7 +96,6 @@ export function createPreviewHandlers(options: PreviewOptions = {}) {
     completed_at: options.scenario === "first-run" ? null : new Date(now).toISOString(),
   };
 
-  /** Chooses existing error examples where available; common synthetic transport failures reuse canonical error envelopes. */
   function failure(operation: PreviewOperation, status: number, fixture: string): PreviewResponse {
     return (
       operation.errors.find((response) => response.status === status) ?? {
@@ -250,9 +247,6 @@ export function createPreviewHandlers(options: PreviewOptions = {}) {
         },
       ),
     );
-  // The device-authorization endpoints are plugin-owned rather than OpenAPI
-  // operations. These synthetic handlers let the Routes tab open the real
-  // consent page in the isolated preview without a backend.
   const previewDeviceHandlers = [
     http.post("/api/auth/device/code", ({ request }) => {
       const origin = new URL(request.url).origin;

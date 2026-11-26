@@ -3,11 +3,6 @@ import { Heading } from "fumadocs-ui/components/heading";
 
 type HeadingTag = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
 
-/**
- * Retains Fumadocs heading markup and anchor semantics while marking its static
- * copy button for delegated browser behavior. MDX becomes HTML, not hydrated
- * React, so the native docs script owns copying for every heading level.
- */
 function headingRenderer(as: HeadingTag) {
   return function DocsHeading(props: HTMLAttributes<HTMLHeadingElement>) {
     return <Heading {...props} as={as} data-docs-heading="" />;

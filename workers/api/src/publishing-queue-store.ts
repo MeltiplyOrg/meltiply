@@ -22,7 +22,6 @@ export interface QueueRow extends Record<string, unknown> {
 export const queueColumns =
   "id, org_id, brand_profile_id, name, timezone, slots, created_at, updated_at";
 
-/** Projects a validated stored Queue; retired plans remain available only through historical membership. */
 export function mapQueue(row: QueueRow): PublishingQueue {
   return {
     id: row.id,
@@ -35,7 +34,6 @@ export function mapQueue(row: QueueRow): PublishingQueue {
   };
 }
 
-/** Reads an active, tenant-visible Queue and validates its active Brand Profile; callers serialize mutations with the organization lock. */
 export function readQueueEffect(
   client: EffectTransactionClient,
   id: string,
@@ -56,7 +54,6 @@ export function readQueueEffect(
   });
 }
 
-/** Validates a tenant Queue's active Brand Profile without loading its slot plan. Missing or differently scoped Queues fail with 404. */
 export function requireQueueEffect(
   client: EffectTransactionClient,
   id: string,
@@ -76,7 +73,6 @@ export function requireQueueEffect(
   });
 }
 
-/** Reads one active membership in the current tenant, or null after release. Its saved name and UTC instant remain unchanged by Queue configuration edits. */
 function readQueueMembershipEffect(
   client: EffectTransactionClient,
   postId: string,
@@ -100,7 +96,6 @@ function readQueueMembershipEffect(
     );
 }
 
-/** Reserves the earliest strictly future unoccupied instant under the existing organization/Post locks. Each slot advances only past occupied, elapsed or nonexistent occurrences; the indexed unique constraint arbitrates any missed race. PostgreSQL chooses the post-transition offset on overlaps; round-trip validation skips gaps. */
 export function reserveQueueSlotEffect(
   client: EffectTransactionClient,
   organizationId: string,
@@ -167,7 +162,6 @@ export function reserveQueueSlotEffect(
   });
 }
 
-/** Rejects manual per-Post/per-Channel rescheduling while a Queue owns its instant; explicit removal is the only cutover. */
 export function requireNoQueueMembershipEffect(client: EffectTransactionClient, postId: string) {
   return Effect.gen(function* () {
     const membership = yield* readQueueMembershipEffect(client, postId);
@@ -182,7 +176,6 @@ export function requireNoQueueMembershipEffect(client: EffectTransactionClient, 
   });
 }
 
-/** Releases a reservation after safely cancelling/deleting its pending work; no later reservation is moved. */
 export function releaseQueueMembershipEffect(client: EffectTransactionClient, postId: string) {
   return client
     .query(

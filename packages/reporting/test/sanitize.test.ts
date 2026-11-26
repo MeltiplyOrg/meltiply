@@ -9,14 +9,6 @@ import {
   usageProperties,
 } from "../src/sanitize";
 
-/**
- * Sanitization cases.
- *
- * These prove the allowlist itself, using deliberate sensitive canaries. They are
- * supplementary: the integration suites assert the same canaries never reach the
- * bytes a real capture receiver actually receives.
- */
-
 const context = { appVersion: "1.0.0-target.0", deploymentCategory: "selfhosted" } as const;
 
 const usageInput = {
@@ -82,7 +74,6 @@ describe("usage payload", () => {
     );
 
     const gauge = (properties.engagement as Record<string, Record<string, number>>).threads!;
-    // `reactions: 0` is a real measured zero and survives; unsupported counters vanish.
     expect(gauge.reactions).toBe(0);
     expect(gauge.views).toBeUndefined();
     expect(gauge.shares).toBeUndefined();
@@ -112,7 +103,6 @@ describe("usage payload", () => {
       measured: 1,
       missing: 4,
       truncated: true,
-      // Canonical order, so a dashboard never sees producer ordering.
       unsupported_metrics: ["views", "reactions"],
     });
     expect(payloadViolation(properties)).toBeUndefined();
@@ -132,7 +122,6 @@ describe("usage payload", () => {
       context,
     );
 
-    // An unrelated value cannot become a coverage claim.
     expect(properties.engagement_coverage).toEqual({ measured: 1, missing: 0 });
     expect(payloadViolation(properties)).toBeUndefined();
   });
@@ -191,12 +180,9 @@ describe("diagnostic payload", () => {
     });
     const stacktrace = list[0]!.stacktrace as { frames: Record<string, unknown>[]; type: string };
     expect(stacktrace.type).toBe("raw");
-    // Only the application frame survives; node internals and eval frames are cut.
     expect(stacktrace.frames).toEqual([
       {
         filename: "workers/automation/source",
-        // The stack symbol is free-form text a caller could have chosen, so it is
-        // never forwarded; grouping keys on the release location instead.
         function: "<anonymous>",
         in_app: true,
         lang: "javascript",
@@ -375,8 +361,6 @@ describe("deployed release frames", () => {
       "    at render (https://installation.example/assets/index-DiwrgTda.js:4:12)",
     );
 
-    // The deployed browser build refers to the asset, not to repository source:
-    // an origin-only allowlist would drop every real frontend frame.
     expect(frame).toEqual({
       filename: "assets/DiwrgTda.js",
       function: "<anonymous>",
@@ -444,7 +428,6 @@ describe("hostile stack frame boundaries", () => {
   it("accepts the V8 frame shapes the sanitizer supports", () => {
     const frames = sanitizedFrames(
       [
-        // A named frame, an async frame, and a bare frame all carry a location.
         "    at publishDistribution (workers/automation/src/distribution.ts:42:7)",
         "    at async publishDistribution (workers/automation/src/distribution.ts:42:7)",
         "    at workers/automation/src/distribution.ts:42:7",
@@ -463,8 +446,6 @@ describe("hostile stack frame boundaries", () => {
     expect(
       sanitizedFrames(
         [
-          // No numeric suffix, a name-only body, a whitespace body, and an
-          // eval wrapper whose tail is not a location all yield nothing.
           "    at publishDistribution (workers/automation/src/distribution.ts)",
           "    at publishDistribution",
           "    at    ",
@@ -476,8 +457,6 @@ describe("hostile stack frame boundaries", () => {
   });
 
   it("keeps an unusable line number off a frame whose location is valid", () => {
-    // The location is still provable release output, so the frame survives and
-    // only the line number is dropped rather than the whole frame.
     const [frame] = sanitizedFrames(
       "    at boot (workers/automation/src/distribution.ts:99999999999999999999:1)",
     );
@@ -494,8 +473,6 @@ describe("hostile stack frame boundaries", () => {
       ].join("\n"),
     );
 
-    // The crafted name is discarded rather than forwarded, and a dependency
-    // bundle is not this application's release output.
     const serialized = JSON.stringify(frames);
     expect(serialized).not.toContain("customer-name");
     expect(serialized).not.toContain("cdn.provider.test");
@@ -520,7 +497,6 @@ describe("exception type and frame value allowlist", () => {
     );
 
     const list = properties.$exception_list as Record<string, unknown>[];
-    // A plain identifier is not evidence that it names an exception class.
     expect(list[0]!.type).toBe("Error");
     expect(JSON.stringify(properties)).not.toContain("SensitiveCustomerName");
     expect(payloadViolation(properties)).toBeUndefined();
@@ -580,8 +556,6 @@ describe("exception type and frame value allowlist", () => {
         $exception_list: [
           {
             stacktrace: {
-              // Not in the emitted vocabulary and not URL-shaped, so the location
-              // allowlist itself is what refuses it.
               frames: [{ filename: "packages/SensitiveCustomerName.ts", function: "<anonymous>" }],
               type: "raw",
             },

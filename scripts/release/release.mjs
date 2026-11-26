@@ -27,16 +27,6 @@ import {
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-/**
- * Reads and bounds an unencrypted secret bundle from a non-interactive stdin stream.
- *
- * Enforces that secrets are never entered interactively via a TTY, bounds total incoming
- * stream size to 64KB (65536 bytes) to prevent denial-of-service, and rejects empty input.
- *
- * @param {NodeJS.ReadableStream & { isTTY?: boolean }} stream - Standard input stream
- * @returns {Promise<string>} UTF-8 decoded secret bundle string
- * @throws {TypeError} If stream is interactive TTY, empty, or exceeds 64KB
- */
 async function readSecretStdin(stream) {
   if (stream.isTTY) throw new TypeError("release secrets must be supplied through stdin");
   const chunks = [];
@@ -50,36 +40,11 @@ async function readSecretStdin(stream) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-/**
- * Maps Worker service and release mode to the expected prerequisite IaC phase.
- *
- * During update releases, all workers require "domains-paused" state.
- * During bootstrap releases, API and frontend require "consumers-paused",
- * while foundation workers (state, automation) require "foundation".
- *
- * @param {object} spec - Release specification with deployment_mode
- * @param {string} worker - Target release Worker service
- * @returns {string} Expected IaC state phase name
- */
 function workerIacPhase(spec, worker) {
   if (spec.deployment_mode === "update") return "domains-paused";
   return worker === "api" || worker === "frontend" ? "consumers-paused" : "foundation";
 }
 
-/**
- * Gates release mutations on checkout identity, explicit intent, and operator review.
- *
- * Review records bind the phase, commit, plan digest, and release session.
- * They record human intent, not authenticated identities or signatures; local
- * filesystem permissions and deployment credentials remain the trust boundary.
- *
- * @param {object} options - Parsed release CLI options
- * @param {object} dependencies - Injected CLI execution dependencies
- * @param {object} spec - Release specification
- * @param {string} expectedApprovalName - Required approval metadata scope name
- * @returns {Promise<object>} Validated approval records object
- * @throws {TypeError|Error} If approvals are missing, invalid, or mutation is not confirmed
- */
 async function authorize(options, dependencies, spec, expectedApprovalName) {
   return authorizeMutation({
     apply: options.apply,
@@ -93,26 +58,6 @@ async function authorize(options, dependencies, spec, expectedApprovalName) {
   });
 }
 
-/**
- * Primary command-line entrypoint for orchestrating the Meltiply release lifecycle.
- *
- * Parses release options, enforces IaC state prerequisites, validates human signoffs,
- * and routes execution to release subcommands (preflight, render, restore-point,
- * migrate, cron, deploy, secrets, smoke, manifest).
- *
- * @param {Array<string>} argv - Command-line arguments passed to release CLI
- * @param {object} [dependencies={}] - Injectable runtime dependencies for testing
- * @param {Record<string, string | undefined>} [dependencies.environment] - Environment variables
- * @param {Function} [dependencies.runCommand] - Subprocess runner implementation
- * @param {string} [dependencies.repoRoot] - Repository root directory path
- * @param {typeof fetch} [dependencies.fetchImpl] - HTTP client implementation
- * @param {() => number} [dependencies.now] - Current time provider
- * @param {Function} [dependencies.clientFactory] - PostgreSQL client factory
- * @param {string} [dependencies.stdin] - Preloaded stdin secrets string
- * @param {NodeJS.ReadableStream} [dependencies.stdinStream] - Stdin stream provider
- * @returns {Promise<object>} JSON-serializable execution result payload
- * @throws {TypeError|Error} On option validation failures, policy violations, or command errors
- */
 export async function runReleaseCli(argv, dependencies = {}) {
   const environment = dependencies.environment ?? process.env;
   const options = parseReleaseArguments(argv, environment);
@@ -311,9 +256,6 @@ export async function runReleaseCli(argv, dependencies = {}) {
   }
 
   if (options.command === "smoke") {
-    // Smoke writes signed-off-adjacent evidence records into the release
-    // directory, so the same checkout pin enforced for mutations applies:
-    // the probing code must be the reviewed release commit.
     if (!new Set(["version", "live"]).has(options.phase)) {
       throw new TypeError("smoke --phase must be version or live");
     }
@@ -323,8 +265,6 @@ export async function runReleaseCli(argv, dependencies = {}) {
       spec,
     });
     if (options.phase === "version") {
-      // Runs after candidate + secrets but before domain attachment:
-      // bootstrap expects consumers-paused, update expects domains-paused.
       assertIacState(iac, workerIacPhase(spec, "api"), spec);
       return smokeVersionCandidate({
         environment,
@@ -334,8 +274,6 @@ export async function runReleaseCli(argv, dependencies = {}) {
         spec,
       });
     }
-    // Live smoke always runs after domain attachment while Queue delivery is
-    // still paused, regardless of deployment mode.
     assertIacState(iac, "domains-paused", spec);
     return smokeLiveApi({
       environment,
@@ -348,9 +286,6 @@ export async function runReleaseCli(argv, dependencies = {}) {
   }
 
   if (options.command === "manifest") {
-    // Manifest publication is the terminal step: the working tree must be the
-    // reviewed release commit and the final outputs must prove the fully
-    // active state (Cron resumed via cron-activate).
     await verifyReleaseCheckout({
       repoRoot: checkoutRoot,
       runCommand: commandRunner,

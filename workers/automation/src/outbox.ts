@@ -1,6 +1,7 @@
 import { Cause, Effect, Exit } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
 import type { DatabaseError, Platform } from "@meltiply/domain";
+import { errorDiagnostic, log } from "@meltiply/observability";
 
 import { maximumDelayedDeliverySeconds } from "@meltiply/domain";
 import { withSystemTransactionEffect } from "./database";
@@ -13,6 +14,7 @@ import {
 import type { AutomationEnv } from "./env";
 import { safeErrorMessage } from "./errors";
 import type { OutboxMessage } from "./messages";
+import { nextDelaySeconds, QUEUE_RETRY_POLICY } from "./retry-policy";
 
 interface OutboxRow extends Record<string, unknown> {
   aggregate_id: string;
@@ -29,11 +31,6 @@ interface OutboxRow extends Record<string, unknown> {
 interface PendingOutboxMessage {
   message: OutboxMessage;
   row: OutboxRow;
-  /**
-   * Delivery delay for one Queue message, or `null` to send without delay.
-   * Derived from the durable distribution row at relay time so a command
-   * recorded earlier still honors the row's current schedule.
-   */
   delaySeconds: number | null;
 }
 
@@ -52,23 +49,30 @@ export interface OutboxRelayResult {
 const maximumAttempts = 10;
 const leaseSeconds = 120;
 
-/**
- * Claims a batch of due outbox events using `FOR UPDATE SKIP LOCKED` and transitions them to 'leased'.
- *
- * Joins against the distributions table for distribution events to resolve platform and schedule data,
- * sets a 120-second lease expiration, and increments attempt counts.
- *
- * @param client - Transactional database client.
- * @param batchSize - Maximum number of outbox records to claim.
- * @returns Array of claimed outbox event rows.
- */
 function claimOutbox(
   client: EffectTransactionClient,
   batchSize: number,
 ): Effect.Effect<OutboxRow[], DatabaseError> {
   return Effect.map(
     client.query<OutboxRow>(
-      `WITH candidates AS (
+      `WITH exhausted AS (
+         UPDATE outbox_events
+         SET state = 'dead',
+             available_at = NULL,
+             lease_expires_at = NULL,
+             last_error = 'The relay lease expired on the final delivery attempt.',
+             updated_at = now()
+         WHERE id IN (
+           SELECT id
+           FROM outbox_events
+           WHERE state = 'leased'
+             AND attempt_count >= $2
+             AND lease_expires_at <= now()
+           ORDER BY lease_expires_at, id
+           LIMIT $1
+           FOR UPDATE SKIP LOCKED
+         )
+       ), candidates AS (
          SELECT event.id,
                 CASE WHEN event.topic LIKE 'distribution.%'
                   THEN distribution.platform
@@ -113,18 +117,6 @@ function claimOutbox(
   );
 }
 
-/**
- * Extracts and bounds topic-specific payload attributes from an outbox row.
- *
- * Enforces strict key allowlists for asset, channel, comment, and distribution
- * topics to prevent leaking unvalidated data into queue messages. The channel
- * revocation payload carries the still-encrypted access token: the platform
- * account row is already deleted when the consumer runs, so the ciphertext
- * must travel with the command and is decrypted only at the provider boundary.
- *
- * @param row - Outbox database record.
- * @returns Cleaned and typed payload dictionary.
- */
 function safePayload(row: OutboxRow): Record<string, unknown> {
   switch (row.topic) {
     case "asset.upload.created":
@@ -187,22 +179,6 @@ function safePayload(row: OutboxRow): Record<string, unknown> {
   }
 }
 
-/**
- * Resolves the target Cloudflare Queue binding for an outbox event as an Effect.
- *
- * Asset events still route to ASSET_PROCESSING_QUEUE, channel revocations to
- * CHANNEL_REVOCATION_QUEUE, comment replies to REPLIES_QUEUE, and telemetry to
- * no queue; distribution events resolve through the PublishQueueResolver
- * service so per-platform routing is injectable at the job boundary.
- * Resolution failures stay on the error channel so the relay marks only the
- * individual row failed instead of aborting the batch.
- *
- * @param env - Automation worker environment bindings.
- * @param row - Outbox row being routed.
- * @returns Effect producing the target Queue, or null for telemetry/unrouted
- *   topics; fails with Error when a binding is missing, the distribution row
- *   carries no platform, or the topic is unsupported.
- */
 function queueFor(
   env: AutomationEnv,
   row: OutboxRow,
@@ -246,15 +222,6 @@ function queueFor(
   });
 }
 
-/**
- * Transitions successfully relayed outbox events to the terminal 'published' state.
- *
- * Clears active leases, records publication timestamps, and nullifies error fields.
- *
- * @param env - Automation worker environment bindings.
- * @param eventIds - Array of outbox event UUIDs to mark published.
- * @returns Effect completing once the events are marked published.
- */
 function markPublished(
   env: AutomationEnv,
   eventIds: readonly string[],
@@ -274,23 +241,16 @@ function markPublished(
   ).pipe(Effect.asVoid);
 }
 
-/**
- * Updates failed outbox events with exponential backoff delays or transitions them to 'dead'.
- *
- * If attempt counts reach the maximum threshold (10), transitions events to 'dead' for dead-lettering.
- * Otherwise computes exponential backoff delays and sets state back to 'failed'.
- *
- * @param env - Automation worker environment bindings.
- * @param messages - Array of failed outbox messages and their error causes.
- * @returns Effect producing the number of events transitioned to 'dead'.
- */
 function markFailed(
   env: AutomationEnv,
   messages: readonly FailedOutboxMessage[],
 ): Effect.Effect<number, DatabaseError> {
   if (messages.length === 0) return Effect.succeed(0);
   const eventIds = messages.map(({ row }) => row.id);
-  const delays = messages.map(({ row }) => Math.min(3_600, 2 ** row.attempt_count * 15));
+  const delays = messages.map(
+    ({ row }) =>
+      nextDelaySeconds(QUEUE_RETRY_POLICY, row.attempt_count) ?? QUEUE_RETRY_POLICY.maxSeconds,
+  );
   const errors = messages.map(({ cause }) => safeErrorMessage(cause, "unknown relay error"));
   return withSystemTransactionEffect(env, (client) =>
     Effect.map(
@@ -318,12 +278,6 @@ function markFailed(
   );
 }
 
-/**
- * Assembles an OutboxMessage contract structure from a database outbox row.
- *
- * @param row - Outbox event record.
- * @returns Formatted outbox message suitable for Cloudflare Queue publication.
- */
 function messageFor(row: OutboxRow): OutboxMessage {
   return {
     attempt: row.attempt_count,
@@ -338,28 +292,11 @@ function messageFor(row: OutboxRow): OutboxMessage {
   };
 }
 
-/**
- * Bounds a delivery delay to a whole, non-negative, finite number of seconds.
- *
- * Derived from durable distribution schedules or delayed reply reconciliation payloads.
- * An unparseable timestamp or a payload holding NaN/Infinity returns null for immediate delivery.
- *
- * @param seconds - Raw calculated delivery delay in seconds.
- * @returns Non-negative integer delay, or null for immediate dispatch.
- */
 function boundedDelay(seconds: number): number | null {
   if (!Number.isFinite(seconds)) return null;
   return Math.max(0, Math.ceil(seconds));
 }
 
-/**
- * Calculates delivery delay in seconds for scheduled publications or delayed comment reply reconciliations.
- *
- * Inspects scheduled publication times or explicit delay seconds in the payload against current time.
- *
- * @param row - Outbox event record.
- * @returns Calculated delay in seconds, or null for immediate delivery.
- */
 function publishDelaySeconds(row: OutboxRow): number | null {
   const dueAt =
     row.topic === "distribution.publish.requested"
@@ -379,18 +316,6 @@ interface DispatchOutcome {
   published: PendingOutboxMessage[];
 }
 
-/**
- * Dispatches a batch of pending outbox messages through the QueuePublisher service.
- *
- * Sends one sendBatch of JSON bodies (the binding default) with optional
- * per-message delivery delays. A rejected batch stays on the Effect error
- * channel so the caller can mark the whole group failed.
- *
- * @param queue - Target Cloudflare Queue binding.
- * @param messages - Array of pending outbox messages to publish.
- * @returns Effect resolving to the accepted messages; a sendBatch rejection
- *   fails the Effect with the service's Error.
- */
 function publishQueueMessages(
   queue: Queue<unknown>,
   messages: readonly PendingOutboxMessage[],
@@ -408,23 +333,6 @@ function publishQueueMessages(
   });
 }
 
-/**
- * Claims and relays pending outbox events to their respective Cloudflare Queues.
- *
- * Effect program: claims a leased batch in one transaction, routes each row
- * (distribution topics through the PublishQueueResolver service, other topics
- * through env bindings), groups by target Queue, and dispatches batches through
- * the QueuePublisher service before settling outbox states (published, failed,
- * dead). Per-row routing and per-Queue send failures mark only the affected
- * rows failed; the batch-claim and markFailed transactions abort the whole
- * program. An out-of-range batchSize fails the program instead of throwing.
- *
- * @param env - Automation worker environment bindings.
- * @param batchSize - Number of outbox events to claim per relay pass (1-100, default 50).
- * @returns Effect resolving to claimed/published/failed/dead counts; fails with
- *   a classified AutomationJobError (a RangeError surfaced as RetryableJobError
- *   when batchSize is invalid, or a classified persistence failure).
- */
 export function relayOutbox(
   env: AutomationEnv,
   batchSize = 50,
@@ -450,8 +358,6 @@ export function relayOutbox(
     const failed: FailedOutboxMessage[] = [];
 
     for (const row of rows) {
-      // Exit captures routing defects as well as failures, mirroring the
-      // previous try/catch: any routing exception marks only this row failed.
       const routed = yield* Effect.exit(queueFor(env, row));
       if (Exit.isFailure(routed)) {
         failed.push({ cause: Cause.squash(routed.cause), row });
@@ -466,11 +372,6 @@ export function relayOutbox(
         }
         const delaySeconds = publishDelaySeconds(row);
         if (delaySeconds !== null && delaySeconds > maximumDelayedDeliverySeconds) {
-          // The durable schedule now sits beyond the delivery horizon — for
-          // example after a reschedule moved it later. The message is only a
-          // trigger, so delivering nothing is safe: finalize the stale command
-          // without a send and let the Due work claim pick the row up when it
-          // comes due.
           publishedWithoutQueue.push({ ...pending, delaySeconds });
           continue;
         }
@@ -487,9 +388,6 @@ export function relayOutbox(
       [...queueGroups.entries()].map(([queue, messages]) =>
         Effect.catch(
           publishQueueMessages(queue, messages),
-          // Queue batch acceptance is all-or-nothing from the relay's point of
-          // view. Stable event IDs make a later retry safe if the provider
-          // accepted a request before returning an ambiguous failure.
           (cause): Effect.Effect<DispatchOutcome> =>
             Effect.succeed({
               failed: messages.map(({ row }) => ({ cause, row })),
@@ -513,11 +411,23 @@ export function relayOutbox(
         ).pipe(Effect.mapError(classifyJobError)),
       );
       if (Exit.isFailure(marked)) {
-        failed.push(
-          ...published.map(({ row }) => ({
-            cause: Cause.squash(marked.cause),
-            row,
-          })),
+        log(
+          "error",
+          {
+            environment: env.ENVIRONMENT,
+            service: "automation",
+            trace_id: "outbox-relay",
+            version: env.VERSION,
+          },
+          {
+            ...errorDiagnostic(Cause.squash(marked.cause)),
+            error_code: "outbox_settlement_failed",
+            event: "outbox_settlement_failed",
+            job: "outbox_relay",
+            outcome: published.length,
+            retry_class: "queue_backoff",
+            unsettled_events: published.length,
+          },
         );
       } else {
         result.published = published.length;

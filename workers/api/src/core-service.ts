@@ -3,9 +3,10 @@ import type { components } from "@meltiply/contracts/schema";
 import type { SessionClaims } from "@meltiply/auth";
 import type { EffectTransactionClient } from "@meltiply/database";
 import {
-  AccessDenied,
+  ActiveOrganizationRequiredError,
   type DatabaseError,
   isoDateTime,
+  PLATFORM_IDS,
   rateLimitBudgetFreshSeconds,
 } from "@meltiply/domain";
 import { ProviderRegistry } from "@meltiply/providers";
@@ -22,18 +23,14 @@ import {
   withTenantTransactionEffect as defaultTenantTransaction,
 } from "./database";
 import type { ApiWorkerEnv } from "./env";
-import {
-  completeIdempotencyEffect,
-  hashIdempotencyRequestEffect,
-  reserveIdempotencyEffect,
-} from "./idempotency";
+import { hashIdempotencyRequestEffect } from "./idempotency";
+import { withIdempotentMutation } from "./idempotent-mutation";
 import { lockOrganizationEffect } from "./organization-lock";
 import { createDistributionMethods } from "./distribution-service";
 
 type Schemas = components["schemas"];
 type AnalyticsSnapshot = Schemas["AnalyticsSnapshot"];
 type AnalyticsSummary = Schemas["AnalyticsSummary"];
-/** Effective filters accepted by the public analytics summary operation. */
 type AnalyticsSummaryFilters = Parameters<CoreApiService["summaryAnalytics"]>[2];
 type AnalyticsSummaryTransactionResult =
   | { kind: "ready"; summary: AnalyticsSummary }
@@ -65,7 +62,6 @@ interface PlatformAccountRow extends Record<string, unknown> {
   username?: string | null;
 }
 
-/** A calendar row projects one pending or completed publication of one Post. */
 interface CalendarRow extends Record<string, unknown> {
   brand_profile_id: string;
   id: string;
@@ -109,7 +105,7 @@ interface AnalyticsPostRow extends Record<string, unknown> {
 
 interface AnalyticsSeriesRow extends Record<string, unknown> {
   comments: number | string;
-  date: Date | string;
+  date: string;
   impressions: number | string;
   last_synced_at: Date | string | null;
   likes: number | string;
@@ -230,44 +226,16 @@ interface ReplyTargetRow extends InboxRow {
   account_token_expires_at: Date | string | null;
 }
 
-const platforms: readonly Platform[] = ["tiktok", "youtube", "instagram", "facebook", "threads"];
+const platforms: readonly Platform[] = PLATFORM_IDS;
 
-/**
- * Converts a nullable database numeric or string column value into a JavaScript number.
- *
- * Defaults null or undefined input to 0, ensuring consistent arithmetic and serialization.
- *
- * @param value - Candidate numeric value, string representation, or null.
- * @returns Parsed number or 0 if null.
- */
 function number(value: number | string | null): number {
   return value === null ? 0 : Number(value);
 }
 
-/**
- * Formats a nullable database timestamp into an ISO-8601 string representation.
- *
- * Preserves null values while standardizing valid Dates or date strings via `isoDateTime`.
- *
- * @param value - Database date, ISO string, or null.
- * @returns ISO-8601 string or `null` if the input is null.
- */
 function optionalDateTime(value: Date | string | null): string | null {
   return value === null ? null : isoDateTime(value);
 }
 
-/** Formats a database date as the contract's date-only string. */
-function dateOnly(value: Date | string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? String(value) : date.toISOString().slice(0, 10);
-}
-
-/**
- * Classifies one Distribution's frozen attachment set as a content format.
- * Empty attachments mean text-only, multiple attachments mean carousel, and a
- * single video asset means video; every other single attachment is an image.
- * The alias is a compile-time constant owned by this module, never user input.
- */
 function analyticsFormatExpression(alias: string): string {
   return `CASE
     WHEN COALESCE(array_length(${alias}.attachment_ids, 1), 0) = 0 THEN 'text'
@@ -288,14 +256,6 @@ const ANALYTICS_POST_SORT_COLUMNS = {
   views: "pp.views",
 } as const satisfies Record<Schemas["AnalyticsMetric"], string>;
 
-/**
- * Builds an immutable lookup map from social platform identifier to capability descriptor.
- *
- * Deep clones capability objects to prevent mutation leaks across callers.
- *
- * @param capabilities - Readonly collection of platform capability definitions.
- * @returns Readonly map keyed by platform.
- */
 function capabilityMap(
   capabilities: readonly PlatformCapability[],
 ): ReadonlyMap<Platform, PlatformCapability> {
@@ -304,41 +264,16 @@ function capabilityMap(
   );
 }
 
-/** Freshly authorized tenant scope and Brand Profile lifecycle identity. */
 interface AnalyticsAccess {
   organizationId: string;
   role: string | null;
   visibility: string;
 }
 
-/**
- * Establishes current tenant authorization and Brand Profile visibility inside
- * the caller's authenticated transaction with one statement.
- *
- * `auth_active_org_id()` proves the claimed Workspace still has an active
- * membership, so suspension, membership removal, and RLS apply even before a
- * cache lookup. The same statement reads the persisted ids and lifecycle
- * timestamps available under those claims: an explicit selector includes its
- * row (including a deleted row an admin may see) while the All Brand Profiles
- * scope includes only active rows. Persisted `updated_at` values act as the
- * lifecycle generation, so a delete or restore performed by another API
- * instance changes the identity instead of leaving a warm cache authoritative.
- * PostgreSQL hashes that canonical persisted identity before returning it, so
- * retained keys stay fixed-size even when a Workspace has many Brand Profiles.
- * Keeping authorization and visibility in one aggregate read also preserves
- * the existing analytics statement budget: a cache hit issues no analytics
- * aggregation and a cold read issues exactly one more statement.
- *
- * @param client - Tenant-authenticated transaction client.
- * @param brandProfileId - Optional explicit Brand Profile selector.
- * @returns Current organization, database membership role, and canonical
- *   visibility identity.
- * @throws {AccessDenied} When the caller has no active membership in the claimed Workspace.
- */
 function analyticsAccessEffect(
   client: EffectTransactionClient,
   brandProfileId: string | undefined,
-): Effect.Effect<AnalyticsAccess, DatabaseError | AccessDenied> {
+): Effect.Effect<AnalyticsAccess, DatabaseError | ActiveOrganizationRequiredError> {
   return Effect.gen(function* () {
     const result = yield* client.query<{
       organization_id: string | null;
@@ -372,7 +307,9 @@ function analyticsAccessEffect(
     const row = result.rows[0];
     if (!row || !row.organization_id) {
       return yield* Effect.fail(
-        new AccessDenied("The authenticated identity is not an active organization member."),
+        new ActiveOrganizationRequiredError({
+          message: "The authenticated identity is not an active organization member.",
+        }),
       );
     }
     return {
@@ -383,17 +320,6 @@ function analyticsAccessEffect(
   });
 }
 
-/**
- * Builds the capability configuration component of the analytics cache scope.
- *
- * The summary response depends on which Platforms declare analytics support, so
- * this sorted signature identifies the effective configuration. Using only the
- * behavior-relevant flag keeps the namespace small while a changed flag selects
- * a fresh cache rather than retaining a namespace per full capability object.
- *
- * @param capabilities - Effective capability map for this service instance.
- * @returns Deterministically ordered analytics capability signature.
- */
 function analyticsCapabilityNamespace(
   capabilities: ReadonlyMap<Platform, PlatformCapability>,
 ): string {
@@ -403,18 +329,6 @@ function analyticsCapabilityNamespace(
     .join(",");
 }
 
-/**
- * Builds the deployment and authoritative data-source component of the cache scope.
- *
- * `ENVIRONMENT` and `VERSION` separate deployment configurations. The parsed
- * PostgreSQL host and database separate data sources without retaining
- * credentials or query parameters from the connection string. An unparseable
- * binding falls back to a stable checksum of the string, so changing bindings
- * still cannot reuse an earlier namespace's results.
- *
- * @param env - Worker environment bindings.
- * @returns Stable, non-secret deployment/data-source namespace component.
- */
 function analyticsDeploymentNamespace(env: ApiWorkerEnv): string {
   const connectionString = env.DB_AUTHENTICATED?.connectionString ?? "";
   let dataSource = "unbound";
@@ -429,17 +343,6 @@ function analyticsDeploymentNamespace(env: ApiWorkerEnv): string {
   return `${env.ENVIRONMENT}|${env.VERSION}|${dataSource}`;
 }
 
-/**
- * Computes an unsigned 32-bit FNV-1a checksum for a cache namespace component.
- *
- * Only distinguishes unparseable connection strings without retaining their
- * contents. Tenant scope remains a separate key component, so a checksum
- * collision can only merge cache entries within one deployment configuration;
- * every request still re-authorizes and re-reads visibility before a hit.
- *
- * @param value - Namespace input string.
- * @returns Eight-character lowercase hexadecimal checksum.
- */
 function stableStringChecksum(value: string): string {
   let hash = 0x811c9dc5;
   for (let index = 0; index < value.length; index += 1) {
@@ -449,23 +352,6 @@ function stableStringChecksum(value: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-/**
- * Builds a canonical key covering every effective analytics cache dimension.
- *
- * The key includes the deployment/data-source and capability namespace, the
- * freshly authorized Workspace, subject and database role, the explicit Brand
- * Profile selector (or its absence for All Brand Profiles), persisted Brand
- * Profile visibility generations, every public analytics filter, and exact
- * start/end instants. UUID casing normalizes because PostgreSQL treats it
- * equivalently; date instants are not rounded and inclusive bounds remain
- * exactly those the caller supplied.
- *
- * @param access - Fresh authorization and visibility identity for this request.
- * @param filters - Effective analytics filters.
- * @param namespace - Deployment/data-source and capability configuration scope.
- * @param session - Authenticated session claims.
- * @returns Deterministic serialized cache key.
- */
 function analyticsSummaryCacheKey(
   access: AnalyticsAccess,
   filters: AnalyticsSummaryFilters,
@@ -488,16 +374,6 @@ function analyticsSummaryCacheKey(
   ]);
 }
 
-/**
- * Evaluates the effective connection status of a platform account based on tokens and revocations.
- *
- * Considers explicit revocation timestamps, token expiration against current time,
- * and flags accounts expiring within a 7-day grace threshold as `'expiring'`.
- *
- * @param row - Partial platform account record containing status, revocation, and token expiry.
- * @param now - Reference epoch millisecond timestamp for expiry comparisons (defaults to current time).
- * @returns Resolved connection status (`"connected"`, `"expiring"`, `"expired"`, or `"revoked"`).
- */
 function accountStatus(
   row: Pick<PlatformAccountRow, "connection_status" | "revoked_at" | "token_expires_at">,
   now = Date.now(),
@@ -510,16 +386,6 @@ function accountStatus(
   return expiresAt - now <= 7 * 24 * 60 * 60 * 1_000 ? "expiring" : "connected";
 }
 
-/**
- * Transforms a database platform account row into an API `PlatformAccount` entity.
- *
- * Attaches cloned platform capabilities, computes dynamic connection status,
- * and formats rate-limit budget information if available.
- *
- * @param row - Raw database row from `platform_accounts` joined with `rate_limit_budgets`.
- * @param capabilities - Platform capabilities lookup map.
- * @returns Formatted API `PlatformAccount` object.
- */
 function mapPlatformAccount(
   row: PlatformAccountRow,
   capabilities: ReadonlyMap<Platform, PlatformCapability>,
@@ -552,14 +418,6 @@ function mapPlatformAccount(
   };
 }
 
-/**
- * Maps an analytics snapshot database record to the API `AnalyticsSnapshot` schema.
- *
- * Coerces numeric database fields to numbers and formats timestamps to ISO-8601.
- *
- * @param row - Database row from `analytics_snapshots`.
- * @returns Formatted `AnalyticsSnapshot` contract object.
- */
 export function mapSnapshot(row: AnalyticsSnapshotRow): AnalyticsSnapshot {
   return {
     comments: number(row.comments),
@@ -576,14 +434,6 @@ export function mapSnapshot(row: AnalyticsSnapshotRow): AnalyticsSnapshot {
   };
 }
 
-/**
- * Normalizes an internal database reply status string into an API contract `ReplyStatus`.
- *
- * Maps `'in_progress'` to `'processing'`, `'succeeded'` to `'replied'`, and defaults to `'not_replied'`.
- *
- * @param value - Internal database reply status string.
- * @returns Contract `ReplyStatus` enum string.
- */
 function contractReplyStatus(value: string): ReplyStatus {
   switch (value) {
     case "queued":
@@ -601,14 +451,6 @@ function contractReplyStatus(value: string): ReplyStatus {
   }
 }
 
-/**
- * Translates an API contract `ReplyStatus` filter into its corresponding database column value.
- *
- * Converts `'not_replied'` to `'none'`, `'processing'` to `'in_progress'`, and `'replied'` to `'succeeded'`.
- *
- * @param value - API reply status filter or undefined.
- * @returns Corresponding database reply status string, or `null` if unmapped/omitted.
- */
 function databaseReplyStatus(value: ReplyStatus | undefined): string | null {
   switch (value) {
     case "not_replied":
@@ -628,15 +470,6 @@ function databaseReplyStatus(value: ReplyStatus | undefined): string | null {
   }
 }
 
-/**
- * Converts an inbox comment database record to the API `InboxComment` contract schema.
- *
- * Normalizes reply status, constructs a structured failure object if `reply_error` is present,
- * and formats timestamps to ISO strings.
- *
- * @param row - Raw database row from `comments` joined with `distributions`.
- * @returns Formatted `InboxComment` object.
- */
 function mapInboxComment(row: InboxRow): InboxComment {
   const attemptedAt = row.reply_attempted_at ?? row.updated_at;
   return {
@@ -665,24 +498,6 @@ function mapInboxComment(row: InboxRow): InboxComment {
   };
 }
 
-/**
- * Computes the canonical analytics summary inside an established transaction.
- *
- * Cohorts on `published_at` (never the calendar's scheduled `event_at`) and
- * derives coverage from the Platforms actually published in scope. One bounded
- * CTE selects the window's published distributions, then a LATERAL lookup reads
- * the newest snapshot of each distribution as of the range end. Keeping the
- * lookup correlated per candidate prevents the planner from materializing a
- * latest set it then re-executes once per candidate row when row estimates are
- * small; the index on `(distribution_id, snapshot_at DESC)` serves each probe.
- * The result is derived only from persisted rows, so uncached and cold reads
- * share this exact path; the caller may retain the returned successful value.
- *
- * @param client - Tenant-authenticated transaction client.
- * @param capabilities - Effective capability map deciding unsupported coverage.
- * @param filters - Analytics filters including dates, platform, and optional Brand Profile scope.
- * @returns Effect resolving to the canonical summary response.
- */
 function computeAnalyticsSummaryEffect(
   client: EffectTransactionClient,
   capabilities: ReadonlyMap<Platform, PlatformCapability>,
@@ -790,16 +605,6 @@ function computeAnalyticsSummaryEffect(
   });
 }
 
-/**
- * Factory creating the unified core API service instance for Meltiply.
- *
- * Combines distribution management, social platform account management,
- * content calendar queries, cross-platform analytics aggregation, and inbox comments.
- *
- * @param configuredCapabilities - Optional platform capability list (defaults to `ProviderRegistry`).
- * @param options - Optional clock and factory-owned tenant transaction overrides. Defaults use the real clock and Hyperdrive transaction; build-time seed compilation supplies an already scoped embedded SQL client without changing read projections.
- * @returns Configured `CoreApiService` instance implementing all core business operations via Effect.
- */
 export function createCoreApiService(
   configuredCapabilities = new ProviderRegistry().capabilities(),
   options: {
@@ -816,47 +621,16 @@ export function createCoreApiService(
 
   return {
     ...distributionMethods,
-    /**
-     * Lists supported social media platforms and their respective feature capabilities.
-     *
-     * Returns deep clones of cached capabilities (publishing, analytics, comments, video limits)
-     * for TikTok, YouTube, Instagram, Facebook, and Threads.
-     *
-     * @returns Array of cloned `PlatformCapability` objects.
-     */
     platformCapabilities() {
       return platforms.map((platform) => structuredClone(capabilities.get(platform)!));
     },
 
-    /**
-     * Resolves the active tenant organization ID for the authenticated session via Effect.
-     *
-     * Queries `public.auth_active_org_id()` within a tenant transaction.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @returns Effect resolving to unique organization ID string.
-     * @throws {AccessDenied} If the user lacks active organization membership.
-     */
     activeOrganization(env, session) {
       return withTenantTransactionEffect(env, session, (client) =>
         activeOrganizationIdEffect(client),
       );
     },
 
-    /**
-     * Lists connected social platform accounts for the active tenant with rate-limit budgets via Effect.
-     *
-     * Left joins recent rate limit budgets (within fresh window) and computes dynamic
-     * token expiry statuses. When `brandProfileId` is provided the result is restricted
-     * to Channels owned by that Brand Profile; omitted returns the workspace-wide
-     * aggregate across all Brand Profiles.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param brandProfileId - Optional Brand Profile UUID restricting the listing.
-     * @returns Effect resolving to array of populated `PlatformAccount` entities.
-     */
     listPlatformAccounts(env, session, brandProfileId) {
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.gen(function* () {
@@ -887,86 +661,48 @@ export function createCoreApiService(
       );
     },
 
-    /**
-     * Disconnects a platform account, cancelling scheduled/queued distributions on it via Effect.
-     *
-     * Idempotently cancels all in-flight scheduled or queued distributions targeting the account,
-     * deletes the platform account record, enqueues a durable remote-revocation outbox event,
-     * and records operation idempotency. The local cutover is immediate; the provider-side
-     * token revocation is retried asynchronously by the automation worker.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param accountId - Platform account ID to disconnect.
-     * @param idempotencyKey - Client-provided idempotency key.
-     * @returns Effect resolving to object indicating replay status.
-     * @throws {CoreApiError} 404 `not_found` if the platform account does not exist.
-     */
     disconnectPlatform(env, session, accountId, idempotencyKey) {
       return Effect.gen(function* () {
         const requestHash = yield* hashIdempotencyRequestEffect(accountId);
-        return yield* withTenantTransactionEffect(env, session, (client) =>
+        const result = yield* withTenantTransactionEffect(env, session, (client) =>
           Effect.gen(function* () {
             const organizationId = yield* activeOrganizationIdEffect(client);
-            const replay = yield* reserveIdempotencyEffect(
+            return yield* withIdempotentMutation<null, CoreServiceError>(
               client,
               organizationId,
               "disconnect-platform",
               idempotencyKey,
               requestHash,
-            );
-            if (replay) return { replayed: true, value: undefined };
-
-            const account = yield* client.query<{
-              access_token: string;
-              brand_profile_id: string;
-              id: string;
-              platform: string;
-            }>(
-              `SELECT id, brand_profile_id, platform, access_token
-               FROM platform_accounts
-               WHERE id = $1`,
-              [accountId],
-            );
-            const accountRow = account.rows[0];
-            if (!accountRow) {
-              return yield* Effect.fail(
-                new CoreApiError(404, "not_found", "The platform account was not found."),
-              );
-            }
-            yield* disconnectPlatformAccountEffect(client, organizationId, accountRow);
-            yield* completeIdempotencyEffect(
-              client,
-              organizationId,
-              "disconnect-platform",
-              idempotencyKey,
               204,
-              null,
+              (tx) =>
+                Effect.gen(function* () {
+                  const account = yield* tx.query<{
+                    access_token: string;
+                    brand_profile_id: string;
+                    id: string;
+                    platform: string;
+                  }>(
+                    `SELECT id, brand_profile_id, platform, access_token
+                     FROM platform_accounts
+                     WHERE id = $1`,
+                    [accountId],
+                  );
+                  const accountRow = account.rows[0];
+                  if (!accountRow) {
+                    return yield* Effect.fail(
+                      new CoreApiError(404, "not_found", "The platform account was not found."),
+                    );
+                  }
+                  yield* disconnectPlatformAccountEffect(tx, organizationId, accountRow);
+                  return null;
+                }),
             );
-            return { replayed: false, value: undefined };
           }),
         );
+        return { replayed: result.replayed, value: undefined };
       });
     },
 
-    /**
-     * Queries pending and completed publication events across a given time window via Effect.
-     *
-     * Joins each Distribution to its retained Post so calendar entries carry
-     * the durable Post identity and title. Soft-deleted Posts are excluded just
-     * like the Post list; retained Distribution history remains available to
-     * analytics and reconciliation without resurrecting deleted compositions.
-     * Filters `event_at` within `[start, end]` and, when `brandProfileId` is
-     * supplied, restricts results to that Brand Profile's publications.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param start - Start of event window.
-     * @param end - End of event window.
-     * @param limit - Maximum calendar entries to return (default: 500).
-     * @param brandProfileId - Optional Brand Profile UUID restricting the listing.
-     * @returns Effect resolving to chronologically ordered calendar items.
-     */
     calendar(env, session, start, end, limit = 500, brandProfileId) {
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.gen(function* () {
@@ -1001,15 +737,6 @@ export function createCoreApiService(
       );
     },
 
-    /**
-     * Returns a thirty-second summary after fresh authorization and persisted
-     * Brand Profile visibility checks. Equivalent cold misses share one bounded
-     * computation; followers commit and release their clients before waiting.
-     * Leaders settle only after commit, never retain failures, and run through
-     * caller cancellation so one caller cannot abort another's shared read.
-     * Database statement deadlines still bound aggregation. Configuration,
-     * identity, role, lifecycle and exact filters partition every result.
-     */
     summaryAnalytics(env, session, filters) {
       return Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
@@ -1042,7 +769,6 @@ export function createCoreApiService(
           }
           const outcome = exit.value;
           if (outcome.kind === "pending") {
-            // This promise always resolves to an Exit, including leader defects.
             const shared = yield* restore(Effect.promise(() => outcome.promise));
             return yield* Exit.isSuccess(shared)
               ? Effect.succeed(structuredClone(shared.value))
@@ -1063,24 +789,6 @@ export function createCoreApiService(
       );
     },
 
-    /**
-     * Ranks Posts by one stored metric over Distributions published inside the
-     * requested cohort.
-     *
-     * Each included Distribution contributes its latest snapshot at or before
-     * the range end; an unsynced Distribution still counts as a destination and
-     * contributes zero. Rows exclude soft-deleted Posts and Brand Profiles,
-     * order by the selected metric, publication time, then Post id, and fetch
-     * one extra row to report `has_more` without a second count query.
-     * Set-based as-of selection amortizes RLS checks across the cohort instead
-     * of repeating a policy-filtered history lookup for every Distribution.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param filters - Cohort dates, optional Platform/Brand Profile scope,
-     *   ranking metric, and limit/offset pagination.
-     * @returns Effect resolving to the ranked Post rows and pagination metadata.
-     */
     analyticsPosts(env, session, filters) {
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.gen(function* () {
@@ -1177,22 +885,6 @@ export function createCoreApiService(
       );
     },
 
-    /**
-     * Builds the dashboard's multi-chart aggregates from stored snapshots.
-     *
-     * Daily series report measured changes between consecutive snapshots, not
-     * lifetime totals; a day with no sync contributes no fabricated zero.
-     * Followers come from account snapshots, and counters a Provider does not
-     * expose stay null and are named in `unavailable_metrics`.
-     * Latest/baseline selection batches policy-filtered snapshot reads across
-     * the cohort. Accumulation retains historical maxima (including counter
-     * corrections), but never scans captures later than its 720-hour bucket.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param filters - Cohort dates plus optional Platform, account, format, and profile scope.
-     * @returns Effect resolving to dashboard series and breakdowns.
-     */
     dashboardAnalytics(env, session, filters) {
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.gen(function* () {
@@ -1269,7 +961,7 @@ export function createCoreApiService(
                WINDOW w AS (PARTITION BY e.distribution_id ORDER BY e.snapshot_at, e.id)
              ),
              snapshot_days AS (
-               SELECT date_trunc('day', snapshot_at)::date AS date, platform,
+               SELECT (snapshot_at AT TIME ZONE 'UTC')::date::text AS date, platform,
                       SUM(views) AS views, SUM(likes) AS likes,
                       SUM(comments) AS comments, SUM(shares) AS shares,
                       SUM(impressions) AS impressions, SUM(reach) AS reach,
@@ -1278,7 +970,7 @@ export function createCoreApiService(
                GROUP BY 1, 2
              ),
              published_days AS (
-               SELECT date_trunc('day', published_at)::date AS date, platform,
+               SELECT (published_at AT TIME ZONE 'UTC')::date::text AS date, platform,
                       COUNT(*) AS posts
                FROM candidates
                GROUP BY 1, 2
@@ -1302,9 +994,6 @@ export function createCoreApiService(
             scope,
           );
 
-          // One round trip for the three grouped breakdowns. The joined set is
-          // materialized so the latest-snapshot lookup runs once, not once per
-          // aggregate; each subquery then scans the small joined set.
           const aggregateResult = yield* client.query<AnalyticsAggregateRow>(
             `WITH candidates AS (${candidates}),
              ${latest},
@@ -1383,10 +1072,6 @@ export function createCoreApiService(
             platforms: [],
           };
 
-          // One baseline row per account plus one point per captured day in
-          // range. Provider sweeps run several times a day, but every chart
-          // renders daily points, so shipping each raw capture would multiply
-          // the payload without changing the line.
           const followerResult = yield* client.query<AnalyticsFollowerRow>(
             `WITH baseline AS (
                SELECT account.id AS account_id, account.platform,
@@ -1600,7 +1285,7 @@ export function createCoreApiService(
               start: filters.start.toISOString(),
             },
             series: seriesResult.rows.map((row) => ({
-              date: dateOnly(row.date),
+              date: row.date,
               platform: row.platform,
               posts: number(row.posts),
               views: number(row.views),
@@ -1647,18 +1332,6 @@ export function createCoreApiService(
       );
     },
 
-    /**
-     * Verifies an active distribution exists within tenant scope, excluding
-     * soft-deleted Brand Profiles before querying chronologically ordered
-     * snapshots within the optional date bounds.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param distributionId - Target distribution identifier.
-     * @param filters - Query filters containing start date, end date, and result limit.
-     * @returns Effect resolving to chronological list of analytics snapshots.
-     * @throws {CoreApiError} 404 `not_found` if the distribution does not exist or is deleted.
-     */
     distributionAnalytics(env, session, distributionId, filters) {
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.gen(function* () {
@@ -1718,20 +1391,6 @@ export function createCoreApiService(
       );
     },
 
-    /**
-     * Lists received audience comments with pagination and filtering across distributions via Effect.
-     *
-     * Supports filtering by reply status, platform, distribution, Brand Profile, and unreplied
-     * flags. When `brandProfileId` is provided the result is restricted to comments on that
-     * profile's distributions; omitted returns the workspace-wide aggregate.
-     * Fetches `limit + 1` rows to determine pagination continuation.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param filters - Inbox search filters (unreplied, platform, distributionId, brandProfileId,
-     *   replyStatus, limit, offset).
-     * @returns Effect resolving to paginated inbox comments list with pagination metadata.
-     */
     inbox(env, session, filters) {
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.gen(function* () {
@@ -1784,28 +1443,6 @@ export function createCoreApiService(
       );
     },
 
-    /**
-     * Queues an outbound reply to an audience comment and schedules asynchronous dispatch via Effect.
-     *
-     * Verifies platform reply capability, plan entitlement, account connection health, and that
-     * a reply is not already pending or sent. Queues a `comment.reply.requested` outbox event.
-     * The comment's Brand Profile is derived from its distribution and must match the
-     * `brandProfileId` in the request body.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param commentId - Comment ID to reply to.
-     * @param brandProfileId - Brand Profile UUID that must own the comment's distribution.
-     * @param text - Outbound reply message body.
-     * @param idempotencyKey - Client-provided idempotency key.
-     * @param requestId - Optional request ID for telemetry tracing.
-     * @returns Effect resolving to object indicating replay status and the updated `InboxComment`.
-     * @throws {CoreApiError} 404 `not_found` if comment does not exist or belongs to another profile.
-     * @throws {CoreApiError} 404 `brand_profile_not_found` if the profile is missing or foreign.
-     * @throws {CoreApiError} 409 `brand_profile_deleted` if the profile is soft-deleted.
-     * @throws {CoreApiError} 422 `unsupported_capability` if the platform cannot reply to comments.
-     * @throws {CoreApiError} 409 `platform_reconnect_required` if account is disconnected/expired.
-     */
     replyToComment(env, session, commentId, brandProfileId, text, idempotencyKey, requestId) {
       return Effect.gen(function* () {
         const requestHash = yield* hashIdempotencyRequestEffect(
@@ -1818,138 +1455,128 @@ export function createCoreApiService(
         return yield* withTenantTransactionEffect(env, session, (client) =>
           Effect.gen(function* () {
             const organizationId = yield* activeOrganizationIdEffect(client);
-            const replay = yield* reserveIdempotencyEffect(
+            return yield* withIdempotentMutation<InboxComment, CoreServiceError>(
               client,
               organizationId,
               "reply-to-comment",
               idempotencyKey,
               requestHash,
-            );
-            if (replay) {
-              return {
-                replayed: true,
-                value: replay.response_body as InboxComment,
-              };
-            }
-            yield* lockOrganizationEffect(client, organizationId);
-            yield* requireActiveBrandProfileEffect(client, organizationId, brandProfileId);
-
-            const target = yield* client.query<ReplyTargetRow>(
-              `SELECT
-                 c.id, c.distribution_id, d.platform, c.platform_comment_id,
-                 c.author_name, c.author_avatar, c.body, c.reply_text,
-                 c.reply_status, c.reply_error, c.reply_attempted_at,
-                 c.commented_at, c.synced_at, c.updated_at,
-                 d.brand_profile_id, d.post_id,
-                 pa.connection_status AS account_connection_status,
-                 pa.revoked_at AS account_revoked_at,
-                 pa.token_expires_at AS account_token_expires_at
-               FROM comments c
-               JOIN distributions d
-                 ON d.id = c.distribution_id AND d.org_id = c.org_id
-               JOIN organizations o ON o.id = c.org_id
-               LEFT JOIN platform_accounts pa
-                 ON pa.id = d.platform_account_id AND pa.org_id = d.org_id
-               WHERE c.id = $1 AND d.brand_profile_id = $2
-               FOR UPDATE OF c`,
-              [commentId, brandProfileId],
-            );
-            const row = target.rows[0];
-            if (!row) {
-              return yield* Effect.fail(
-                new CoreApiError(404, "not_found", "The comment was not found."),
-              );
-            }
-            const capability = capabilities.get(row.platform)!;
-            if (!capability.reply) {
-              return yield* Effect.fail(
-                new CoreApiError(
-                  422,
-                  "unsupported_capability",
-                  `${row.platform} comment replies are not available.`,
-                ),
-              );
-            }
-            if (
-              !row.account_connection_status ||
-              accountStatus({
-                connection_status: row.account_connection_status,
-                revoked_at: row.account_revoked_at,
-                token_expires_at: row.account_token_expires_at,
-              }) !== "connected"
-            ) {
-              return yield* Effect.fail(
-                new CoreApiError(
-                  409,
-                  "platform_reconnect_required",
-                  "Reconnect the platform account before replying.",
-                ),
-              );
-            }
-            if (contractReplyStatus(row.reply_status) === "replied") {
-              return yield* Effect.fail(
-                new CoreApiError(
-                  409,
-                  "already_replied",
-                  "The comment already has a confirmed reply.",
-                ),
-              );
-            }
-            if (row.reply_status === "queued" || row.reply_status === "in_progress") {
-              return yield* Effect.fail(
-                new CoreApiError(
-                  409,
-                  "reply_in_progress",
-                  "A reply is already queued for this comment.",
-                ),
-              );
-            }
-
-            const updated = yield* client.query<InboxRow>(
-              `UPDATE comments
-               SET reply_text = $2,
-                   reply_status = 'queued',
-                   reply_error = NULL,
-                   reply_attempted_at = now(),
-                   updated_at = now()
-               WHERE id = $1
-               RETURNING
-                 id, distribution_id, $3::text AS platform,
-                 $4::uuid AS brand_profile_id, $5::uuid AS post_id,
-                 platform_comment_id,
-                 author_name, author_avatar, body, reply_text, reply_status,
-                 reply_error, reply_attempted_at, commented_at, synced_at,
-                 updated_at`,
-              [commentId, text, row.platform, brandProfileId, row.post_id],
-            );
-            const comment = mapInboxComment(updated.rows[0]!);
-            yield* client.query(
-              `INSERT INTO outbox_events
-                 (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-               VALUES ($1, 'comment.reply.requested', 'comment', $2, $3, $4)`,
-              [
-                organizationId,
-                commentId,
-                idempotencyKey,
-                {
-                  comment_id: commentId,
-                  distribution_id: row.distribution_id,
-                  platform: row.platform,
-                  ...(requestId ? { request_id: requestId } : {}),
-                  text,
-                  version: 1,
-                },
-              ],
-            );
-            yield* completeIdempotencyEffect(
-              client,
-              organizationId,
-              "reply-to-comment",
-              idempotencyKey,
               202,
-              comment,
+              (tx) =>
+                Effect.gen(function* () {
+                  yield* lockOrganizationEffect(tx, organizationId);
+                  yield* requireActiveBrandProfileEffect(tx, organizationId, brandProfileId);
+
+                  const target = yield* tx.query<ReplyTargetRow>(
+                    `SELECT
+                       c.id, c.distribution_id, d.platform, c.platform_comment_id,
+                       c.author_name, c.author_avatar, c.body, c.reply_text,
+                       c.reply_status, c.reply_error, c.reply_attempted_at,
+                       c.commented_at, c.synced_at, c.updated_at,
+                       d.brand_profile_id, d.post_id,
+                       pa.connection_status AS account_connection_status,
+                       pa.revoked_at AS account_revoked_at,
+                       pa.token_expires_at AS account_token_expires_at
+                     FROM comments c
+                     JOIN distributions d
+                       ON d.id = c.distribution_id AND d.org_id = c.org_id
+                     JOIN organizations o ON o.id = c.org_id
+                     LEFT JOIN platform_accounts pa
+                       ON pa.id = d.platform_account_id AND pa.org_id = d.org_id
+                     WHERE c.id = $1 AND d.brand_profile_id = $2
+                     FOR UPDATE OF c`,
+                    [commentId, brandProfileId],
+                  );
+                  const row = target.rows[0];
+                  if (!row) {
+                    return yield* Effect.fail(
+                      new CoreApiError(404, "not_found", "The comment was not found."),
+                    );
+                  }
+                  const capability = capabilities.get(row.platform)!;
+                  if (!capability.reply) {
+                    return yield* Effect.fail(
+                      new CoreApiError(
+                        422,
+                        "unsupported_capability",
+                        `${row.platform} comment replies are not available.`,
+                      ),
+                    );
+                  }
+                  if (
+                    !row.account_connection_status ||
+                    accountStatus({
+                      connection_status: row.account_connection_status,
+                      revoked_at: row.account_revoked_at,
+                      token_expires_at: row.account_token_expires_at,
+                    }) !== "connected"
+                  ) {
+                    return yield* Effect.fail(
+                      new CoreApiError(
+                        409,
+                        "platform_reconnect_required",
+                        "Reconnect the platform account before replying.",
+                      ),
+                    );
+                  }
+                  if (contractReplyStatus(row.reply_status) === "replied") {
+                    return yield* Effect.fail(
+                      new CoreApiError(
+                        409,
+                        "already_replied",
+                        "The comment already has a confirmed reply.",
+                      ),
+                    );
+                  }
+                  if (row.reply_status === "queued" || row.reply_status === "in_progress") {
+                    return yield* Effect.fail(
+                      new CoreApiError(
+                        409,
+                        "reply_in_progress",
+                        "A reply is already queued for this comment.",
+                      ),
+                    );
+                  }
+
+                  const updated = yield* tx.query<InboxRow>(
+                    `UPDATE comments
+                     SET reply_text = $2,
+                         reply_status = 'queued',
+                         reply_error = NULL,
+                         reply_attempted_at = now(),
+                         updated_at = now()
+                     WHERE id = $1
+                     RETURNING
+                       id, distribution_id, $3::text AS platform,
+                       $4::uuid AS brand_profile_id, $5::uuid AS post_id,
+                       platform_comment_id,
+                       author_name, author_avatar, body, reply_text, reply_status,
+                       reply_error, reply_attempted_at, commented_at, synced_at,
+                       updated_at`,
+                    [commentId, text, row.platform, brandProfileId, row.post_id],
+                  );
+                  const comment = mapInboxComment(updated.rows[0]!);
+                  yield* tx.query(
+                    `INSERT INTO outbox_events
+                       (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
+                     VALUES ($1, 'comment.reply.requested', 'comment', $2, $3, $4)`,
+                    [
+                      organizationId,
+                      commentId,
+                      idempotencyKey,
+                      {
+                        comment_id: commentId,
+                        distribution_id: row.distribution_id,
+                        platform: row.platform,
+                        ...(requestId ? { request_id: requestId } : {}),
+                        text,
+                        version: 1,
+                      },
+                    ],
+                  );
+                  return comment;
+                }),
             );
-            return { replayed: false, value: comment };
           }),
         );
       });

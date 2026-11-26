@@ -53,11 +53,6 @@ export interface OAuthSelectionRecord {
   completed_brand_profile_id?: string;
   completed_idempotency_key?: string;
   cancelled_idempotency_key?: string;
-  /**
-   * Bounded retention deadline for secret-free fence/replay evidence.
-   * Set when the credential sweep strips an expired ticket; the master record
-   * is deleted once this passes. Unset means expires_at + retention applies.
-   */
   evidence_expires_at?: number;
   expires_at: number;
   readonly id: string;

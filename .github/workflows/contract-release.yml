@@ -62,18 +62,18 @@ jobs:
           mkdir -p artifacts
           git add --intent-to-add packages/contracts/release.json
           git diff --binary > artifacts/contract-preparation.patch
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: contract-release-artifacts
           path: packages/contracts/dist/release/
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         with:
           name: contract-release-preparation
           path: artifacts/contract-preparation.patch
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: contract-preview-evidence
@@ -88,7 +88,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: contract-release-artifacts
           path: release

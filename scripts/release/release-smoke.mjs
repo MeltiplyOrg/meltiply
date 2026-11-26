@@ -2,9 +2,10 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { readJsonFile, writeEvidence } from "./release-guard.mjs";
+import { assertReleaseBound, readJsonFile, writeEvidence } from "./release-guard.mjs";
 import { readBoundedJsonResponse } from "./release-http.mjs";
 import {
+  assertWorkerTraffic,
   candidatePath,
   getWorkerTraffic,
   secretPath,
@@ -22,48 +23,13 @@ const smokePollIntervalMs = 2_000;
 const smokePollAttempts = 60;
 const gitShaPattern = /^[0-9a-f]{40}$/;
 
-/**
- * Asserts that an evidence record binds the current release identity.
- *
- * @param {object} evidence - Parsed evidence record
- * @param {string} name - Evidence description for error reporting
- * @param {object} spec - Validated release specification
- * @returns {object} The validated evidence record
- * @throws {TypeError} If schema version, release ID, or Git SHA do not match
- */
-function assertReleaseEvidence(evidence, name, spec) {
-  if (
-    !evidence ||
-    typeof evidence !== "object" ||
-    Array.isArray(evidence) ||
-    evidence.schema_version !== 1 ||
-    evidence.release_id !== spec.release_id ||
-    evidence.git_sha !== spec.git_sha
-  ) {
-    throw new TypeError(`${name} does not match the release`);
-  }
-  return evidence;
-}
-
-/**
- * Loads the API candidate and secret-injection evidence for the release.
- *
- * The deployable candidate is the secret-injected version: it is the version
- * promoted by activation and canary rollouts and the only version that can
- * satisfy deployed binding validation over HTTP.
- *
- * @param {string} outDir - Release evidence directory
- * @param {object} spec - Validated release specification
- * @returns {Promise<{ candidate: object, versionId: string }>} Bound candidate evidence and deployable version ID
- * @throws {TypeError} If evidence is missing, mismatched, or internally inconsistent
- */
 async function loadApiCandidateEvidence(outDir, spec) {
-  const candidate = assertReleaseEvidence(
+  const candidate = assertReleaseBound(
     await readJsonFile(candidatePath(outDir, "api"), "API candidate evidence"),
     "API candidate evidence",
     spec,
   );
-  const secrets = assertReleaseEvidence(
+  const secrets = assertReleaseBound(
     await readJsonFile(secretPath(outDir, "api"), "API secret evidence"),
     "API secret evidence",
     spec,
@@ -76,42 +42,11 @@ async function loadApiCandidateEvidence(outDir, spec) {
   return { candidate, versionId };
 }
 
-/**
- * Builds the immutable Version URL origin for a Worker version.
- *
- * Cloudflare Version URLs use the first eight characters of the version UUID
- * as the hostname prefix on the Worker's workers.dev subdomain, matching the
- * URL Wrangler reports after `versions upload`. The subdomain is pinned by
- * the reviewed release input's api_workers_dev_url, matched against the IaC
- * API Worker name before CLI smoke begins.
- *
- * @param {object} spec - Validated release specification
- * @param {string} versionId - Worker version UUID
- * @returns {string} Absolute HTTPS origin for the immutable version
- * @throws {TypeError} If the configured origin is not the expected Worker subdomain
- */
 function versionUrlOrigin(spec, versionId) {
   const origin = new URL(spec.api_workers_dev_url);
   return `https://${versionId.slice(0, 8)}-${origin.hostname}`;
 }
 
-/**
- * Performs one bounded GET against the public API health endpoint.
- *
- * Rejects redirects, non-200 statuses, non-JSON envelopes, and bodies with
- * unexpected keys. Missing contract_version is accepted only for legacyVersion,
- * the verified previous SHA during a partial rollout, and normalized to null.
- * Candidate, bootstrap and full-rollout callers omit legacyVersion and remain strict.
- *
- * @param {object} params - Probe parameters
- * @param {string} params.expectedEnvironment - Selected release environment
- * @param {typeof fetch} params.fetchImpl - HTTP client implementation
- * @param {string} params.origin - Absolute HTTPS origin to probe
- * @param {number} params.requestBudgetMs - Maximum time allowed for the request
- * @param {string} [params.legacyVersion] - Only previous SHA permitted to omit contract_version
- * @returns {Promise<object>} Validated health payload
- * @throws {TypeError|Error} If the response is not an exact health success envelope
- */
 export async function fetchHealth({
   expectedEnvironment,
   fetchImpl,
@@ -128,8 +63,6 @@ export async function fetchHealth({
       signal: AbortSignal.timeout(Math.min(requestTimeoutMs, Math.max(1, requestBudgetMs))),
     });
   } catch (cause) {
-    // Node fetch reports transport failures as TypeError too. Wrap only the
-    // transport boundary so contract TypeErrors below remain terminal.
     throw new Error("API health transport failed", { cause });
   }
   if (!response.ok) {
@@ -169,30 +102,6 @@ export async function fetchHealth({
   };
 }
 
-/**
- * Polls an API health endpoint until it reports an accepted Git SHA.
- *
- * Bounded by a monotonic deadline: every attempt is timeout-bounded and
- * transport failures are retried while budget remains. Envelope or version
- * mismatches throw TypeError, which is terminal — a healthy endpoint cannot
- * fix a wrong binding by retrying — while transport errors retry until the
- * deadline or attempt ceiling.
- * Missing contract metadata is allowed only for the explicitly verified previous SHA.
- *
- * @param {object} params - Polling parameters
- * @param {Set<string>} params.acceptedVersions - Git SHAs the endpoint may legitimately serve
- * @param {string} params.expectedEnvironment - Selected release environment
- * @param {typeof fetch} [params.fetchImpl=fetch] - HTTP client implementation
- * @param {string} [params.legacyVersion] - Previous partial-rollout SHA allowed to omit contract_version
- * @param {number} [params.maximumElapsedMs=120000] - Hard deadline in milliseconds
- * @param {() => number} [params.now] - High-resolution timestamp provider
- * @param {string} params.origin - Absolute origin to poll
- * @param {(ms: number) => Promise<void>} [params.pause] - Delay between attempts
- * @param {number} [params.pollAttempts=60] - Maximum number of attempts
- * @param {number} [params.pollIntervalMs=2000] - Interval between attempts
- * @returns {Promise<{ attempts: number, health: object }>} Successful health payload and attempt count
- * @throws {TypeError|Error} If bounds are invalid, the version mismatches, or the deadline expires
- */
 async function pollHealth({
   acceptedVersions,
   expectedEnvironment,
@@ -244,21 +153,6 @@ async function pollHealth({
   throw new Error(`API health did not reach the expected release state${detail}`);
 }
 
-/**
- * Re-verifies the deployable API candidate on the Cloudflare control plane.
- *
- * `versions view` re-asserts the release tag and the VERSION binding equal to
- * the release Git SHA, so smoke evidence binds an immutable version identity
- * rather than a mutable deployment pointer.
- *
- * @param {object} params - Verification parameters
- * @param {Record<string, string | undefined>} params.environment - Process environment
- * @param {string} params.outDir - Release output directory holding rendered configs
- * @param {(cmd: string, args: Array<string>, opts?: object) => Promise<object>} params.runCommand - Subprocess runner
- * @param {object} params.spec - Validated release specification
- * @param {string} params.versionId - Deployable secret-injected version ID
- * @returns {Promise<object>} Verified version details record
- */
 async function verifyCandidateVersion({ environment, outDir, runCommand, spec, versionId }) {
   return verifyWorkerVersion({
     configPath: workerConfigPath(outDir, "api"),
@@ -271,44 +165,6 @@ async function verifyCandidateVersion({ environment, outDir, runCommand, spec, v
   });
 }
 
-/**
- * Asserts that control-plane traffic equals the expected deployment split.
- *
- * @param {Array<{ percentage: number, version_id: string }>} traffic - Observed traffic
- * @param {Array<{ percentage: number, version_id: string }>} expected - Expected traffic
- * @param {string} name - Context for error reporting
- * @throws {TypeError} If the observed split differs from the expected split
- */
-function assertTrafficSplit(traffic, expected, name) {
-  const normalized = [...expected].sort((left, right) =>
-    left.version_id.localeCompare(right.version_id),
-  );
-  if (JSON.stringify(traffic) !== JSON.stringify(normalized)) {
-    throw new TypeError(`${name} does not match the release traffic set`);
-  }
-}
-
-/**
- * Probes the immutable API candidate version over HTTPS before promotion.
- *
- * Loads candidate and secret evidence, re-verifies the secrets version tag and
- * VERSION binding on the control plane, then polls the version's immutable
- * Version URL until `/api/v1/health` reports the release Git SHA. Version URLs
- * route only when the Worker enables preview URLs, so a Worker deployed with
- * previews disabled fails closed rather than passing smoke by another path.
- *
- * @param {object} params - Smoke parameters
- * @param {Record<string, string | undefined>} params.environment - Process environment
- * @param {typeof fetch} [params.fetchImpl=fetch] - HTTP client implementation
- * @param {string} params.outDir - Release output/evidence directory
- * @param {(ms: number) => Promise<void>} [params.pause] - Poll pacing provider
- * @param {number} [params.pollAttempts] - Maximum health poll attempts
- * @param {number} [params.pollIntervalMs] - Poll interval in milliseconds
- * @param {(cmd: string, args: Array<string>, opts?: object) => Promise<object>} params.runCommand - Subprocess runner
- * @param {object} params.spec - Validated release specification
- * @returns {Promise<object>} Immutable candidate smoke evidence record
- * @throws {TypeError|Error} If evidence mismatches, the version is unreachable, or health is wrong
- */
 export async function smokeVersionCandidate({
   environment,
   fetchImpl = fetch,
@@ -359,31 +215,6 @@ export async function smokeVersionCandidate({
   return evidence;
 }
 
-/**
- * Probes the live API hostname against the release traffic split.
- *
- * For bootstrap, deployment evidence must prove the secrets version serves
- * 100% of traffic; for updates, the rollout evidence at the requested
- * percentage must equal the control-plane split between the secrets version
- * and the previously serving version. The health probe then asserts the
- * hostname serves only Git SHAs that the verified traffic split permits —
- * fail-closed against a third version or a stale release.
- * Legacy previous responses normalize contract_version to null and record the
- * verified previous Worker ID/SHA; candidates and full rollouts remain strict.
- *
- * @param {object} params - Smoke parameters
- * @param {Record<string, string | undefined>} params.environment - Process environment
- * @param {typeof fetch} [params.fetchImpl=fetch] - HTTP client implementation
- * @param {string} params.outDir - Release output/evidence directory
- * @param {(ms: number) => Promise<void>} [params.pause] - Poll pacing provider
- * @param {number | undefined} params.percentage - Rollout percentage for update releases
- * @param {number} [params.pollAttempts] - Maximum health poll attempts
- * @param {number} [params.pollIntervalMs] - Poll interval in milliseconds
- * @param {(cmd: string, args: Array<string>, opts?: object) => Promise<object>} params.runCommand - Subprocess runner
- * @param {object} params.spec - Validated release specification
- * @returns {Promise<object>} Live smoke evidence record
- * @throws {TypeError|Error} If mode/percentage is invalid, traffic mismatches, or health is outside the release set
- */
 export async function smokeLiveApi({
   environment,
   fetchImpl = fetch,
@@ -417,7 +248,7 @@ export async function smokeLiveApi({
   let previousSha;
   let previousVersionId;
   if (spec.deployment_mode === "bootstrap") {
-    const deployment = assertReleaseEvidence(
+    const deployment = assertReleaseBound(
       await readJsonFile(
         path.join(outDir, "worker-api-deployment.json"),
         "API deployment evidence",
@@ -430,7 +261,7 @@ export async function smokeLiveApi({
     }
     expectedTraffic = [{ percentage: 100, version_id: versionId }];
   } else {
-    const rollout = assertReleaseEvidence(
+    const rollout = assertReleaseBound(
       await readJsonFile(
         path.join(outDir, `api-rollout-${percentage}.json`),
         "API rollout evidence",
@@ -463,7 +294,11 @@ export async function smokeLiveApi({
     environment,
     runCommand,
   });
-  assertTrafficSplit(observedTraffic, expectedTraffic, "API deployment");
+  assertWorkerTraffic(
+    observedTraffic,
+    expectedTraffic,
+    "API deployment does not match the release traffic set",
+  );
 
   const acceptedVersions = new Set([spec.git_sha]);
   if (previousSha !== undefined) acceptedVersions.add(previousSha);

@@ -1,25 +1,18 @@
-import { assertTranslationArray, expectedTranslationCount, ProviderError } from "./provider.mjs";
-import { isRetryableStatus } from "./retry.mjs";
+import {
+  assertTranslationArray,
+  createStatusError,
+  DEFAULT_TIMEOUT_MS,
+  expectedTranslationCount,
+  ProviderError,
+} from "./provider.mjs";
 
 const trailingSlashesPattern = /\/+$/u;
 
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const DEFAULT_OLLAMA_MODEL = "qwen3:8b";
 
-/** Default request timeout and context window for one local completion. */
-const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_CONTEXT_WINDOW = 8192;
 
-/**
- * Maps a fetch failure to an actionable local-provider error. A missing Ollama
- * process is terminal and says how to start it; timeouts and unexpected
- * transport failures remain retryable.
- *
- * @param {unknown} error Fetch rejection.
- * @param {string} url Ollama base URL.
- * @param {string} model Requested model.
- * @returns {ProviderError} Classified error.
- */
 function connectionError(error, url, model) {
   const code = error?.cause?.code ?? error?.code;
   if (error?.name === "TimeoutError" || error?.name === "AbortError") {
@@ -42,55 +35,16 @@ function connectionError(error, url, model) {
   });
 }
 
-/**
- * Maps an HTTP failure to an actionable provider error. A missing model names
- * the exact `ollama pull` command; rate limits and server faults retry.
- *
- * @param {number} status HTTP status code.
- * @param {string} body Response body used for a bounded error suffix.
- * @param {string} model Requested model.
- * @returns {ProviderError} Classified error.
- */
 function statusError(status, body, model) {
-  const detail = body.trim().slice(0, 500);
-  const suffix = detail ? `: ${detail}` : "";
-  if (status === 404) {
-    return new ProviderError(
-      `Ollama does not have model "${model}". Run \`ollama pull ${model}\`.${suffix}`,
-      { status, kind: "provider", retryable: false },
-    );
-  }
-  if (isRetryableStatus(status)) {
-    return new ProviderError(`Ollama is temporarily unavailable (HTTP ${status}).${suffix}`, {
-      status,
-      kind: "transient",
-      retryable: true,
-    });
-  }
-  return new ProviderError(`Ollama request failed (HTTP ${status}).${suffix}`, {
-    status,
-    kind: "provider",
-    retryable: false,
+  return createStatusError("Ollama", status, body, {
+    404: {
+      message: `Ollama does not have model "${model}". Run \`ollama pull ${model}\`.`,
+      kind: "provider",
+      retryable: false,
+    },
   });
 }
 
-/**
- * Creates a credential-free `TranslationProvider` backed by a local Ollama
- * server. The request fixes `temperature: 0`, the supplied seed, a bounded
- * prediction length, a context window sized for a translation batch, and
- * `think: false` so reasoning models answer without analysis tokens. No
- * account, API key, or network egress is involved.
- *
- * @param {object} options
- * @param {string} [options.url] Ollama base URL.
- * @param {string} [options.model] Locally pulled model, e.g. `qwen3:8b`.
- * @param {string} [options.systemPrompt] Product context, style, and glossary.
- * @param {number} [options.seed] Sampling seed.
- * @param {number} [options.timeoutMs] Per-request timeout.
- * @param {number} [options.contextWindow] `num_ctx` for the batch prompt.
- * @param {typeof fetch} [options.fetchImpl] Injectable fetch for tests.
- * @returns {{name: string, complete: (prompt: string, options?: {maxTokens?: number}) => Promise<string>}}
- */
 export function createOllamaProvider({
   url = DEFAULT_OLLAMA_URL,
   model = DEFAULT_OLLAMA_MODEL,

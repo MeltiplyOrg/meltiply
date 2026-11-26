@@ -16,21 +16,6 @@ const SettingsPage = lazy(() => import("@/components/layout/workspace-settings")
 const InvitationAcceptRoute = lazy(() => import("@/app/invitation-accept-route"));
 const SignInRoute = lazy(() => import("@/app/sign-in-route"));
 
-/**
- * Root routing component for the authenticated React application.
- *
- * The marketing site is served independently by the Astro landing project.
- * Protected workspace routes mount through `AuthenticatedShell`, which
- * resolves the session and redirects unauthenticated visitors to `/sign-in`
- * before the lazy dashboard layout chunk ever loads; unknown paths take the
- * same route.
- *
- * The single Suspense boundary renders the shared
- * `WorkspaceLoadingSkeleton` - the workspace frame itself - so a lazy route chunk
- * downloads under the shell's own geometry instead of a page-shaped guess.
- *
- * @returns React element rendering the active application route hierarchy.
- */
 export function AppRouter(): React.ReactElement {
   return (
     <Suspense fallback={<WorkspaceLoadingSkeleton />}>

@@ -2,22 +2,9 @@
 @import "fumadocs-ui/css/neutral.css";
 @import "fumadocs-ui/css/preset.css";
 
-/*
- * Shared design source: the warm Gr8r-adapted palette, radii, and shadows
- * and landing use lives in @meltiply/ui — no palette values are copied into
- * docs. `tokens.css` serves both host conventions (`.dark` class and
- * `data-theme` attribute); docs toggles `.dark` like the app. `motion.css`
- * supplies the ease variables, shared keyframes, `[data-brand-accent]` fill,
- * `data-animated-icon` and `data-preference-icon` geometry and glyph
- * selection, and native `prefers-reduced-motion` accessibility behavior. Reduced
- * animations still reach final keyframes and dispatch Radix Presence's animationend.
- */
 @import "@meltiply/ui/tokens.css";
 @import "@meltiply/ui/motion.css";
 
-/* The public Lenis controller owns smooth input and heading pulls. Keeping the
-   native document instant avoids competing browser and JS scroll timelines;
-   native keyboard and fragment navigation remain available. */
 html {
   scroll-behavior: auto;
   scrollbar-width: none;
@@ -27,30 +14,8 @@ html::-webkit-scrollbar {
   display: none;
 }
 
-/*
- * Docs and the app share class-based dark mode. The bootstrap applies validated
- * navigation intent before paint; optional stores still require functional
- * consent. `DocsThemeProvider` preserves that intent through hydration.
- * Re-declaring `dark` re-affirms the preset variant so `dark:` utilities and
- * Fumadocs internal rules flip together.
- */
 @custom-variant dark (&:is(.dark, .dark *));
 
-/*
- * Docs palette = the shared palette. Fumadocs' `fd-*` color names bridge onto
- * the semantic tokens from @meltiply/ui/tokens.css, so docs and product share
- * one identity in both themes:
- *
- *   @theme inline — every generated `*-fd-*` utility resolves straight to the
- *     shared variables; no color value is copied into utility declarations.
- *   :root emission — Fumadocs internals bypass utilities: its typography
- *     plugin's `--tw-prose-*` custom properties, code `code { background }`,
- *     and the base layer read `--color-fd-*` at runtime. Re-declaring them
- *     below as `var(--token)` references keeps those lookups theme-aware
- *     (the vars flip on `.dark`) without importing app component styles.
- *   --overlay-dim is a docs-local alias for scrims; the shared ramp has no
- *     named token for it, so its per-theme alpha stays declared here.
- */
 @theme inline {
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
@@ -83,7 +48,6 @@ html::-webkit-scrollbar {
   --color-fd-diff-remove: var(--red-tint);
   --color-fd-diff-remove-symbol: var(--red);
 
-  /* Shared control radii: 4px chip to 10px window. */
   --radius-sm: var(--radius-chip);
   --radius-md: var(--radius-chip);
   --radius-lg: var(--radius-control);
@@ -92,7 +56,6 @@ html::-webkit-scrollbar {
   --radius-3xl: 9999px;
   --radius-4xl: 9999px;
 
-  /* Shared elevation scale so `shadow-*` utilities resolve to the ramp. */
   --shadow-hairline: var(--shadow-hairline);
   --shadow-btn: var(--shadow-btn);
   --shadow-card: var(--shadow-card);
@@ -102,10 +65,8 @@ html::-webkit-scrollbar {
 }
 
 :root {
-  /* Docs-local scrim; the shared ramp has no named token for it. */
   --overlay-dim: color-mix(in oklab, var(--overlay) 28%, transparent);
 
-  /* Fumadocs bridge — consumed directly, not through utilities (see above). */
   --color-fd-background: var(--page);
   --color-fd-foreground: var(--ink);
   --color-fd-muted: var(--inset);
@@ -135,15 +96,9 @@ html::-webkit-scrollbar {
 }
 
 .dark {
-  /* Deep scrim for dark surfaces; matches the previous docs copy. */
   --overlay-dim: color-mix(in oklab, var(--overlay) 55%, transparent);
 }
 
-/*
- * `neutral.css` pins a few sidebar vars under `.dark #nd-sidebar` with a more
- * specific selector, so re-point them at the shared ramp here (later in
- * source order wins at equal specificity).
- */
 .dark #nd-sidebar {
   --color-fd-muted: var(--inset);
   --color-fd-secondary: var(--canvas);
@@ -151,8 +106,6 @@ html::-webkit-scrollbar {
 }
 
 @layer base {
-  /* Bare `border`/`border-*` utilities in Fumadocs markup carry no color;
-     give every generated border the shared hairline, like the app does. */
   * {
     border-color: var(--line);
   }
@@ -167,8 +120,6 @@ html::-webkit-scrollbar {
       "calt" 1;
   }
 
-  /* Shared focus contract: a clear 2px accent outline on every interactive
-    element. Fumadocs' ring utilities use the same --accent via --color-fd-ring. */
   a:focus-visible,
   button:focus-visible,
   input:focus-visible,
@@ -196,39 +147,21 @@ html {
   scrollbar-gutter: stable;
 }
 
-/* Fumadocs scroll-locks body while the mobile nav or search dialog is open;
-   without this the reserved scrollbar gutter shifts the layout on toggle. */
 html > body[data-scroll-locked] {
   margin-right: 0px !important;
   --removed-body-scroll-bar-size: 0px !important;
 }
 
-/* Unlayered component rules below outrank Tailwind utilities, so they can
-   refine Fumadocs defaults (which only emit layered utilities) without
-   `!important` or attribute selector arms races. Transitions stay in the
- * restrained 150–220ms range and target paint-cheap properties only; native
- * `prefers-reduced-motion` suppresses them via @meltiply/ui/motion.css. */
-
-/* — Sidebar navigation ————————————————————————————————————————
-   The page tree renders flat <a> page links grouped by .docs-nav-section
-   headings inside the Radix ScrollArea viewport. Desktop aside is #nd-sidebar
-   (bg-fd-card → --surface); the mobile drawer is #nd-sidebar-mobile and gets
-   the same --surface treatment so it never reads as a stray panel. */
 #nd-sidebar,
 #nd-sidebar-mobile {
   font-size: 13.5px;
 }
 
-/* Hairline separation from the article column; the drawer needs an explicit
-   edge because it floats over dimmed content. */
 #nd-sidebar {
   border-inline-end-color: var(--line);
   background-color: var(--canvas);
 }
 
-/* Keep the expanded desktop rail anchored to the viewport, not the sticky
-   placeholder's document boundary. The placeholder still reserves its grid
-   column; Fumadocs retains the collapsed hover panel and mobile drawer. */
 @media (min-width: 48rem) {
   #nd-sidebar[data-collapsed="false"] {
     position: fixed;
@@ -241,7 +174,6 @@ html > body[data-scroll-locked] {
   border-inline-start-color: var(--line-strong);
 }
 
-/* Match the workspace's compact rail and 8px inner gutters. */
 #nd-sidebar {
   align-items: stretch;
 }
@@ -271,7 +203,6 @@ html > body[data-scroll-locked] {
   margin-top: 4px;
 }
 
-/* Mobile drawer keeps the desktop surface and dims the page behind it. */
 #nd-sidebar-mobile {
   background-color: var(--canvas);
 }
@@ -280,11 +211,6 @@ div:has(+ aside#nd-sidebar-mobile) {
   background-color: var(--overlay-dim);
 }
 
-/* The ScrollArea root is, between the pinned header block and the pinned
-   preferences footer, the only element that may grow/scroll. `min-h-0` is
-   explicit (not just the utility) so a long page tree can never push the
-   footer out of view at any viewport height, and `isolation` keeps the
-   z-indexed rows stacking inside the scroller. */
 #nd-sidebar > div:has(> [data-radix-scroll-area-viewport]),
 #nd-sidebar-mobile > div:has(> [data-radix-scroll-area-viewport]) {
   position: relative;
@@ -292,15 +218,6 @@ div:has(+ aside#nd-sidebar-mobile) {
   isolation: isolate;
 }
 
-/* The sliding highlight pill mounts in `sidebar.banner` — inside the aside's
-   header block — but must position against the aside itself, so header and
-   footer blocks stay unpositioned to avoid stealing its containing block.
-   The scroll root comes later in DOM order and paints over it; the pill is
-   additionally clamped to the viewport rect by the owner, so it can never
-   dip under the search field or the footer preference controls. */
-
-/* The scroll thumb reads `--line` by default; give it the stronger hairline
-   so it stays visible on the --surface rail, and ink-3 under the pointer. */
 #nd-sidebar [data-orientation="vertical"] > *,
 #nd-sidebar-mobile [data-orientation="vertical"] > * {
   background-color: var(--line-strong);
@@ -312,16 +229,10 @@ div:has(+ aside#nd-sidebar-mobile) {
   background-color: var(--ink-3);
 }
 
-/* Hairline above the footer block mirrors the app's `border-t` on its
-   sidebar footer controls; the drawer already gets one from Fumadocs. */
 #nd-sidebar > div:last-child {
   border-top: 1px solid var(--line);
 }
 
-/* Hover on nav rows uses the shared --hover surface, not a faint accent wash.
-   Tracked .docs-nav-item rows are the exception: like the app's
-   `group-hover/glide:bg-transparent`, they stay transparent so the sliding
-   .docs-nav-glide pill (under the rows) provides the hover affordance. */
 #nd-sidebar [data-radix-scroll-area-viewport] :is(a, button):hover,
 #nd-sidebar-mobile [data-radix-scroll-area-viewport] :is(a, button):hover {
   background-color: var(--hover);
@@ -335,7 +246,6 @@ div:has(+ aside#nd-sidebar-mobile) {
   background-color: transparent;
 }
 
-/* Match the app's neutral selected row instead of a docs-only blue wash. */
 #nd-sidebar [data-radix-scroll-area-viewport] a[data-active="true"],
 #nd-sidebar-mobile [data-radix-scroll-area-viewport] a[data-active="true"] {
   background-color: var(--surface);
@@ -348,7 +258,6 @@ div:has(+ aside#nd-sidebar-mobile) {
   display: none;
 }
 
-/* Desktop rows sit tighter (≈30px); drawer rows stay near 40px touch targets. */
 @media (min-width: 48rem) {
   #nd-sidebar [data-radix-scroll-area-viewport] :is(a, button) {
     padding-block: 6px;
@@ -359,12 +268,6 @@ div:has(+ aside#nd-sidebar-mobile) {
   padding-block: 10px;
 }
 
-/*
- * Guide rows mirror the app's sidebar item metrics: 32px rows, 7px radius,
- * 13.5px medium label in --ink-2. Rows lift above the sliding highlight
- * pill (.docs-nav-glide) without trapping Fumadocs' own absolutely-
- * positioned affordances, and only paint properties animate.
- */
 .docs-nav-item {
   position: relative;
   z-index: 1;
@@ -389,15 +292,10 @@ div:has(+ aside#nd-sidebar-mobile) {
   }
 }
 
-/* Fill the viewport with the visible columns. Fumadocs subtracts the nominal
-   sidebar width; compensate when its actual column collapses to zero. */
 .docs-shell {
   --fd-layout-width: calc(100% + var(--fd-sidebar-width) - var(--fd-sidebar-col));
 }
 
-/* Compact section captions distinguish guide groups without turning the
-   sidebar into widely separated documentation blocks. The renderer owns
-   the 12px group gap; links keep the app's 32px row rhythm. */
 .docs-nav-section {
   font-size: 0.6875rem;
   font-weight: 600;
@@ -407,8 +305,6 @@ div:has(+ aside#nd-sidebar-mobile) {
   color: var(--ink-3);
 }
 
-/* The real logo and single-line title share one lockup across docs surfaces;
-   sidebar branding keeps its compact hit area and slightly larger artwork. */
 .docs-brand {
   font-size: 0.9375rem;
   font-weight: 600;
@@ -430,8 +326,6 @@ div:has(+ aside#nd-sidebar-mobile) {
   flex-shrink: 0;
 }
 
-/* Public footer controls share the theme owner and keep a touch-sized target.
-   Motion is a presentation policy, not an interactive preference. */
 .docs-prefs {
   display: flex;
   align-items: center;
@@ -465,16 +359,12 @@ div:has(+ aside#nd-sidebar-mobile) {
   stroke-width: 2.5;
 }
 
-/* Manual-on reads enabled via the app's accent tint; it stays stable under
-   hover, unlike the neutral idle surface. */
 .docs-pref-button[aria-pressed="true"],
 .docs-pref-button[aria-pressed="true"]:hover {
   background-color: var(--accent-tint);
   color: var(--accent-ink);
 }
 
-/* Icon atoms sit in a 16px slot; shared motion.css sizes glyphs to 1em, so
-   the 14px font matches the app's size-3.5 footer glyph. */
 .docs-pref-button-icon {
   width: 16px;
   height: 16px;
@@ -488,49 +378,12 @@ div:has(+ aside#nd-sidebar-mobile) {
   }
 }
 
-/* Match the canonical control floor on touch-capable tablets as well as phones. */
 @media (pointer: coarse) {
   .docs-pref-button,
   .docs-nav-item {
     min-width: 44px;
     min-height: 44px;
   }
-}
-
-/* — Search ————————————————————————————————————————————————————
-   The sidebar's full-width trigger is restyled as an app field control
-   (inset fill + hairline + button shadow) with chip-like kbd hints. The
-   dialog keeps Fumadocs' markup; paint is aligned with the shared ramp:
-   popover surface, overlay shadow, neutral selected rows, ink accent on the
-   breadcrumb/type chips. */
-button[data-search-full] {
-  border-color: var(--line-strong);
-  background-color: var(--field);
-  color: var(--ink-3);
-  box-shadow: var(--shadow-btn);
-  transition:
-    background-color 160ms ease,
-    color 160ms ease,
-    border-color 160ms ease;
-}
-
-button[data-search-full]:hover {
-  border-color: var(--line-strong);
-  background-color: var(--hover);
-  color: var(--ink);
-}
-
-button[data-search-full] > svg {
-  color: var(--ink-3);
-}
-
-button[data-search-full] kbd {
-  border-color: var(--line);
-  background-color: var(--surface);
-  color: var(--ink-3);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 16px;
 }
 
 button[data-search] {
@@ -541,7 +394,6 @@ button[data-search] {
     color 160ms ease;
 }
 
-/* Keep search as a compact icon in the sidebar footer; hide the wide bar. */
 button[data-search-full] {
   display: none !important;
 }
@@ -551,10 +403,6 @@ button[data-search]:hover {
   color: var(--ink);
 }
 
-/* The Radix dialog portals straight into <body>: the overlay is a bare
-   data-state div, the panel is the only [role="dialog"]. The scrim keeps the
-   docs dim and the panel gets the shared overlay elevation — it replaces
-   Fumadocs' heavier black/50 shadow which was tuned for its own palette. */
 body > [data-state]:not(aside):not([role="dialog"]) {
   background-color: var(--overlay-dim);
 }
@@ -564,8 +412,6 @@ body > [role="dialog"] {
   box-shadow: var(--shadow-overlay);
 }
 
-/* Result rows are buttons with role="option"; the keyboard/pointer active
-   row reuses the sidebar's selected fill instead of a separate accent. */
 [role="dialog"] [role="option"] {
   transition:
     background-color 160ms ease,
@@ -581,9 +427,6 @@ body > [role="dialog"] {
   color: var(--accent-ink);
 }
 
-/* — Article column ————————————————————————————————————————————
-   Keep one centered width limit on the article, not nested caps on its body.
-   A modest desktop gutter leaves breathing room without narrowing mobile. */
 #nd-page {
   max-width: 72rem;
 }
@@ -594,8 +437,6 @@ body > [role="dialog"] {
   }
 }
 
-/* Reading surfaces share the workspace palette and compact corner language;
-   article padding expands without narrowing the mobile reading column. */
 .docs-prose {
   width: 100%;
   max-width: none;
@@ -632,12 +473,6 @@ body > [role="dialog"] {
   text-wrap: pretty;
 }
 
-/*
- * Prev/next pagination: the footer grid is the only div directly before
- * .docs-footer inside the article. Cards reuse the content card's surface,
- * hairline, and button elevation; the directional cue is the only accent —
- * the arrow and label turn accent-ink on hover while the card lifts.
- */
 #nd-page div:has(+ footer.docs-footer) > a {
   border-color: var(--line);
   border-radius: var(--radius-card);
@@ -666,8 +501,6 @@ body > [role="dialog"] {
   transition: color 180ms ease;
 }
 
-/* The plane morphs during its return flight. The shell-owned ring takes over
-   at arrival and survives guide replacement; only pending guides spin. */
 [data-toc-plane-outline] {
   d: var(--docs-toc-plane-shape);
   stroke-dasharray: 100 0;
@@ -707,10 +540,6 @@ body > [role="dialog"] {
   }
 }
 
-/* — Table of contents ————————————————————————————————————————
-   The right rail is a quiet hierarchy: muted links, ink on hover, and the
-   accent reserved for the reading position. The "On this page" heading gets
-   the same caption treatment as sidebar section headings. */
 #nd-toc h3 {
   font-size: 0.6875rem;
   font-weight: 600;
@@ -720,8 +549,6 @@ body > [role="dialog"] {
   color: var(--ink-3);
 }
 
-/* Static clipping contains retracting rows without scaling their text.
-   The outer frame keeps long contents scrollable without changing article width. */
 .docs-toc-viewport {
   display: flex;
   flex-direction: column;
@@ -730,13 +557,10 @@ body > [role="dialog"] {
   overflow: hidden;
 }
 
-/* Promote rows only during route motion; settlement releases compositor layers. */
 #nd-toc[data-toc-transition] .docs-reading-items > li {
   will-change: transform, opacity;
 }
 
-/* Original bent reading rail; only decoration follows continuous scroll.
-   Its colors use the same ink/accent tokens as the landing page. */
 .docs-reading-rail {
   position: relative;
   margin-top: 12px;
@@ -769,7 +593,6 @@ body > [role="dialog"] {
   color: var(--ink);
 }
 
-/* Shared selection overrides passed/hover colors on both TOC surfaces. */
 .docs-reading-link[data-active="true"] {
   color: var(--accent-ink);
 }
@@ -818,7 +641,6 @@ body > [role="dialog"] {
   visibility: hidden;
 }
 
-/* Mobile disclosure shares rail semantics and tokens with the desktop column. */
 .docs-rail-popover header {
   border-bottom: 1px solid var(--line);
   background: var(--page);
@@ -899,10 +721,6 @@ body > [role="dialog"] {
   min-height: 44px;
 }
 
-/* — Site footer ———————————————————————————————————————————————
-   Compact legal bar inside the article column (after prev/next pagination):
-   copyright and legal links share the row and wrap on mobile.
-   Owns all styling — the markup is bare elements. */
 .docs-footer {
   display: flex;
   flex-wrap: wrap;
@@ -935,8 +753,6 @@ body > [role="dialog"] {
   color: var(--ink);
 }
 
-/* Pending article text keeps its geometry while a streaming wave passes
-   through line-shaped placeholders. The real article remains layout-bearing. */
 #nd-page[data-article-loading] {
   position: relative;
 }
@@ -971,8 +787,6 @@ body > [role="dialog"] {
   }
 }
 
-/* Expand the pointer target without moving the icon or overlapping the title link.
-   Extra width extends into the empty trailing space; vertical padding is invisible. */
 [data-docs-heading] > button {
   position: relative;
   min-width: 24px;
@@ -985,15 +799,12 @@ body > [role="dialog"] {
   inset: -10px -20px -10px 0;
 }
 
-/* Static MDX copy controls are driven by the native docs script, not React.
-   Keep confirmation visible and expose failure without claiming a copied URL. */
 [data-docs-heading]:hover > button,
 [data-docs-heading] > button[data-docs-copy-state],
 [data-docs-heading] > button:focus-visible {
   opacity: 1;
 }
 
-/* Keep the canonical Lucide link glyph; success is also confirmed by Sileo. */
 [data-docs-heading] > button[data-docs-copy-state="copied"] {
   color: var(--green);
 }
@@ -1004,8 +815,6 @@ body > [role="dialog"] {
   }
 }
 
-/* Keep copy notifications above consent instead of obscuring its actions.
-   Each canonical viewport keeps its own semantics, motion, and toast lifecycle. */
 .docs-feedback {
   position: fixed;
   z-index: 1000;
@@ -1032,7 +841,6 @@ body > [role="dialog"] {
   color: var(--red);
 }
 
-/* Clipboard recovery is readable and operable on touch, without a hover tooltip. */
 .docs-copy-recovery {
   margin-block: 0.75rem 1.5rem;
   padding: 1rem;
@@ -1083,7 +891,6 @@ body > [role="dialog"] {
   outline-offset: 2px;
 }
 
-/* Agent discovery remains available after the guide, outside the reading preface. */
 .docs-agent-metadata {
   margin-top: 2rem;
   padding-top: 1rem;

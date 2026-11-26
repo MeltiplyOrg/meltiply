@@ -5,11 +5,6 @@ const authenticatedRoutes = [
   ["/channels", "Search accounts"],
 ] as const;
 
-/**
- * Exercises each retained workspace route with an existing authenticated session.
- * The URL and route-specific search control prove the intended surface loaded,
- * without coupling readiness to incidental page-heading copy.
- */
 test("loads every authenticated product route", async ({ page }) => {
   for (const [route, searchLabel] of authenticatedRoutes) {
     await page.goto(route);
@@ -18,18 +13,11 @@ test("loads every authenticated product route", async ({ page }) => {
   }
 });
 
-/**
- * Exercises local Channels filtering without creating or modifying business data.
- * After navigating directly to Channels, entering a query activates the toolbar's
- * "Clear all" reset control; clearing must empty the visible query field.
- */
 test("exercises safe authenticated controls without creating business data", async ({ page }) => {
   await page.goto("/channels");
   const search = page.getByRole("textbox", { name: "Search accounts", exact: true });
   await search.fill("staging-smoke-no-matching-account");
   await expect(search).toHaveValue("staging-smoke-no-matching-account");
-  // `TopToolbarReset` renders its title as "Reset filters" but its accessible
-  // name is the visible label "Clear all".
   await page.getByRole("button", { name: "Clear all", exact: true }).click();
   await expect(search).toHaveValue("");
 });

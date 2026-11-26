@@ -1,3 +1,4 @@
+import { PLATFORM_IDS } from "@meltiply/domain";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -21,31 +22,28 @@ describe("platformDisplayName", () => {
   it("returns raw string for unknown platform", () => {
     expect(platformDisplayName("unknown")).toBe("unknown");
   });
+
+  it.each(["constructor", "__proto__", "toString"])(
+    "treats the inherited key %s from a callback URL as an unknown platform",
+    (provider) => {
+      expect(platformDisplayName(provider)).toBe(provider);
+    },
+  );
 });
 
 describe("getAvailablePlatforms", () => {
   it("returns all platforms when none connected", () => {
-    expect(getAvailablePlatforms([])).toEqual([
-      "tiktok",
-      "youtube",
-      "instagram",
-      "facebook",
-      "threads",
-    ]);
+    expect(getAvailablePlatforms([])).toEqual([...PLATFORM_IDS]);
   });
 
   it("excludes connected platforms", () => {
-    expect(getAvailablePlatforms(["tiktok", "instagram"])).toEqual([
-      "youtube",
-      "facebook",
-      "threads",
-    ]);
+    expect(getAvailablePlatforms(["tiktok", "instagram"])).toEqual(
+      PLATFORM_IDS.filter((platform) => platform !== "tiktok" && platform !== "instagram"),
+    );
   });
 
   it("returns empty when all connected", () => {
-    expect(
-      getAvailablePlatforms(["tiktok", "youtube", "instagram", "facebook", "threads"]),
-    ).toEqual([]);
+    expect(getAvailablePlatforms([...PLATFORM_IDS])).toEqual([]);
   });
 });
 

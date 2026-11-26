@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowRight, Check, Share2, UserRoundPlus } from "lucide-react";
@@ -23,17 +24,8 @@ import {
 } from "@/components/settings/reporting-disclosure";
 import type { DiscoverySource, OnboardingProgress, ReportingFeedback } from "@/types";
 
-/** Remaining first-run screens after the account and Workspace already exist. */
 type WizardStep = "improvement" | "ready";
 
-/**
- * Explains one recorded attribution answer honestly, distinguishing a local
- * choice from a queued or destination-accepted report.
- *
- * @param t Active translation function.
- * @param feedback Stored attribution state.
- * @returns The user-facing sentence for that state.
- */
 function feedbackStatus(t: (message: string) => string, feedback: ReportingFeedback): string {
   if (feedback.delivery_status === "delivered") return t("PostHog accepted your answer.");
   if (feedback.delivery_status === "pending")
@@ -43,15 +35,6 @@ function feedbackStatus(t: (message: string) => string, feedback: ReportingFeedb
   return t("Saved on this installation, but no report was queued.");
 }
 
-/**
- * Final first-run screen: each action completes onboarding and then hands the
- * Owner to the existing flow, so setup never reimplements Channel connection or
- * teammate invitation.
- *
- * @param props.onDone Called after completion with the destination path.
- * @param props.pending Whether completion is in flight.
- * @returns React element with the three routes.
- */
 function ReadyScreen({
   onDone,
   pending,
@@ -103,17 +86,6 @@ function ReadyScreen({
   );
 }
 
-/**
- * Second first-run screen: the optional improvement choices and the one-time
- * discovery-source question.
- *
- * Nothing here is implicit. Both switches start off, continuing or skipping
- * saves the switches without enabling either, and the answer is transmitted
- * only through its own `Share feedback` action, which has its own disclosure.
- *
- * @param props.onContinue Called after the switch decision is saved.
- * @returns React element with the improvement choices.
- */
 function ImprovementScreen({
   advancing,
   onContinue,
@@ -127,10 +99,6 @@ function ImprovementScreen({
   const feedbackQuery = useReportingFeedback(scope);
   const savePreferences = useUpdateReportingPreferences(scope);
   const submitFeedback = useSubmitReportingFeedback(scope);
-  // The switches render the persisted choice until the Owner edits one. Keeping
-  // an explicit local override instead of copying the read into state means the
-  // first paint already shows the stored decision and a save in flight can never
-  // be rendered as consent the installation does not have.
   const [choiceOverride, setChoiceOverride] = useState<{
     diagnostics: boolean;
     usage: boolean;
@@ -139,17 +107,11 @@ function ImprovementScreen({
   const [error, setError] = useState<string | null>(null);
 
   const stored = policy.data;
-  // An unread policy is never rendered as consent: both switches stay off until
-  // the stored decision arrives.
   const usage = choiceOverride?.usage ?? stored?.categories.usage.requested ?? false;
   const diagnostics =
     choiceOverride?.diagnostics ?? stored?.categories.diagnostics.requested ?? false;
   const setUsage = (value: boolean) => setChoiceOverride({ diagnostics, usage: value });
   const setDiagnostics = (value: boolean) => setChoiceOverride({ diagnostics: value, usage });
-  // The read always resolves to a shape describing the surface, including for an
-  // installation that never answered. Only a recorded answer — a stored source or
-  // submission instant — may replace the controls, otherwise a fresh screen would
-  // hide the selector and claim the question was already shared.
   const answered = feedbackQuery.data;
   const feedback =
     answered && (answered.submitted_at !== null || answered.discovery_source !== null)
@@ -169,14 +131,10 @@ function ImprovementScreen({
     }
     try {
       await savePreferences.mutateAsync({ diagnostics, usage });
-      // The persisted decision is now authoritative; keeping the override would
-      // mask a later policy change on this screen.
       setChoiceOverride(null);
       onContinue();
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : t("Your choices could not be saved. Try again."),
-      );
+      setError(errorMessage(cause, t("Your choices could not be saved. Try again.")));
     }
   };
 
@@ -186,9 +144,7 @@ function ImprovementScreen({
     try {
       await submitFeedback.mutateAsync({ discoverySource: source });
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : t("Your answer could not be shared. Try again."),
-      );
+      setError(errorMessage(cause, t("Your answer could not be shared. Try again.")));
     }
   };
 
@@ -329,18 +285,6 @@ function ImprovementScreen({
   );
 }
 
-/**
- * Resumable first-run wizard for the current Installation Owner.
- *
- * The account and shared Workspace already exist by the time this mounts, so the
- * journey resumes at the optional screens after verification, sign-in, or a
- * browser restart. Invited members and upgraded installations never reach it:
- * the caller renders it only for `in_progress`. No step mints a privileged
- * session or reopens registration, and no choice is transmitted without its own
- * explicit action.
- *
- * @returns React element rendering the wizard surface.
- */
 export function OnboardingWizard({
   progress,
 }: {
@@ -351,10 +295,6 @@ export function OnboardingWizard({
   const scope = useSessionScope();
   const complete = useCompleteOnboarding(scope);
   const saveProgress = useSaveOnboarding(scope);
-  // The reached screen is durable installation state, so a browser restart or a
-  // later sign-in resumes here instead of restarting the optional step. It is
-  // never inferred from consent or attribution: skipping and declining are
-  // supported paths that must resume the same way.
   const [step, setStep] = useState<WizardStep>(progress.step);
   const [error, setError] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -366,14 +306,10 @@ export function OnboardingWizard({
   const advance = async () => {
     setError(null);
     try {
-      // Persist before rendering the next screen: a reload immediately afterwards
-      // must resume at the screen the Owner actually saw.
       await saveProgress.mutateAsync({ step: "ready" });
       setStep("ready");
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : t("Your progress could not be saved. Try again."),
-      );
+      setError(errorMessage(cause, t("Your progress could not be saved. Try again.")));
     }
   };
 
@@ -381,11 +317,9 @@ export function OnboardingWizard({
     setError(null);
     try {
       await complete.mutateAsync({});
-      navigate(destination, { replace: true });
+      void navigate(destination, { replace: true });
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : t("Setup could not be finished. Try again."),
-      );
+      setError(errorMessage(cause, t("Setup could not be finished. Try again.")));
     }
   };
 

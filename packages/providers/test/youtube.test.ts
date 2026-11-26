@@ -39,13 +39,6 @@ function sequence(...responders: Responder[]) {
   return { calls, fetcher };
 }
 
-/**
- * Builds the YouTube adapter under test with deterministic credentials, redirect
- * URI, and a 100 ms timeout so each spec only supplies its scripted `fetch`
- * double. `now` fixes the adapter clock (default 2026-07-19) for stable expiry
- * math; `uploadChunkBytes`, when given, overrides the resumable-upload chunk
- * size. Returns the real adapter wired to the test doubles, not a mock.
- */
 function adapter(
   fetcher: typeof fetch,
   now = new Date("2026-07-19T00:00:00Z"),
@@ -93,7 +86,6 @@ function publishInput(patch: Partial<PublishInput> = {}): PublishInput {
   };
 }
 
-/** One resumable attachment carrying the given verified facts. */
 function shot(metadata: ProviderMediaMetadata | undefined): ProviderStreamMedia {
   return {
     body: stream(),
@@ -258,6 +250,26 @@ describe("createYouTubeAdapter", () => {
       delivery: "broadcast",
       providerOperationId: "ended_live:never-live",
     });
+  });
+
+  it("adopts a terminal ended_live operation without another provider read", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => {
+      throw new Error("ended_live lookup must not contact YouTube");
+    });
+    await expect(
+      adapter(fetcher).lookupPublication!(context, credentials, {
+        providerOperationId: "ended_live:broadcast-one",
+      }),
+    ).resolves.toEqual({
+      state: "published",
+      result: {
+        outcome: "confirmed_success",
+        providerOperationId: "ended_live:broadcast-one",
+        providerPostId: "broadcast-one",
+        providerUrl: "https://youtu.be/broadcast-one",
+      },
+    });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("builds an offline, PKCE-bound Google authorization URL", () => {
@@ -609,8 +621,6 @@ describe("createYouTubeAdapter", () => {
     ["angle brackets", { caption: "A <Short>" }],
     ["no attachment at all", { media: [] }],
     [
-      // YouTube uploads one video per post, so several attachments are rejected
-      // rather than silently uploading only the first.
       "several attachments",
       {
         media: [
@@ -1072,7 +1082,6 @@ describe("createYouTubeAdapter", () => {
   it("resumes a persisted submitted session after Google's acknowledged offset", async () => {
     const providerCalls = sequence(
       (_url, init) => {
-        // The continuation probes the session; it never re-initiates (no POST).
         expect(init.method).toBe("PUT");
         expect(new Headers(init.headers).get("Content-Range")).toBe("bytes */4");
         return new Response(null, {
@@ -1204,7 +1213,6 @@ describe("createYouTubeAdapter", () => {
         return new Response(null, { status: 308 });
       },
       (_url, init) => {
-        // A 308 without Range acknowledges nothing: the same range is resent.
         expect(new Headers(init.headers).get("Content-Range")).toBe("bytes 0-3/4");
         expect([...(init.body as Uint8Array)]).toEqual([1, 2, 3, 4]);
         return json({ id: "video-1" }, { status: 201 });
@@ -1245,10 +1253,6 @@ describe("createYouTubeAdapter", () => {
   });
 
   it("assembles fragmented streams into bounded payloads without quadratic copying", async () => {
-    // 1 200 fragments of 250 bytes force multi-part assembly across two
-    // chunks — a fragment straddles the 256 KiB boundary — and the bounded
-    // read count plus exact payloads prove every byte arrives once, in
-    // order, at the right offset.
     const fileSize = 300_000;
     const fragmentSize = 250;
     const fragments = fileSize / fragmentSize;

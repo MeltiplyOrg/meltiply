@@ -1,6 +1,3 @@
-// Disposable-database smoke: run only after test:integration has seeded the
-// local database. Exercises production API/storage/processing/retention code;
-// only authentication and the Container transport are supplied by this host.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { Effect } from "effect";
@@ -76,13 +73,8 @@ const providers = [
     S3_ENDPOINT: endpoint,
   },
 ] satisfies ObjectStorageEnv[];
-// Pools are cached by connection settings across both provider iterations.
 const pools = new Set<Pool>();
 
-/**
- * Adapts asset-scoped processor lookup to the live private native engine.
- * IDs retain stable name/equality semantics; process returns the production RPC outcome.
- */
 const mediaProcessor = {
   idFromName: (name: string): DurableObjectId => ({
     name,
@@ -127,7 +119,6 @@ try {
         subject,
       }),
     });
-    /** Makes an authenticated mutation/read and rejects unexpected HTTP outcomes. */
     const api = async (path: string, body?: unknown, status = 200): Promise<unknown> => {
       const response = await app.request(
         path,
@@ -256,7 +247,6 @@ try {
         upload.asset.id,
       ]);
       const keys = z.array(z.object({ r2_key: z.string() })).parse(inventory.rows);
-      // Put this disposable profile into the daily purge's retained state.
       await pool.query(
         "UPDATE brand_profiles SET deleted_at = now() - interval '8 days', purge_at = now() - interval '1 day' WHERE id = $1",
         [profile.id],

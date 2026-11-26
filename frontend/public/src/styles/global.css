@@ -1,13 +1,3 @@
-/*
- * Landing entry stylesheet. The Gr8r-adapted warm palette and shared
- * aliases come from `frontend/shared/tokens.css`, the same source the app
- * loads — the public site uses the shared `.dark` class theme convention.
- * Skip-link, site-header, [data-brand-mark], and button/icon controls
- * are the shared public primitives from `frontend/shared/public.css`; the
- * BrandMark accent diamond resolves from `@meltiply/ui/motion.css` (imported
- * by `index.astro`). Only landing-specific base, typography, layout, and
- * the responsive overrides below live in this file.
- */
 @import "@meltiply/ui/tokens.css";
 @import "@meltiply/ui/public.css";
 
@@ -154,12 +144,6 @@ button:active {
   visibility: visible;
   pointer-events: auto;
 }
-.landing-rail-track {
-  display: none;
-}
-.landing-rail-fill {
-  display: none;
-}
 .landing-rail-list {
   list-style: none;
   margin: 0;
@@ -269,8 +253,6 @@ p {
 svg {
   flex-shrink: 0;
 }
-/* Animated-icon islands must not create layout boxes inside flex controls;
- * contents keeps the wrapped glyph a direct flex item for sizing and gaps. */
 astro-island {
   display: contents;
 }
@@ -343,8 +325,6 @@ h1 > span {
     background 180ms ease,
     transform 180ms ease;
 }
-/* Labels parse before Astro's island bootstrap; reserve the glyph box so icon
- * hydration does not change the individual control's geometry. */
 .feature-pill-icon {
   display: inline-flex;
   flex: 0 0 16px;
@@ -1190,8 +1170,6 @@ h2 {
 .site-footer nav {
   display: flex;
   align-items: center;
-  /* Seven links (Product, Why Meltiply, Docs, Terms, Privacy, Cookies, Log in)
-   * can exceed narrow widths; wrap rows instead of overflowing. */
   flex-wrap: wrap;
   row-gap: 12px;
   gap: 12px 24px;
@@ -1216,9 +1194,6 @@ h2 {
   font-size: 11px;
   color: var(--ink-2);
 }
-/* Landing extends the shared public-control motion vocabulary (public.css) to
- * its own navigation, footer, and product detail surfaces. Palette swaps
- * suppress these transitions through theme-transition.css. */
 .site-footer nav a,
 .mobile-nav a,
 .feature-icon,
@@ -1649,8 +1624,6 @@ h2 {
   }
 }
 
-/* Compact samples retain their layout while real controls stay touch-sized.
- * Search, theme, and navigation take priority over the repeated header CTA. */
 @media (pointer: coarse) {
   .feature-pill,
   .preview-tab,

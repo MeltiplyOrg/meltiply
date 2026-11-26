@@ -10,14 +10,15 @@ import {
   type ProviderRegistry,
 } from "@meltiply/providers";
 import {
+  isPlatform,
   rateLimitBudgetFreshSeconds,
   type DatabaseError,
   type Platform,
   type PlatformCapability,
 } from "@meltiply/domain";
 import type { EffectTransactionClient } from "@meltiply/database";
+import { errorDiagnostic, log } from "@meltiply/observability";
 import {
-  isPlatform,
   isProviderFailureClass,
   recordPublicationUsage,
   reportingConfiguration,
@@ -37,16 +38,13 @@ import {
 } from "./distribution-provider";
 import type { AutomationEnv } from "./env";
 import { createProviderMediaResolver, providerMediaRetrievalLeaseSeconds } from "./provider-media";
+import { armDistributionReconcile, armOutboxCommand, outboxDedupeKey } from "./outbox-commands";
 import { decryptStoredToken, tokenCipherFor } from "./provider-credentials";
-import { isOutboxMessage, type OutboxMessage } from "./messages";
+import { isOutboxMessage, providerSyncMessage, type OutboxMessage } from "./messages";
+import { nextDelaySeconds } from "./retry-policy";
 
 type DistributionMessage = OutboxMessage;
 
-/**
- * One frozen object an attempt may deliver, as read from `asset_objects` at
- * claim. Renditions and the verified original are both candidates; the
- * capability check decides which one is delivered.
- */
 interface DistributionMediaCandidate extends Record<string, unknown> {
   content_type: string | null;
   duration_sec: number | null;
@@ -59,7 +57,6 @@ interface DistributionMediaCandidate extends Record<string, unknown> {
   width: number | null;
 }
 
-/** One ordered attachment of the composition with its ready objects. */
 interface DistributionMediaEntry extends Record<string, unknown> {
   asset_id: string;
   asset_type: "image" | "video";
@@ -72,14 +69,6 @@ interface DistributionMediaEntry extends Record<string, unknown> {
   width: number | null;
 }
 
-/**
- * Claimed Distribution joined to its Post and resolved composition.
- *
- * `post_title`/`post_default_text` are the Post defaults, while the override
- * columns are the copies resolved at schedule time; both are frozen into the
- * attempt snapshot before any Provider call so later Post edits cannot change
- * what this attempt publishes or what reconciliation replays.
- */
 interface DistributionRow extends Record<string, unknown> {
   access_token: string | null;
   attachment_ids: string[] | null;
@@ -110,11 +99,6 @@ interface DistributionRow extends Record<string, unknown> {
   token_expires_at: Date | string | null;
 }
 
-/**
- * Claim outcome: a claimed row always carries the composition snapshot that
- * was frozen with its Provider operation, so publish, poll, retry, resume, and
- * reconciliation all work from the same resolved content and media.
- */
 type DistributionPreparation =
   | { outcome: "deferred" }
   | { outcome: "ready"; row: DistributionRow; snapshot: PublicationSnapshot }
@@ -142,24 +126,12 @@ import {
 } from "./due-work";
 const leaseSeconds = distributionProcessingGraceSeconds;
 
-/**
- * Formats a distributed job lease key for a distribution outbox message.
- *
- * @param message - Outbox message.
- * @returns Formatted lease event key string.
- */
 function eventKey(message: DistributionMessage): string {
   return `outbox:${message.event_id}`;
 }
 
 type DistributionOperation = "cancel" | "publish" | "reconcile";
 
-/**
- * Resolves the distribution operation type from the outbox message topic.
- *
- * @param message - Outbox message containing the topic.
- * @returns 'cancel', 'publish', or 'reconcile', or undefined if unsupported.
- */
 function operation(message: DistributionMessage): DistributionOperation | undefined {
   switch (message.topic) {
     case "distribution.cancel.requested":
@@ -173,40 +145,15 @@ function operation(message: DistributionMessage): DistributionOperation | undefi
   }
 }
 
-/**
- * Generates an idempotent operation key for provider interactions.
- *
- * @param message - Outbox message.
- * @returns Namespaced idempotency key.
- */
 function idempotencyKey(message: DistributionMessage): string {
   return `queue:${message.event_id}`;
 }
 
-/**
- * A cached Provider budget parks a publish when it reports fewer than
- * `rateLimitRemainingThreshold` calls left or at least
- * `rateLimitPercentThreshold` of the window used. A budget older than
- * `rateLimitBudgetFreshSeconds` carries no signal, so a stale exhaustion never
- * parks a publish forever.
- */
 const rateLimitRemainingThreshold = 5;
 const rateLimitPercentThreshold = 90;
 const rateLimitMaxParkSeconds = 3_600;
 const rateLimitUnknownResetParkSeconds = 60;
 
-/**
- * Seconds to park a publish against the cached `(platform, provider account id)` budget,
- * or `null` when the publish may proceed. Bounded by
- * `rateLimitMaxParkSeconds` so a distant or malformed reset time cannot hold a
- * Distribution past one window.
- *
- * @param client - Transactional database client.
- * @param platform - Social platform identifier.
- * @param accountId - Provider account identifier.
- * @param now - Reference timestamp for measuring reset expiration.
- * @returns Seconds to delay the publish attempt, or null if execution may proceed immediately.
- */
 function rateLimitParkSeconds(
   client: EffectTransactionClient,
   platform: string,
@@ -244,16 +191,6 @@ function rateLimitParkSeconds(
   });
 }
 
-/**
- * Cache a confirmed Provider throttle so the next publish for the same account
- * parks before spending a Provider call. `retryAfterSeconds` is the Provider's
- * own wait when it sent one; without it the recorded reset time is kept.
- *
- * @param client - Transactional database client.
- * @param platform - Social platform identifier.
- * @param accountId - Provider account identifier.
- * @param budget - Budget metrics with remaining calls, percent used, and reset seconds.
- */
 function recordRateLimitBudget(
   client: EffectTransactionClient,
   platform: string,
@@ -282,20 +219,6 @@ function recordRateLimitBudget(
     .pipe(Effect.asVoid);
 }
 
-/**
- * Reports whether one claimed object can be delivered to the target Platform.
- *
- * Compatibility is decided by the shared `validatePublishInput` rules rather
- * than a second copy of them, so claim-time selection and the Provider
- * pre-flight check can never disagree about a MIME type, kind, byte ceiling,
- * or video duration. Only issues scoped to the probed attachment count:
- * caption, hashtag, and attachment-set rules describe the whole attempt and
- * are owned by the publish path, so a per-object probe ignores them.
- *
- * @param capability - Target Platform capability the object must satisfy.
- * @param candidate - Claimed ready object with its verified stored facts.
- * @returns True when no per-attachment constraint rejects the object.
- */
 function candidateDeliversTo(
   capability: PlatformCapability,
   candidate: DistributionMediaCandidate,
@@ -306,9 +229,6 @@ function candidateDeliversTo(
     idempotencyKey: "distribution-claim-selection",
     media: [
       {
-        // An object that never recorded a media type or a positive byte count
-        // cannot be shown to fit, so the probe reports it as incompatible
-        // rather than guessing the missing fact from the Asset row.
         contentType: candidate.content_type ?? "",
         fileSize: candidate.file_size ?? 0,
         metadata: {
@@ -323,24 +243,6 @@ function candidateDeliversTo(
   }).some((issue) => issue.field.startsWith("media[0]."));
 }
 
-/**
- * Selects the object an attempt freezes for one attachment.
- *
- * The claim query orders ready renditions ahead of the verified original and
- * then by size, so the first *deliverable* candidate is the smallest validated
- * output this Platform actually accepts. Compatibility is part of the choice
- * because the freeze is immutable: an object the Platform would reject has to
- * be skipped here, while a larger approved object that does fit is still
- * selected, rather than freezing an undeliverable object and failing the whole
- * attempt later. An attachment whose Asset has no ready, deliverable object
- * yields `null`, which becomes unavailable media rather than a silently
- * dropped attachment.
- *
- * @param entry - Claimed attachment entry with its ordered ready candidates.
- * @param capability - Target Platform capability, or null when the Platform has
-   no registered adapter and therefore cannot accept any object.
- * @returns The candidate to freeze, or null when the attachment has none.
- */
 function frozenCandidate(
   entry: DistributionMediaEntry,
   capability: PlatformCapability | null,
@@ -349,12 +251,6 @@ function frozenCandidate(
   return entry.candidates.find((candidate) => candidateDeliversTo(capability, candidate)) ?? null;
 }
 
-/**
- * One frozen media object as persisted on an attempt, in the stored JSONB
- * shape. `object_*` is null when the attachment had no ready object at claim,
- * which keeps the attachment itself in the frozen order instead of silently
- * dropping it from the publication.
- */
 interface FrozenMediaItem {
   asset_id: string;
   asset_type: "image" | "video";
@@ -370,13 +266,6 @@ interface FrozenMediaItem {
   width: number | null;
 }
 
-/**
- * Immutable resolved composition persisted on a publish attempt.
- *
- * `content` is what the Provider was asked to publish and `media` the exact
- * ordered objects it was handed, so polling, retry, and reconciliation all
- * reproduce the same publication instead of re-reading live Post state.
- */
 interface PublicationSnapshot {
   content: {
     hashtags: string[];
@@ -390,25 +279,6 @@ interface PublicationSnapshot {
   version: 1;
 }
 
-/**
- * Builds the immutable publication snapshot written on a publish attempt.
- *
- * Content is the target's schedule-time overrides falling back to the Post
- * default; media is the ordered attachment list with the object chosen for
- * each. The object for an attachment is picked from the ready candidates this
- * Platform can actually accept, so the freeze records a deliverable delivery
- * rather than the smallest ready object regardless of its media type. Once
- * persisted, nothing but this snapshot governs what the attempt publishes,
- * polls, retries, or reconciles, so later Post edits — text, attachment order,
- * or replaced files — can never rewrite the attempt or the history it
- * produces.
- *
- * @param row - Claimed Distribution joined to its resolved composition.
- * @param capability - Target Platform capability deciding which ready object
-   each attachment may deliver; null when the Platform has no registered
-   adapter, which leaves every attachment without a frozen object.
- * @returns Snapshot persisted as `provider_operations.publication_snapshot`.
- */
 function publicationSnapshot(
   row: DistributionRow,
   capability: PlatformCapability | null,
@@ -443,17 +313,6 @@ function publicationSnapshot(
   };
 }
 
-/**
- * Presents a frozen snapshot to the Provider path as ordered attachment
- * entries.
- *
- * An attachment whose object could not be frozen keeps its place with no
- * candidate, so publication fails as unavailable media instead of quietly
- * publishing fewer attachments than the creator composed.
- *
- * @param snapshot - Snapshot persisted on the claimed attempt.
- * @returns Frozen media entries in publication order.
- */
 function frozenMediaEntries(snapshot: PublicationSnapshot): PublicationMediaEntry[] {
   return snapshot.media.map((item) => ({
     position: item.position,
@@ -477,18 +336,6 @@ function frozenMediaEntries(snapshot: PublicationSnapshot): PublicationMediaEntr
   }));
 }
 
-/**
- * Reads the media a Distribution's publish attempts already froze.
- *
- * Reconcile and cancel resolve media from this instead of the live Post, so a
- * continuation resumes the Provider's own upload and a cancelled publication
- * releases exactly the bytes the attempt used. The newest snapshot wins
- * because that is the attempt the current Distribution state belongs to.
- *
- * @param client - Transactional database client inside the claim transaction.
- * @param distributionId - Distribution whose publish snapshot is needed.
- * @returns Frozen snapshot, or an empty-media snapshot when none was recorded.
- */
 function frozenSnapshotFor(
   client: EffectTransactionClient,
   distributionId: string,
@@ -516,26 +363,6 @@ function frozenSnapshotFor(
     );
 }
 
-/**
- * Claims a distributed job lease and prepares a distribution record for execution.
- *
- * Acquires a lease in `async_job_events`, checks cached rate limit budgets,
- * validates that every selected attachment identity remains attached before freezing publish snapshots,
- * inserts or updates provider operations intent, and locks the distribution row.
- * Publish triggers on `processing` rows are skipped rather than re-executed — a prior
- * attempt's provider side effect is unknown, so recovery is reconciliation's job (#256).
- * An intent conflict marks the row `needs_reconciliation` and arms an immediate
- * `distribution.reconcile.requested` trigger in the same transaction.
- * @param env - Automation worker environment bindings.
- * @param message - Outbox message.
- * @param operationType - Active distribution operation ('cancel', 'publish', or 'reconcile').
- * @param transaction - Transaction runner for database operations.
- * @param now - Reference timestamp for schedule and lease evaluation.
- * @param capabilityFor - Resolves the capability a Platform publishes under, or
-   null when no adapter is registered for it; publish freezes only objects this
- *   capability accepts, so selection happens inside the claim transaction.
- * @returns Preparation result ('deferred', 'ready', or 'skipped').
- */
 function prepare(
   env: AutomationEnv,
   message: DistributionMessage,
@@ -560,13 +387,6 @@ function prepare(
           ? { outcome: "deferred" }
           : { outcome: "skipped" };
       }
-      // Composition is resolved here, in the same transaction that claims the
-      // lease, and frozen into the attempt snapshot below. Content comes from
-      // the target's schedule-time overrides falling back to the Post default;
-      // media is the ordered attachment subset the target selected, each with
-      // the ready objects (renditions first, verified original as fallback) a
-      // Provider could legitimately receive. Later Post edits therefore cannot
-      // reach this attempt or the history it produces.
       const result = yield* client.query<DistributionRow>(
         `SELECT distribution.id, distribution.org_id, distribution.platform,
                 distribution.platform_account_id, distribution.status,
@@ -597,8 +417,6 @@ function prepare(
                           '[]'::jsonb) AS media
            FROM (
              SELECT attachment.asset_id,
-                    -- A target's ordered selection is authoritative for that
-                    -- Channel; an inheriting target keeps the Post's order.
                     CASE
                       WHEN distribution.attachment_ids IS NULL
                         THEN attachment.position
@@ -629,19 +447,6 @@ function prepare(
                           END,
                           object.bytes, object.id
                       )
-                      -- A candidate is a ready object a ready rendition
-                      -- references, on an Asset processing has approved. The
-                      -- asset gate is what keeps a still-processing, failed,
-                      -- deleting, or deleted Asset out of a publication: such
-                      -- an Asset can still hold ready bytes behind an older
-                      -- rendition reference, and delivering one of those would
-                      -- publish media nothing ever decoded. It filters
-                      -- candidates, not attachments, so the attachment keeps
-                      -- its position and fails as unavailable media instead of
-                      -- silently shrinking the frozen composition. Any
-                      -- attachment detached from the Post after target selection
-                      -- is omitted by the post_attachments join below and is
-                      -- rejected as unavailable media before freezing.
                       FILTER (
                         WHERE object.id IS NOT NULL
                           AND asset.status = 'ready'
@@ -668,19 +473,11 @@ function prepare(
         [message.aggregate_id, message.organization_id],
       );
       const distribution = result.rows[0];
-      // Delayed delivery makes every publish message only a trigger: the
-      // durable row decides. A due `scheduled` row publishes straight from its
-      // recorded schedule; a row rescheduled later or cancelled leaves an early
       const dueScheduledPublish =
         distribution !== undefined &&
         distribution.status === "scheduled" &&
         distribution.scheduled_at !== null &&
         new Date(distribution.scheduled_at).getTime() <= now.getTime();
-      // A publish trigger on a 'processing' row means a prior attempt is either
-      // still in flight or was lost mid-attempt; either way the provider side
-      // effect is unknown. Publishing again could duplicate the post, so the
-      // delivery no-ops here and the stalled-processing Due scan arms
-      // reconciliation once the grace period lapses (#256).
       if (
         !distribution ||
         (operationType === "publish" && distribution.status !== "queued" && !dueScheduledPublish) ||
@@ -692,10 +489,6 @@ function prepare(
         yield* finishJobLease(client, eventKey(message), "skipped");
         return { outcome: "skipped" };
       }
-      // An exhausted or nearly exhausted cached budget skips creating a
-      // Provider operation intent, token decryption, and any Provider call. The
-      // Distribution remains queued, keeps its attempt count, and gets a new
-      // delayed trigger so this internal parking is invisible to retry policy.
       const parkSeconds =
         operationType === "publish" && distribution.platform_user_id !== null
           ? yield* rateLimitParkSeconds(
@@ -716,32 +509,19 @@ function prepare(
          WHERE id = $1 AND status IN ('queued', 'processing', 'scheduled')`,
           [distribution.id, parkSeconds],
         );
-        yield* client.query(
-          `INSERT INTO outbox_events
-           (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-         VALUES ($1, 'distribution.publish.requested', 'distribution', $2, $3, $4)
-         ON CONFLICT DO NOTHING`,
-          [
-            distribution.org_id,
-            distribution.id,
-            `distribution:${distribution.id}:rate-limit-park:${message.event_id}`,
-            JSON.stringify({ distribution_id: distribution.id, version: 1 }),
-          ],
-        );
+        yield* armOutboxCommand(client, {
+          aggregateId: distribution.id,
+          aggregateType: "distribution",
+          dedupeKey: outboxDedupeKey.distributionRateLimitPark(distribution.id, message.event_id),
+          onConflict: "nothing",
+          orgId: distribution.org_id,
+          payload: { distribution_id: distribution.id, version: 1 },
+          topic: "distribution.publish.requested",
+        });
         yield* finishJobLease(client, eventKey(message), "skipped");
         return { outcome: "skipped" };
       }
-      // A target's ordered selection is authoritative for that Channel. When
-      // specific attachments were selected (attachment_ids is not null), every
-      // selected identity must still be attached to the Post. An attachment-only
-      // Post edit that detaches or replaces a selected asset between schedule
-      // and execution must not silently drop the missing media, freeze a
-      // truncated snapshot, and publish partial content (#284 Decision 3 & 10).
-      // The attempt fails immediately with an actionable readiness error and no
-      // retries, preserving the selected order and settled history.
       const selectedAttachmentIds = distribution.attachment_ids;
-      // `media` is coalesced to an array by the claim query, so every entry is
-      // one still-attached selected Asset; missing selected ids fail closed.
       const attachedAssetIds = new Set(distribution.media.map((entry) => entry.asset_id));
       if (
         operationType === "publish" &&
@@ -761,27 +541,10 @@ function prepare(
         yield* finishJobLease(client, eventKey(message), "succeeded");
         return { outcome: "skipped" };
       }
-      // A publish attempt freezes its composition here, inside the same
-      // transaction that claims the lease: the snapshot is written with the
-      // intent, so nothing a creator does to the Post afterwards can change
-      // what this attempt publishes, polls, or reconciles. Selection is part of
-      // the freeze because it is irreversible: the capability decides which
-      // ready object each attachment may deliver while every candidate is still
-      // in hand, so an approved compatible object is never passed over for a
-      // smaller incompatible one. Publish freezes the composition it just
-      // resolved; reconcile and cancel inherit the newest frozen publish
-      // snapshot, so they keep acting on the media the published attempt used
-      // instead of re-reading live Post state.
       const snapshot =
         operationType === "publish"
           ? publicationSnapshot(distribution, capabilityFor(distribution.platform))
           : yield* frozenSnapshotFor(client, distribution.id);
-      // Reconcile re-arms its own idempotency key and keeps the snapshot it
-      // already froze; publish and cancel never overwrite an existing
-      // operation, because that conflict is exactly what proves a prior attempt
-      // reached the Provider boundary without a durable outcome.
-      // `media_asset_ids` is the indexed hold set cleanup probes: it lists the
-      // Assets this attempt may still be retrieving without parsing JSON.
       const frozenAssetIds = snapshot.media
         .map((item) =>
           item !== null && typeof item === "object" && "asset_id" in item ? item.asset_id : null,
@@ -833,11 +596,6 @@ function prepare(
               ],
             );
       if (intent.rowCount === 1) {
-        // Durable protection evidence for every object this attempt may
-        // deliver. The hold lives with the attempt and is released only once
-        // the attempt is terminal and its reconciliation is done, so deleting
-        // the Post or cancelling a pending target can never pull media out from
-        // under live Provider retrieval.
         yield* client.query(
           `INSERT INTO provider_operation_media
              (operation_id, org_id, distribution_id, asset_id, brand_profile_id,
@@ -874,11 +632,6 @@ function prepare(
            AND status = 'started'`,
           [distribution.id, operationType, idempotencyKey(message)],
         );
-        // The conflicting intent proves a prior attempt reached the provider
-        // boundary without a durable outcome. The row becomes actionable
-        // immediately: a reconcile event is armed in the same transaction and
-        // next_attempt_at marks the row due so the scanner re-arms the trigger
-        // if this event is ever lost (#256).
         yield* client.query(
           `UPDATE distributions
          SET status = 'needs_reconciliation',
@@ -890,18 +643,11 @@ function prepare(
          WHERE id = $1 AND status NOT IN ('delivered', 'published', 'cancelled')`,
           [distribution.id],
         );
-        yield* client.query(
-          `INSERT INTO outbox_events
-           (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-         VALUES ($1, 'distribution.reconcile.requested', 'distribution', $2, $3, $4)
-         ON CONFLICT DO NOTHING`,
-          [
-            distribution.org_id,
-            distribution.id,
-            `distribution:${distribution.id}:reconcile:${distribution.reconciliation_attempt_count + 1}`,
-            JSON.stringify({ distribution_id: distribution.id, version: 1 }),
-          ],
-        );
+        yield* armDistributionReconcile(client, {
+          completedAttempts: distribution.reconciliation_attempt_count,
+          distributionId: distribution.id,
+          orgId: distribution.org_id,
+        });
         yield* finishJobLease(client, eventKey(message), "succeeded");
         return { outcome: "skipped" };
       }
@@ -924,15 +670,6 @@ function prepare(
   );
 }
 
-/**
- * Maps a provider operation result into database lifecycle and operation statuses.
- *
- * Distinguishes confirmed failures, ambiguous unknown results, asynchronous started operations
- * ('awaiting_provider'), terminal native handoffs ('delivered'), and publications ('published').
- *
- * @param result - Provider operation result.
- * @returns Status descriptors for the distribution and provider operation records.
- */
 function failureState(result: ProviderOperationResult): {
   code: string | null;
   errorClass: string | null;
@@ -991,44 +728,26 @@ function failureState(result: ProviderOperationResult): {
   };
 }
 
-/**
- * Computes an exponential retry backoff delay with jitter within policy bounds.
- *
- * Applies full jitter between 75% and 100% of the exponential interval, bounded by
- * policy maximums and provider retry-after headers.
- *
- * @param policy - Provider adapter retry policy.
- * @param completedAttempts - Number of prior failed attempts.
- * @param random - Random number generator producing a float in [0, 1).
- * @param retryAfter - Minimum delay requested by provider headers in seconds.
- * @returns Delay in seconds, or null if maximum attempts were reached.
- */
 function boundedDelaySeconds(
   policy: NonNullable<DistributionPublishExecution["retryPolicy"]>,
   completedAttempts: number,
   random: () => number,
   retryAfter = 0,
 ): number | null {
-  if (completedAttempts >= policy.maxAttempts) return null;
-  const sample = random();
-  const jitter = Number.isFinite(sample) ? 0.75 + Math.min(1, Math.max(0, sample)) * 0.25 : 0.875;
-  const exponential = Math.min(
-    policy.maxDelaySeconds,
-    policy.baseDelaySeconds * 2 ** Math.max(0, completedAttempts - 1),
+  return nextDelaySeconds(
+    {
+      attemptBase: 1,
+      baseSeconds: policy.baseDelaySeconds,
+      clampBeforeJitter: true,
+      jitter: "quarter",
+      maxAttempts: policy.maxAttempts,
+      maxSeconds: policy.maxDelaySeconds,
+    },
+    completedAttempts,
+    { random, retryAfterSeconds: retryAfter },
   );
-  return Math.min(policy.maxDelaySeconds, Math.max(1, Math.ceil(exponential * jitter), retryAfter));
 }
 
-/**
- * Computes the retry delay for a failed publication attempt based on provider retry policy.
- *
- * Returns null if the failure was non-retryable or no retry policy is defined.
- *
- * @param execution - Result of the provider publish call.
- * @param completedAttempts - 1-based attempt count.
- * @param random - PRNG function.
- * @returns Delay in seconds, or null if retries should not proceed.
- */
 function providerRetryDelaySeconds(
   execution: DistributionPublishExecution,
   completedAttempts: number,
@@ -1049,82 +768,52 @@ function providerRetryDelaySeconds(
   );
 }
 
-/**
- * Dispatches initial background sync triggers for analytics and comments to Cloudflare Queues.
- *
- * Enqueues Analytics immediately after publication; Comment-body collection is
- * emitted only when the deployment explicitly enables recurring collection.
- *
- * @param env - Automation worker environment bindings.
- * @param distributionId - Target distribution UUID.
- * @param analyticsEventId - Minted analytics sync event ID, if assigned.
- * @param commentsEventId - Minted comments sync event ID, if assigned.
- */
 async function dispatchInitialEngagementTriggers(
   env: AutomationEnv,
   distributionId: string,
   analyticsEventId: string | null | undefined,
   commentsEventId: string | null | undefined,
 ): Promise<void> {
-  if (analyticsEventId && env.ANALYTICS_QUEUE) {
+  const sendTrigger = async (
+    queue: Queue<unknown> | undefined,
+    workload: "analytics" | "comments",
+    eventId: string | null | undefined,
+  ): Promise<void> => {
+    if (!eventId || !queue) return;
     try {
-      await env.ANALYTICS_QUEUE.sendBatch([
+      await queue.sendBatch([
         {
-          body: {
-            event_id: analyticsEventId,
-            request_id: analyticsEventId,
-            target_id: distributionId,
-            type: "provider.sync",
-            version: 1,
-            workload: "analytics",
-          },
+          body: providerSyncMessage(workload, distributionId, eventId),
           contentType: "json",
         },
       ]);
-    } catch {
-      // Retained durably in analytics_sync_event_id; hourly sweep recovers lost sends.
-    }
-  }
-  if (env.RECURRING_COMMENTS_ENABLED === "true" && commentsEventId && env.COMMENTS_QUEUE) {
-    try {
-      await env.COMMENTS_QUEUE.sendBatch([
+    } catch (cause) {
+      log(
+        "warn",
         {
-          body: {
-            event_id: commentsEventId,
-            request_id: commentsEventId,
-            target_id: distributionId,
-            type: "provider.sync",
-            version: 1,
-            workload: "comments",
-          },
-          contentType: "json",
+          environment: env.ENVIRONMENT,
+          job_id: eventId,
+          service: "automation",
+          trace_id: eventId,
+          version: env.VERSION,
         },
-      ]);
-    } catch {
-      // Retained durably in comments_sync_event_id; hourly sweep recovers lost sends.
+        {
+          ...errorDiagnostic(cause),
+          distribution_id: distributionId,
+          event: "engagement_trigger_send_failed",
+          outcome: "deferred_to_sweep",
+          retry_class: "none",
+          workload,
+        },
+      );
     }
+  };
+  await sendTrigger(env.ANALYTICS_QUEUE, "analytics", analyticsEventId);
+  if (env.RECURRING_COMMENTS_ENABLED === "true") {
+    await sendTrigger(env.COMMENTS_QUEUE, "comments", commentsEventId);
   }
 }
 
-/**
- * Reports one normalized Provider failure that was actually committed.
- *
- * The publish executor catches adapter errors into `confirmed_failure`/`unknown`
- * result values, so the queue boundary sees a successful Effect and its
- * rejected/retry reporting branches never run for these ordinary conditions.
- * Reading the committed result here — after the outcome transaction, once per
- * message rather than once per Provider attempt — is what makes "expired
- * authorization" and "rate limited" countable without counting failed Posts.
- *
- * Confirmed successes and skipped work produce nothing. The call is
- * fire-and-forget on the job's own lifecycle: it never fails the program it
- * instruments, and it cannot change the retry/DLQ decision already recorded.
- *
- * @param env - Automation worker environment bindings.
- * @param row - Distribution the attempt belonged to; supplies the Platform.
- * @param execution - Normalized Provider outcome that was just persisted.
- * @returns Effect that never fails.
- */
 function reportCommittedProviderFailure(
   env: AutomationEnv,
   row: { platform: string },
@@ -1146,21 +835,6 @@ function reportCommittedProviderFailure(
   }).pipe(Effect.asVoid);
 }
 
-/**
- * Records the results of a publication attempt in provider operations and distributions tables.
- *
- * Updates distribution status (published, awaiting_provider, failed, or needs_reconciliation),
- * schedules retries or poll attempts, stores rate limit budgets, and triggers initial engagement syncs.
- * Reconciliation-eligible outcomes always arm a `distribution.reconcile.requested` trigger
- * and a next-attempt time, even when the provider returned no operation evidence (#256).
- *
- * @param env - Automation worker environment bindings.
- * @param message - Outbox message.
- * @param row - Active distribution row.
- * @param execution - Provider publication execution outcome.
- * @param random - PRNG function.
- * @param transaction - Transaction runner for database operations.
- */
 function recordPublishOutcome(
   env: AutomationEnv,
   message: DistributionMessage,
@@ -1173,11 +847,6 @@ function recordPublishOutcome(
     const result = execution.result;
     const state = failureState(result);
     const retryDelay = providerRetryDelaySeconds(execution, row.attempt_count + 1, random);
-    // Entering `awaiting_provider` starts the fixed-interval provider poll
-    // loop; `needs_reconciliation` keeps the publish retry ladder's backoff.
-    // Neither arm requires providerOperationId: a missing operation identity is
-    // itself the ambiguity the reconcile trigger resolves, so the row always
-    // gets a deterministic next attempt instead of stranding (#256).
     const nextAttemptDelay =
       retryDelay ??
       (state.status === "awaiting_provider"
@@ -1200,11 +869,6 @@ function recordPublishOutcome(
        SET status = $4, provider_operation_id = $5, provider_post_id = $6,
            provider_url = $7, error_class = $8, last_error = $9,
            completed_at = CASE WHEN $4 IN ('succeeded', 'failed') THEN now() ELSE NULL END,
-           -- The hold always covers a full Provider retrieval window from the
-           -- last outcome write: a freshly handed-out URL may still be fetched
-           -- for up to that window even after the attempt records terminal
-           -- status, and an unresolved attempt needs its media for the poll or
-           -- reconciliation that follows.
            media_hold_until = now() + ($10 * INTERVAL '1 second'),
            updated_at = now()
        WHERE distribution_id = $1 AND operation = $2 AND idempotency_key = $3`,
@@ -1315,10 +979,6 @@ function recordPublishOutcome(
         analyticsEventId = updated.rows[0]?.analytics_event_id;
         commentsEventId = updated.rows[0]?.comments_event_id;
         const updatedRow = updated.rows[0];
-        // A confirmed publication is measured inside the transaction that
-        // recorded it, so the counter and the domain commit are atomic and a
-        // later deletion cannot reduce what was already counted. The hook is a
-        // savepoint-scoped no-op for any other outcome.
         if (updatedRow?.status === "published") {
           yield* recordPublicationUsage(
             client,
@@ -1345,31 +1005,17 @@ function recordPublishOutcome(
             yield* recordRateLimitBudget(client, row.platform, row.platform_user_id, budget);
           }
         }
-        // Every reconciliation-eligible outcome leaves its trigger armed in the
-        // same transaction that records it, so a lost Queue delivery can never
-        // strand the row. The dedupe key uses the post-update attempt count so
-        // it matches the Due scanner's `reconcile:<attempt>` numbering: a
-        // scanner re-arm dedupes against this event instead of double-arming
-        // (#256). Rows that stayed cancel_requested or terminal gain no
-        // trigger.
         if (
           nextAttemptDelay !== null &&
           updatedRow !== undefined &&
           (updatedRow.status === "awaiting_provider" ||
             updatedRow.status === "needs_reconciliation")
         ) {
-          yield* client.query(
-            `INSERT INTO outbox_events
-           (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-         VALUES ($1, 'distribution.reconcile.requested', 'distribution', $2, $3, $4)
-         ON CONFLICT DO NOTHING`,
-            [
-              row.org_id,
-              row.id,
-              `distribution:${row.id}:reconcile:${updatedRow.reconciliation_attempt_count + 1}`,
-              JSON.stringify({ distribution_id: row.id, version: 1 }),
-            ],
-          );
+          yield* armDistributionReconcile(client, {
+            completedAttempts: updatedRow.reconciliation_attempt_count,
+            distributionId: row.id,
+            orgId: row.org_id,
+          });
         }
         yield* finishJobLease(client, eventKey(message), "succeeded");
       }),
@@ -1382,19 +1028,6 @@ function recordPublishOutcome(
   });
 }
 
-/**
- * Flags a distribution cancel operation as requiring reconciliation when no adapter cancel method exists.
- *
- * Updates provider operations and distributions to 'needs_reconciliation', clearing active leases.
- * The row is made immediately actionable — next_attempt_at = now() plus a
- * reconcile trigger armed in the same transaction — so the unresolved cancel
- * can never strand without a next attempt (#256).
- *
- * @param env - Automation worker environment bindings.
- * @param message - Outbox message.
- * @param row - Active distribution row.
- * @param transaction - Transaction runner for database operations.
- */
 function markCancelNeedsReconciliation(
   env: AutomationEnv,
   message: DistributionMessage,
@@ -1407,8 +1040,6 @@ function markCancelNeedsReconciliation(
         `UPDATE provider_operations
        SET status = 'needs_reconciliation', error_class = 'ambiguous',
            last_error = 'No accepted provider cancellation adapter is configured.',
-           -- An unresolved cancel still needs its media for the reconciliation
-           -- that follows, so the retrieval-window hold is refreshed.
            media_hold_until = now() + ($3 * INTERVAL '1 second'),
            updated_at = now()
        WHERE distribution_id = $1 AND operation = 'cancel' AND idempotency_key = $2`,
@@ -1425,39 +1056,16 @@ function markCancelNeedsReconciliation(
        WHERE id = $1 AND status = 'cancel_requested'`,
         [row.id],
       );
-      // Arm the reconcile trigger with the scanner's `reconcile:<attempt>`
-      // dedupe key so a scanner re-arm dedupes against this event (#256).
-      yield* client.query(
-        `INSERT INTO outbox_events
-       (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-       VALUES ($1, 'distribution.reconcile.requested', 'distribution', $2, $3, $4)
-       ON CONFLICT DO NOTHING`,
-        [
-          row.org_id,
-          row.id,
-          `distribution:${row.id}:reconcile:${row.reconciliation_attempt_count + 1}`,
-          JSON.stringify({ distribution_id: row.id, version: 1 }),
-        ],
-      );
+      yield* armDistributionReconcile(client, {
+        completedAttempts: row.reconciliation_attempt_count,
+        distributionId: row.id,
+        orgId: row.org_id,
+      });
       yield* finishJobLease(client, eventKey(message), "succeeded");
     }),
   );
 }
 
-/**
- * Records the outcome of a provider publication cancellation attempt.
- *
- * Updates the distribution status to 'cancelled' if confirmed, or 'needs_reconciliation' if ambiguous or failed.
- * An unresolved cancel is made immediately actionable — next_attempt_at =
- * now() plus a reconcile trigger armed in the same transaction — so it can
- * never strand without a next attempt (#256).
- *
- * @param env - Automation worker environment bindings.
- * @param message - Outbox message.
- * @param row - Active distribution row.
- * @param execution - Cancellation execution outcome from the provider adapter.
- * @param transaction - Transaction runner for database operations.
- */
 function recordCancelOutcome(
   env: AutomationEnv,
   message: DistributionMessage,
@@ -1476,10 +1084,6 @@ function recordCancelOutcome(
            provider_post_id = $5, provider_url = $6,
            error_class = $7, last_error = $8,
            completed_at = CASE WHEN $3 IN ('succeeded', 'failed') THEN now() ELSE NULL END,
-           -- The cancel outcome itself does not prove the Provider stopped
-           -- fetching the published objects, so the hold always covers a full
-           -- retrieval window; a follow-up reconciliation can then still
-           -- replay the frozen media while that window is open.
            media_hold_until = now() + ($9 * INTERVAL '1 second'),
            updated_at = now()
        WHERE distribution_id = $1 AND operation = 'cancel' AND idempotency_key = $2`,
@@ -1514,38 +1118,18 @@ function recordCancelOutcome(
           failure?.message ?? null,
         ],
       );
-      // An unresolved cancel arms its reconcile trigger with the scanner's
-      // `reconcile:<attempt>` dedupe key so a scanner re-arm dedupes against
-      // this event (#256).
       if (!confirmed) {
-        yield* client.query(
-          `INSERT INTO outbox_events
-         (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-         VALUES ($1, 'distribution.reconcile.requested', 'distribution', $2, $3, $4)
-         ON CONFLICT DO NOTHING`,
-          [
-            row.org_id,
-            row.id,
-            `distribution:${row.id}:reconcile:${row.reconciliation_attempt_count + 1}`,
-            JSON.stringify({ distribution_id: row.id, version: 1 }),
-          ],
-        );
+        yield* armDistributionReconcile(client, {
+          completedAttempts: row.reconciliation_attempt_count,
+          distributionId: row.id,
+          orgId: row.org_id,
+        });
       }
       yield* finishJobLease(client, eventKey(message), "succeeded");
     }),
   );
 }
 
-/**
- * Computes normalized distribution and operation state descriptors from a status lookup execution.
- *
- * Distinguishes published posts, ongoing processing ('awaiting_provider'), confirmed failures,
- * ambiguous unknown states, and not-found responses. A lookup failure caused by missing
- * provider evidence is terminal `failed` — it can never resolve (#256).
- *
- * @param execution - Distribution lookup execution result.
- * @returns State mapping including status, errors, provider IDs, and polling flags.
- */
 function reconciliationState(execution: DistributionLookupExecution): {
   code: string | null;
   errorClass: string | null;
@@ -1560,10 +1144,6 @@ function reconciliationState(execution: DistributionLookupExecution): {
 } {
   if (execution.result.kind === "lookup_failure") {
     const { failure } = execution.result;
-    // A lookup with no usable provider evidence can never resolve, so it is a
-    // terminal failure rather than another reconciliation round-trip; other
-    // lookup failures stay reconciliation-eligible while they are retryable
-    // (#256).
     const evidenceMissing = failure.code === "provider_lookup_evidence_unavailable";
     return {
       code: failure.code,
@@ -1661,23 +1241,6 @@ function reconciliationState(execution: DistributionLookupExecution): {
   }
 }
 
-/**
- * Records the results of a provider reconciliation lookup in the database.
- *
- * Enforces provider poll budgets for ongoing processing and the shared
- * reconciliation attempt ceiling for unresolved outcomes, schedules retries or
- * poll attempts, and makes exhausted budgets, missing provider evidence, and
- * non-retryable lookup failures terminal `failed` states so no row strands
- * without a next attempt (#256).
- * Stores rate limit budgets and triggers initial engagement syncs if published.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Outbox message.
- * @param row - Active distribution row.
- * @param execution - Provider status lookup execution result.
- * @param random - PRNG function.
- * @param transaction - Transaction runner for database operations.
- */
 function recordReconciliationOutcome(
   env: AutomationEnv,
   message: DistributionMessage,
@@ -1688,20 +1251,9 @@ function recordReconciliationOutcome(
 ): Effect.Effect<void, DatabaseError> {
   return Effect.gen(function* () {
     const state = reconciliationState(execution);
-    // A Provider that is still assembling the publication is polled on a fixed
-    // interval against its own budget: the wait is the Provider's processing
-    // time, not a failure to back off from. Exhausting the poll budget is a
-    // terminal failure — the row must not wait for reconciliation forever
-    // (#256).
     const providerStillProcessing = state.status === "awaiting_provider";
     const pollBudgetExhausted =
       providerStillProcessing && row.provider_poll_attempts >= maximumProviderPollAttempts - 1;
-    // Reconciliation re-arms only while the adapter's retry policy still has
-    // budget and the shared reconciliation attempt ceiling has room for the
-    // next attempt. Every other unresolved outcome — including a non-retryable
-    // lookup failure that can never be rearmed — is terminal `failed` with the
-    // provider's safe code so the row can never strand in needs_reconciliation
-    // without a next attempt or loop reconciliation indefinitely (#256).
     const rearmDelay =
       !providerStillProcessing &&
       state.status === "needs_reconciliation" &&
@@ -1752,10 +1304,6 @@ function recordReconciliationOutcome(
            provider_post_id = $5, provider_url = $6,
            error_class = $7, last_error = $8,
            completed_at = CASE WHEN $3 IN ('succeeded', 'failed') THEN now() ELSE NULL END,
-           -- Reconciliation cannot prove the Provider's final retrieval has
-           -- finished, so every outcome — published, failed, or still
-           -- outstanding — re-arms the full retrieval window. Cleanup relies
-           -- on that expiry rather than on operation status.
            media_hold_until = now() + ($9 * INTERVAL '1 second'),
            updated_at = now()
        WHERE distribution_id = $1 AND operation = 'reconcile'
@@ -1845,9 +1393,6 @@ function recordReconciliationOutcome(
         analyticsEventId = updated.rows[0]?.analytics_event_id;
         commentsEventId = updated.rows[0]?.comments_event_id;
         const updatedRow = updated.rows[0];
-        // Reconciliation that establishes success is a confirmed publication,
-        // and the durable per-Post/per-Distribution marks make a second
-        // observation of the same `published` row advance nothing.
         if (updatedRow?.status === "published") {
           yield* recordPublicationUsage(
             client,
@@ -1867,30 +1412,17 @@ function recordReconciliationOutcome(
             execution.metadata.rateLimitBudget,
           );
         }
-        // Re-arm the next reconcile trigger only when the row actually moved
-        // to a reconciliation-eligible state; a concurrent cancel or terminal
-        // transition must not gain a trigger. The dedupe key uses the
-        // post-update attempt count so it matches the Due scanner's
-        // `reconcile:<attempt>` numbering — a scanner re-arm dedupes against
-        // this event instead of claiming an independent budget slot (#256).
         if (
           nextAttemptDelay !== null &&
           updatedRow !== undefined &&
           (updatedRow.status === "awaiting_provider" ||
             updatedRow.status === "needs_reconciliation")
         ) {
-          yield* client.query(
-            `INSERT INTO outbox_events
-           (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-         VALUES ($1, 'distribution.reconcile.requested', 'distribution', $2, $3, $4)
-         ON CONFLICT DO NOTHING`,
-            [
-              row.org_id,
-              row.id,
-              `distribution:${row.id}:reconcile:${updatedRow.reconciliation_attempt_count + 1}`,
-              JSON.stringify({ distribution_id: row.id, version: 1 }),
-            ],
-          );
+          yield* armDistributionReconcile(client, {
+            completedAttempts: updatedRow.reconciliation_attempt_count,
+            distributionId: row.id,
+            orgId: row.org_id,
+          });
         }
         yield* finishJobLease(client, eventKey(message), "succeeded");
       }),
@@ -1902,26 +1434,6 @@ function recordReconciliationOutcome(
     }
   });
 }
-/**
- * Atomically persists a just-in-time token rotation for a publish target's
- * platform account (#256).
- *
- * Encrypts the rotated access/refresh tokens and commits them with the new
- * expiry (or NULL when omitted), `connected` status, a reset refresh-attempt state, and the next
- * background refresh arm (`max(now + 1h, expiresAt - 7d)`, matching the
- * background refresh cadence, or NULL when expiry is absent) in a single guarded UPDATE. The
- * `token_expires_at IS NOT DISTINCT FROM` guard makes the write conditional on
- * the credential snapshot the publish read: a concurrent rotation that already
- * committed yields zero rows and resolves false, so the caller must not publish
- * with credentials it could not persist. A revoked account is never resurrected.
- *
- * @param env - Automation worker environment bindings.
- * @param transaction - Transaction runner for database operations.
- * @param expectedTokenExpiresAt - Token expiry the publish target was read with.
- * @param now - Reference timestamp for the next-attempt arm.
- * @param rotation - Plaintext rotated token set from the provider refresh.
- * @returns Promise resolving true when the rotation committed, false on a lost race.
- */
 function persistRotatedTokens(
   env: AutomationEnv,
   transaction: typeof withSystemTransactionEffect,
@@ -1934,67 +1446,49 @@ function persistRotatedTokens(
     refreshToken?: string;
     scopes: string[];
   },
-): Promise<boolean> {
-  return Effect.runPromise(
-    Effect.gen(function* () {
-      const cipher = tokenCipherFor(env);
-      const accessToken = yield* Effect.promise(() => cipher.encrypt(rotation.accessToken));
-      const refreshToken = rotation.refreshToken
-        ? yield* Effect.promise(() => cipher.encrypt(rotation.refreshToken!))
+): Effect.Effect<boolean, DatabaseError> {
+  return Effect.gen(function* () {
+    const cipher = tokenCipherFor(env);
+    const accessToken = yield* Effect.promise(() => cipher.encrypt(rotation.accessToken));
+    const refreshToken = rotation.refreshToken
+      ? yield* Effect.promise(() => cipher.encrypt(rotation.refreshToken!))
+      : null;
+    const expiresAt = rotation.expiresAt !== undefined ? new Date(rotation.expiresAt) : null;
+    const nextAttemptAt =
+      expiresAt !== null
+        ? new Date(Math.max(now.getTime() + 3_600_000, expiresAt.getTime() - 7 * 86_400_000))
         : null;
-      const expiresAt = rotation.expiresAt !== undefined ? new Date(rotation.expiresAt) : null;
-      const nextAttemptAt =
-        expiresAt !== null
-          ? new Date(Math.max(now.getTime() + 3_600_000, expiresAt.getTime() - 7 * 86_400_000))
-          : null;
-      const updated = yield* transaction(env, (client) =>
-        client.query(
-          `UPDATE platform_accounts
-             SET access_token = $2, refresh_token = COALESCE($3, refresh_token),
-                 token_expires_at = $4,
-                 scopes = COALESCE($5::text[], scopes),
-                 connection_status = 'connected', last_synced_at = now(),
-                 token_refresh_event_id = NULL,
-                 token_refresh_lease_expires_at = NULL,
-                 token_refresh_next_attempt_at = $6::timestamptz,
-                 token_refresh_attempt_count = 0,
-                 token_refresh_last_error = NULL,
-                 reconnect_notified_at = NULL, updated_at = now()
-             WHERE id = $1
-               AND connection_status <> 'revoked'
-               AND token_expires_at IS NOT DISTINCT FROM $7::timestamptz`,
-          [
-            rotation.platformAccountId,
-            accessToken,
-            refreshToken,
-            expiresAt,
-            rotation.scopes.length > 0 ? rotation.scopes : null,
-            nextAttemptAt,
-            expectedTokenExpiresAt,
-          ],
-        ),
-      );
-      return updated.rowCount === 1;
-    }),
-  );
+    const updated = yield* transaction(env, (client) =>
+      client.query(
+        `UPDATE platform_accounts
+           SET access_token = $2, refresh_token = COALESCE($3, refresh_token),
+               token_expires_at = $4,
+               scopes = COALESCE($5::text[], scopes),
+               connection_status = 'connected', last_synced_at = now(),
+               token_refresh_event_id = NULL,
+               token_refresh_lease_expires_at = NULL,
+               token_refresh_next_attempt_at = $6::timestamptz,
+               token_refresh_attempt_count = 0,
+               token_refresh_last_error = NULL,
+               reconnect_notified_at = NULL, updated_at = now()
+           WHERE id = $1
+             AND connection_status <> 'revoked'
+             AND token_expires_at IS NOT DISTINCT FROM $7::timestamptz`,
+        [
+          rotation.platformAccountId,
+          accessToken,
+          refreshToken,
+          expiresAt,
+          rotation.scopes.length > 0 ? rotation.scopes : null,
+          nextAttemptAt,
+          expectedTokenExpiresAt,
+        ],
+      ),
+    );
+    return updated.rowCount === 1;
+  });
 }
 
-/**
- * Main queue consumer handler for processing distribution outbox messages.
- *
- * Coordinates execution of 'publish', 'cancel', and 'reconcile' distribution operations.
- * Claims distributed job leases, decrypts tokens, calls platform provider adapters,
- * updates database state machines, and dispatches follow-up engagement or polling tasks.
- * Composes provider IO with persistence in the calling job fiber; persistence
- * rejections and lease deferrals surface as typed AutomationJobError failures
- * (ProviderAdapterError stays in the declared channel for provider throws),
- * which the job boundary classifies into ack/retry/DLQ handling.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Outbox message from the queue.
- * @param dependencies - Optional dependency overrides for testing (credentials, media resolver, time, registry).
- * @returns Effect producing 'processed' or 'skipped'; fails with RetryableJobError on active leases or classified persistence errors.
- */
 export function processDistributionMessage(
   env: AutomationEnv,
   message: DistributionMessage,
@@ -2005,11 +1499,6 @@ export function processDistributionMessage(
     const operationType = operation(message);
     if (!operationType) return "skipped" as const;
     const transaction = dependencies.transaction ?? withSystemTransactionEffect;
-    // The registry is resolved lazily and shared: claim needs its capability to
-    // freeze a deliverable object, and the publish path needs the same graph.
-    // Building it on first use keeps an environment whose provider
-    // configuration is unusable from failing the claim itself — the attempt is
-    // still recorded, and the failure surfaces on the Provider path.
     let built: ProviderRegistry | undefined;
     const registry = (): ProviderRegistry =>
       (built ??= dependencies.providerRegistry ?? cachedProviderRegistryFromEnvironment(env));
@@ -2041,9 +1530,6 @@ export function processDistributionMessage(
           },
           {
             connectionStatus: row.connection_status ?? "unavailable",
-            // Reconciliation replays the bytes the publish attempt froze, so a
-            // Post edited or un-attached since then cannot break a Provider
-            // upload that is still resuming (#256).
             media: frozenMediaEntries(snapshot),
             platform: row.platform,
             providerAccountId: row.platform_user_id ?? undefined,
@@ -2054,8 +1540,6 @@ export function processDistributionMessage(
           },
           {
             decryptToken: dependencies.decryptToken ?? decryptStoredToken(env),
-            // The resolver lets a resumable-capable adapter replay the original
-            // Asset bytes so a persisted upload session resumes in place (#256).
             mediaFor: dependencies.mediaFor ?? createProviderMediaResolver(env),
           },
           dependencies.now?.() ?? new Date(),
@@ -2119,8 +1603,6 @@ export function processDistributionMessage(
           connectionStatus: row.connection_status ?? "unavailable",
           hashtags: snapshot.content.hashtags,
           idempotencyKey: idempotencyKey(message),
-          // Content and media both come from the snapshot written when this
-          // attempt claimed its work, never from live Post state.
           media: frozenMediaEntries(snapshot),
           platform: row.platform,
           platformAccountId: row.platform_account_id ?? undefined,
@@ -2154,30 +1636,11 @@ export function processDistributionMessage(
       dependencies.random ?? Math.random,
       transaction,
     ).pipe(Effect.mapError(classifyJobError));
-    // The publish executor normalizes Provider failures into result *values*:
-    // `executeProviderPublishEffect` never fails, so the queue boundary's Exit is
-    // a success and its rejected/retry reporting branches are never reached for
-    // an ordinary expired authorization or rate limit. This is the canonical
-    // outcome seam, so that is where a categorized fact is produced — once per
-    // committed outcome, not once per Provider attempt.
     yield* reportCommittedProviderFailure(env, row, execution);
     return "processed" as const;
   });
 }
 
-/**
- * Scans and enqueues due distributions for publication or scheduled reconciliation.
- *
- * Claims a bounded batch of distributions that are scheduled, failed with retryable flag,
- * awaiting provider poll, due for reconciliation, or stalled in processing past the
- * grace period. Stalled processing rows transition to `needs_reconciliation` and arm
- * `distribution.reconcile.requested` — never a second publish (#256).
- *
- * @param env - Automation worker environment bindings.
- * @param limit - Maximum number of distributions to claim (defaults to 100).
- * @param stalledGraceSeconds - Grace period for stalled processing recovery (defaults to 300s).
- * @returns Effect producing the number of distributions claimed and transitioned; fails with a classified AutomationJobError.
- */
 export function enqueueDueDistributions(
   env: AutomationEnv,
   limit = 100,
@@ -2186,17 +1649,6 @@ export function enqueueDueDistributions(
   return claimDueOutboxWork(env, "distribution", limit, [stalledGraceSeconds]);
 }
 
-/**
- * Sweeps scheduled distributions within the delayed delivery horizon that lack armed outbox commands.
- *
- * Recovers lost delayed delivery triggers or schedules near-term publications ahead of time.
- *
- * @param env - Automation worker environment bindings.
- * @param limit - Maximum number of distributions to claim (defaults to 100).
- * @param overdueGraceSeconds - Grace duration before an un-triggered scheduled distribution is deemed overdue.
- * @param horizonSeconds - Maximum delayed delivery horizon supported by Cloudflare Queues.
- * @returns Effect producing the number of swept distributions armed with outbox commands; fails with a classified AutomationJobError.
- */
 export function sweepDueDistributions(
   env: AutomationEnv,
   limit = 100,

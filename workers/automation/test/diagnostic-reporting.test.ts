@@ -9,23 +9,6 @@ import {
   scheduledDiagnosticReport,
 } from "../src/diagnostic-reporting";
 
-/**
- * Boundary-shape cases for automation diagnostics.
- *
- * The real-PostgreSQL and controlled-egress behaviour is covered by
- * `test/improvement-reporting.integration.test.ts`; these pin the translation
- * contract: which fixed category, grouping and Provider class a boundary failure
- * becomes.
- *
- * The boundary report intentionally keeps the thrown value's bounded stack — the
- * allowlist that strips it runs downstream, in the payload the installation
- * sends. So the privacy assertions below cross that real consumer boundary by
- * assembling the properties and validating them with the same
- * `payloadViolation` gate the service applies before transport, rather than
- * searching the boundary input for a message it is supposed to carry.
- */
-
-/** Payload context the consumer uses for a self-hosted installation. */
 const payloadContext = { appVersion: "1.0.0", deploymentCategory: "selfhosted" } as const;
 
 describe("automation diagnostic classification", () => {
@@ -63,7 +46,6 @@ describe("automation diagnostic classification", () => {
       operation: "publish",
       platform: "threads",
     });
-    // Only the class name and an optional bounded stack travel.
     const serialized = JSON.stringify(report);
     expect(serialized).not.toContain("rate_limited");
     expect(serialized).not.toContain("distribution.publish.requested");
@@ -82,9 +64,6 @@ describe("automation diagnostic classification", () => {
       handled: true,
       operation: "publish",
     });
-    // The runtime message must not survive into the payload the installation
-    // would send: the exception value is the fixed category, and the frame the
-    // test's own stack names reduces to a reviewed release location.
     const properties = diagnosticProperties(report, payloadContext);
     expect(JSON.stringify(properties)).not.toContain("timed out waiting");
     expect(payloadViolation(properties)).toBeUndefined();
@@ -98,8 +77,6 @@ describe("automation diagnostic classification", () => {
       handled: false,
       operation: "other",
     });
-    // Same boundary: the boundary report carries the stack, the sent payload
-    // must not carry the message or the unit name the failure came from.
     const properties = diagnosticProperties(report, payloadContext);
     expect(JSON.stringify(properties)).not.toContain("maintenance boom");
     expect(JSON.stringify(properties)).not.toContain("retention");

@@ -1,5 +1,3 @@
-// Disposable network smoke: production routing/actor resolution/RLS/crypto and bounded Provider HTTP.
-// The upstream is controlled and never publishes content; no cache diagnostic route is added.
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -8,17 +6,18 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Miniflare, convertV4MiniflareOptions, Log, LogLevel } from "miniflare";
 import pg from "pg";
 import { TokenCipher } from "../../packages/secrets/src/index";
+import { LOCAL_ADMIN_URL, LOCAL_SYSTEM_URL, LOCAL_TEST_URL } from "../lib/integration-database";
 
 const selfhost = process.env.SELFHOST_DB_PASSWORD !== undefined;
 const adminUrl = selfhost
   ? `postgres://postgres:${encodeURIComponent(process.env.SELFHOST_DB_PASSWORD ?? "")}@postgres:5432/meltiply`
-  : "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
+  : LOCAL_ADMIN_URL;
 const authenticatedUrl = selfhost
   ? `postgres://meltiply_rls:${encodeURIComponent(process.env.SELFHOST_DB_AUTHENTICATED_PASSWORD ?? "")}@postgres:5432/meltiply`
-  : "postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable";
+  : LOCAL_TEST_URL;
 const systemUrl = selfhost
   ? `postgres://meltiply_system:${encodeURIComponent(process.env.SELFHOST_DB_SYSTEM_PASSWORD ?? "")}@postgres:5432/meltiply`
-  : "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
+  : LOCAL_SYSTEM_URL;
 const scriptPath = process.env.REQUIREMENTS_SMOKE_BUNDLE;
 if (!scriptPath) throw new Error("REQUIREMENTS_SMOKE_BUNDLE must name the built disposable Worker");
 const bundlePath = resolve(scriptPath);
@@ -42,7 +41,6 @@ const observations: {
 }[] = [];
 let runtime: Miniflare | undefined;
 
-/** Waits for observable progress, with a deadline; no fixed-duration sleep substitutes for readiness. */
 async function until(predicate: () => boolean | Promise<boolean>, label: string) {
   const end = Date.now() + 15_000;
   while (!(await predicate())) {
@@ -51,7 +49,6 @@ async function until(predicate: () => boolean | Promise<boolean>, label: string)
   }
 }
 
-/** Observes completed persisted account checks; this cannot prove a caller has already joined a flight. */
 async function accountReads(): Promise<number> {
   const result = await pool.query<{ calls: number }>(
     `SELECT COALESCE(sum(calls), 0)::int AS calls FROM pg_stat_statements
@@ -60,13 +57,11 @@ async function accountReads(): Promise<number> {
   return result.rows[0]?.calls ?? 0;
 }
 
-/** Releases every controlled upstream read; the production HTTP client still enforces its normal deadline. */
 function release() {
   held = false;
   for (const resolve of pending.splice(0)) resolve();
 }
 
-/** Records completed-response latency and every started request, including explicitly canceled callers; preparation is excluded. */
 function record(scenario: string, before: number, samples: { ms: number }[], canceled = 0) {
   const latencies = samples.map((sample) => sample.ms).sort((a, b) => a - b);
   observations.push({
@@ -154,7 +149,6 @@ try {
     }),
   );
   const origin = (await runtime.ready).origin;
-  /** Uses a real TCP HTTP dispatch; each response must retain its own caller correlation. */
   async function request(id: string, signal?: AbortSignal, expected = 200) {
     const start = performance.now();
     const response = await fetch(
@@ -193,9 +187,6 @@ try {
     upstreamCalls - before < concurrent.length,
     "The held network burst must demonstrate avoided upstream work",
   );
-  // Transport cannot acknowledge private flight acquisition. Late callers may
-  // correctly start a new read after settlement; record rather than misclassify
-  // that scheduling as a cache failure. Distinct upstream attempts have distinct data.
   assert.equal(
     new Set(concurrentResults.map((result) => JSON.stringify(result.body))).size,
     upstreamCalls - before,

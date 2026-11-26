@@ -9,10 +9,6 @@ const lenisMock = vi.hoisted(() => ({
 }));
 
 vi.mock("lenis", () => ({
-  // `function` (not an arrow) so `new Lenis(...)` constructs through the v5
-  // spy's Reflect.construct path: the returned instance object wins over
-  // `this`, and construction calls record into mock.calls for
-  // toHaveBeenCalledOnce just like ordinary calls.
   default: vi.fn(function LenisMock(options: unknown) {
     lenisMock.instance = { destroy: lenisMock.destroy };
     lenisMock.options = options;

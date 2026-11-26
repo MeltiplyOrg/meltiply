@@ -64,7 +64,7 @@ function sequence(...responders: Responder[]) {
 
 function adapter(fetcher: typeof fetch, now = new Date("2026-07-19T00:00:00Z")) {
   return createTikTokAdapter({
-    clientKey: "tiktok-client-key",
+    clientId: "tiktok-client-key",
     clientSecret: "tiktok-client-secret",
     fetch: fetcher,
     mediaUrlPrefix,
@@ -74,13 +74,6 @@ function adapter(fetcher: typeof fetch, now = new Date("2026-07-19T00:00:00Z")) 
   });
 }
 
-/**
- * Returns the canonical valid TikTok Direct Post publish request — a 120 s
- * portrait MP4 ingested from a `mediaUrlPrefix` URL with full creator options —
- * so each spec overrides only the dimension it exercises. `patch` is spread
- * last, so its keys replace whole top-level fields (e.g. `media`,
- * `providerOptions`) rather than deep-merging into the defaults.
- */
 function publishInput(patch: Partial<PublishInput> = {}): PublishInput {
   return {
     caption: "A direct post\n\n#launch",
@@ -517,10 +510,8 @@ describe("createTikTokAdapter", () => {
       outcome: "confirmed_success",
       providerOperationId: "publish:p_pub_url~v2.789",
     });
-    const body = JSON.parse(String(providerCalls.calls[1]!.init.body)) as {
-      post_info: { auto_add_music?: boolean };
-    };
-    expect(body.post_info.auto_add_music).toBe(true);
+    const body: unknown = JSON.parse(String(providerCalls.calls[1]!.init.body));
+    expect(body).toMatchObject({ post_info: { auto_add_music: true } });
   });
 
   it("accepts a 1080p portrait photo rather than requiring a square image", async () => {
@@ -859,6 +850,24 @@ describe("createTikTokAdapter", () => {
       failure: { classification: "ambiguous" },
       outcome: "unknown",
       providerOperationId: "publish:v_pub_url~v2.123",
+    });
+  });
+
+  it("preserves the inbox phase when cancelling an inbox operation", async () => {
+    const providerCalls = sequence((url, init) => {
+      expect(url.pathname).toBe("/v2/post/publish/cancel/");
+      expect(JSON.parse(String(init.body))).toEqual({
+        publish_id: "inbox-draft-1",
+      });
+      return success({});
+    });
+    await expect(
+      adapter(providerCalls.fetcher).cancelPublication!(context, credentials, {
+        providerOperationId: "inbox:inbox-draft-1",
+      }),
+    ).resolves.toEqual({
+      outcome: "confirmed_success",
+      providerOperationId: "inbox:inbox-draft-1",
     });
   });
 

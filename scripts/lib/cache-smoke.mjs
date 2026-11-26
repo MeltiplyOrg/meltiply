@@ -4,13 +4,6 @@ import { mkdir } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { capabilityNavigation } from "../../frontend/app/e2e/cache-smoke.mjs";
 
-/**
- * Exercises built APIs and the real browser query consumers using disposable persisted fixtures.
- * `query` is a privileged, parameterized test-only PostgreSQL connection; authentication remains
- * the deployment's real cookie/token path. Requires pg_stat_statements on the disposable database.
- * Never publishes content or logs cookies/tokens. SQL observations assert cache reuse,
- * not latency or resource measurements.
- */
 export async function cacheSmoke({ origin, frontendOrigin = origin, cookie, query, label }) {
   const minted = await fetch(`${origin}/api/auth/token`, {
     headers: { cookie, origin: frontendOrigin },
@@ -24,7 +17,6 @@ export async function cacheSmoke({ origin, frontendOrigin = origin, cookie, quer
     "content-type": "application/json",
   };
   const requestIds = new Set();
-  /** Performs a bounded authenticated call, preserving each response's correlation identity. */
   async function api(path, body) {
     const response = await fetch(`${origin}/api/v1${path}`, {
       headers: { ...headers, "idempotency-key": randomUUID() },
@@ -65,7 +57,6 @@ export async function cacheSmoke({ origin, frontendOrigin = origin, cookie, quer
       [postId],
     );
     const base = `/analytics?brand_profile_id=${profile.id}&start=2026-01-01T00%3A00%3A00Z&end=`;
-    /** Reads only aggregate executions, excluding auth/visibility work and fixture preparation. */
     async function aggregateStats() {
       const stats = await query(
         `SELECT COALESCE(sum(calls), 0)::int AS calls
@@ -73,7 +64,6 @@ export async function cacheSmoke({ origin, frontendOrigin = origin, cookie, quer
       );
       return stats.rows[0];
     }
-    /** Asserts persisted summaries for sequential or concurrent reads and returns the aggregate query count. */
     async function exercise(paths, concurrent, beforeSample) {
       const before = await aggregateStats();
       const samples = [];
@@ -109,7 +99,6 @@ export async function cacheSmoke({ origin, frontendOrigin = origin, cookie, quer
     const warm = await exercise(Array(20).fill(warmPath), false);
     assert.equal(warm, 0);
     await exercise(Array(20).fill(`${base}2026-02-03T00%3A00%3A00Z`), true);
-    // Persisted lifecycle changes bypass any local invalidation: a second DB client writes directly.
     await query(
       "UPDATE brand_profiles SET deleted_at = now(), purge_at = now() + interval '30 days', updated_at = now() WHERE id = $1",
       [profile.id],
@@ -120,7 +109,6 @@ export async function cacheSmoke({ origin, frontendOrigin = origin, cookie, quer
       [profile.id],
     );
     assert.equal((await api(warmPath)).data.totals.views, 1280);
-    // More than 64 meaningful identities: oldest completed entry must be eligible for recomputation.
     const overflow = Array.from(
       { length: 65 },
       (_, index) =>
@@ -140,7 +128,6 @@ export async function cacheSmoke({ origin, frontendOrigin = origin, cookie, quer
       1280,
       "Ordinary snapshot writes may remain stale only within TTL",
     );
-    // Runtime smoke observes real wall-clock expiry; regression tests use controlled time instead.
     await delay(31_000);
     assert.equal((await api(expiryPath)).data.totals.views, 2560);
     await mkdir("artifacts/cache", { recursive: true });

@@ -1,4 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { PLATFORM_IDS } from "@meltiply/domain";
 import { useReducedMotion } from "motion/react";
 import {
   Bar,
@@ -21,7 +22,12 @@ import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { platformDisplayName } from "@/lib/platforms";
 import { useI18n } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
-import { ANALYTICS_METRICS, formatAnalyticsInteger } from "./analytics-helpers";
+import {
+  ANALYTICS_METRICS,
+  formatAnalyticsDecimal,
+  formatAnalyticsInteger,
+  formatAnalyticsWhole,
+} from "./analytics-helpers";
 import { analyticsFormatLabel, analyticsMetricLabel } from "./analytics-toolbar";
 import type {
   AnalyticsBestTime,
@@ -40,12 +46,6 @@ const GROUPINGS = ["day", "week", "month"] as const;
 
 type Grouping = (typeof GROUPINGS)[number];
 
-/**
- * View-change timing for chart marks. Bars FLIP from the previous view's
- * rendered geometry; the line chart samples the previous curve onto the new
- * buckets and eases its values. Both use this one length, and reduced motion
- * renders the destination immediately instead.
- */
 const CHART_MORPH_MS = 360;
 
 const PLATFORM_COLORS: Record<Platform, string> = {
@@ -56,9 +56,8 @@ const PLATFORM_COLORS: Record<Platform, string> = {
   youtube: "var(--gray)",
 };
 
-const PLATFORMS: readonly Platform[] = ["facebook", "instagram", "threads", "tiktok", "youtube"];
+const PLATFORMS: readonly Platform[] = [...PLATFORM_IDS].sort();
 
-/** Shared provider identity legend; series paint never carries provider-brand or status meaning. */
 function PlatformLegend({ platforms }: { platforms: readonly Platform[] }) {
   return (
     <ul className="flex flex-wrap justify-center gap-x-4 gap-y-1 pt-2 text-xs text-ink-2">
@@ -135,8 +134,26 @@ function EmptyInsight({ message }: { message: string }) {
   return <p className="py-10 text-center text-sm text-ink-2">{message}</p>;
 }
 
+const BUCKET_MONTH_FORMATS = new Map<Language, Intl.DateTimeFormat>();
+const BUCKET_DAY_FORMATS = new Map<Language, Intl.DateTimeFormat>();
+const WEEKDAY_SHORT_FORMATS = new Map<Language, Intl.DateTimeFormat>();
+const WEEKDAY_NARROW_FORMATS = new Map<Language, Intl.DateTimeFormat>();
+
+function cachedDateFormat(
+  cache: Map<Language, Intl.DateTimeFormat>,
+  language: Language,
+  options: Intl.DateTimeFormatOptions,
+): Intl.DateTimeFormat {
+  let formatter = cache.get(language);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(language, options);
+    cache.set(language, formatter);
+  }
+  return formatter;
+}
+
 function formatAverage(value: number, language: Language): string {
-  return new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(value);
+  return formatAnalyticsDecimal(value, language);
 }
 
 function bucketStart(date: string, grouping: Grouping): string {
@@ -158,13 +175,13 @@ function bucketStart(date: string, grouping: Grouping): string {
 function bucketLabel(date: string, grouping: Grouping, language: Language): string {
   const value = new Date(`${date}T00:00:00Z`);
   if (grouping === "month") {
-    return new Intl.DateTimeFormat(language, {
+    return cachedDateFormat(BUCKET_MONTH_FORMATS, language, {
       month: "short",
       year: "numeric",
       timeZone: "UTC",
     }).format(value);
   }
-  return new Intl.DateTimeFormat(language, {
+  return cachedDateFormat(BUCKET_DAY_FORMATS, language, {
     day: "numeric",
     month: "short",
     timeZone: "UTC",
@@ -175,7 +192,6 @@ function groupingLabel(grouping: Grouping, t: (message: string) => string): stri
   return t(grouping === "day" ? "Day" : grouping === "week" ? "Week" : "Month");
 }
 
-/** Day/week/month granularity, shared by the time-series cards. */
 function GroupingControl({
   grouping,
   onChange,
@@ -195,24 +211,16 @@ function GroupingControl({
   );
 }
 
-/** Analytics-capable platforms in the cohort, in the shared display order. */
 function platformRows(dashboard: AnalyticsDashboard) {
   return dashboard.platforms.filter((row) => PLATFORMS.includes(row.platform));
 }
 
-/** One endpoint of a rendered line path, in drawing order. */
 interface PathCommand {
   command: string;
   x: number;
   y: number;
 }
 
-/**
- * Parses the drawing commands of a rendered line path into their endpoints.
- * Recharts emits `M`, `C`, and `L` segments for these charts; control points of
- * a cubic segment are skipped because only the curve's endpoints matter for
- * sampling the previous shape.
- */
 function readPathCommands(d: string): PathCommand[] {
   const tokens = d.match(pathTokenPattern) ?? [];
   const commands: PathCommand[] = [];
@@ -231,7 +239,6 @@ function readPathCommands(d: string): PathCommand[] {
       const x = number();
       const y = number();
       commands.push({ command: active, x, y });
-      // Extra pairs after M are implicit line-to commands.
       if (active === "M") active = "L";
     } else if (active === "C") {
       number();
@@ -248,19 +255,16 @@ function readPathCommands(d: string): PathCommand[] {
   return commands;
 }
 
-/** Reads a line path's current shape, including an in-flight morph. */
 function readLinePath(path: SVGPathElement): string {
   const computed = path.ownerDocument.defaultView?.getComputedStyle(path).d;
   const animated = computed?.match(cssPathPattern)?.[1];
   return animated ?? path.getAttribute("d") ?? "";
 }
 
-/** Reads every trend line's shape, in series order, as a morph snapshot. */
 function readLinePaths(root: HTMLElement): string[] {
   return [...root.querySelectorAll<SVGPathElement>(".recharts-line-curve")].map(readLinePath);
 }
 
-/** Interpolates the previous curve's y at an x position. */
 function samplePathY(commands: readonly PathCommand[], x: number): number {
   if (commands.length === 0) return 0;
   const first = commands[0]!;
@@ -275,12 +279,6 @@ function samplePathY(commands: readonly PathCommand[], x: number): number {
   return commands.at(-1)!.y;
 }
 
-/**
- * Builds the shape a line starts from: the previous curve sampled at every
- * endpoint of the destination path, using the same command structure so the
- * browser can interpolate `d` directly. Control points of the start curve lie
- * on the straight segment, so the curve visibly settles into its new bends.
- */
 function morphPathStart(previousD: string, targetD: string): string | null {
   const target = readPathCommands(targetD);
   const previous = readPathCommands(previousD);
@@ -305,12 +303,6 @@ function morphPathStart(previousD: string, targetD: string): string | null {
   return shape;
 }
 
-/**
- * Animates every trend line from its previous shape to the rendered shape.
- * The browser interpolates the `d` path directly, so a grouping change costs no
- * React render per frame. Runs once the destination paths exist; browsers
- * without CSS path interpolation render the destination immediately.
- */
 function morphLinePaths(
   root: HTMLElement,
   previous: readonly string[],
@@ -319,7 +311,6 @@ function morphLinePaths(
   if (reduceMotion || previous.length === 0) return true;
   const paths = [...root.querySelectorAll<SVGPathElement>(".recharts-line-curve")];
   const target = paths.map((path) => path.getAttribute("d") ?? "");
-  // The destination has not been published yet: keep waiting.
   if (target.length === 0 || target[0] === previous[0]) return false;
   if (!root.ownerDocument.defaultView?.CSS?.supports?.("d", 'path("M0,0")')) return true;
   for (const [index, path] of paths.entries()) {
@@ -337,14 +328,6 @@ function morphLinePaths(
   return true;
 }
 
-/**
- * Runs an animation once the chart has rendered its destination marks.
- * Recharts publishes new marks after the data change, so a layout read still
- * sees the previous chart. Observing stops as soon as `attempt` reports the
- * animation was applied; the timeout covers a range with no marks to morph.
- *
- * @returns Cleanup that disconnects the observer and cancels pending work.
- */
 function whenMarksSettle(root: HTMLElement, attempt: () => boolean): () => void {
   let applied = false;
   let observer: MutationObserver;
@@ -366,18 +349,11 @@ function whenMarksSettle(root: HTMLElement, attempt: () => boolean): () => void 
   };
 }
 
-/** One rendered bar segment: its element and viewport geometry. */
 interface BarSegment {
   element: SVGPathElement;
   rect: { height: number; left: number; top: number; width: number };
 }
 
-/**
- * Reads the rendered stacked bars grouped into columns (one per time bucket),
- * ordered left to right with each stack ordered bottom to top. Geometry comes
- * from the live DOM so a capture taken mid-animation reflects what is on
- * screen, not the last settled frame.
- */
 function readBarColumns(root: HTMLElement): BarSegment[][] {
   const columns = new Map<number, BarSegment[]>();
   for (const element of root.querySelectorAll<SVGPathElement>(".recharts-bar-rectangle path")) {
@@ -396,15 +372,6 @@ function readBarColumns(root: HTMLElement): BarSegment[][] {
     .map(([, column]) => column.sort((left, right) => left.rect.top - right.rect.top));
 }
 
-/**
- * Morphs freshly rendered bars from the previous view's geometry.
- *
- * The chart renders the destination once; each new column borrows the column
- * nearest its position in the previous view and each segment borrows the
- * nearest segment of that column. A FLIP transform then travels from that
- * start box to the rendered destination, so days merge into weeks (and split
- * back) without a React render per frame. Reduced motion skips the effect.
- */
 function morphBarColumns(
   root: HTMLElement,
   previous: readonly BarSegment[][],
@@ -412,8 +379,6 @@ function morphBarColumns(
 ): number {
   if (reduceMotion || previous.length === 0) return 0;
   const next = readBarColumns(root);
-  // Wait for the destination marks: Recharts publishes its new bars after the
-  // data change, so the container is observed until the column geometry moves.
   const previousWidth = previous[0]?.[0]?.rect.width ?? 0;
   const nextWidth = next[0]?.[0]?.rect.width ?? 0;
   if (next.length === 0 || nextWidth === previousWidth) return 0;
@@ -455,7 +420,6 @@ function morphBarColumns(
   return applied;
 }
 
-/** Stacked publication counts per time bucket and Platform, morphing on grouping changes. */
 export function PostsOverTimeChart({ dashboard }: { dashboard: AnalyticsDashboard }) {
   const { t, language } = useI18n();
   const [grouping, setGrouping] = useState<Grouping>("week");
@@ -583,7 +547,6 @@ const TREND_COLORS: Record<AnalyticsMetric, string> = {
   shares: "var(--ink-3)",
 };
 
-/** Dash patterns keep overlapping indexed lines distinguishable without more charts. */
 const TREND_DASHES: Record<AnalyticsMetric, string | undefined> = {
   views: undefined,
   likes: "6 4",
@@ -591,17 +554,10 @@ const TREND_DASHES: Record<AnalyticsMetric, string | undefined> = {
   shares: "10 4",
 };
 
-/** Index values stay whole numbers; the absolute value is in the tooltip. */
 function formatIndex(value: number, language: Language): string {
-  return new Intl.NumberFormat(language, { maximumFractionDigits: 0 }).format(value);
+  return formatAnalyticsWhole(value, language);
 }
 
-/**
- * Cumulative measured change per metric, rebased to 100 at the first period
- * where that metric was measured. Indexing is the documented alternative to a
- * second y-axis: four metrics with different magnitudes share one honest scale,
- * and the tooltip restores the absolute cumulative value.
- */
 function trendSeries(dashboard: AnalyticsDashboard, grouping: Grouping, language: Language) {
   const buckets = groupSeries(dashboard.series, grouping, language);
   const cumulative: Record<AnalyticsMetric, number> = {
@@ -639,7 +595,6 @@ function trendSeries(dashboard: AnalyticsDashboard, grouping: Grouping, language
   return { data, metrics };
 }
 
-/** Tooltip for the indexed chart: index plus the absolute cumulative value. */
 function TrendTooltip({ active, label, payload }: TooltipProps) {
   const { t, language } = useI18n();
   if (!active || !payload?.length) return null;
@@ -665,13 +620,6 @@ function TrendTooltip({ active, label, payload }: TooltipProps) {
   );
 }
 
-/**
- * One trend chart for every stored metric. Cumulative changes are indexed to
- * 100 at the first measured period so views cannot flatten likes, comments, and
- * shares; hovering restores absolute values. A grouping change animates each
- * line's rendered path from its previous shape to the new one, so the curve
- * reshapes without a React render per frame.
- */
 export function PerformanceTrendChart({ dashboard }: { dashboard: AnalyticsDashboard }) {
   const { t, language } = useI18n();
   const [grouping, setGrouping] = useState<Grouping>("week");
@@ -741,7 +689,6 @@ export function PerformanceTrendChart({ dashboard }: { dashboard: AnalyticsDashb
           </LineChart>
         </ResponsiveContainer>
       </div>
-      {/* A block wrapper keeps the visually hidden table from leaking its caption. */}
       <div className="sr-only">
         <table>
           <caption>{t("Performance trend")}</caption>
@@ -784,23 +731,43 @@ function bestTimeValue(
   return row[metric];
 }
 
-/** Seven-by-twenty-four heatmap; metric changes tween cell intensity without replacing the grid. */
 export function BestTimeHeatmap({ dashboard }: { dashboard: AnalyticsDashboard }) {
   const { t, language } = useI18n();
   const [metric, setMetric] = useState<HeatMetric>("avg_engagement");
-  const cells = new Map(dashboard.best_times.map((row) => [`${row.day_of_week}:${row.hour}`, row]));
-  const max = Math.max(0, ...dashboard.best_times.map((row) => bestTimeValue(row, metric)));
-  const best = [...dashboard.best_times]
-    .filter((row) => row.posts >= 2)
-    .sort((left, right) => bestTimeValue(right, metric) - bestTimeValue(left, metric))[0];
-  const weekdayLabel = (day: number) =>
-    new Intl.DateTimeFormat(language, { weekday: "short", timeZone: "UTC" }).format(
-      new Date(Date.UTC(2026, 0, 4 + day)),
-    );
-  const weekdayNarrowLabel = (day: number) =>
-    new Intl.DateTimeFormat(language, { weekday: "narrow", timeZone: "UTC" }).format(
-      new Date(Date.UTC(2026, 0, 4 + day)),
-    );
+  const cells = useMemo(
+    () => new Map(dashboard.best_times.map((row) => [`${row.day_of_week}:${row.hour}`, row])),
+    [dashboard.best_times],
+  );
+  const { max, best } = useMemo(() => {
+    let peak = 0;
+    let bestRow: AnalyticsBestTime | undefined;
+    let bestScore = -Infinity;
+    for (const row of dashboard.best_times) {
+      const value = bestTimeValue(row, metric);
+      if (value > peak) peak = value;
+      if (row.posts >= 2 && value > bestScore) {
+        bestScore = value;
+        bestRow = row;
+      }
+    }
+    return { max: peak, best: bestRow };
+  }, [dashboard.best_times, metric]);
+  const weekdayLabels = useMemo(() => {
+    const shortFmt = cachedDateFormat(WEEKDAY_SHORT_FORMATS, language, {
+      weekday: "short",
+      timeZone: "UTC",
+    });
+    const narrowFmt = cachedDateFormat(WEEKDAY_NARROW_FORMATS, language, {
+      weekday: "narrow",
+      timeZone: "UTC",
+    });
+    return WEEKDAYS.map((day) => {
+      const refDate = new Date(Date.UTC(2026, 0, 4 + day));
+      return { short: shortFmt.format(refDate), narrow: narrowFmt.format(refDate) };
+    });
+  }, [language]);
+  const weekdayLabel = (day: number) => weekdayLabels[day]?.short ?? "";
+  const weekdayNarrowLabel = (day: number) => weekdayLabels[day]?.narrow ?? "";
   if (dashboard.best_times.length === 0) {
     return <EmptyInsight message={t("No published posts in this range.")} />;
   }
@@ -913,11 +880,8 @@ export function BestTimeHeatmap({ dashboard }: { dashboard: AnalyticsDashboard }
   );
 }
 
-/** Follower lines aggregated by Platform, with current count and net gain. */
 export function FollowerEvolutionChart({ dashboard }: { dashboard: AnalyticsDashboard }) {
   const { t, language } = useI18n();
-  // One entry per account so staggered captures never subtract from each other;
-  // the platform line sums each account's latest value at or before the date.
   const accountsByPlatform = new Map<Platform, { points: Map<string, number> }[]>();
   for (const account of dashboard.followers) {
     if (!PLATFORMS.includes(account.platform) || account.points.length === 0) continue;
@@ -1011,7 +975,6 @@ export function FollowerEvolutionChart({ dashboard }: { dashboard: AnalyticsDash
   );
 }
 
-/** Ranked content formats with every stored value visible and one comparison bar. */
 export function ContentFormatBreakdown({ dashboard }: { dashboard: AnalyticsDashboard }) {
   const { t, language } = useI18n();
   const rows = dashboard.formats.filter((row) => row.posts > 0);
@@ -1092,7 +1055,6 @@ type PlatformSortKey =
   | "followers"
   | "follower_gain";
 
-/** Metrics that only exist after a content snapshot; Posts and follower data do not. */
 const CONTENT_METRIC_KEYS: ReadonlySet<PlatformSortKey> = new Set([
   "views",
   "likes",
@@ -1103,10 +1065,6 @@ const CONTENT_METRIC_KEYS: ReadonlySet<PlatformSortKey> = new Set([
   "engagement_rate",
 ]);
 
-/**
- * Sorts platform metrics with honest null cells. Native column sizing fills the
- * available width using only visible metrics; narrow viewports scroll locally.
- */
 export function PlatformBreakdownTable({ dashboard }: { dashboard: AnalyticsDashboard }) {
   const { t, language } = useI18n();
   const [sort, setSort] = useState<{ key: PlatformSortKey; direction: "asc" | "desc" }>({

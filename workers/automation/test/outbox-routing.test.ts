@@ -3,17 +3,18 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { AutomationEnv } from "../src/env";
 import { publishingQueueFor } from "../src/publish-queues";
+import { fakeQueue } from "./test-doubles";
 
 describe("provider-specific publish Queue routing", () => {
   it("isolates every provider on its own binding", () => {
     const queues = {
-      facebook: { send: async () => undefined },
-      instagram: { send: async () => undefined },
-      threads: { send: async () => undefined },
-      tiktok: { send: async () => undefined },
-      youtube: { send: async () => undefined },
-    } satisfies Record<Platform, unknown>;
-    const env = {
+      facebook: fakeQueue(),
+      instagram: fakeQueue(),
+      threads: fakeQueue(),
+      tiktok: fakeQueue(),
+      youtube: fakeQueue(),
+    } satisfies Record<Platform, Queue<unknown>>;
+    const env: AutomationEnv = {
       ENVIRONMENT: "test",
       FACEBOOK_PUBLISH_QUEUE: queues.facebook,
       INSTAGRAM_PUBLISH_QUEUE: queues.instagram,
@@ -21,7 +22,7 @@ describe("provider-specific publish Queue routing", () => {
       TIKTOK_PUBLISH_QUEUE: queues.tiktok,
       VERSION: "test",
       YOUTUBE_PUBLISH_QUEUE: queues.youtube,
-    } as unknown as AutomationEnv;
+    };
 
     for (const platform of Object.keys(queues) as Platform[]) {
       expect(publishingQueueFor(env, platform)).toBe(queues[platform]);

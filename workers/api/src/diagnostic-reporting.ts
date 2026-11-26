@@ -1,8 +1,7 @@
 import { createRequestId, createTraceId, errorDiagnostic, log } from "@meltiply/observability";
-import { ProviderAdapterError } from "@meltiply/providers";
 import {
   diagnosticReportInput,
-  isProviderFailureClass,
+  extractProviderFailureClass,
   REPORTING_MAX_DELIVERY_BATCH,
   ReportingService,
   type DiagnosticReportInput,
@@ -16,10 +15,6 @@ import { runBackgroundContinuation } from "./background-continuation";
 import type { ApiWorkerEnvironment } from "./env";
 import { reportingLayer, type ReportingDependencies } from "./reporting-layer";
 
-// Optional reporting observes authenticated invocation failures after the HTTP
-// outcome is fixed. Consent and payload minimization remain in the shared service.
-
-/** Fixed operation grouping for one API path prefix, matched most specific first. */
 const operationPrefixes: readonly (readonly [string, OperationCategory])[] = [
   ["/api/v1/installation/reporting", "reporting"],
   ["/api/v1/installation", "installation"],
@@ -40,7 +35,6 @@ const operationPrefixes: readonly (readonly [string, OperationCategory])[] = [
   ["/api/v1/flows", "other"],
 ];
 
-/** Maps a local API path to a fixed operation group; unmatched paths become `other`. */
 export function operationForPath(path: string): OperationCategory {
   for (const [prefix, operation] of operationPrefixes) {
     if (path === prefix || path.startsWith(`${prefix}/`)) return operation;
@@ -48,7 +42,6 @@ export function operationForPath(path: string): OperationCategory {
   return "other";
 }
 
-/** Prefers defects over typed errors; pure interruption is not reportable. */
 function failureValue(cause: Cause.Cause<unknown>): unknown {
   if (Cause.hasInterruptsOnly(cause)) return undefined;
   if (Cause.hasDies(cause)) {
@@ -59,37 +52,24 @@ function failureValue(cause: Cause.Cause<unknown>): unknown {
   return Option.isSome(typed) ? typed.value : Cause.squash(cause);
 }
 
-/** Canonical Provider class of an adapter failure, when the value carries one. */
-function providerFailureClass(cause: unknown): DiagnosticReportInput["failureClass"] {
-  if (!(cause instanceof ProviderAdapterError)) return undefined;
-  const classification = cause.failure?.classification;
-  return isProviderFailureClass(classification) ? classification : undefined;
-}
-
-/** Separates classified Provider conditions from defects without retaining runtime messages. */
 export function apiBoundaryReport(cause: unknown, path: string): DiagnosticReportInput {
-  const failureClass = providerFailureClass(cause);
+  const failureClass = extractProviderFailureClass(cause);
   return diagnosticReportInput(cause, {
     ...(failureClass ? { category: "provider_failure" as const, failureClass } : {}),
     operation: operationForPath(path),
   });
 }
 
-/** Enqueues and drains on the request continuation, after its HTTP outcome is fixed. */
 function scheduleDiagnostic(
   c: Context<ApiWorkerEnvironment>,
   input: DiagnosticReportInput,
   dependencies: ReportingDependencies,
   event: string,
 ): void {
-  // Reporting never reports itself: an ingestion or delivery failure inside the
-  // reporting surface would otherwise recurse into another ingestion attempt.
   if (input.operation === "reporting") return;
   runBackgroundContinuation<{ accepted: boolean; decision: string }>(c, {
     errorCode: "diagnostic_report_failed",
     event,
-    // The continuation is a Promise-facing boundary, so the Effect program runs
-    // here exactly once, mirroring the delivery scheduler's adapter.
     perform: () =>
       Effect.runPromise(
         Effect.flatMap(ReportingService, (service: ReportingServiceShape) =>
@@ -108,7 +88,6 @@ function scheduleDiagnostic(
   });
 }
 
-/** Observes authenticated API failures; client mistakes and reporting's own failures are excluded. */
 export function scheduleInvocationFailureDiagnostic(
   c: Context<ApiWorkerEnvironment>,
   cause: Cause.Cause<unknown>,
@@ -118,12 +97,11 @@ export function scheduleInvocationFailureDiagnostic(
   if (!path.startsWith("/api/v1/")) return;
   const failure = failureValue(cause);
   if (failure === undefined) return;
-  const provider = providerFailureClass(failure) !== undefined;
+  const provider = extractProviderFailureClass(failure) !== undefined;
   if (status < 500 && !provider) return;
   try {
     scheduleDiagnostic(c, apiBoundaryReport(failure, path), {}, "diagnostic_invocation_failure");
   } catch (reportingCause) {
-    // Never let the reporting seam replace the boundary's own outcome.
     log(
       "warn",
       {

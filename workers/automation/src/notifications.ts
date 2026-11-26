@@ -48,14 +48,10 @@ interface PublicationFailureRow extends Record<string, unknown> {
   post_text: string;
 }
 
-/** Maximum delivery attempts before a notification is retained as dead. */
 const maximumDeliveryAttempts = 5;
-/** A crashed sender's claim may be retried after five minutes. */
 const sendingLeaseSeconds = 300;
-/** Matches the API's saved recipient limit so a hand-written row stays bounded. */
 const maximumNotificationRecipients = 20;
 
-/** Classifies notification payloads without trusting arbitrary queue contents. */
 function notificationPayload(value: Record<string, unknown>): NotificationPayload | null {
   const kind = value.kind;
   const deliveryKey = value.delivery_key;
@@ -94,7 +90,6 @@ function notificationPayload(value: Record<string, unknown>): NotificationPayloa
   };
 }
 
-/** Reads the Workspace's saved notification channel and event choices. */
 function notificationPreferencesEffect(env: AutomationEnv, organizationId: string) {
   return withSystemTransactionEffect(env, (client) =>
     client.query<PreferenceRow>(
@@ -107,7 +102,6 @@ function notificationPreferencesEffect(env: AutomationEnv, organizationId: strin
   );
 }
 
-/** Loads the Post/Channel context for a terminal publication failure. */
 function failureContextEffect(env: AutomationEnv, organizationId: string, distributionId: string) {
   return withSystemTransactionEffect(env, (client) =>
     client.query<PublicationFailureRow>(
@@ -126,44 +120,23 @@ function failureContextEffect(env: AutomationEnv, organizationId: string, distri
   );
 }
 
-/** One rendered email body, ready for the Cloudflare Email Sending binding. */
 interface NotificationEmail {
   html: string;
   subject: string;
   text: string;
 }
 
-/** Maximum characters kept in a subject line after collapsing whitespace. */
 const maximumSubjectLength = 160;
 
-/**
- * Normalizes arbitrary Post/Provider text into a bounded, single-line excerpt
- * before it reaches any mail header or body. The ellipsis is included in the
- * supplied character limit.
- */
 function boundedMailText(value: string, maximumLength: number): string {
   const line = value.replace(/\s+/g, " ").trim();
   return line.length <= maximumLength ? line : `${line.slice(0, maximumLength - 1)}…`;
 }
 
-/**
- * Collapses arbitrary Post text into one bounded subject line. Newlines and
- * tabs are removed before submission so owner content cannot add mail headers,
- * and the suffix keeps a long title from producing an oversized header.
- *
- * @param value - Candidate subject derived from the Post title or text.
- * @returns Single-line subject no longer than {@link maximumSubjectLength}.
- */
 function mailSubject(value: string): string {
   return boundedMailText(value, maximumSubjectLength);
 }
 
-/**
- * Renders the owner-facing message for one supported event. Every interpolated
- * field is HTML-escaped, the subject is collapsed to one bounded line, and no
- * token, header, or content beyond the Post's own title/body and failure reason
- * reaches the message.
- */
 function renderEmail(
   env: AutomationEnv,
   kind: NotificationKind,
@@ -229,14 +202,6 @@ function renderEmail(
   };
 }
 
-/**
- * Submits one message through the Cloudflare Email Sending binding exactly once.
- *
- * The first saved recipient appears in `to`; any others ride `bcc`, so a team
- * inbox can receive the alert without exposing every address to the whole list.
- * The binding call remains all-or-nothing, preserving the existing retry and
- * idempotency semantics for the event.
- */
 async function submitMail(
   env: AutomationEnv,
   email: NotificationEmail,
@@ -268,23 +233,6 @@ async function submitMail(
   }
 }
 
-/**
- * Processes one durable notification outbox message.
- *
- * The outbox row was written in the same transaction as the failure or
- * disconnection, so a lost Queue message is retried by the relay. Delivery
- * evidence is keyed by the payload's delivery key: a redelivery observes the
- * terminal state and acks without sending again. Claiming atomically marks
- * `sending`, uses `updated_at` as the lease start, and counts only claimed send
- * attempts; a deferred duplicate leaves the lease and attempt count untouched.
- * Disabled preferences, including an email channel without recipients, are
- * recorded as skipped and never sent.
- *
- * @param env - Automation bindings including the Email Sending binding.
- * @param message - Validated outbox message carrying a notification payload.
- * @returns Effect resolving "processed" after delivery, or "skipped" when the
- *   event is disabled, already terminal, or exhausted.
- */
 export function processNotificationMessage(
   env: AutomationEnv,
   message: OutboxMessage,
@@ -324,8 +272,6 @@ export function processNotificationMessage(
 
     const row = yield* withSystemTransactionEffect(env, (client) =>
       Effect.gen(function* () {
-        // The upsert locks an existing row but must not refresh its sending
-        // lease or count a duplicate as a new mail attempt.
         const delivery = yield* client.query<DeliveryRow>(
           `INSERT INTO notification_deliveries
              (org_id, dedupe_key, kind, aggregate_type, aggregate_id, state, attempt_count)

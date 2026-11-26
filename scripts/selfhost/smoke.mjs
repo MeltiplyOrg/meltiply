@@ -21,11 +21,9 @@ const composeArgs = [
   "--profile",
   "verification",
 ];
-/** Runs only this deployment's services, preserving command failures and binary fixture bytes. */
 function compose(...args) {
   return execFileSync("docker", [...composeArgs, ...args], { maxBuffer: 8 * 1024 * 1024 });
 }
-/** Invokes the container-private operational socket; no diagnostics endpoint is exposed publicly. */
 function admin(...args) {
   return JSON.parse(
     compose("exec", "-T", "runtime", "node", "scripts/selfhost/admin.mjs", ...args).toString(),
@@ -33,7 +31,6 @@ function admin(...args) {
 }
 const origin = "http://localhost:8080";
 let token;
-/** Exercises the public API and reports bounded error bodies without logging credentials or verification URLs. */
 async function api(path, body, expected = 200) {
   const response = await fetch(`${origin}${path}`, {
     method: body === undefined ? "GET" : "POST",
@@ -84,12 +81,7 @@ const email = `selfhost-${randomUUID()}@example.com`;
 const password = `Selfhost-${randomUUID()}!`;
 const setupSecret = parseEnv(await readFile(".env.selfhost", "utf8")).AUTH_SETUP_SECRET;
 assert.equal(typeof setupSecret, "string");
-// The chosen Workspace name is real installation data: it must survive the
-// verification handoff and land on the canonical shared Workspace.
 const workspaceName = `Selfhost Studio ${randomUUID().slice(0, 8)}`;
-// Acceptance launch pointer: the owner journey opens with this command and the
-// credential-free captures land in artifacts/selfhost/. See
-// docs/self-hosting.md#verifying-an-installation.
 const cookie = await ownerBrowserSession({ origin, email, password, setupSecret, workspaceName });
 const minted = await fetch(`${origin}/api/auth/token`, { headers: { cookie, origin } });
 assert.equal(minted.status, 200);
@@ -102,12 +94,9 @@ assert.equal(
   workspaceName,
   "The first-run Workspace name must reach the canonical shared Workspace",
 );
-// Onboarding completed through the wizard, so the journey is not offered again.
 const onboarding = await api("/api/v1/onboarding");
 assert.equal(onboarding.status, "completed");
 assert.equal(onboarding.workspace_named, true);
-// Skipping the improvement screen left both categories off, and the shipped
-// policy reports the effective state honestly instead of assuming a destination.
 const reporting = await api("/api/v1/installation/reporting");
 assert.equal(reporting.categories.usage.requested, false);
 assert.equal(reporting.categories.diagnostics.requested, false);
@@ -119,7 +108,6 @@ const profile = await api(
   { name: "Selfhost smoke", description: "Production image acceptance", color: "#1d4ed8" },
   201,
 );
-// Test-only privileged observation runs outside workerd; the public API still authenticates normally.
 await cacheSmoke({
   origin,
   cookie,
@@ -147,8 +135,6 @@ await cacheSmoke({
       ),
     ),
 });
-// Run independently dispatched Provider reads inside the exact production runtime image.
-// Only the disposable Worker/driver are copied to writable tmpfs; production routes stay unchanged.
 execFileSync(
   "docker",
   [
@@ -250,7 +236,6 @@ assert.ok(
   put.ok,
   `Signed R2 upload failed: ${put.status}; code=${storageFailure.match(/<Code>([^<]+)<[/]Code>/)?.[1] ?? "unknown"}; canonicalHost=${storageFailure.match(/host:([^\n<]+)/)?.[1] ?? "unknown"}; expectedHost=${new URL(grant.url).host}`,
 );
-// Signature tampering must not permit an object overwrite.
 const invalidGrant = new URL(grant.url);
 invalidGrant.searchParams.set("X-Amz-Signature", "0".repeat(64));
 assert.equal(
@@ -282,8 +267,6 @@ console.log(
 
 const probeId = randomUUID();
 assert.equal(admin("probe-write", probeId, identity.active_organization.id).prepared, true);
-// SIGKILL, not graceful shutdown: queued delays and workflow/OAuth state must
-// survive an unexpected runtime loss. Restart the shared-network processor too.
 compose("kill", "-s", "SIGKILL", "runtime", "processor");
 compose("up", "-d", "--no-build", "--wait", "--wait-timeout", "120", "runtime", "processor");
 assert.deepEqual(admin("probe-read", probeId, identity.active_organization.id), {
@@ -298,14 +281,6 @@ console.log(
   "Crash recovery preserved sessions, PostgreSQL records, R2 objects, delayed queue messages, OAuth consumption, and workflow execution",
 );
 
-/**
- * Restores a consistent, stopped-runtime backup into a separate disposable
- * Compose project. PostgreSQL, runtime volume, application revision, and secret
- * environment are restored together; the source volumes are never overwritten.
- * Validates real authentication and independent R2/OAuth/Queue/Workflow state.
- * Timings describe this fixture only, not a deployed installation's RPO/RTO.
- * Protected archives are deleted after the clone has been torn down.
- */
 async function verifyFullRestore() {
   const directory = await mkdtemp(join(tmpdir(), "meltiply-restore-"));
   await chmod(directory, 0o700);
@@ -321,7 +296,6 @@ async function verifyFullRestore() {
     maxBuffer: 8 * 1024 * 1024,
     env: { ...process.env, SELFHOST_ENV_FILE: protectedEnv },
   };
-  /** Addresses only the freshly named recovery project, never the source deployment. */
   const recover = (...command) => execFileSync("docker", [...args, ...command], options);
   const probe = randomUUID();
   assert.equal(admin("probe-write", probe, identity.active_organization.id).prepared, true);
@@ -452,7 +426,6 @@ async function verifyFullRestore() {
     );
     throw error;
   } finally {
-    // These volumes were created above solely for this recovery exercise.
     try {
       recover("down", "--volumes", "--remove-orphans");
     } finally {

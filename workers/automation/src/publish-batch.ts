@@ -5,14 +5,6 @@ import { isOutboxMessage } from "./messages";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
-/**
- * Resolves a bounded publish batch to authoritative Provider-account partitions.
- * One consumer invocation remains the infrastructure limit; messages for the
- * same external account run serially, including separate connected Channel
- * records. Unknown/invalid targets share a conservative serial partition and
- * still pass through ordinary message validation. No payload account hint can
- * bypass the database identity or the existing Provider rate-budget checks.
- */
 export function partitionPublishBatch(env: AutomationEnv, messages: readonly Message<unknown>[]) {
   const ids = [
     ...new Set(
@@ -60,13 +52,6 @@ export function partitionPublishBatch(env: AutomationEnv, messages: readonly Mes
   );
 }
 
-/**
- * Drains at most two independent Provider-account partitions at a time, preserving
- * order within each account. Unexpected failures are collected until every
- * started callback has settled, then rethrown so the Queue retries unacknowledged
- * work without orphaning a running publication. Explicit per-message ack/retry,
- * ambiguous-outcome reconciliation, and durable deduplication stay in the caller.
- */
 export async function consumePublishPartitions(
   partitions: readonly (readonly Message<unknown>[])[],
   consume: (message: Message<unknown>) => Promise<void>,

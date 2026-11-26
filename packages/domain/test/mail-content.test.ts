@@ -71,8 +71,6 @@ describe("mailSenderConfiguration", () => {
     ).toBeUndefined();
   });
 
-  // Dot-atom senders require nonempty atoms; valid dotted and tagged names
-  // remain usable while malformed separators fail before mail dispatch.
   it("rejects empty local-part atoms without rejecting valid dotted senders", () => {
     for (const email of [
       ".sender@example.com",

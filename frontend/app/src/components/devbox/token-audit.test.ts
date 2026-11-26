@@ -17,17 +17,12 @@ const emptyTokens: TokenColorMap = { byColor: new Map(), resolved: 0 };
 let elements: Element[] = [];
 let styles: HTMLStyleElement[] = [];
 
-/** Appends an element to the audit root and returns it. */
 function append<T extends Element>(element: T): T {
   document.body.appendChild(element);
   elements.push(element);
   return element;
 }
 
-/**
- * Adds a stylesheet rule. Tests use CSS rather than inline paint so the audit
- * sees the same cascade shape as utilities compiled by Tailwind.
- */
 function appendStyle(css: string): void {
   const style = document.createElement("style");
   style.textContent = css;

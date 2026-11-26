@@ -24,8 +24,6 @@ const userId = "00000000-0000-4000-8000-000000000011";
 const workspaceId = "00000000-0000-4000-8000-000000000001";
 const teamWorkspaceId = "00000000-0000-4000-8000-000000000002";
 
-// Verified Better Auth JWT identity as produced by the bearer verifier in the
-// app middleware; actor resolution consumes it without any session lookup.
 const identity: JwtIdentity = {
   email: "alpha@example.com",
   name: "Alpha User",
@@ -36,7 +34,6 @@ function request(headers: Record<string, string> = {}): Request {
   return new Request("https://api.example.test/api/v1/assets", { headers });
 }
 
-/** Resolves an actor with the middleware request id the app supplies. */
 function resolveActor(
   env: ApiWorkerEnv,
   identity: JwtIdentity,
@@ -45,13 +42,6 @@ function resolveActor(
   return resolveActorWithRequestId(env, identity, request, "actor-resolution-test-request");
 }
 
-/**
- * Builds an Effect transaction client dispatching on SQL shape.
- *
- * Mirrors the statements actor resolution issues: user upsert, installation
- * bootstrap, invitation consumption, ownership read, and shared-workspace
- * resolution.
- */
 function effectClient(options: {
   collision?: boolean;
   invitation?: boolean;

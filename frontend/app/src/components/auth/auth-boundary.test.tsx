@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { AuthBoundary } from "./auth-boundary";
 import * as authClientModule from "@/lib/auth-client";
 
-/** A session that is genuinely valid; `new Date()` would model an expired one. */
 const futureSessionExpiry = new Date("2099-07-18T16:00:00Z");
 
 function renderBoundary() {

@@ -1,19 +1,4 @@
 #!/usr/bin/env node
-/**
- * CI-only static preview for Lighthouse performance measurement.
- *
- * Cloudflare compresses text assets at its edge, while Vite's local preview
- * serves them identity-encoded. Measuring the uncompressed local preview makes
- * the performance budget report a transfer time production never pays. This
- * server serves the built client with production-like brotli/gzip negotiation
- * and proxies `/api` and `/health` to the local Worker, so the audit measures a
- * working production build instead of a compression artifact.
- *
- * Usage: node scripts/ci/lighthouse-preview.mjs [--root dist/client] [--port 3000]
- *
- * The server is bounded to the given asset root and local API origin. It is not
- * a deployment server and is only started by the `frontend-full` lane.
- */
 import { readFile, stat } from "node:fs/promises";
 import { createServer, request } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
@@ -48,50 +33,40 @@ const contentTypes = new Map([
   [".webmanifest", "application/manifest+json"],
 ]);
 const compressible = new Set([".html", ".js", ".css", ".svg", ".json", ".txt", ".webmanifest"]);
+const assetCache = new Map();
 
-/**
- * Reads one request target from the asset root, falling back to the SPA shell.
- *
- * @param pathname - Decoded request pathname.
- * @returns The resolved file path and whether it is the SPA fallback.
- * @throws When the path escapes the asset root.
- */
 async function resolveAsset(pathname) {
   const candidate = normalize(join(root, pathname));
   if (candidate !== root && !candidate.startsWith(`${root}/`)) {
     throw new Error("Path escapes the asset root");
   }
-  try {
-    const info = await stat(candidate);
-    if (info.isFile()) return { fallback: false, path: candidate };
-  } catch {
-    // Missing files use the Worker's single-page-application fallback.
-  }
-  return { fallback: true, path: join(root, "index.html") };
+  const info = await stat(candidate).catch(() => null);
+  if (info?.isFile()) return { fallback: false, mtimeMs: info.mtimeMs, path: candidate };
+  const fallbackPath = join(root, "index.html");
+  const fallbackInfo = await stat(fallbackPath);
+  return { fallback: true, mtimeMs: fallbackInfo.mtimeMs, path: fallbackPath };
 }
 
-/**
- * Encodes one text asset when the caller advertises brotli or gzip.
- *
- * @param body - Uncompressed asset bytes.
- * @param extension - Lowercase file extension including the dot.
- * @param acceptEncoding - Request `Accept-Encoding` value.
- * @returns The response bytes and content encoding, or null for identity.
- */
-function encode(body, extension, acceptEncoding) {
-  if (!compressible.has(extension)) return null;
+async function loadEncodedAsset(assetPath, mtimeMs, extension, acceptEncoding) {
+  let entry = assetCache.get(assetPath);
+  if (!entry || entry.mtimeMs !== mtimeMs) {
+    entry = { body: await readFile(assetPath), br: undefined, gzip: undefined, mtimeMs };
+    assetCache.set(assetPath, entry);
+  }
+  if (!compressible.has(extension)) {
+    return { body: entry.body, encoding: null };
+  }
   if (acceptEncoding.includes("br")) {
-    return {
-      body: brotliCompressSync(body, {
-        params: { [constants.BROTLI_PARAM_QUALITY]: 5 },
-      }),
-      encoding: "br",
-    };
+    entry.br ??= brotliCompressSync(entry.body, {
+      params: { [constants.BROTLI_PARAM_QUALITY]: 5 },
+    });
+    return { body: entry.br, encoding: "br" };
   }
   if (acceptEncoding.includes("gzip")) {
-    return { body: gzipSync(body), encoding: "gzip" };
+    entry.gzip ??= gzipSync(entry.body);
+    return { body: entry.gzip, encoding: "gzip" };
   }
-  return null;
+  return { body: entry.body, encoding: null };
 }
 
 const server = createServer(async (req, res) => {
@@ -126,22 +101,22 @@ const server = createServer(async (req, res) => {
   try {
     const asset = await resolveAsset(decodeURIComponent(url.pathname));
     const extension = extname(asset.path).toLowerCase();
-    const body = await readFile(asset.path);
     const contentType = contentTypes.get(extension) ?? "application/octet-stream";
-    const encoded = encode(body, extension, req.headers["accept-encoding"] ?? "");
+    const { body, encoding } = await loadEncodedAsset(
+      asset.path,
+      asset.mtimeMs,
+      extension,
+      req.headers["accept-encoding"] ?? "",
+    );
     const headers = {
       "cache-control": asset.fallback ? "no-cache" : "public,max-age=31536000,immutable",
+      "content-length": String(body.byteLength),
       "content-type": contentType,
       vary: "accept-encoding",
     };
-    if (encoded) {
-      headers["content-encoding"] = encoded.encoding;
-      headers["content-length"] = String(encoded.body.byteLength);
-      res.writeHead(200, headers);
-      res.end(req.method === "HEAD" ? undefined : encoded.body);
-      return;
+    if (encoding) {
+      headers["content-encoding"] = encoding;
     }
-    headers["content-length"] = String(body.byteLength);
     res.writeHead(200, headers);
     res.end(req.method === "HEAD" ? undefined : body);
   } catch {

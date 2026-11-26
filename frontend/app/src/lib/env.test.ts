@@ -8,7 +8,6 @@ afterEach(() => {
 
 describe("public env parsing", () => {
   it("defaults to the page origin in browsers and the local API elsewhere", () => {
-    // Node test environments have no `location`, so the local dev API applies.
     expect(getPublicEnv({})).toEqual({
       APP_URL: "http://localhost:8787",
     });

@@ -1,10 +1,8 @@
 locals {
   protected_hostnames = sort(distinct(values(var.protected_app_hostnames)))
-  # Keep the single-host expression stable; a shared owner extends it to both apps.
   host_expression = length(local.protected_hostnames) == 1 ? "http.host eq ${jsonencode(local.protected_hostnames[0])}" : "http.host in {${join(" ", [for hostname in local.protected_hostnames : jsonencode(hostname)])}}"
 }
 
-# Adding ownership must not replace the existing staging entrypoint.
 moved {
   from = cloudflare_ruleset.rate_limit
   to   = cloudflare_ruleset.rate_limit[0]

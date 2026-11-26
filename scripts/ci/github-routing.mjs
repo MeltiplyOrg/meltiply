@@ -3,14 +3,11 @@ import { appendFileSync, readFileSync } from "node:fs";
 
 const zeroCommitPattern = /^0+$/;
 
-/** Runs Git without a shell; unavailable ancestry fails closed to every lane. */
 function git(...args) {
   return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
-// Compile the configured patterns once at module initialization; malformed
-// lane configuration fails before any changed-path routing occurs.
-const mapping = JSON.parse(readFileSync("scripts/ci/github-paths.json", "utf8"));
+const mapping = JSON.parse(readFileSync(new URL("./github-paths.json", import.meta.url), "utf8"));
 if (
   !mapping ||
   typeof mapping !== "object" ||
@@ -30,7 +27,6 @@ const rules = Object.entries(mapping).flatMap(([lane, patterns]) => {
   return patterns.map((pattern) => ({ pattern: new RegExp(pattern), lane }));
 });
 
-/** Resolves PR/branch merge bases or the default-branch push range; missing history runs every lane. */
 function changedPaths(event) {
   if (process.env.GITHUB_EVENT_NAME === "workflow_dispatch") return null;
   try {
@@ -45,7 +41,6 @@ function changedPaths(event) {
     } else {
       base = git("merge-base", `origin/${event.repository.default_branch}`, head);
     }
-    // Report both sides of renames, including deletions, without whitespace splitting.
     return execFileSync("git", ["diff", "--name-only", "--no-renames", "-z", base, head], {
       encoding: "utf8",
     })

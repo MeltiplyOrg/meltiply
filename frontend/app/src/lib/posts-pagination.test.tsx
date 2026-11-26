@@ -9,8 +9,6 @@ import type { Post, PostListResponse } from "@/types";
 import { listPosts } from "./api";
 import { usePosts } from "./queries";
 
-// Keep the real frontend Effect service Layer and query cache; only the HTTP
-// adapter is replaced so the tests can control page boundaries and transport failure.
 vi.mock("./api", async (original) => ({
   ...(await original<typeof import("./api")>()),
   listPosts: vi.fn(),
@@ -20,7 +18,6 @@ const scope = { isSignedIn: true, workspaceId: "workspace-a", brandProfileId: nu
 const fixture = contractSuccessBody<Post>("getPost");
 let client: QueryClient;
 
-/** Creates settled Posts so the test observes explicit pagination, not lifecycle polling. */
 function posts(start: number, count: number): Post[] {
   return Array.from({ length: count }, (_, index) => ({
     ...fixture,
@@ -31,7 +28,6 @@ function posts(start: number, count: number): Post[] {
   }));
 }
 
-/** Supplies the same browser cache across hook mounts, as route/view navigation does. */
 function Wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
@@ -112,7 +108,6 @@ describe("Post pagination and browser cache", () => {
     await act(async () => {
       await result.current.fetchNextPage();
     });
-    // fetchNextPage settles before TanStack's scheduled observer notification.
     await waitFor(() => expect(result.current.isFetchNextPageError).toBe(true));
     expect(result.current.data?.map((post) => post.id)).toEqual(
       posts(0, 60).map((post) => post.id),

@@ -6,19 +6,8 @@ import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import { Button, buttonVariants } from "@meltiply/ui/button";
 
-/**
- * Sentinel ancestor class standing in for Button's arbitrary-variant compounds.
- * Tailwind emits rules like `.\[\&_svg…\]\:size-4 svg… { … }`; jsdom cannot parse
- * the escaped ancestor class, so the compiled rules are rebound to this class and
- * applied to the rendered button, leaving the generated descendant selector —
- * including the authored `size-*` guard — to decide the cascade.
- */
 const SCOPE_CLASS = "icon-scope";
 
-/**
- * Rebinds every compiled `… svg…` rule to the sentinel ancestor class so jsdom's
- * CSS engine can evaluate the real descendant selector Tailwind generated.
- */
 function scopeSvgRules(css: string): string {
   return css.replace(/([^{}@]+)\{/g, (rule, selector: string) => {
     const rebound = selector
@@ -32,11 +21,6 @@ function scopeSvgRules(css: string): string {
   });
 }
 
-/**
- * Compiles the exact utility classes Button emits (plus authored icon sizes) into
- * real CSS and injects it into the document so `getComputedStyle` reflects the
- * shipped cascade rather than a hand-written approximation.
- */
 beforeAll(async () => {
   const candidates = [
     ...buttonVariants().split(/\s+/).filter(Boolean),
@@ -57,10 +41,6 @@ beforeAll(async () => {
   document.head.appendChild(style);
 });
 
-/**
- * Renders a Button carrying the sentinel scope class and returns its first child
- * SVG for computed-style assertions.
- */
 function renderIcon(svgClassName?: string): SVGSVGElement {
   const { container } = render(
     <Button className={SCOPE_CLASS}>
@@ -117,8 +97,6 @@ describe("Button icon preset with caller square geometry", () => {
       const style = window.getComputedStyle(button);
       expect(style.width).toBe(expected);
       expect(style.height).toBe(expected);
-      // The icon preset emits no padding utilities, so the authored square is
-      // the whole border box rather than a content box squeezed by px-*/py-*.
       expect(style.padding).toBe("0");
     },
   );

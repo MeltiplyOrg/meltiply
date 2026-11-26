@@ -17,7 +17,6 @@ interface Props {
   t: (message: string, values?: TranslationValues) => string;
 }
 
-/** Infers the native content form from persisted options, including drafts reopened without a local method key. */
 function threadsMethod(
   settings: Partial<ThreadsComposerSettings>,
 ): NonNullable<ThreadsComposerSettings["post_type"]> {
@@ -41,11 +40,6 @@ function threadsMethod(
   );
 }
 
-/**
- * Keeps incomplete draft intent and the selected method across reopen. Sending
- * projects only applicable media controls, while the owning composer keeps the
- * unanswered/local values so hidden fields cannot poison a later text target.
- */
 export function threadsTargetOptions(
   settings: Partial<ThreadsComposerSettings>,
   mediaKinds: readonly ("image" | "video")[],
@@ -83,12 +77,6 @@ export function threadsTargetOptions(
   };
 }
 
-/**
- * Edits every native Threads content form with typed canonical controls. Caption
- * and ordered Assets remain owned by the composer. Optional permissions and
- * account eligibility are explicit; a cross-share request never substitutes
- * success on Instagram for success on Threads.
- */
 export function ThreadsPublishingFields({ settings, update, updateMany, mediaKinds, t }: Props) {
   const id = useId();
   const method = threadsMethod(settings);

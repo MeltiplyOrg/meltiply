@@ -16,8 +16,6 @@ frontend_port="${MELTIPLY_FRONTEND_PORT:-${FRONTEND_DEV_PORT:-3000}}"
 configure_local_wrangler_network "$repo_root" "$frontend_port" "$wrangler_port"
 printf 'API Worker using http://%s:%s\n' "${WRANGLER_DEV_IP:-127.0.0.1}" "$wrangler_port"
 
-# API-only session: no container runs, so loopback stays the signed R2 host and
-# the browser reaches the same presigned URLs unchanged.
 configure_local_r2_endpoint_host false
 
 wrangler_args=(

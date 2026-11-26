@@ -26,7 +26,6 @@ const digests = {
   unpause: "e".repeat(64),
 };
 
-// Builds a valid reviewed release input for manifest fixture scenarios.
 function releaseInput(overrides = {}) {
   return {
     schema_version: 1,
@@ -57,7 +56,6 @@ function releaseInput(overrides = {}) {
   };
 }
 
-// Builds the OpenTofu outputs document the release contracts require.
 function iacOutput(overrides = {}) {
   const environment = overrides.environment ?? "staging";
   const suffix = environment === "staging" ? "" : `-${environment}`;
@@ -123,7 +121,6 @@ function iacOutput(overrides = {}) {
   };
 }
 
-// Builds an operator review record bound to a plan digest.
 function approval(name, planDigest, index = "88888888") {
   return {
     approval_job: {
@@ -139,7 +136,6 @@ function approval(name, planDigest, index = "88888888") {
   };
 }
 
-// Builds the release plan transition variable triple for a phase.
 function transition(attachDomains, attachConsumers, paused, environment = "staging") {
   return {
     attachAppCustomDomains: attachDomains,
@@ -149,7 +145,6 @@ function transition(attachDomains, attachConsumers, paused, environment = "stagi
   };
 }
 
-// Builds a redacted plan summary matching scripts/infra/release-plan.mjs.
 function planSummary(phase, transitionFields) {
   return {
     phase,
@@ -166,7 +161,6 @@ function planSummary(phase, transitionFields) {
   };
 }
 
-// Builds the health sub-record embedded in smoke evidence.
 function healthEvidence(extra = {}) {
   return {
     contract_version: "1.3.0",
@@ -178,7 +172,6 @@ function healthEvidence(extra = {}) {
   };
 }
 
-/** Reviewed frontend config bytes shared by fixture evidence and private rendered artifacts. */
 function frontendConfig(spec) {
   return JSON.stringify({
     name: `meltiply-frontend-${spec.environment}`,
@@ -192,7 +185,6 @@ function frontendConfig(spec) {
   });
 }
 
-/** Frontend activates its code candidate directly, without a secrets version. */
 function frontendEvidenceSet(spec, foundation) {
   const base = {
     schema_version: 1,
@@ -221,7 +213,6 @@ function frontendEvidenceSet(spec, foundation) {
     },
   };
 }
-// Builds a complete, internally consistent update-mode release directory.
 function updateEvidenceSet(spec) {
   const base = {
     git_sha: spec.git_sha,
@@ -446,7 +437,6 @@ function updateEvidenceSet(spec) {
   };
 }
 
-// Writes an evidence map to a release directory with private scratch files.
 async function seedReleaseDir(outDir, files, { includeFinal = true } = {}) {
   await mkdir(path.join(outDir, "wrangler"), { recursive: true });
   await writeFile(path.join(outDir, "wrangler", "api.json"), "{}", {
@@ -477,7 +467,6 @@ async function seedReleaseDir(outDir, files, { includeFinal = true } = {}) {
   });
 }
 
-// Builds buildReleaseManifest parameters for a seeded release directory.
 function manifestParams(outDir, spec, overrides = {}) {
   const approvalDir = outDir;
   return {
@@ -493,7 +482,6 @@ function manifestParams(outDir, spec, overrides = {}) {
   };
 }
 
-// Creates a temporary release directory and registers its cleanup.
 async function withReleaseDir(context, files, options) {
   const outDir = await mkdtemp(path.join(tmpdir(), "meltiply-manifest-"));
   context.after(() => rm(outDir, { force: true, recursive: true }));
@@ -513,9 +501,6 @@ test("manifest publishes deterministic redacted provenance for a complete update
   assert.equal(manifest.git_sha, gitSha);
   assert.equal(manifest.environment, "staging");
 
-  // Every publishable artifact is listed with byte size and digest, and the set
-  // is exactly the release's evidence — not a subset that could silently drop a
-  // required review artifact.
   const names = manifest.evidence.map((entry) => entry.file);
   const expectedNames = Object.keys(files).sort();
   assert.deepEqual(names, expectedNames, "every required evidence file is published");
@@ -525,12 +510,10 @@ test("manifest publishes deterministic redacted provenance for a complete update
   }
   assert.deepEqual(names, [...names].sort(), "evidence order is deterministic");
 
-  // Private scratch never reaches the manifest.
   for (const name of names) {
     assert.doesNotMatch(name, /release-input|wrangler|^iac-outputs\.json$/);
   }
 
-  // Contract provenance carries a digest alongside the three approval holds.
   assert.match(manifest.openapi.sha256, /^[0-9a-f]{64}$/);
   assert.deepEqual(manifest.signoffs.map((signoff) => signoff.job).sort(), [
     "staging-foundation-approval",
@@ -543,16 +526,13 @@ test("manifest publishes deterministic redacted provenance for a complete update
   assert.equal(trafficSignoff.plan_digest, digests.domain);
   assert.equal(trafficSignoff.workflow_id, workflowId);
 
-  // The persisted record is the returned record.
   const written = JSON.parse(await readFile(path.join(outDir, "release-manifest.json"), "utf8"));
   assert.deepEqual(written, manifest);
 
-  // Re-running is byte-for-byte deterministic.
   const second = await buildReleaseManifest(manifestParams(outDir, spec));
   assert.deepEqual(second, manifest);
 });
 
-/** A complete production set is valid, but staging review, plan, health, and deployment evidence cannot be borrowed. */
 test("manifest accepts production provenance and rejects mixed installations", async (context) => {
   const spec = validateReleaseSpec(
     releaseInput({
@@ -583,7 +563,6 @@ test("manifest accepts production provenance and rejects mixed installations", a
   }
 });
 
-/** A partial rollout may record an unknown contract only for its proven previous Worker identity. */
 test("manifest accepts normalized legacy health for the previous partial-rollout version", async (context) => {
   const spec = validateReleaseSpec(releaseInput());
   const files = updateEvidenceSet(spec);
@@ -597,7 +576,6 @@ test("manifest accepts normalized legacy health for the previous partial-rollout
   assert.equal(manifest.status, "complete");
 });
 
-/** Legacy evidence never waives candidate/full-rollout checks or a mismatched previous identity. */
 test("manifest rejects legacy health without a matching partial-rollout previous version", async (context) => {
   for (const scenario of [
     { name: "candidate", file: "smoke-version.json" },
@@ -642,7 +620,6 @@ test("manifest rejects incomplete and unclassified release directories", async (
   const spec = validateReleaseSpec(releaseInput());
   const files = updateEvidenceSet(spec);
 
-  // A missing evidence file fails closed with the name surfaced.
   const incomplete = { ...files };
   delete incomplete["smoke-version.json"];
   let outDir = await withReleaseDir(context, incomplete);
@@ -651,7 +628,6 @@ test("manifest rejects incomplete and unclassified release directories", async (
     /incomplete: .*smoke-version\.json/,
   );
 
-  // Bootstrap-mode artifacts inside an update release are unclassified.
   outDir = await withReleaseDir(context, {
     ...files,
     "worker-api-deployment.json": {},
@@ -661,14 +637,12 @@ test("manifest rejects incomplete and unclassified release directories", async (
     /unclassified release artifact: worker-api-deployment\.json/,
   );
 
-  // Unknown top-level artifacts fail closed.
   outDir = await withReleaseDir(context, { ...files, "notes.txt": "hi" });
   await assert.rejects(
     buildReleaseManifest(manifestParams(outDir, spec)),
     /unclassified release artifact: notes\.txt/,
   );
 
-  // Bootstrap evidence cannot satisfy an update manifest either.
   outDir = await withReleaseDir(context, {
     ...files,
     "smoke-live.json": files["smoke-live-100.json"],
@@ -683,7 +657,6 @@ test("manifest rejects mismatched provenance, approvals, and secret-bearing evid
   const spec = validateReleaseSpec(releaseInput());
   const files = updateEvidenceSet(spec);
 
-  // Evidence bound to a different commit is rejected.
   let outDir = await withReleaseDir(context, {
     ...files,
     "worker-api-candidate.json": {
@@ -696,7 +669,6 @@ test("manifest rejects mismatched provenance, approvals, and secret-bearing evid
     /worker-api-candidate\.json does not match the release/,
   );
 
-  // An approval bound to the wrong plan digest fails its hold binding.
   const wrongApproval = approval("staging-foundation-approval", "0".repeat(64));
   outDir = await withReleaseDir(context, {
     ...files,
@@ -708,7 +680,6 @@ test("manifest rejects mismatched provenance, approvals, and secret-bearing evid
   });
   await assert.rejects(buildReleaseManifest(manifestParams(outDir, spec)), /plan digest|approval/i);
 
-  // Embedded approvals that diverge from the loaded hold are rejected.
   const diverged = {
     ...files["migration-evidence.json"],
     approvals: [approval("staging-foundation-approval", digests.unpause)],
@@ -722,7 +693,6 @@ test("manifest rejects mismatched provenance, approvals, and secret-bearing evid
     /embeds unexpected approval records|plan digest/,
   );
 
-  // A rollout split that contradicts its percentage is rejected.
   outDir = await withReleaseDir(context, {
     ...files,
     "api-rollout-25.json": {
@@ -735,7 +705,6 @@ test("manifest rejects mismatched provenance, approvals, and secret-bearing evid
     /does not prove the staged rollout/,
   );
 
-  // Credential material in any evidence record rejects the whole release.
   const secretValue = "sk_live_manifest_secret_123456";
   outDir = await withReleaseDir(context, {
     ...files,
@@ -753,8 +722,6 @@ test("manifest rejects mismatched provenance, approvals, and secret-bearing evid
     /embeds a protected secret value|credential material/,
   );
 
-  // Secret material in private scratch (release-input.json) is not scanned
-  // for publication but the manifest still covers publishable content.
   outDir = await withReleaseDir(context, {
     ...files,
     "migration-evidence.json": {
@@ -772,7 +739,6 @@ test("manifest verifies final outputs equal the unpause transition and are activ
   const spec = validateReleaseSpec(releaseInput());
   const files = updateEvidenceSet(spec);
 
-  // Final outputs that do not match unpause byte-for-byte are rejected.
   let outDir = await withReleaseDir(context, files);
   await writeFile(
     path.join(outDir, "iac-outputs.json"),
@@ -784,7 +750,6 @@ test("manifest verifies final outputs equal the unpause transition and are activ
     /do not match the unpause transition/,
   );
 
-  // Outputs claiming the wrong phase state are rejected inside the document.
   outDir = await withReleaseDir(context, {
     ...files,
     "iac-outputs-unpause.json": iacOutput({ queue_delivery_paused: true }),
@@ -795,7 +760,6 @@ test("manifest verifies final outputs equal the unpause transition and are activ
   );
 });
 
-// Builds a complete, internally consistent bootstrap-mode release directory.
 function bootstrapEvidenceSet(spec) {
   const base = {
     git_sha: spec.git_sha,
@@ -1028,8 +992,6 @@ test("manifest publishes bound provenance for a complete bootstrap release", asy
 
   const manifest = await buildReleaseManifest(manifestParams(outDir, spec));
   assert.equal(manifest.deployment_mode, "bootstrap");
-  // The published set must be exactly the bootstrap evidence: a subset would let
-  // a dropped foundation artifact pass review as a complete release.
   assert.deepEqual(
     manifest.evidence.map((entry) => entry.file),
     Object.keys(files).sort(),
@@ -1042,7 +1004,6 @@ test("manifest rejects bootstrap identity drift and update-only artifacts", asyn
   const spec = validateReleaseSpec(releaseInput({ deployment_mode: "bootstrap" }));
   const files = bootstrapEvidenceSet(spec);
 
-  // Update-mode rollout evidence is unclassified inside a bootstrap release.
   let outDir = await withReleaseDir(context, {
     ...files,
     "api-rollout-5.json": {},
@@ -1052,7 +1013,6 @@ test("manifest rejects bootstrap identity drift and update-only artifacts", asyn
     /unclassified release artifact: api-rollout-5\.json/,
   );
 
-  // A bootstrap candidate recording a previous version contradicts the mode.
   outDir = await withReleaseDir(context, {
     ...files,
     "worker-api-candidate.json": {
@@ -1065,7 +1025,6 @@ test("manifest rejects bootstrap identity drift and update-only artifacts", asyn
     /must not record a previous version/,
   );
 
-  // The state Worker must activate its own code candidate, not a foreign ID.
   outDir = await withReleaseDir(context, {
     ...files,
     "worker-state-deployment.json": {
@@ -1079,7 +1038,6 @@ test("manifest rejects bootstrap identity drift and update-only artifacts", asyn
     /activated the wrong Worker version/,
   );
 
-  // The secrets version must derive from the recorded code candidate.
   outDir = await withReleaseDir(context, {
     ...files,
     "worker-api-secrets.json": {
@@ -1092,7 +1050,6 @@ test("manifest rejects bootstrap identity drift and update-only artifacts", asyn
     /not based on the candidate|not the reviewed secrets version/,
   );
 
-  // Recovery preview URLs legitimately null out; a foreign URL is rejected.
   outDir = await withReleaseDir(context, {
     ...files,
     "worker-api-candidate.json": {
@@ -1106,7 +1063,6 @@ test("manifest rejects bootstrap identity drift and update-only artifacts", asyn
   );
 });
 
-/** Neither missing frontend proof nor a deployment borrowed from another installation completes a release. */
 test("manifest requires frontend candidate and same-release activation", async (context) => {
   const spec = validateReleaseSpec(releaseInput());
   const files = updateEvidenceSet(spec);
@@ -1127,7 +1083,6 @@ test("manifest requires frontend candidate and same-release activation", async (
   await assert.rejects(buildReleaseManifest(manifestParams(outDir, spec)), /frontend deploy step/);
 });
 
-/** Production bootstrap requires the same complete four-Worker evidence as staging. */
 test("manifest accepts a complete production bootstrap including frontend", async (context) => {
   const spec = validateReleaseSpec(
     releaseInput({

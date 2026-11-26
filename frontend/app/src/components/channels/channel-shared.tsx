@@ -25,29 +25,15 @@ import { useI18n } from "@/lib/i18n";
 import { formatUsername } from "@/lib/format";
 import { cn } from "@meltiply/ui/utils";
 
-/**
- * Consistent icon-button chrome for the channel table's health and settings controls.
- */
 const channelActionClass =
   "size-7 shrink-0 text-ink-3 hover:bg-hover hover:text-ink [&_svg]:size-3.5";
 
-/**
- * Resolves the channel's display title for its table row and settings dialog:
- * an explicit override (the workspace integration name), the provider display
- * name, then the platform label as last resort so the identity never renders blank.
- */
 export function channelDisplayTitle(account: PlatformAccount, displayName?: string | null): string {
   return (
     displayName?.trim() || account.display_name?.trim() || platformDisplayName(account.platform)
   );
 }
 
-/**
- * Returns a clipboard helper that copies a provider value and reports through
- * Sileo: a confirmed copy gets an action-specific title plus the copied value as
- * expandable detail, while denied clipboard access shows manual-copy recovery
- * instead of claiming success.
- */
 function useCopyChannelValue(): (value: string, successTitle: string) => Promise<void> {
   const { t } = useI18n();
   return useCallback(
@@ -73,12 +59,6 @@ export interface ChannelCopyValuesProps {
   account: PlatformAccount;
 }
 
-/**
- * Keeps the handle and provider ID on one compact metadata line, regardless of
- * username availability. The values themselves are keyboard-accessible copy
- * targets, using the shared Button, clipboard helper, and success/error toast.
- * Copies raw values without display labels; long values truncate without wrapping.
- */
 export function ChannelCopyValues({ account }: ChannelCopyValuesProps): React.ReactElement | null {
   const { t } = useI18n();
   const copyValue = useCopyChannelValue();
@@ -127,15 +107,9 @@ export interface ChannelHealthControlProps {
   account: PlatformAccount;
   statusReason?: string | null;
   isReconnecting?: boolean;
-  /** Admin-only; omitted for read-only roles, leaving the status passive. */
   onReconnect?: (account: PlatformAccount) => void;
 }
 
-/**
- * Renders the table's channel-health icon with a tooltip and accessible name.
- * Healthy channels use a passive control; unhealthy ones open a dropdown with
- * the reason and real re-authentication action, delegated to the board's OAuth flow.
- */
 export function ChannelHealthControl({
   account,
   statusReason = null,
@@ -191,20 +165,11 @@ export function ChannelHealthControl({
 
 export interface ChannelSettingsActionProps {
   account: PlatformAccount;
-  /** Resolved owning Brand Profile; missing profiles surface as "Unknown profile". */
   profile?: BrandProfile | null;
-  /** Resolved display title used as the dialog's accessible name. */
   channelName: string;
-  /** Admin-only; omitted for read-only roles, leaving settings informational. */
   onDisconnect?: (account: PlatformAccount) => void;
 }
 
-/**
- * Renders the directory's overflow trigger and real channel settings dialog.
- * The dialog shows the owning Brand Profile and the real granted scopes, and
- * its destructive action closes the dialog before delegating to the board's
- * disconnect confirmation so exactly one CenterAlertDialog is ever active.
- */
 export function ChannelSettingsAction({
   account,
   profile = null,
@@ -293,17 +258,11 @@ export function ChannelSettingsAction({
 export interface ChannelSelectionCheckboxProps {
   checked: boolean;
   disabled?: boolean;
-  /** Accessible name, e.g. "Select channel" or "Select all visible channels". */
   label: string;
   onToggle: () => void;
   className?: string;
 }
 
-/**
- * Single-channel selection checkbox built on the shared Input primitive. The
- * click stops at the input so selection never triggers card or row navigation
- * in interactive containers.
- */
 export function ChannelSelectionCheckbox({
   checked,
   disabled = false,

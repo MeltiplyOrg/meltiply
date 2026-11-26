@@ -12,16 +12,6 @@ import {
   type R2BucketLike,
 } from "../src";
 
-/**
- * Resolves an Effect to the `_tag` of its typed failure, or `"success"`.
- *
- * Asserting only `Exit._tag === "Failure"` accepts any tagged error, so a
- * signer/store that regressed to a different error class would still pass.
- * Comparing the tag keeps each claimed error-mapping contract checkable.
- *
- * @param effect - Any Effect whose failure carries a `_tag` discriminant.
- * @returns Effect resolving to the failure tag, or `"success"` on success.
- */
 function errorTag<A, E extends { readonly _tag: string }>(
   effect: Effect.Effect<A, E>,
 ): Effect.Effect<string> {
@@ -31,12 +21,6 @@ function errorTag<A, E extends { readonly _tag: string }>(
   });
 }
 
-/**
- * Runs {@link errorTag} outside an Effect generator.
- *
- * @param effect - Any Effect whose failure carries a `_tag` discriminant.
- * @returns The failure tag, or `"success"` when the Effect succeeded.
- */
 async function failureTag<A, E extends { readonly _tag: string }>(
   effect: Effect.Effect<A, E>,
 ): Promise<string> {
@@ -45,13 +29,9 @@ async function failureTag<A, E extends { readonly _tag: string }>(
 
 describe("storage keys", () => {
   it("separates upload-writable staging keys from publishable ready keys", () => {
-    // A ready key keeps `<org>/<asset>/<name>` so ownership is verifiable from
-    // the key alone, which is what authorizes a Provider delivery.
     expect(readyObjectKey("org-alpha", "asset-one", "rendition-webp")).toBe(
       "org-alpha/asset-one/rendition-webp",
     );
-    // A staging key lives in a distinct namespace, so it can never be mistaken
-    // for or promoted into an approved byte stream by key shape alone.
     expect(stagingObjectKey("org-alpha", "asset-one", "session-one", "clip.mp4")).toBe(
       "staging/org-alpha/asset-one/session-one/clip.mp4",
     );
@@ -94,8 +74,6 @@ describe("R2SigV4Signer key derivation", () => {
       );
       const signed = await Promise.all(requests);
 
-      // Each request signs a distinct part key and number, so 63 distinct
-      // signatures prove the cached key is reused without collapsing inputs.
       expect(new Set(signed).size).toBe(63);
       expect(importKey).toHaveBeenCalledTimes(5);
 
@@ -121,9 +99,6 @@ describe("R2ObjectStore", () => {
       delete: vi.fn(),
       get: vi.fn(),
       head: vi.fn().mockResolvedValue({
-        // R2 reports `checksums.sha256` as an ArrayBuffer, and this one is a
-        // real 32-byte digest rather than a two-byte stand-in. The leading 0x06
-        // byte is what catches a hex conversion that drops zero padding.
         checksums: {
           sha256: new Uint8Array([
             0x06, 0xc0, 0xae, 0x52, 0x7e, 0xb2, 0x21, 0x31, 0x1d, 0x94, 0x2e, 0xca, 0x38, 0xef,
@@ -154,15 +129,8 @@ describe("R2ObjectStore", () => {
     });
   });
 
-  /**
-   * Promotion of verified upload bytes from the upload-writable staging key to
-   * the publishable ready key is the security boundary a reusable upload grant
-   * must not cross: the source generation is pinned by ETag and the destination
-   * is written only when absent, so a mutated staging object is never promoted
-   * and a replayed copy adopts the bytes an interrupted attempt already wrote.
-   */
   it("promotes staged bytes to a ready key under a pinned source ETag", async () => {
-    const body = { locked: false } as unknown as ReadableStream;
+    const body = new ReadableStream();
     const uploaded = new Date("2026-01-01T00:00:00Z");
     const get = vi.fn().mockResolvedValue({
       body,
@@ -202,8 +170,6 @@ describe("R2ObjectStore", () => {
     expect(get).toHaveBeenCalledWith("staging/org/asset/session/clip.mp4", {
       onlyIf: { etagMatches: "etag-staged" },
     });
-    // The source body is streamed straight into the destination write; the
-    // worker never buffers the object.
     expect(put).toHaveBeenCalledWith(
       "org/asset/original",
       body,
@@ -215,10 +181,6 @@ describe("R2ObjectStore", () => {
   });
 
   it("refuses to promote a staging object that no longer exists", async () => {
-    // R2 answers an `etagMatches` failure with the object metadata and no body,
-    // not with null (see the next case); null means the key itself is gone, so
-    // the only thing left to assert is that the read was pinned and no write
-    // followed it.
     const get = vi.fn().mockResolvedValue(null);
     const put = vi.fn();
     const store = new R2ObjectStore({
@@ -243,8 +205,6 @@ describe("R2ObjectStore", () => {
   });
 
   it("declines a copy whose source R2 answered without a body", async () => {
-    // R2 answers a failed conditional get with the object metadata and no body,
-    // so the pinned source generation is gone and nothing may be promoted.
     const put = vi.fn();
     const store = new R2ObjectStore({
       createMultipartUpload: vi.fn(),
@@ -270,9 +230,7 @@ describe("R2ObjectStore", () => {
   });
 
   it("adopts an existing destination instead of duplicating a replayed copy", async () => {
-    // R2 answers a failed `etagDoesNotMatch: "*"` write with null, which is how
-    // a replay learns the earlier attempt already wrote the destination.
-    const body = {} as unknown as ReadableStream;
+    const body = new ReadableStream();
     const put = vi.fn().mockResolvedValue(null);
     const store = new R2ObjectStore({
       createMultipartUpload: vi.fn(),
@@ -294,8 +252,6 @@ describe("R2ObjectStore", () => {
         ifDestinationAbsent: true,
       }),
     ).resolves.toBeNull();
-    // The write really was attempted with the create-only guard; a copy that
-    // skipped the write would return null for the wrong reason.
     expect(put).toHaveBeenCalledWith("org/asset/original", body, {
       onlyIf: { etagDoesNotMatch: "*" },
     });
@@ -348,8 +304,6 @@ describe("R2ObjectStore", () => {
       range: { length: 256, offset: 0 },
     });
     await expect(store.readPrefix("org/asset/image.png", 0)).rejects.toThrow("maximumBytes");
-    // 1 MiB is the inclusive ceiling: the exact limit succeeds and one byte
-    // more is refused, so the bound is neither exclusive nor unbounded.
     await expect(store.readPrefix("org/asset/image.png", 1024 * 1024)).resolves.toEqual(
       new Uint8Array([1, 2, 3]),
     );
@@ -360,7 +314,6 @@ describe("R2ObjectStore", () => {
       "maximumBytes",
     );
     await expect(store.readRange("org/asset/image.png", -1, 256)).rejects.toThrow("offset");
-    // Only the two accepted reads reached the bucket.
     expect(get).toHaveBeenCalledTimes(2);
   });
 });
@@ -395,10 +348,6 @@ describe("R2SigV4Signer", () => {
   });
 
   it("clamps a signed upload grant to an absolute expiresAt captured at signing time", async () => {
-    // The clock advances a full second while the signature is produced. A
-    // grant whose remaining TTL were recomputed from a later instant than the
-    // one the signature is dated at would silently outlive the deadline the
-    // caller already persisted on its inventory row.
     let clockReads = 0;
     const delayedSigner = new R2SigV4Signer({
       accessKeyId: "access-key",
@@ -424,17 +373,11 @@ describe("R2SigV4Signer", () => {
       }),
     );
 
-    // One captured instant drives both halves of the grant: the signature's
-    // own date and the remaining lifetime that clamps the nominal TTL to the
-    // persisted deadline.
     expect(signed.searchParams.get("X-Amz-Date")).toBe("20260718T123456Z");
     expect(signed.searchParams.get("X-Amz-Expires")).toBe("200");
   });
 
   it("clamps multipart part and exact-write grants to the same absolute deadline", async () => {
-    // Exactly 120s of the frozen instant's window remain, so both write
-    // capabilities are signed for the deadline remainder rather than their
-    // nominal TTL.
     const deadline = new Date("2026-07-18T12:36:56Z");
 
     const part = new URL(
@@ -464,9 +407,6 @@ describe("R2SigV4Signer", () => {
   });
 
   it("rejects a write deadline that elapsed before signing instead of minting a one-second grant", async () => {
-    // The signer's frozen instant is 2026-07-18T12:34:56Z, so a deadline at or
-    // before it — including one with under a second left — can never become a
-    // valid grant and must fail rather than be stretched to expiresInSeconds=1.
     await expect(
       signer.signUpload({
         contentLength: 42,
@@ -496,9 +436,6 @@ describe("R2SigV4Signer", () => {
   });
 
   it("keeps the requested expiresInSeconds when the deadline is further out", async () => {
-    // expiresAt is a ceiling, not a replacement TTL: a deadline an hour away
-    // must not widen a 60-second grant beyond the caller's requested
-    // lifetime. The signed duration is the smaller of the two.
     const deadline = new Date("2026-07-18T13:34:56Z"); // 3600s after the frozen instant.
 
     const upload = new URL(
@@ -606,10 +543,6 @@ describe("R2SigV4Signer", () => {
   ])(
     "signs a path-prefixed S3 origin with $boundary boundary slashes and binds required write headers",
     async ({ prefix }) => {
-      // A local runtime serves the same bucket at `/cdn-cgi/local/r2/s3/<bucket>`.
-      // The prefix is part of the canonical URI (otherwise the signature could not
-      // be verified), while `host` stays the configured origin so the browser and
-      // a processor container receive byte-identical signed URLs.
       const localSigner = new R2SigV4Signer({
         accessKeyId: "local-r2-access-key",
         accountId: "local",
@@ -633,8 +566,6 @@ describe("R2SigV4Signer", () => {
       expect(signed.pathname).toBe(
         "/cdn-cgi/local/r2/s3/meltiply-assets-local/staging/org/asset/processing-image_jpeg_webp_4096_long_edge",
       );
-      // The header is inside the signature, so an engine that omits it is rejected
-      // by the origin instead of overwriting an earlier attempt's output.
       expect(signed.searchParams.get("X-Amz-SignedHeaders")).toBe("host;if-none-match");
     },
   );
@@ -668,8 +599,6 @@ describe("R2SigV4Signer", () => {
       R2_SECRET_ACCESS_KEY: "local-r2-secret-key",
     });
     expect(local).toBeInstanceOf(R2SigV4Signer);
-    // No configuration value can turn the plain-HTTP allowance on outside a
-    // local/test environment: the flag is derived, not read from the env.
     expect(() =>
       createR2SignerFromEnv({
         ENVIRONMENT: "staging",
@@ -738,7 +667,6 @@ describe("R2SigV4Signer", () => {
         uploadId: "upload",
       }),
     ).rejects.toThrow("partNumber");
-    // 10,000 is the inclusive last part; the bound must not reject it.
     const lastPart = new URL(
       await signer.signMultipartPart({
         contentLength: 1,
@@ -750,8 +678,6 @@ describe("R2SigV4Signer", () => {
       }),
     );
     expect(lastPart.searchParams.get("partNumber")).toBe("10000");
-    // Expiry is an inclusive 1..604800 range: both ends sign, and one step
-    // outside each end is refused.
     const oneSecond = new URL(
       await signer.signDownload({ expiresInSeconds: 1, key: "org/asset/clip.mp4" }),
     );
@@ -902,18 +828,16 @@ describe("R2SigV4Signer", () => {
       }).pipe(
         Effect.provide(
           createStorageServiceLive({
-            signer: {
+            signer: new R2SigV4Signer({
               accessKeyId: "access-key",
               accountId: "account-id",
               bucket: "assets",
               secretAccessKey: "secret-key",
-            },
+            }),
           }),
         ),
       ),
     );
-    // Signing is independent of the store, so this is a real presigned grant
-    // for the requested key rather than a placeholder.
     const signedUrl = new URL(result.url);
     expect(signedUrl.origin).toBe("https://account-id.r2.cloudflarestorage.com");
     expect(signedUrl.pathname).toBe("/assets/org/asset/photo.png");
@@ -957,8 +881,6 @@ describe("R2SigV4Signer", () => {
       head: (key) =>
         Effect.succeed({
           contentType: "text/plain",
-          // Distinct from the default double's `mock-etag`, otherwise the
-          // assertion below would pass whether or not the override was used.
           etag: "override-etag",
           key,
           size: 10,
@@ -1044,8 +966,6 @@ describe("R2SigV4Signer", () => {
     expect(res.prefix).toEqual(new Uint8Array([1, 2, 3, 4]));
     expect(res.range).toEqual(new Uint8Array([1, 2, 3, 4]));
     expect(res.completed.etag).toBe("complete-etag");
-    // The uploaded part reaches `complete` unchanged, and both handles were
-    // aborted, so the wrapped Effects really drove the native controller.
     expect(mockComplete).toHaveBeenCalledWith([{ etag: "part-1-etag", partNumber: 1 }]);
     expect(mockAbort).toHaveBeenCalledTimes(2);
   });
@@ -1138,12 +1058,12 @@ describe("R2SigV4Signer", () => {
           uploadPart: vi.fn().mockResolvedValue({ etag: "p1", partNumber: 1 }),
         }),
       }),
-      signer: {
+      signer: new R2SigV4Signer({
         accessKeyId: "access-key",
         accountId: "account-id",
         bucket: "meltiply-test",
         secretAccessKey: "secret-key",
-      },
+      }),
     });
 
     const liveProgram = Effect.gen(function* () {
@@ -1193,8 +1113,6 @@ describe("R2SigV4Signer", () => {
 
     const liveRes = await Effect.runPromise(liveProgram);
     expect(liveRes.meta.etag).toBe("live-etag");
-    // The live layer signs with the supplied R2 credentials, so the grant is a
-    // bucket-scoped presigned URL rather than any URL at all.
     const liveUploadUrl = new URL(liveRes.uploadUrl);
     expect(liveUploadUrl.origin).toBe("https://account-id.r2.cloudflarestorage.com");
     expect(liveUploadUrl.pathname).toBe("/meltiply-test/test.mp4");
@@ -1204,7 +1122,6 @@ describe("R2SigV4Signer", () => {
       false,
     );
 
-    // Test default implementation doubles in createStorageServiceTest
     const defaultTestLayer = createStorageServiceTest();
     const testProgram = Effect.gen(function* () {
       const storage = yield* StorageService;
@@ -1248,9 +1165,6 @@ describe("R2SigV4Signer", () => {
 
     const testRes = await Effect.runPromise(testProgram);
     expect(testRes.meta.etag).toBe("mock-etag");
-    // Each call is served by the corresponding fake, which means the requested
-    // arguments really travelled through the service rather than a shared
-    // stub: the granted URLs carry the requested key and part identifiers.
     const upUrl = new URL(testRes.upUrl);
     expect(upUrl.pathname.endsWith("/dummy")).toBe(true);
     const partUrl = new URL(testRes.partUrl);
@@ -1259,15 +1173,10 @@ describe("R2SigV4Signer", () => {
     const downUrl = new URL(testRes.downUrl);
     expect(downUrl.pathname.endsWith("/dummy")).toBe(true);
     expect(testRes.head?.etag).toBe("mock-etag");
-    // readPrefix and readRange are distinct operations even though the default
-    // doubles return the same in-memory payload.
     expect(testRes.prefix).toEqual(new Uint8Array([0x00, 0x01]));
     expect(testRes.range).toEqual(new Uint8Array([0x00, 0x01]));
-    // `complete` on the created session reports the create-double's metadata,
-    // not the resumed one, so the two handles are not aliased.
     expect(testRes.c.etag).toBe("mock-etag-complete");
 
-    // Live layer without signer fails closed on signing
     const noSignerLayer = createStorageServiceLive({
       store: new R2ObjectStore({
         createMultipartUpload: vi.fn(),
@@ -1284,11 +1193,8 @@ describe("R2SigV4Signer", () => {
       return yield* storage.signDownload({ expiresInSeconds: 60, key: "test" });
     }).pipe(Effect.provide(noSignerLayer));
 
-    // The signer is absent, so signing fails closed with the shared
-    // infrastructure error rather than a signing-specific one.
     expect(await failureTag(noSignerProgram)).toBe("StorageUnavailableError");
 
-    // Live layer with plain ObjectUrlSigner (Promise-based)
     const customSignerLayer = createStorageServiceLive({
       store: new R2ObjectStore({
         createMultipartUpload: vi.fn(),
@@ -1330,39 +1236,16 @@ describe("R2SigV4Signer", () => {
     expect(customRes.p).toBe("https://plain.signer/part");
     expect(customRes.u).toBe("https://plain.signer/upload");
 
-    // Live layer with invalid signer options catches and fails closed
-    const invalidSignerLayer = createStorageServiceLive({
-      store: new R2ObjectStore({
-        createMultipartUpload: vi.fn(),
-        delete: vi.fn(),
-        get: vi.fn(),
-        head: vi.fn(),
-        put: vi.fn(),
-        resumeMultipartUpload: vi.fn(),
-      }),
-      signer: {
-        accessKeyId: "",
-        accountId: "",
-        bucket: "",
-        secretAccessKey: "",
-      },
-    });
+    expect(
+      () =>
+        new R2SigV4Signer({
+          accessKeyId: "",
+          accountId: "",
+          bucket: "",
+          secretAccessKey: "",
+        }),
+    ).toThrow(TypeError);
 
-    const invalidSignerProgram = Effect.gen(function* () {
-      const storage = yield* StorageService;
-      return yield* storage.signUpload({
-        contentLength: 10,
-        contentType: "text/plain",
-        expiresInSeconds: 60,
-        key: "k",
-      });
-    }).pipe(Effect.provide(invalidSignerLayer));
-
-    // Empty R2 credentials make createStorageServiceLive drop the signer, so
-    // the service reports signing as not configured instead of signing.
-    expect(await failureTag(invalidSignerProgram)).toBe("StorageUnavailableError");
-
-    // Invalid parameters in signMultipartPartEffect and signDownloadEffect
     const localSigner = new R2SigV4Signer({
       accessKeyId: "access-key",
       accountId: "account-id",
@@ -1370,8 +1253,6 @@ describe("R2SigV4Signer", () => {
       secretAccessKey: "secret-key",
     });
 
-    // signMultipartPartEffect / signDownloadEffect / signUploadEffect only map
-    // to InvalidRequestError, so the tag is the whole contract.
     expect(
       await failureTag(
         localSigner.signMultipartPartEffect({
@@ -1394,7 +1275,6 @@ describe("R2SigV4Signer", () => {
       ),
     ).toBe("InvalidRequestError");
 
-    // Custom signer failure maps to StorageUnavailableError
     const failingSignerLayer = createStorageServiceLive({
       store: new R2ObjectStore({
         createMultipartUpload: vi.fn(),
@@ -1411,8 +1291,6 @@ describe("R2SigV4Signer", () => {
       },
     });
 
-    // A plain Error rejection is infrastructure, not invalid input; every
-    // signing entry point must classify it that way.
     expect(
       await failureTag(
         Effect.gen(function* () {
@@ -1452,7 +1330,6 @@ describe("R2SigV4Signer", () => {
       ),
     ).toBe("StorageUnavailableError");
 
-    // Invalid request in signUploadEffect
     expect(
       await failureTag(
         localSigner.signUploadEffect({
@@ -1464,7 +1341,6 @@ describe("R2SigV4Signer", () => {
       ),
     ).toBe("InvalidRequestError");
 
-    // Multipart upload errors in EffectMultipartUpload
     const failingMultipartLayer = createStorageServiceLive({
       store: new R2ObjectStore({
         createMultipartUpload: vi.fn().mockResolvedValue({
@@ -1487,17 +1363,12 @@ describe("R2SigV4Signer", () => {
     const mpFailProgram = Effect.gen(function* () {
       const storage = yield* StorageService;
       const mp = yield* storage.createMultipartUpload("test.txt", "text/plain");
-      // A bare `Failure` would accept any tagged error, so each operation's
-      // taxonomy is pinned: wrapMultipartUpload fixes abort/complete to
-      // infrastructure, while uploadPart keeps the caller-error distinction.
       const abortTag = yield* errorTag(mp.abort());
       expect(abortTag).toBe("StorageUnavailableError");
 
       const completeTag = yield* errorTag(mp.complete([]));
       expect(completeTag).toBe("StorageUnavailableError");
 
-      // TypeError from the provider is a caller error; anything else is
-      // infrastructure. The mock rejects once with each, in this order.
       const callerErrorTag = yield* errorTag(mp.uploadPart(1, new Uint8Array([1])));
       expect(callerErrorTag).toBe("InvalidRequestError");
 
@@ -1507,7 +1378,6 @@ describe("R2SigV4Signer", () => {
 
     await Effect.runPromise(mpFailProgram);
 
-    // Characters in encode: [!'()*]
     const specialUrl = await localSigner.signDownload({
       expiresInSeconds: 60,
       key: "org/asset/clip!(1)'*.mp4",

@@ -6,7 +6,6 @@ locals {
   protected_app_hostnames = length(var.protected_app_hostnames) == 0 ? tomap({
     (var.environment) = trimprefix(var.app_url, "https://")
   }) : var.protected_app_hostnames
-  # Preserve legacy staging services while keeping production independent in the same account.
   worker_suffix = var.environment == "staging" ? "" : "-${var.environment}"
   worker_names = {
     api        = coalesce(var.api_worker_name, "meltiply-api${local.worker_suffix}")

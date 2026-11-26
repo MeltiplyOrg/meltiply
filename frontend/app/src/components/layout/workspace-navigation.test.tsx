@@ -50,10 +50,6 @@ vi.mock("@/lib/preload-routes", () => ({
   preloadDashboardRoute: vi.fn(),
 }));
 
-// The dashboard layout renders the onboarding gate, which reads the session scope
-// and the Owner's progress. Both are data providers here, mocked to a resolved
-// non-applicable read exactly as the settings and brand-profile suites do, so the
-// shell under test never depends on an ambient auth provider.
 vi.mock("@/hooks/use-session-scope", () => ({
   useSessionScope: () => ({
     brandProfileId: null,
@@ -69,11 +65,6 @@ vi.mock("@/lib/queries", () => ({
   }),
 }));
 
-/**
- * Exposes the live router location plus test-only route controls. The buttons
- * change the URL through the same router the shell reads, so assertions observe
- * pathname and query-only transitions rather than a hand-fed `currentView`.
- */
 function LocationProbe(): React.ReactElement {
   const location = useLocation();
   const navigate = useNavigate();
@@ -93,11 +84,6 @@ function LocationProbe(): React.ReactElement {
   );
 }
 
-/**
- * Renders the real dashboard layout, navigation shell, and `SidebarNav` inside a
- * memory router. Only data providers and platform APIs are mocked, so the rail
- * and drawer consume the same canonical roster and live route as production.
- */
 function renderWorkspace(entry = "/posts"): void {
   render(
     <I18nProvider>
@@ -117,7 +103,6 @@ function renderWorkspace(entry = "/posts"): void {
   );
 }
 
-/** Minimal ResizeObserver stand-in; jsdom does not implement the platform API. */
 class TestResizeObserver implements ResizeObserver {
   constructor(_callback: ResizeObserverCallback) {}
   observe(): void {}
@@ -126,7 +111,6 @@ class TestResizeObserver implements ResizeObserver {
 }
 
 beforeAll(() => {
-  // jsdom omits both APIs used by the rail's measured hover pill and Radix menus.
   vi.stubGlobal("ResizeObserver", TestResizeObserver);
   Element.prototype.scrollIntoView = vi.fn();
   vi.stubGlobal(
@@ -194,8 +178,6 @@ describe("workspace navigation selection", () => {
       "page",
     );
 
-    // Unknown first segments fall back to Posts; a substring match would wrongly
-    // keep Analytics selected for `/analytics-archive`.
     fireEvent.click(screen.getByRole("button", { name: "Show unknown page" }));
     await waitFor(() => expect(location).toHaveTextContent("/analytics-archive"));
     expect(screen.getByRole("button", { name: "Posts" })).toHaveAttribute("aria-current", "page");

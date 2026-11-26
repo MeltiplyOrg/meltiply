@@ -31,9 +31,6 @@ variables {
   zone_id                            = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 }
 
-# These root-module tests assert the exported release-manifest contract.
-# Child-module outputs for attachment and pause state currently echo inputs;
-# they do not establish the state of the child modules' private resources.
 run "staging_plan" {
   command = plan
 

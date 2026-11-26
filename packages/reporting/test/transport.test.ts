@@ -5,15 +5,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { reportingConfiguration } from "../src/configuration";
 import { CAPTURE_TIMEOUT_MILLISECONDS, createPostHogTransport } from "../src/transport";
 
-/**
- * Controlled PostHog-compatible capture receiver.
- *
- * These cases exercise the real transport against a real socket on loopback: no
- * `fetch` stub and no echoing adapter stands in for the reporting module. The
- * receiver records the bytes the transport actually sent, which is the only
- * evidence that proves the outbound payload and the deployment controls.
- */
-
 interface ReceivedRequest {
   body: Record<string, unknown>;
   headers: Record<string, string | string[] | undefined>;
@@ -21,7 +12,6 @@ interface ReceivedRequest {
   url: string;
 }
 
-/** Receiver behaviour for the next requests. */
 type ReceiverMode = { kind: "ok" } | { kind: "status"; status: number } | { kind: "hang" };
 
 const receiver = {
@@ -34,14 +24,15 @@ const server = createServer((request, response) => {
   request.on("data", (chunk: Buffer) => chunks.push(chunk));
   request.on("end", () => {
     const text = Buffer.concat(chunks).toString("utf8");
+    const parsed: unknown = text.length === 0 ? {} : JSON.parse(text);
     receiver.requests.push({
-      body: text.length === 0 ? {} : (JSON.parse(text) as Record<string, unknown>),
+      body:
+        parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {},
       headers: request.headers,
       method: request.method ?? "",
       url: request.url ?? "",
     });
     if (receiver.mode.kind === "hang") {
-      // Never respond: the transport's abort signal is the only way out.
       return;
     }
     response.writeHead(receiver.mode.kind === "ok" ? 200 : receiver.mode.status, {
@@ -64,13 +55,11 @@ afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-/** Resets recorded requests and the receiver's behaviour. */
 function resetReceiver(mode: ReceiverMode = { kind: "ok" }) {
   receiver.mode = mode;
   receiver.requests = [];
 }
 
-/** Resolves the destination the transport under test will use. */
 function destinationFor(host = origin) {
   const configuration = reportingConfiguration({
     DEPLOYMENT_CATEGORY: "selfhosted",
@@ -105,7 +94,6 @@ describe("PostHog capture transport", () => {
     expect(receiver.requests).toHaveLength(1);
     const [captured] = receiver.requests;
     expect(captured!.method).toBe("POST");
-    // The capture reference documents `/i/v0/e/`, not `/capture/`.
     expect(captured!.url).toBe("/i/v0/e/");
     expect(captured!.headers["content-type"]).toBe("application/json");
     expect(captured!.body).toMatchObject({
@@ -126,7 +114,6 @@ describe("PostHog capture transport", () => {
     const properties = receiver.requests[0]!.body.properties as Record<string, unknown>;
     expect(properties.$process_person_profile).toBe(false);
     expect(properties.$geoip_disable).toBe(true);
-    // No identification or enrichment payload may accompany a report.
     expect(properties.$set).toBeUndefined();
     expect(properties.$set_once).toBeUndefined();
     expect(Object.keys(properties).some((key) => key.startsWith("$group"))).toBe(false);
@@ -144,7 +131,6 @@ describe("PostHog capture transport", () => {
 
     resetReceiver({ kind: "status", status: 401 });
     const rejected = await transport.capture(usageEvent);
-    // A wrong token cannot be fixed by retrying; the row must be discarded.
     expect(rejected).toMatchObject({
       errorCode: "capture_status_401",
       ok: false,
@@ -166,8 +152,6 @@ describe("PostHog capture transport", () => {
 
   it("resolves a refused connection as a transport failure value", async () => {
     resetReceiver();
-    // Port 9 is closed on loopback; nothing listens and no socket is opened
-    // outside the machine.
     const transport = createPostHogTransport({
       destination: destinationFor("http://127.0.0.1:9"),
       timeoutMilliseconds: CAPTURE_TIMEOUT_MILLISECONDS,

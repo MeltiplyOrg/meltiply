@@ -6,18 +6,11 @@ export type PostGroupBy = "status" | "profile" | "none";
 
 export interface PostGroup {
   id: string;
-  /** Raw status for localized status groups; profile name otherwise. */
   label: string;
   status?: string;
   posts: PostRow[];
 }
 
-/**
- * Groups the already filtered/sorted page without rewriting Post identity or
- * publication state. Unknown outcome statuses coalesce into one neutral
- * `unknown` group after every recognized lifecycle state. Row order inside each
- * group stays exactly as supplied by sorting.
- */
 export function groupPostRows(
   posts: PostRow[],
   groupBy: PostGroupBy,

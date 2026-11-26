@@ -159,8 +159,6 @@ test("restore point creates one named Neon snapshot and waits for completion", a
   assert.equal(operationPolls, 1);
   assert.equal(evidence.snapshot_id, snapshotId);
   assert.equal(evidence.status, "ready");
-  // The secret values themselves must never reach evidence — checking only the
-  // variable name would pass an implementation that embedded the token text.
   const serialized = JSON.stringify(evidence);
   assert.ok(!serialized.includes("fixture-token-0000000000"));
   assert.ok(!serialized.includes("secret"));

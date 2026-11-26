@@ -15,14 +15,14 @@ describe("automation flow observability gating", () => {
       flowDatabaseAvailable({
         DB_SYSTEM: {
           connectionString: "postgres://meltiply_system:secret@db/meltiply",
-        } as Hyperdrive,
+        },
         ENVIRONMENT: "test",
         VERSION: "x",
       }),
     ).toBe(true);
     expect(
       flowDatabaseAvailable({
-        DB_SYSTEM: {} as Hyperdrive,
+        DB_SYSTEM: {},
         ENVIRONMENT: "test",
         VERSION: "x",
       }),

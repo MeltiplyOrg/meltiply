@@ -1,11 +1,3 @@
-// Wrangler ↔ Terraform ↔ environment drift gate (AUD-050).
-//
-// Single source of truth assertions:
-//   1. Terraform queue consumers attach the Worker name declared in wrangler;
-//   2. every `env.X` / `process.env.X` binding referenced in worker source is
-//      declared in that worker's wrangler.jsonc or in .env.example;
-//   3. the only `replace-with-*` strings in checked-in configs are the
-//      documented release-substituted placeholders.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { test } from "node:test";
@@ -64,8 +56,6 @@ test("Terraform Queue consumers attach the Worker declared in wrangler", () => {
   );
 });
 
-// Binding discovery covers native mail declarations as well as storage and
-// service bindings; undeclared source references still fail the drift gate.
 test("worker bindings referenced in code are declared in wrangler or .env.example", () => {
   const envNames = new Set(
     read(".env.example")
@@ -107,8 +97,6 @@ test("worker bindings referenced in code are declared in wrangler or .env.exampl
   }
 });
 
-// Mail sender placeholders are intentionally release-rendered into both the
-// sender variable and binding restriction; all undocumented placeholders fail.
 test("only documented replace-with placeholders remain in checked-in configs", () => {
   const documented = [
     "system-hyperdrive-id",

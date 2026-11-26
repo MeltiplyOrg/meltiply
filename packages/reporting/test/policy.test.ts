@@ -4,8 +4,6 @@ import { reportingConfiguration } from "../src/configuration";
 import { categoryStatus, retryDelaySeconds } from "../src/policy";
 import type { PreferencesRow } from "../src/policy";
 
-// Corrupt consent fails closed; declined metadata remains readable.
-
 const enabledConfiguration = reportingConfiguration({
   DEPLOYMENT_CATEGORY: "selfhosted",
   REPORTING_POSTHOG_HOST: "https://us.i.posthog.com",
@@ -44,8 +42,6 @@ describe("category status", () => {
       enabledConfiguration,
     );
 
-    // A stored request without a disclosure decision is not consent: the Owner
-    // never saw a text that authorized this payload.
     expect(status.requested).toBe(true);
     expect(status.effective).toBe(false);
     expect(status.reason).toBe("preference_unavailable");
@@ -61,8 +57,6 @@ describe("category status", () => {
 
     expect(status.effective).toBe(false);
     expect(status.reason).toBe("preference_unavailable");
-    // The retained metadata stays truthful rather than being upgraded to today's
-    // version.
     expect(status.disclosureVersion).toBe(7);
   });
 
@@ -78,8 +72,6 @@ describe("category status", () => {
       enabledConfiguration,
     );
 
-    // Nothing is requested, so there is nothing to withhold: the surface still
-    // explains that the Owner never asked.
     expect(status.effective).toBe(false);
     expect(status.reason).toBe("not_requested");
   });

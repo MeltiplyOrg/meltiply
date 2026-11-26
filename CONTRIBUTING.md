@@ -2,7 +2,8 @@
 
 [AGENTS.md](AGENTS.md) owns implementation standards and change-scoped verification
 for humans and coding agents. Read [STATE.md](STATE.md) before refactors, schema
-changes, or data resets; use [CONTEXT.md](CONTEXT.md) for domain vocabulary.
+changes, or data resets; use [CONTEXT.md](CONTEXT.md) for domain vocabulary and the
+[MVP release checklist](docs/release-acceptance.md) for release acceptance.
 
 ## Licensing
 

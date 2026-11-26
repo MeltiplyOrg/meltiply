@@ -3,7 +3,6 @@ import { ThemeIcon } from "@meltiply/ui/preference-icons";
 import { DocsThemeContext, DocsThemeProvider } from "./docs-theme";
 import { DocumentationSearchTrigger } from "./search";
 
-/** Keeps preference labels server-neutral until the browser palette is available. */
 function useMounted(): boolean {
   return useSyncExternalStore(
     () => () => {},
@@ -12,11 +11,6 @@ function useMounted(): boolean {
   );
 }
 
-/**
- * Public theme control backed by the shared consent-aware theme owner.
- * There is no app motion mode; native OS accessibility is handled by effects.
- * Optional article search stays bound to Fumadocs' existing search context.
- */
 export function DocsPreferences({
   includeSearch = false,
 }: {
@@ -44,7 +38,6 @@ export function DocsPreferences({
   );
 }
 
-/** Shares the docs theme controller on the static landing page without a second preference owner. */
 export function LandingPreferences(): ReactElement {
   return (
     <DocsThemeProvider>

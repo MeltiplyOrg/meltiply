@@ -34,19 +34,9 @@ import {
 } from "@meltiply/ui/dropdown-menu";
 import { workspaceNavItems, type WorkspaceView } from "@/lib/navigation";
 
-/** Placements are resolved once: the same canonical roster feeds rail, drawer, and search. */
 const PRIMARY_NAV_ITEMS = workspaceNavItems("primary");
 const UTILITY_NAV_ITEMS = workspaceNavItems("utility");
 
-/**
- * Reference navigation row shared by the desktop rail and mobile drawer; native button/Slot semantics stay intact.
- *
- * @param props.collapsed - Centers icon-only content in the collapsed rail.
- * @param props.active - Paints the selected surface treatment.
- * @param props.glideTarget - Marks the row as a `SidebarGlideHighlight` target
- *   (the default). The account identity row opts out so the travelling pill
- *   never lights the sidebar's account block; that row paints its own fill.
- */
 const SidebarNavRow = forwardRef<
   HTMLButtonElement,
   ButtonProps & { collapsed?: boolean; active?: boolean; glideTarget?: boolean }
@@ -84,7 +74,6 @@ export interface SidebarNavProps {
   currentView: WorkspaceView;
   onNavigate: (view: WorkspaceView, options?: { search?: string }) => void;
   className?: string;
-  /** Mobile navigation reuses the full rail without a collapse-only desktop control. */
   collapsible?: boolean;
 }
 
@@ -97,7 +86,6 @@ const ACCOUNT_THEMES = [
   { value: "system", icon: Monitor },
 ] as const;
 
-/** Shows the actual account image with the shared user-glyph fallback; caller sizing never changes identity. */
 function AccountAvatar({ src, className }: { src?: string | null; className?: string }) {
   return (
     <Avatar className={cn("size-6 shrink-0", className)} aria-hidden="true">
@@ -109,18 +97,6 @@ function AccountAvatar({ src, className }: { src?: string | null; className?: st
   );
 }
 
-/**
- * Gr8r's 252px/52px rail, rewritten in React/Tailwind. Posts and Channels are
- * single destinations; view selection and Brand Profile scope belong to their
- * page controls. Search lives in the top bar. The compact account row opens the
- * real identity/settings/sign-out menu with immediate shared theme preferences;
- * collapse preserves its accessible name.
- *
- * Every rail row is a `data-sidebar-item` target for the shared
- * `SidebarGlideHighlight` pill, which springs to the hovered row instead of each
- * row painting its own hover fill; rows stay `relative z-10` so their labels and
- * selected surface read above the travelling background.
- */
 export function SidebarNav({
   currentView,
   onNavigate,
@@ -144,9 +120,6 @@ export function SidebarNav({
       )}
       aria-label={t("Workspace navigation")}
     >
-      {/* Rows sit in the scrolling nav and the pinned footer, so the rail aside owns
-          the pill. The 26px snap radius crosses the nav divider (~21px) without
-          lighting a row from the identity header above the list. */}
       <SidebarGlideHighlight containerRef={asideRef} snapThreshold={26} />
       <div
         className={cn("flex h-topbar shrink-0 items-center gap-2 px-3", !collapsible && "pr-12")}
@@ -252,9 +225,6 @@ export function SidebarNav({
               aria-label={t("Account menu")}
               title={collapsed ? t("Account menu") : undefined}
             >
-              {/* The 24px identity avatar stays centered in the same 16px leading
-                  column as every other row icon, so footer glyphs and labels share
-                  one axis instead of the avatar pushing the name 8px right. */}
               <span className="flex size-4 shrink-0 items-center justify-center">
                 <AccountAvatar src={user?.avatarUrl} />
               </span>

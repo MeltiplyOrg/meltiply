@@ -83,14 +83,6 @@ const app = createApiApp({
   },
 });
 
-/**
- * Sends one authenticated request through the real API app.
- *
- * @param path - API path.
- * @param init - Request method, body, and headers.
- * @param as - Identity key, or undefined for an unauthenticated request.
- * @returns The HTTP response.
- */
 function request(
   path: string,
   init: { body?: string; headers?: Record<string, string>; method: string },
@@ -110,12 +102,6 @@ function request(
   );
 }
 
-/**
- * Reads the machine error code from an error envelope.
- *
- * @param value - Parsed JSON response.
- * @returns The error code, when present.
- */
 function errorCode(value: unknown): string | undefined {
   if (
     value !== null &&
@@ -131,13 +117,6 @@ function errorCode(value: unknown): string | undefined {
   return undefined;
 }
 
-/**
- * Reads the Seat count from an installation response.
- *
- * @param value - Parsed JSON response.
- * @returns The number of Seats in use.
- * @throws Error when the payload does not carry a numeric `seats_used`.
- */
 function seatsUsedFrom(value: unknown): number {
   if (
     value !== null &&
@@ -150,13 +129,6 @@ function seatsUsedFrom(value: unknown): number {
   throw new Error("Installation response must include a numeric seats_used");
 }
 
-/**
- * Reads Audit entries from an audit response.
- *
- * @param value - Parsed JSON response.
- * @returns The Audit entries.
- * @throws Error when the payload does not carry an entries array.
- */
 function auditEntriesFrom(value: unknown): { action: string; target_id: string }[] {
   if (
     value !== null &&
@@ -169,13 +141,6 @@ function auditEntriesFrom(value: unknown): { action: string; target_id: string }
   throw new Error("Audit response must include an entries array");
 }
 
-/**
- * Reads a string `id` from a decoded response object.
- *
- * @param value - Parsed JSON response.
- * @returns The `id` string.
- * @throws Error when the payload does not carry a string id.
- */
 function idFrom(value: unknown): string {
   if (
     value !== null &&
@@ -188,13 +153,6 @@ function idFrom(value: unknown): string {
   throw new Error("Response must include a string id");
 }
 
-/**
- * Reads the member user id from an invitation acceptance response.
- *
- * @param value - Parsed JSON response.
- * @returns The internal member user id.
- * @throws Error when the payload does not carry the nested id.
- */
 function memberUserIdFrom(value: unknown): string {
   if (
     value !== null &&
@@ -210,12 +168,6 @@ function memberUserIdFrom(value: unknown): string {
   throw new Error("Acceptance response must include member.user_id");
 }
 
-/**
- * Creates a unique temporary Brand Profile through the admin API.
- *
- * @param as - Identity performing the create.
- * @returns The created profile id and name.
- */
 async function createTemporaryProfile(as: "admin" | "owner") {
   const name = `permission-profile-${crypto.randomUUID().slice(0, 8)}`;
   const response = await request(
@@ -232,8 +184,6 @@ async function createTemporaryProfile(as: "admin" | "owner") {
 }
 
 beforeAll(async () => {
-  // A manually rerun suite shares the local database with earlier attempts;
-  // clear rate-limit buckets so repeat runs observe authorization, not 429s.
   await systemPoolFor(env).query("DELETE FROM auth_rate_limits");
 });
 
@@ -278,13 +228,8 @@ describe("role permission matrix", () => {
     }
   });
 
-  // Each mutation names the exact error code its own guard produces, derived
-  // from the capability map and the route's guard order. A set of acceptable
-  // codes would let a denial produced by the wrong guard pass, and a Viewer
-  // missing one capability would be indistinguishable from missing another.
   it("denies every Viewer mutation with the exact forbidden code of its guard", async () => {
     const mutations = [
-      // Authorization guard: viewer lacks content:write.
       {
         body: JSON.stringify({ brand_profile_id: seededProfileId }),
         code: "forbidden_role",
@@ -302,7 +247,6 @@ describe("role permission matrix", () => {
         method: "DELETE",
         path: `/api/v1/posts/${unknownId}`,
       },
-      // Authorization guard: viewer lacks brand-profile:manage.
       {
         body: JSON.stringify({ color: "#1d4ed8", name: "viewer-forbidden" }),
         code: "workspace_admin_required",
@@ -314,7 +258,6 @@ describe("role permission matrix", () => {
         method: "DELETE",
         path: `/api/v1/brand-profiles/${seededProfileId}`,
       },
-      // A GET connect is the one read-shaped route the guard gates.
       {
         code: "forbidden_role",
         method: "GET",
@@ -331,8 +274,6 @@ describe("role permission matrix", () => {
         method: "POST",
         path: `/api/v1/oauth-selections/${unknownId}/confirm`,
       },
-      // Role assignment is refused at the route boundary before the admin
-      // check: a Viewer cannot assign member:assign-editor.
       {
         body: JSON.stringify({ email: "viewer-invite@example.test", role: "editor" }),
         code: "forbidden_role_assignment",
@@ -345,7 +286,6 @@ describe("role permission matrix", () => {
         method: "PATCH",
         path: `/api/v1/workspaces/${sharedWorkspaceId}/members/${editorId}`,
       },
-      // Removal carries no assignable role, so this reaches requireAdmin.
       {
         code: "workspace_admin_required",
         method: "DELETE",
@@ -412,9 +352,6 @@ describe("role permission matrix", () => {
     );
     expect(deleted.status).toBe(200);
 
-    // An Editor holds content:write but no configuration capability, so each
-    // refusal names its own guard: the same code for every row would hide an
-    // Editor gaining or losing a specific capability.
     const forbidden = [
       {
         body: JSON.stringify({ color: "#1d4ed8", name: "editor-forbidden" }),
@@ -551,9 +488,6 @@ describe("role permission matrix", () => {
     ).toBe(200);
     expect((await request("/api/v1/installation", { method: "GET" }, "admin")).status).toBe(200);
 
-    // Admins hold member:assign-editor but not member:assign-admin, and not
-    // installation:manage. Two distinct guards produce these refusals, so each
-    // row pins its own code instead of accepting any 403.
     const forbidden = [
       {
         body: JSON.stringify({ email: "admin-cannot-invite-admin@example.test", role: "admin" }),
@@ -561,7 +495,6 @@ describe("role permission matrix", () => {
         method: "POST",
         path: `/api/v1/workspaces/${sharedWorkspaceId}/invitations`,
       },
-      // Peer-admin mutation is refused even though the assigned role is legal.
       {
         body: JSON.stringify({ role: "editor" }),
         code: "forbidden_role_assignment",

@@ -18,9 +18,6 @@ const { tokenDecryptions, withTenantTransactionEffect } = vi.hoisted(() => ({
 
 vi.mock("../src/database", () => ({ withTenantTransactionEffect }));
 
-// Credential cryptography is not under test here. An immediate cipher makes the
-// post-lookup path a deterministic microtask sequence that scenarios can await
-// without wall-clock timers.
 vi.mock("../src/token-credentials", () => ({
   tokenCipherFor: () => ({
     decrypt: (value: string) => {
@@ -33,15 +30,10 @@ vi.mock("../src/token-credentials", () => ({
 }));
 
 import type { ApiWorkerEnv } from "../src/env";
+import { fakeEnv, fakeTransactionClient } from "../test-support/fakes";
 import { getPublicationRequirementsEffect } from "../src/publication-requirements";
 import { tokenCipherFor } from "../src/token-credentials";
 
-/**
- * Runs one publication-requirements Effect with the live provider layer for the given registry.
- *
- * Passing an abort signal lets a scenario interrupt the calling request while a
- * shared Provider read is pending, matching the route boundary's cancellation.
- */
 function runRequirements(
   program: Effect.Effect<unknown, unknown, ProviderService>,
   currentRegistry: ProviderRegistry,
@@ -53,14 +45,12 @@ function runRequirements(
   );
 }
 
-/** Test-controlled Provider read settlement used to hold coalescing pending. */
 interface RequirementGate {
   readonly promise: Promise<ProviderPublicationRequirements>;
   reject(cause: unknown): void;
   resolve(value: ProviderPublicationRequirements): void;
 }
 
-/** Creates a settlement gate; ES2023 has no `Promise.withResolvers`. */
 function pendingGate(): RequirementGate {
   let resolve!: RequirementGate["resolve"];
   let reject!: RequirementGate["reject"];
@@ -71,13 +61,6 @@ function pendingGate(): RequirementGate {
   return { promise, reject, resolve };
 }
 
-/**
- * Waits until the caller at `index` has passed credential decryption.
- *
- * The mocked decrypt Effects resume synchronously into the next coalescing
- * step, so resolving this promise is the test-visible signal that a caller has
- * either joined a pending read or reached the Provider call.
- */
 async function waitForDecryption(index: number) {
   const decryption = tokenDecryptions[index];
   if (decryption === undefined) {
@@ -98,11 +81,9 @@ const defaultRequirements: ProviderPublicationRequirements = {
   stitchAllowed: true,
 };
 
-const env = {
-  ENVIRONMENT: "test",
+const env = fakeEnv({
   TOKEN_ENCRYPTION_KEY: "0".repeat(32),
-  VERSION: "test",
-} as unknown as ApiWorkerEnv;
+});
 
 const session = {
   organizationId: "org-1",
@@ -145,7 +126,6 @@ function registry(value: ProviderAdapter): ProviderRegistry {
   return result;
 }
 
-/** Supplies encrypted account data through the Effect transaction seam without database I/O. */
 async function setupMockAccount(overrides: Record<string, unknown> = {}) {
   const encrypted = await tokenCipherFor(env).encrypt("provider-token-123");
   const query = vi.fn(() =>
@@ -170,7 +150,7 @@ async function setupMockAccount(overrides: Record<string, unknown> = {}) {
       _env: ApiWorkerEnv,
       _session: typeof session,
       operation: (client: EffectTransactionClient) => Effect.Effect<unknown, unknown>,
-    ) => operation({ query } as unknown as EffectTransactionClient),
+    ) => operation(fakeTransactionClient(query)),
   );
   return query;
 }

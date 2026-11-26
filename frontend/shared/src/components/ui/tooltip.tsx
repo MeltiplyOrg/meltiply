@@ -2,7 +2,6 @@ import * as React from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { cn } from "@meltiply/ui/utils";
 
-/** Coordinates Gr8r's 350ms hover hints; keyboard focus and Escape stay owned by Radix. */
 export function TooltipProvider({
   delayDuration = 350,
   skipDelayDuration = 0,
@@ -17,33 +16,10 @@ export function TooltipProvider({
   );
 }
 
-/**
- * Root state wrapper managing open/closed lifecycle for an individual tooltip.
- */
 export const Tooltip = TooltipPrimitive.Root;
 
-/**
- * Interactive trigger element that opens the associated tooltip on hover or keyboard focus.
- */
 export const TooltipTrigger = TooltipPrimitive.Trigger;
 
-/**
- * Portaled popup content element rendered when the tooltip is active.
- *
- * Ports Gr8r's compact inverse-ink hint: 11px medium text, 5px corners,
- * 5px/7px padding, 6px offset, and a short opacity-only reveal. Radix supplies
- * portal positioning, collision handling, keyboard access, and dismissal.
- * Long operational reasons wrap inside the viewport; reduced motion disables the fade.
- * @returns The portaled tooltip content bubble.
- *
- * @example
- * ```tsx
- * <Tooltip>
- *   <TooltipTrigger asChild><button>Info</button></TooltipTrigger>
- *   <TooltipContent>Detailed hint text</TooltipContent>
- * </Tooltip>
- * ```
- */
 export const TooltipContent = React.forwardRef<
   React.ElementRef<typeof TooltipPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>

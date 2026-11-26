@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import React, { useId, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 
@@ -19,19 +20,10 @@ import type {
 
 const MAX_TEMPLATES = 10;
 
-/** Derives a stable display name for one template row's controls. */
 function templateFieldId(template: SignatureTemplate, suffix: string): string {
   return `signature-${template.id}-${suffix}`;
 }
 
-/**
- * Projects the server document onto the replacement shape the form edits.
- * A whole-document draft keeps timezone, ordered templates, and notification
- * choices atomic, matching the single PUT the form submits.
- *
- * @param data - Current server read, or undefined before it settles.
- * @returns The editable draft, or null when no document has loaded.
- */
 function draftOf(data: PublishingPreferences | undefined): PublishingPreferencesUpdate | null {
   return data
     ? {
@@ -42,16 +34,6 @@ function draftOf(data: PublishingPreferences | undefined): PublishingPreferences
     : null;
 }
 
-/**
- * Workspace preferences for the shared Workspace: the publishing timezone
- * reused by scheduling and displayed dates, reusable signature templates, and
- * the events and explicit email recipients that may receive publishing alerts.
- *
- * The form is a whole-document draft because the API replaces timezone,
- * ordered templates, and notification choices atomically. Email is offered only
- * when `email_available` proves the installation can actually deliver mail, so
- * the interface never advertises a channel that cannot work.
- */
 export function PublishingPreferencesSection(): React.ReactElement {
   const { t } = useI18n();
   const scope = useSessionScope();
@@ -67,11 +49,6 @@ export function PublishingPreferencesSection(): React.ReactElement {
   const draft: PublishingPreferencesUpdate | null =
     edited && edited.source === query.data ? edited.value : draftOf(query.data);
 
-  /**
-   * Applies one local edit against the current server-backed draft. A new query
-   * result supersedes local edits because its object identity differs, so a
-   * successful save or an external refresh is shown without an effect.
-   */
   function setDraft(
     updater: (current: PublishingPreferencesUpdate | null) => PublishingPreferencesUpdate | null,
   ) {
@@ -98,7 +75,6 @@ export function PublishingPreferencesSection(): React.ReactElement {
   const usesDeviceTimeZone = draft.timezone === null;
   const displayTimeZone = draft.timezone ?? browserTimeZone;
 
-  /** Replaces one template row while preserving order and a single default. */
   function patchTemplate(index: number, patch: Partial<SignatureTemplate>) {
     setDraft((current) =>
       current === null
@@ -112,7 +88,6 @@ export function PublishingPreferencesSection(): React.ReactElement {
     );
   }
 
-  /** Moves one template row so the submitted list is the display order. */
   function moveTemplate(index: number, direction: -1 | 1) {
     setDraft((current) => {
       if (current === null) return current;
@@ -126,7 +101,6 @@ export function PublishingPreferencesSection(): React.ReactElement {
     });
   }
 
-  /** Removes one template; deleting the default promotes the first remaining row. */
   function removeTemplate(index: number) {
     setDraft((current) => {
       if (current === null) return current;
@@ -139,7 +113,6 @@ export function PublishingPreferencesSection(): React.ReactElement {
     });
   }
 
-  /** Appends a blank template, selecting it as default when it is the first. */
   function addTemplate() {
     setDraft((current) => {
       if (current === null || current.signature_templates.length >= MAX_TEMPLATES) return current;
@@ -154,7 +127,6 @@ export function PublishingPreferencesSection(): React.ReactElement {
     });
   }
 
-  /** Appends one empty email row while the list is below the server limit. */
   function addRecipient() {
     setDraft((current) => {
       const email = current?.notifications.channels.email;
@@ -169,7 +141,6 @@ export function PublishingPreferencesSection(): React.ReactElement {
     });
   }
 
-  /** Replaces one recipient without disturbing the remaining order. */
   function patchRecipient(index: number, recipient: string) {
     setDraft((current) => {
       const email = current?.notifications.channels.email;
@@ -191,7 +162,6 @@ export function PublishingPreferencesSection(): React.ReactElement {
     });
   }
 
-  /** Removes one recipient; the channel may retain an empty list while disabled. */
   function removeRecipient(index: number) {
     setDraft((current) => {
       const email = current?.notifications.channels.email;
@@ -211,7 +181,6 @@ export function PublishingPreferencesSection(): React.ReactElement {
     });
   }
 
-  /** Persists the complete draft; positions are rewritten to display order. */
   async function save() {
     if (draft === null || saving) return;
     const email = draft.notifications.channels.email;
@@ -254,7 +223,7 @@ export function PublishingPreferencesSection(): React.ReactElement {
       });
     } catch (cause) {
       toast(t("Publishing preferences could not be saved"), {
-        description: cause instanceof Error ? cause.message : t("Try again in a moment."),
+        description: errorMessage(cause, t("Try again in a moment.")),
         variant: "error",
       });
     } finally {

@@ -1,25 +1,5 @@
 import type { ReactElement } from "react";
 
-/**
- * Meltiply logomark shared by the public surfaces (landing and docs). The four
- * polygons reproduce the committed brand geometry verbatim — viewBox, points,
- * and the accent diamond must stay byte-identical wherever the mark ships, so
- * both sites render the same glyph instead of maintaining divergent copies.
- * Purely decorative: callers wrap it in labelled brand links, so it is
- * `aria-hidden`. Styling hooks are data attributes matching the shared icon
- * convention (`data-preference-icon`, `data-animated-icon`): the svg carries
- * `data-brand-mark`, the small variant adds `data-small`, and the accent
- * polygon carries `data-brand-accent`. Sizing stays surface-owned
- * (`public.css` 34px/25px defaults or Tailwind utilities); the accent
- * polygon fill resolves universally through `@meltiply/ui/motion.css`.
- * `className` passes straight through since the component itself emits no
- * classes — shared React must not name custom classes the shadcn lint cannot
- * resolve.
- *
- * @param small - Adds `data-small`, which `public.css` maps to the compact
- *   25px footer/contextual size instead of the 34px header size.
- * @param className - Extra classes from the caller applied to the svg.
- */
 export function BrandMark({
   small = false,
   className,

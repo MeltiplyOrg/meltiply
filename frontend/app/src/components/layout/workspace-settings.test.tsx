@@ -43,11 +43,6 @@ vi.mock("@meltiply/ui/sidebar-glide-highlight", () => ({
 
 type RailBox = { left: number; width: number };
 
-/**
- * Layout metrics jsdom does not compute. The active security tab starts past
- * the rail's right edge, so centering must move the rail instead of leaving the
- * tab offscreen.
- */
 const RAIL_ITEMS: Record<string, RailBox> = {
   Appearance: { left: 0, width: 100 },
   Language: { left: 100, width: 100 },
@@ -63,11 +58,6 @@ const rail = {
 
 const resizeObservers: TestResizeObserver[] = [];
 
-/**
- * Minimal ResizeObserver stand-in; jsdom does not implement the platform
- * observer, and the rail test must deliver the callback that a late font load
- * would trigger in a browser.
- */
 class TestResizeObserver implements ResizeObserver {
   private readonly targets = new Set<Element>();
 
@@ -87,10 +77,6 @@ class TestResizeObserver implements ResizeObserver {
     this.targets.clear();
   }
 
-  /**
-   * Delivers the callback only when the target is actually observed, so the
-   * test proves every section button is registered rather than just the active one.
-   */
   notifyFor(target: Element): void {
     if (!this.targets.has(target)) return;
     this.callback([], this);
@@ -104,7 +90,6 @@ const originalMetrics = Object.fromEntries(
   METRIC_KEYS.map((key) => [key, Object.getOwnPropertyDescriptor(HTMLElement.prototype, key)]),
 ) as Record<(typeof METRIC_KEYS)[number], PropertyDescriptor | undefined>;
 
-/** Replaces jsdom's zeroed layout metrics with the rail geometry under test. */
 function installRailMetrics(): void {
   Object.defineProperty(HTMLElement.prototype, "clientWidth", {
     configurable: true,
@@ -132,7 +117,6 @@ function installRailMetrics(): void {
   });
 }
 
-/** Restores the platform's layout metric descriptors after a test. */
 function restoreLayoutMetrics(): void {
   for (const key of METRIC_KEYS) {
     const descriptor = originalMetrics[key];
@@ -140,7 +124,6 @@ function restoreLayoutMetrics(): void {
   }
 }
 
-/** Settings route fixture reused by rerenders that change workspace capability. */
 function SettingsRouteFixture() {
   return (
     <I18nProvider>
@@ -151,7 +134,6 @@ function SettingsRouteFixture() {
   );
 }
 
-/** Renders the Settings route at a reloadable section URL. */
 function renderSettings() {
   return render(<SettingsRouteFixture />);
 }
@@ -181,7 +163,6 @@ describe("settings section rail", () => {
     renderSettings();
 
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    // Security: 300 + 100/2 - 320/2 = 190, within the 280px scroll range.
     expect(nav.scrollLeft).toBe(190);
 
     const heading = screen.getByRole("heading", { level: 1, name: "Account security" });
@@ -194,7 +175,6 @@ describe("settings section rail", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "Account and workspace" }),
     ).toBeInTheDocument();
-    // Account: 200 + 100/2 - 320/2 = 90.
     expect(nav.scrollLeft).toBe(90);
     expect(content!.scrollTop).toBe(0);
   });
@@ -208,7 +188,6 @@ describe("settings section rail", () => {
     rail.clientWidth = 200;
     fireEvent(window, new Event("resize"));
 
-    // Security: 300 + 100/2 - 200/2 = 250, within the 400px scroll range.
     expect(nav.scrollLeft).toBe(250);
   });
 
@@ -218,14 +197,12 @@ describe("settings section rail", () => {
     renderSettings();
 
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    // Security's 155px center clamps to the 12px range before the font loads.
     expect(nav.scrollLeft).toBe(12);
 
     const accountButton = screen.getByRole("button", { name: "Account" });
     rail.scrollWidth = 526;
     for (const observer of resizeObservers) observer.notifyFor(accountButton);
 
-    // The grown rail can finally reach the clamped 136px position.
     expect(nav.scrollLeft).toBe(136);
   });
 
@@ -236,7 +213,6 @@ describe("settings section rail", () => {
 
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
     expect(nav.scrollWidth).toBe(402);
-    // Security's 155px center clamps to the 12px range before Administration exists.
     expect(nav.scrollLeft).toBe(12);
     expect(screen.queryByRole("button", { name: "Administration" })).toBeNull();
 
@@ -245,7 +221,6 @@ describe("settings section rail", () => {
     rerender(<SettingsRouteFixture />);
 
     expect(screen.getByRole("button", { name: "Administration" })).toBeInTheDocument();
-    // The grown roster can finally reach the clamped 136px position.
     expect(nav.scrollLeft).toBe(136);
   });
 

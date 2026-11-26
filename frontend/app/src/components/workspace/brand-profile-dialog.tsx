@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
@@ -35,25 +36,6 @@ export interface BrandProfileDialogProps {
   onDeleteSuccess?: (profileId: string) => void;
 }
 
-/**
- * Failure alert and action footer pinned to the dialog's scrollport bottom.
- *
- * The dialog keeps native whole-surface scrolling, so the 51-swatch palette can
- * extend far below a phone viewport. This opaque block keeps Delete, Cancel,
- * the primary action, and any mutation failure reachable without scrolling
- * first, while its normal flow position at the end of the content leaves the
- * final swatch fully visible at maximum scroll.
- *
- * It also republishes its live height as the dialog's `scroll-padding-bottom`.
- * Without that reserve, arrow-key navigation can focus a swatch underneath the
- * pinned block because the browser considers the swatch already in view. The
- * effect belongs to this child, not the form: Radix mounts the modal portal
- * after the form's first commit, so a form-level layout effect would run before
- * this node exists.
- *
- * @param props.children - The error alert and action footer to keep visible.
- * @returns Sticky wrapper carrying the pinned-region test hook.
- */
 function BrandProfileDialogActions({ children }: { children: ReactNode }) {
   const regionRef = useRef<HTMLDivElement>(null);
 
@@ -71,8 +53,6 @@ function BrandProfileDialogActions({ children }: { children: ReactNode }) {
         dialog.style.scrollPaddingBottom = "";
       };
     }
-    // The block grows when the failure alert appears and when coarse-pointer
-    // buttons grow, so observe it rather than assuming one height.
     const observer = new ResizeObserver(syncScrollPadding);
     observer.observe(region);
     return () => {
@@ -91,20 +71,6 @@ function BrandProfileDialogActions({ children }: { children: ReactNode }) {
     </div>
   );
 }
-/**
- * Internal form presentation for Brand Profile creation and editing.
- *
- * Mounts freshly with initial drafts keyed on the dialog's open-session generation,
- * avoiding synchronous setState calls inside useEffect. In update mode, deletion
- * follows the app-wide destructive-confirmation pattern: a Delete button opens an
- * CenterAlertDialog whose action is the sole confirmation required to delete the profile.
- *
- * @param props.profile - Optional profile instance to update; omitted for creation.
- * @param props.onClose - Callback to dismiss the enclosing modal dialog.
- * @param props.onSuccess - Callback fired with the saved BrandProfile upon successful mutation.
- * @param props.onDeleteSuccess - Callback fired with the deleted profile ID upon deletion.
- * @returns React modal dialog content element.
- */
 function BrandProfileDialogForm({
   profile,
   onClose,
@@ -130,15 +96,12 @@ function BrandProfileDialogForm({
     () => profile?.color ?? BRAND_PROFILE_COLORS[0],
   );
 
-  /** Controls the destructive-confirmation CenterAlertDialog for profile deletion. */
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const isEditing = Boolean(profile);
   const isSubmitting =
     createMutation.isPending || updateMutation.isPending || deleteMutation.isPending;
   const mutationError = createMutation.error ?? updateMutation.error ?? deleteMutation.error;
-  // Pending copy names the lifecycle that is actually in flight; the footer keeps
-  // the idle label until the owning mutation reports pending state.
   const submitLabel = isEditing
     ? updateMutation.isPending
       ? t("Updating…")
@@ -147,11 +110,6 @@ function BrandProfileDialogForm({
       ? t("Creating…")
       : t("Create profile");
 
-  /**
-   * Submits the trimmed name, optional 280-character summary, and palette color
-   * through the matching lifecycle mutation. Blank descriptions become null so
-   * edit mode can explicitly clear a saved summary without storing whitespace.
-   */
   const handleSave = useCallback(() => {
     const trimmedName = name.trim();
     const normalizedDescription = description.trim() || null;
@@ -201,12 +159,6 @@ function BrandProfileDialogForm({
     onClose,
   ]);
 
-  /**
-   * Deletes an existing profile once the CenterAlertDialog's confirm action fires.
-   *
-   * The guard rejects create mode and concurrent mutations. On success it clears the
-   * matching global selection, reports the removed ID, and closes the editor.
-   */
   const handleConfirmDelete = useCallback(() => {
     if (!profile || isSubmitting) return;
 
@@ -293,16 +245,10 @@ function BrandProfileDialogForm({
         </div>
       </div>
 
-      {/*
-        The palette is taller than a phone dialog, so the failure text and the
-        actions share one sticky block at the scroll container's bottom edge.
-        Native dialog scrolling is unchanged: the block reserves its own flow
-        space at the end, which keeps the last swatch reachable at max scroll.
-      */}
       <BrandProfileDialogActions>
         {mutationError ? (
           <p className="text-xs text-destructive" role="alert">
-            {mutationError instanceof Error ? mutationError.message : t("Something went wrong")}
+            {errorMessage(mutationError, t("Something went wrong"))}
           </p>
         ) : null}
 
@@ -346,7 +292,6 @@ function BrandProfileDialogForm({
         </CenterDialogFooter>
       </BrandProfileDialogActions>
 
-      {/* Destructive confirmation; portals out as the top layer while open. */}
       <CenterAlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <CenterAlertDialogContent>
           <CenterAlertDialogHeader>
@@ -372,25 +317,6 @@ function BrandProfileDialogForm({
   );
 }
 
-/**
- * Shared modal dialog for creating or updating a Brand Profile with bottom-popup animation.
- *
- * Operates in two visual modes depending on the presence of `props.profile`:
- * - Update mode (profile provided): Renders "Update Brand Profile" title, pre-populates form
- *   drafts, shows an "Update profile" submit action, and provides a "Delete profile"
- *   button that deletes only after an CenterAlertDialog confirmation.
- * - Create mode (profile null/undefined): Renders "Create Brand Profile" with default values
- *   and creation submit action.
- * Uses the shared dialog's bottom-up entrance and bottom-down exit. The form stays
- * mounted across the close transition so Radix Presence can finish the exit
- * before removing the content from the DOM.
- * @param props.open - Controlled visibility state of the modal dialog.
- * @param props.onOpenChange - Visibility change callback.
- * @param props.profile - Optional profile instance to update; omitted for creation.
- * @param props.onSuccess - Callback fired with the saved BrandProfile upon successful mutation.
- * @param props.onDeleteSuccess - Callback fired with the deleted profile ID upon deletion.
- * @returns React modal dialog element.
- */
 export function BrandProfileDialog({
   open,
   onOpenChange,
@@ -398,11 +324,6 @@ export function BrandProfileDialog({
   onSuccess,
   onDeleteSuccess,
 }: BrandProfileDialogProps) {
-  // Render-phase session tracking (React's "adjusting state during render" pattern): each
-  // false→true open transition bumps `generation`, remounting the form with freshly seeded
-  // drafts. Closing only records `open: false` — the key and the profile latched at open
-  // time stay stable, so the mounted form plays the bottom-popup exit animation unchanged
-  // even though callers clear `profile` the moment the dialog closes.
   const [session, setSession] = useState(() => ({ open, generation: 0, profile }));
   if (open !== session.open) {
     setSession({
@@ -411,8 +332,6 @@ export function BrandProfileDialog({
       profile: open ? profile : session.profile,
     });
   } else if (open && (profile?.id ?? null) !== (session.profile?.id ?? null)) {
-    // The dialog was retargeted to a different profile while still open: restart the
-    // session so drafts re-seed from the new profile, matching the old key behavior.
     setSession({ open, generation: session.generation + 1, profile });
   }
 

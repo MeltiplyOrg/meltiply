@@ -13,25 +13,21 @@ const manifestPath = resolve(root, "release.json");
 const releaseDirectory = resolve(root, "dist/release");
 const names = ["SHA256SUMS", "changelog.json", "openapi.json", "openapi.yaml"];
 
-/** Computes the digest of the exact distributed bytes, not of a reserialized document. */
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-/** Splits Markdown bullets with their continuation text into machine-readable change entries. */
 function changesIn(section) {
   return (section.match(/^- .*(?:\n(?!- |## ).+)*/gm) ?? []).map((entry) =>
     entry.slice(2).replace(/\n\s*/g, " ").trim(),
   );
 }
 
-/** Determines SemVer severity from explicit breaking/patch notes; other contract changes are additive. */
 function severity(changes) {
   if (changes.some((change) => change.startsWith("**Breaking:**"))) return "major";
   return changes.every((change) => change.startsWith("**Patch:**")) ? "patch" : "minor";
 }
 
-/** Computes the only allowed next stable version; the first public release starts at 1.0.0. */
 function nextVersion(previous, changeType) {
   if (!previous) return "1.0.0";
   if (!/^\d+\.\d+\.\d+$/.test(previous))
@@ -42,7 +38,6 @@ function nextVersion(previous, changeType) {
   return `${major}.${minor}.${patch + 1}`;
 }
 
-/** Reads canonical source and a reachable previous release; rejects malformed version history. */
 async function releaseState(excludeCurrentVersion = true) {
   const source = await readFile(sourcePath, "utf8");
   const document = YAML.parse(source);
@@ -60,7 +55,6 @@ async function releaseState(excludeCurrentVersion = true) {
   return { source, document, tag, previous };
 }
 
-/** Prepares or refreshes one untagged release; unchanged published source is a no-op and keeps its version. */
 async function prepare() {
   const { source, document, tag, previous } = await releaseState(false);
   if (previous && contractDigest(previous) === contractDigest(document)) {
@@ -136,7 +130,6 @@ async function prepare() {
   );
 }
 
-/** Validates source/SemVer and exact versioned notes; existing tags are read from Git, never the worktree. */
 async function validateManifest(manifest, document, tag, previous) {
   if (
     manifest.schemaVersion !== 1 ||
@@ -178,7 +171,6 @@ async function validateManifest(manifest, document, tag, previous) {
   }
 }
 
-/** Produces only allowlisted public assets from the existing validated bundle, with exact checksums. */
 async function artifacts(tagArgument) {
   const { document, tag, previous } = await releaseState();
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
@@ -218,7 +210,6 @@ async function artifacts(tagArgument) {
   await verify();
 }
 
-/** Verifies the actual distribution inventory, document equivalence, version and all asset checksums. */
 async function verify() {
   if (canonical((await readdir(releaseDirectory)).sort()) !== canonical(names))
     throw new Error("Unexpected release asset; internal files must not be published");

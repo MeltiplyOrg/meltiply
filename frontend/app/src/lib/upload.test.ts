@@ -9,11 +9,6 @@ import type { Asset, UploadSessionResponse } from "@/types";
 
 const completedAsset = { id: "asset-1" } as Asset;
 
-/**
- * Fixed Brand Profile UUID shared by every upload fixture; `uploadAssetFile`
- * requires it because `CreateUploadSessionRequest.brand_profile_id` is
- * mandatory on the contract.
- */
 const BRAND_PROFILE_ID = "00000000-0000-4000-8000-000000000111";
 
 class FakeXMLHttpRequest {
@@ -200,10 +195,6 @@ describe("contract upload sessions", () => {
     expect(api.abortUploadSession).not.toHaveBeenCalled();
     expect(progress).toHaveBeenLastCalledWith(100);
   });
-  /**
-   * Uploads remain server-backed when functional consent is rejected, while
-   * local recovery reads and writes remain entirely disabled.
-   */
   it("continues upload without accessing optional recovery storage after rejection", async () => {
     writeCookieConsent({ functional: false });
     const storage = new MemoryStorage();
@@ -240,11 +231,6 @@ describe("contract upload sessions", () => {
     expect(listResumableUploads(storage)).toEqual([]);
   });
 
-  // Both failure shapes a `(assetId) => void` subscriber can produce must be
-  // ignored: a synchronous throw and — legal because async functions satisfy a
-  // void-returning signature — a returned promise that rejects. The rejection
-  // is swallowed inside `#loadSession` the moment the call returns, so the
-  // outcome below is deterministic: the upload completes in both cases.
   it.each([
     {
       label: "synchronously throws",
@@ -346,6 +332,76 @@ describe("contract upload sessions", () => {
       }),
     ).resolves.toBe(completedAsset);
     expect(api.createUploadSession.mock.calls[1]?.[2]?.idempotencyKey).toBe(firstKey);
+    expect(storage.length).toBe(0);
+  });
+
+  it("does not reuse a create key for the same file under another Brand Profile", async () => {
+    const storage = new MemoryStorage();
+    const file = new File([new Uint8Array([1, 2, 3])], "cover.png", {
+      type: "image/png",
+    });
+    const session = sessionResponse({
+      asset_id: "asset-1",
+      content_type: "image/png",
+      expires_at: "2099-07-18T16:00:00Z",
+      file_size: file.size,
+      id: "session-other-profile",
+      multipart: null,
+      single_upload: {
+        expires_at: "2099-07-18T16:00:00Z",
+        headers: { "Content-Type": "image/png" },
+        method: "PUT",
+        url: "https://upload.example.test/other-profile",
+      },
+      status: "created",
+      strategy: "single",
+    });
+    const api = apiFor(session);
+    api.createUploadSession
+      .mockReturnValueOnce(Effect.fail(new Error("response lost after acceptance")))
+      .mockReturnValueOnce(Effect.succeed(session));
+
+    await expect(
+      uploadAssetFile({
+        api,
+        brandProfileId: BRAND_PROFILE_ID,
+        file,
+        storage,
+        workspaceId: "workspace-1",
+      }),
+    ).rejects.toThrow("response lost after acceptance");
+    await expect(
+      uploadAssetFile({
+        api,
+        brandProfileId: "00000000-0000-4000-8000-000000000222",
+        file,
+        storage,
+        workspaceId: "workspace-1",
+      }),
+    ).resolves.toBe(completedAsset);
+
+    const [first, second] = api.createUploadSession.mock.calls.map(
+      (call) => call[2]?.idempotencyKey,
+    );
+    expect(second).not.toBe(first);
+  });
+
+  it("drops expired resumable upload records when listing", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      "meltiply.upload.v1.expired",
+      JSON.stringify({
+        assetId: "asset-old",
+        completedParts: [],
+        expiresAt: "2000-01-01T00:00:00Z",
+        file: { lastModified: 1, name: "old.mp4", size: 10, type: "video/mp4" },
+        sessionId: "expired",
+        strategy: "single",
+        version: 1,
+      }),
+    );
+
+    expect(listResumableUploads(storage)).toEqual([]);
     expect(storage.length).toBe(0);
   });
 

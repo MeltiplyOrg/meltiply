@@ -14,14 +14,6 @@ const expandMarker = "-- meltiply-release-phase: expand";
 const ledgerLockName = "meltiply-release-schema-migrations-v1";
 const maximumMigrationBytes = 2 * 1024 * 1024;
 
-/**
- * Verifies that the release migration phase aligns with deployment mode ('bootstrap' vs 'expand').
- *
- * @param {string} phase - Target migration phase name
- * @param {object} spec - Release specification object
- * @returns {string} The verified phase string
- * @throws {TypeError} If phase does not match deployment mode
- */
 function exactPhase(phase, spec) {
   const expected = spec.deployment_mode === "bootstrap" ? "bootstrap" : "expand";
   if (phase !== expected) {
@@ -32,14 +24,6 @@ function exactPhase(phase, spec) {
   return phase;
 }
 
-/**
- * Validates that migration filenames form a contiguous, 1-based sequential ordering
- * (`001_...sql`, `002_...sql`) with valid 64-character SHA-256 checksums.
- *
- * @param {Array<{ checksum: string, name: string }>} migrations - Migration records
- * @returns {void}
- * @throws {TypeError} If migrations list is empty, non-sequential, or checksum is invalid
- */
 function validateMigrationSequence(migrations) {
   if (migrations.length === 0) throw new TypeError("no database migrations found");
   migrations.forEach((migration, index) => {
@@ -53,16 +37,6 @@ function validateMigrationSequence(migrations) {
   });
 }
 
-/**
- * Reads and verifies all SQL migration files from `packages/database/migrations`.
- * Serves schema migration discovery and validation for local integration tests and release pipelines.
- * Enforces file size limits (<= 2MB), computes SHA-256 digests for drift detection, and validates
- * that migration filenames follow a contiguous, gap-free 3-digit numbering sequence.
- *
- * @param {string} repoRoot - Absolute path to the repository root directory.
- * @returns {Promise<Array<{ checksum: string, name: string, source: string }>>} Sorted list of verified migration descriptors.
- * @throws {TypeError} If the directory contains non-file SQL entries, empty/oversized files, or a broken numbering sequence.
- */
 export async function loadMigrations(repoRoot) {
   const migrationDir = path.join(repoRoot, "packages", "database", "migrations");
   const entries = await readdir(migrationDir, { withFileTypes: true });
@@ -88,13 +62,6 @@ export async function loadMigrations(repoRoot) {
   return migrations;
 }
 
-/**
- * Validates and normalizes records read from the `schema_migrations` ledger table.
- *
- * @param {unknown} rows - Raw query result rows from database ledger
- * @returns {Array<{ checksum: string, name: string }>} Validated ledger records
- * @throws {TypeError} If rows format or naming/checksum patterns are invalid
- */
 function ledgerRows(rows) {
   if (!Array.isArray(rows)) throw new TypeError("migration ledger must be an array");
   return rows.map((row, index) => {
@@ -111,20 +78,6 @@ function ledgerRows(rows) {
   });
 }
 
-/**
- * Compares applied database migration ledger records against reviewed filesystem migrations.
- * Ensures historical ledger integrity (no drift in applied checksums or sequence gaps),
- * calculates pending migrations, and for update releases ('expand' phase) guarantees that all
- * pending migrations carry the expand-only marker (`-- meltiply-release-phase: expand`).
- *
- * @param {object} params - Planning parameters
- * @param {Array<object>} params.appliedRows - Raw rows from `schema_migrations`
- * @param {Array<object>} params.migrations - Reviewed migration records from disk
- * @param {string} params.phase - Migration phase ('bootstrap' or 'expand')
- * @param {object} params.spec - Release specification object
- * @returns {{ alreadyApplied: Array<object>, pending: Array<object> }} Categorized migration plan
- * @throws {TypeError} If ledger drift, gaps, or contract violations are detected
- */
 export function planMigrations({ appliedRows, migrations, phase, spec }) {
   exactPhase(phase, spec);
   validateMigrationSequence(migrations);
@@ -159,15 +112,6 @@ export function planMigrations({ appliedRows, migrations, phase, spec }) {
   return { alreadyApplied: applied, pending };
 }
 
-/**
- * Executes a callback within a PostgreSQL transaction (BEGIN ... COMMIT),
- * rolling back automatically if the callback rejects or errors.
- *
- * @param {object} client - PostgreSQL client instance
- * @param {() => Promise<any>} operation - Asynchronous database operations callback
- * @returns {Promise<any>} Result returned by the operation callback
- * @throws {Error} If the operation fails, after executing ROLLBACK
- */
 async function transaction(client, operation) {
   await client.query("BEGIN");
   try {
@@ -175,21 +119,11 @@ async function transaction(client, operation) {
     await client.query("COMMIT");
     return result;
   } catch (error) {
-    try {
-      await client.query("ROLLBACK");
-    } catch {
-      // Preserve the migration error; connection cleanup still runs below.
-    }
+    await client.query("ROLLBACK").catch(() => {});
     throw error;
   }
 }
 
-/**
- * Verifies the RLS objects installed by the reviewed migrations, not ledger success alone.
- * Requires auth.jwt() returning jsonb and a public-table policy for meltiply_rls on an
- * RLS-enabled table; unrelated policies cannot disguise a skipped authentication setup.
- * Reads catalogs only and refuses to repair previously skipped migrations.
- */
 async function assertRlsInstallation(client) {
   const result = await client.query(`
     SELECT
@@ -222,25 +156,6 @@ async function assertRlsInstallation(client) {
   }
 }
 
-/**
- * Executes database migrations gated by a verified restore point and protected database roles.
- * Checks identities/attributes before any advisory lock, transaction, or ledger mutation,
- * applies reviewed migrations transactionally, then verifies ledger parity and installed
- * authentication RLS objects before writing evidence.
- *
- * @param {object} params - Migration parameters
- * @param {Array<object>} params.approvals - Validated operator review records
- * @param {(url: string) => Promise<object>} [params.clientFactory] - PostgreSQL client factory
- * @param {Record<string, string | undefined>} params.environment - Process environment variables
- * @param {() => number} [params.now] - Current timestamp generator
- * @param {string} params.outDir - Directory for writing evidence artifacts
- * @param {string} params.phase - Release phase ('bootstrap' or 'expand')
- * @param {string} params.planDigest - OpenTofu plan SHA-256 digest
- * @param {string} params.repoRoot - Repository root directory path
- * @param {object} params.spec - Validated release specification
- * @returns {Promise<object>} Structured evidence record detailing applied migrations
- * @throws {Error} If restore point missing, lock contention occurs, or migration execution fails
- */
 export async function migrateDatabase({
   approvals,
   clientFactory = createDatabaseClient,
@@ -349,7 +264,7 @@ export async function migrateDatabase({
       try {
         await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [ledgerLockName]);
       } catch {
-        // Closing the dedicated session releases the lock even if unlock fails.
+        // PostgreSQL releases session advisory locks when the session closes.
       }
     }
     if (client) await client.end().catch(() => {});

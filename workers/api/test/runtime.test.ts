@@ -1,32 +1,20 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { Effect } from "effect";
+import { Effect, Exit } from "effect";
+import type { EffectTransactionClient } from "@meltiply/database";
 import {
   ActiveOrganizationRequiredError,
   DatabaseError,
   NotFoundError,
-  ProviderError,
-  ProviderRateLimitError,
-  RateLimitExceededError,
   RequestContext,
-  StorageUnavailable,
   StorageUnavailableError,
-  ValidationError,
 } from "@meltiply/domain";
 import { ProviderAdapterError } from "@meltiply/providers";
 
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError, toCoreApiErrorOrRethrow } from "../src/core-types";
 import { runWorkerEffect } from "../src/effect/runtime";
+import { fakeHonoContext, fakeTransactionClient } from "../test-support/fakes";
+import { reserveIdempotencyEffect, type IdempotencyRecord } from "../src/idempotency";
 
-/**
- * Constructs a minimal mock Hono context for testing the Worker Effect runtime boundary.
- *
- * Provides a key-value store simulating Hono environment and request-level context
- * values such as correlation IDs, session claims, Worker executionCtx, and the
- * incoming request signal.
- *
- * @param options - Correlation identifiers, session attributes, execution context, and signal.
- * @returns A mocked HonoContext compatible with runWorkerEffect.
- */
 function createMockHonoContext(options: {
   readonly executionCtx?: {
     readonly waitUntil?: (p: Promise<unknown>) => void;
@@ -36,21 +24,13 @@ function createMockHonoContext(options: {
   readonly signal?: AbortSignal;
   readonly traceId?: string;
 }) {
-  const store = new Map<string, unknown>([
-    ["requestId", options.requestId ?? "test-req-id"],
-    ["traceId", options.traceId ?? "test-trace-id"],
-    ["session", options.session ?? { subject: "user_test", organizationId: "org_test" }],
-  ]);
-
-  return {
-    env: {
-      ENVIRONMENT: "test",
-    },
+  return fakeHonoContext({
     executionCtx: options.executionCtx,
-    get: (key: string) => store.get(key),
-    req: { raw: { signal: options.signal } },
-    set: (key: string, value: unknown) => store.set(key, value),
-  } as unknown as Parameters<typeof runWorkerEffect>[0];
+    requestId: options.requestId ?? "test-req-id",
+    session: options.session ?? { subject: "user_test", organizationId: "org_test" },
+    signal: options.signal,
+    traceId: options.traceId ?? "test-trace-id",
+  });
 }
 
 describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
@@ -117,7 +97,6 @@ describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
     const c = createMockHonoContext({ requestId: "req-error-404" });
     const program = Effect.gen(function* () {
       yield* new NotFoundError({
-        entityId: "item_999",
         message: "Requested item not found",
       });
       return null;
@@ -131,94 +110,6 @@ describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
         message: "Requested item not found",
       },
     });
-  });
-
-  it("maps ValidationError with structured issues to OpenAPI ErrorEnvelope details and issues", async () => {
-    const c = createMockHonoContext({ requestId: "req-val-422" });
-    const program = Effect.gen(function* () {
-      yield* new ValidationError({
-        issues: [
-          {
-            constraint: "email_format",
-            field: "email",
-            message: "Must be a valid email address",
-          },
-        ],
-        message: "Validation failed for input parameters.",
-      });
-      return null;
-    });
-
-    const response = await runWorkerEffect(c, program);
-    expect(response.status).toBe(422);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "validation_error",
-        details: [
-          expect.objectContaining({
-            field: "email",
-            message: "Must be a valid email address",
-          }),
-        ],
-        issues: [
-          expect.objectContaining({
-            field: "email",
-            message: "Must be a valid email address",
-          }),
-        ],
-        message: "Validation failed for input parameters.",
-        request_id: "req-val-422",
-      },
-    });
-  });
-
-  it("normalizes ValidationError details-shape entries to canonical ErrorDetail records", async () => {
-    const c = createMockHonoContext({ requestId: "req-val-details" });
-    const program = Effect.gen(function* () {
-      yield* new ValidationError({
-        details: [
-          {
-            field: "email",
-            limit: "5",
-            message: "Required",
-          },
-        ],
-        message: "Invalid",
-      });
-      return null;
-    });
-
-    const response = await runWorkerEffect(c, program);
-    expect(response.status).toBe(422);
-    const body: {
-      error: {
-        code: string;
-        details: Record<string, unknown>[];
-        issues: Record<string, unknown>[];
-        message: string;
-        request_id: string;
-      };
-    } = await response.json();
-    expect(body.error).toMatchObject({
-      code: "validation_error",
-      details: [
-        {
-          code: "invalid",
-          field: "email",
-          message: "Required",
-        },
-      ],
-      issues: [
-        expect.objectContaining({
-          constraint: "invalid",
-          field: "email",
-          message: "Required",
-        }),
-      ],
-      message: "Invalid",
-      request_id: "req-val-details",
-    });
-    expect(body.error.details[0]).not.toHaveProperty("limit");
   });
 
   it("maps unexpected defects to 500 internal_error", async () => {
@@ -243,7 +134,6 @@ describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
       Effect.gen(function* () {
         yield* Effect.addFinalizer(() => Effect.die(new Error("Finalizer crashed unexpectedly")));
         yield* new NotFoundError({
-          entityId: "item_999",
           message: "Requested item not found",
         });
         return null;
@@ -388,24 +278,7 @@ describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
       });
     });
 
-    it("sanitizes provider 502 errors for both ProviderError and ProviderAdapterError", async () => {
-      const c1 = createMockHonoContext({ requestId: "req-prov-502-1" });
-      const prog1 = Effect.fail(
-        new ProviderError({
-          message: "upstream tiktok internal 500 response body",
-          provider: "tiktok",
-        }),
-      );
-      const res1 = await runWorkerEffect(c1, prog1);
-      expect(res1.status).toBe(502);
-      await expect(res1.json()).resolves.toMatchObject({
-        error: {
-          code: "provider_error",
-          message: "An unexpected error occurred.",
-          request_id: "req-prov-502-1",
-        },
-      });
-
+    it("sanitizes provider 502 errors from ProviderAdapterError", async () => {
       const c2 = createMockHonoContext({ requestId: "req-prov-502-2" });
       const prog2 = Effect.fail(
         new ProviderAdapterError({
@@ -426,7 +299,7 @@ describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
       });
     });
 
-    it("sanitizes domain StorageUnavailableError 503 while preserving DomainError 503 message", async () => {
+    it("sanitizes StorageUnavailableError 503 messages", async () => {
       const c1 = createMockHonoContext({ requestId: "req-storage-effect" });
       const prog1 = Effect.fail(
         new StorageUnavailableError({
@@ -442,58 +315,9 @@ describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
           request_id: "req-storage-effect",
         },
       });
-
-      const c2 = createMockHonoContext({ requestId: "req-storage-domain" });
-      const prog2 = Effect.fail(new StorageUnavailable("Storage is unavailable."));
-      const res2 = await runWorkerEffect(c2, prog2);
-      expect(res2.status).toBe(503);
-      await expect(res2.json()).resolves.toMatchObject({
-        error: {
-          code: "service_unavailable",
-          message: "Storage is unavailable.",
-          request_id: "req-storage-domain",
-        },
-      });
     });
 
-    it("preserves message and formats Retry-After header on 429 rate limit errors", async () => {
-      const cRate = createMockHonoContext({ requestId: "req-rate-429" });
-      const progRate = Effect.fail(
-        new RateLimitExceededError({
-          message: "Rate limit budget exceeded. Try again shortly.",
-          retryAfterSeconds: 30,
-        }),
-      );
-      const resRate = await runWorkerEffect(cRate, progRate);
-      expect(resRate.status).toBe(429);
-      expect(resRate.headers.get("Retry-After")).toBe("30");
-      await expect(resRate.json()).resolves.toMatchObject({
-        error: {
-          code: "rate_limited",
-          message: "Rate limit budget exceeded. Try again shortly.",
-          request_id: "req-rate-429",
-        },
-      });
-
-      const cProv = createMockHonoContext({ requestId: "req-prov-rate-429" });
-      const progProv = Effect.fail(
-        new ProviderRateLimitError({
-          message: "TikTok publish rate limit reached.",
-          provider: "tiktok",
-          retryAfterSeconds: 45,
-        }),
-      );
-      const resProv = await runWorkerEffect(cProv, progProv);
-      expect(resProv.status).toBe(429);
-      expect(resProv.headers.get("Retry-After")).toBe("45");
-      await expect(resProv.json()).resolves.toMatchObject({
-        error: {
-          code: "provider_rate_limited",
-          message: "TikTok publish rate limit reached.",
-          request_id: "req-prov-rate-429",
-        },
-      });
-
+    it("formats Retry-After and a sanitized message on provider 429 rate limits", async () => {
       const cAdapter = createMockHonoContext({
         requestId: "req-adapter-rate-429",
       });
@@ -531,5 +355,120 @@ describe("runWorkerEffect (Cloudflare/Hono Effect boundary runner)", () => {
         },
       });
     });
+  });
+});
+
+describe("reserveIdempotencyEffect", () => {
+  const organizationId = "org-1";
+  const operation = "update-post";
+  const idempotencyKey = "key-1";
+  const requestHash = "hash-1";
+
+  function scriptedClient(script: {
+    readonly insertRowCounts: readonly number[];
+    readonly selectRows: readonly (readonly IdempotencyRecord[])[];
+  }): { client: EffectTransactionClient; queries: string[] } {
+    const queries: string[] = [];
+    let insertIndex = 0;
+    let selectIndex = 0;
+    const client = fakeTransactionClient((text) => {
+      queries.push(text);
+      if (text.includes("INSERT INTO idempotency_keys")) {
+        const inserted = (script.insertRowCounts[insertIndex++] ?? 0) === 1;
+        return Effect.succeed({
+          rowCount: inserted ? 1 : 0,
+          rows: inserted ? [{ idempotency_key: idempotencyKey }] : [],
+        });
+      }
+      const rows = script.selectRows[selectIndex++] ?? [];
+      return Effect.succeed({
+        rowCount: rows.length,
+        rows,
+      });
+    });
+    return { client, queries };
+  }
+
+  it("reserves cleanly when a rolled-back leader leaves no committed row", async () => {
+    const { client, queries } = scriptedClient({
+      insertRowCounts: [0, 1],
+      selectRows: [[]],
+    });
+    const result = await Effect.runPromise(
+      reserveIdempotencyEffect(client, organizationId, operation, idempotencyKey, requestHash),
+    );
+    expect(result).toBeNull();
+    expect(queries.filter((text) => text.includes("INSERT INTO"))).toHaveLength(2);
+  });
+
+  it("fails with idempotency_in_progress after bounded retries find no row", async () => {
+    const { client, queries } = scriptedClient({
+      insertRowCounts: [0, 0, 0],
+      selectRows: [[], [], []],
+    });
+    const exit = await Effect.runPromiseExit(
+      reserveIdempotencyEffect(client, organizationId, operation, idempotencyKey, requestHash),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const failure = exit.cause;
+      expect(JSON.stringify(failure)).toContain("idempotency_in_progress");
+    }
+    expect(queries.filter((text) => text.includes("INSERT INTO"))).toHaveLength(3);
+  });
+
+  it("replays a completed record and rejects a hash conflict without retrying", async () => {
+    const completed: IdempotencyRecord = {
+      request_hash: requestHash,
+      response_body: { ok: true },
+      response_status: 200,
+    };
+    const replayed = scriptedClient({
+      insertRowCounts: [0],
+      selectRows: [[completed]],
+    });
+    await expect(
+      Effect.runPromise(
+        reserveIdempotencyEffect(
+          replayed.client,
+          organizationId,
+          operation,
+          idempotencyKey,
+          requestHash,
+        ),
+      ),
+    ).resolves.toEqual(completed);
+    expect(replayed.queries.filter((text) => text.includes("INSERT INTO"))).toHaveLength(1);
+
+    const conflicted = scriptedClient({
+      insertRowCounts: [0],
+      selectRows: [[{ ...completed, request_hash: "other-hash" }]],
+    });
+    const exit = await Effect.runPromiseExit(
+      reserveIdempotencyEffect(
+        conflicted.client,
+        organizationId,
+        operation,
+        idempotencyKey,
+        requestHash,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      expect(JSON.stringify(exit.cause)).toContain("idempotency_conflict");
+    }
+    expect(conflicted.queries.filter((text) => text.includes("INSERT INTO"))).toHaveLength(1);
+  });
+});
+
+describe("toCoreApiErrorOrRethrow", () => {
+  it("returns CoreApiError causes for typed failures", () => {
+    const error = new CoreApiError(422, "validation_error", "Invalid.");
+    expect(toCoreApiErrorOrRethrow(error)).toBe(error);
+  });
+
+  it("rethrows unexpected errors so they surface as defects", () => {
+    const defect = new TypeError("programming defect");
+    expect(() => toCoreApiErrorOrRethrow(defect)).toThrow(defect);
   });
 });

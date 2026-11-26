@@ -1,7 +1,3 @@
-// Live object storage check. With no arguments, uses Miniflare's S3 gateway.
-// S3_CHECK_ENDPOINT selects a disposable, empty S3-compatible bucket instead;
-// the hosted object-storage lane uses MinIO to also exercise server-side copy.
-// Never point this check at a production bucket: it creates and deletes objects.
 import assert from "node:assert/strict";
 import { createServer } from "node:net";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
@@ -13,11 +9,6 @@ const credentials = {
   secretAccessKey: process.env.S3_CHECK_SECRET_KEY ?? "s3-check-secret-key",
 };
 
-/**
- * Reserves an ephemeral loopback port for the gateway.
- *
- * @returns A port that was free a moment ago; the caller binds it immediately.
- */
 async function freePort(): Promise<number> {
   const probe = createServer();
   await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
@@ -84,10 +75,8 @@ try {
     const response = await fetch(request.url, { headers, method: "PUT" });
     assert.equal(response.status, 200, await response.text());
   }
-  // An absent object must read as absent rather than as an origin failure.
   assert.equal(await store.head(key), null);
 
-  // Header-signed SigV4: the path the worker itself uses for reads and writes.
   const upload = await store.createMultipartUpload(key, "video/mp4");
   const part = await upload.uploadPart(1, new TextEncoder().encode(body));
   const completed = await upload.complete([part]);
@@ -122,7 +111,6 @@ try {
     await store.delete(`${key}-ready`);
   }
 
-  // Presigned upload: the capability a browser receives for a direct PUT.
   const uploadUrl = await signer.signUpload({
     contentLength: 4,
     contentType: "image/png",
@@ -136,14 +124,11 @@ try {
   });
   assert.equal(uploaded.status, 200, await uploaded.text());
 
-  // Presigned download: the capability previews, downloads, and Provider media
-  // delivery all rely on.
   const downloadUrl = await signer.signDownload({ expiresInSeconds: 300, key });
   const downloaded = await fetch(downloadUrl);
   assert.equal(downloaded.status, 200);
   assert.equal(await downloaded.text(), body);
 
-  // Presigned multipart part: one part of a browser-driven multipart upload.
   const resumable = await store.createMultipartUpload("org-1/asset-1/parts", "video/mp4");
   const partUrl = await signer.signMultipartPart({
     contentLength: 4,
@@ -161,9 +146,6 @@ try {
   assert.equal(partResponse.status, 200, await partResponse.text());
   await resumable.abort();
 
-  // Create-only exact-object write: the native processor's rendition grant. It
-  // must create once and then refuse, or a retry could overwrite committed
-  // bytes.
   const writeUrl = await signer.signObjectWrite({
     expiresInSeconds: 300,
     key: "org-1/asset-1/processing",

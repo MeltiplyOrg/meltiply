@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Single Compose boundary for the Cloudflare-local stack.
-#
-# Devcontainers add an overlay using the inner daemon's host network (the
-# devcontainer itself). Native workflows retain the baseline Compose network.
-# COMPOSE_PROJECT_NAME keeps lifecycle cleanup scoped in either environment.
-#
-# All arguments are forwarded verbatim to `docker compose`, so callers keep
-# full CLI access (up/down/exec/config/...) through one seam.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

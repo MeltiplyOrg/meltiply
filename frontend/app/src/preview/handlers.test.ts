@@ -15,7 +15,6 @@ afterAll(() => {
 const postPath = `${origin}/api/v1/posts/49000000-0000-4000-8000-000000000001`;
 const profileId = "c0000000-0000-4000-8000-000000000001";
 
-/** Reads every bounded HTTP page so seed growth cannot silently narrow edit/delete or relationship coverage to the first page. */
 async function readAllPosts(): Promise<Post[]> {
   const posts: Post[] = [];
   for (let offset = 0; offset < 10_000; offset += 60) {
@@ -28,7 +27,6 @@ async function readAllPosts(): Promise<Post[]> {
   throw new Error("Preview pagination never reached the end of the seeded Posts");
 }
 
-/** Exercises browser-preview behavior through HTTP, including scenario scope, read-after-edit/reset, authentication, and fail-closed misses. */
 describe("contract-driven UI preview HTTP boundary", () => {
   it("retains the database seed's ordered composition separately from its frozen publication", async () => {
     const response = await fetch(`${origin}/api/v1/posts/49000000-0000-4000-8000-000000000001`);
@@ -356,8 +354,6 @@ describe("contract-driven UI preview HTTP boundary", () => {
     for (const event of calendar.events) {
       const post = posts.find((post) => post.id === event.post_id);
       expect(post).toBeDefined();
-      // The calendar event must fold back onto a real Distribution; comparing two
-      // optional values would also pass when the Distribution is missing.
       const distribution = post?.distributions.find(
         (distribution: { id: string }) => distribution.id === event.id,
       );

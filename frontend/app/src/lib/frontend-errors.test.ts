@@ -25,6 +25,9 @@ describe("userFacingErrorMessage", () => {
     { status: 503 },
     { status: 599 },
     { code: "unknown_failure" },
+    { code: "constructor" },
+    { code: "toString" },
+    { code: "__proto__" },
   ])("uses generic copy for system failures: %s", (error) => {
     expect(userFacingErrorMessage(error)).toBe("An error has occurred.");
   });

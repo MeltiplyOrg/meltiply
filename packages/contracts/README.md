@@ -90,10 +90,10 @@ Default-branch validation still compares against the latest release tag.
 
 For a removal, first publish its deprecation and announce the earliest removal
 version/date in the changelog. Record the honored window and replacement in the
-breaking release; never silently remove a published operation. During the current
-pre-production clean-cutover state, an intentional immediate break must explicitly
-say that the window is immediate and explain the client migration. This does not
-promise backward compatibility that [STATE.md](../../STATE.md) does not provide.
+breaking release; never silently remove a published operation. Follow
+[STATE.md](../../STATE.md) for deployed-client and rollout compatibility. An
+exact-change review token records the reviewed span; it does not authorize an
+immediate incompatible cutover during stabilization or production.
 
 ## Prepare and publish
 

@@ -1,6 +1,5 @@
 import { Effect } from "effect";
 import { runProviderProgram } from "./provider-program";
-import type { EffectTransactionClient } from "@meltiply/database";
 
 import {
   classifyProviderFailure,
@@ -12,10 +11,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createQueuePublisherTest } from "../src/effect/services";
 import type { AutomationEnv } from "../src/env";
-import {
-  processProviderSyncMessage,
-  type ProviderSyncProcessingDependencies,
-} from "../src/provider-sync";
+import { processProviderSyncMessage } from "../src/provider-sync";
+import { fakeSystemTransaction } from "./test-doubles";
 import {
   executeProviderAnalyticsEffect,
   executeProviderCommentsEffect,
@@ -387,18 +384,11 @@ function tokenRefreshRow(): Record<string, unknown> {
   };
 }
 
-/**
- * QueuePublisher layer for provider-sync programs under test: messages whose
- * processing never reaches a queue send still declare the service requirement.
- */
 const queuePublisherLayer = createQueuePublisherTest({
   sendBatch: () => Effect.void,
 });
 
 function tokenRefreshHarness() {
-  // The claim row exists until its delivery checkpoints; recording success or
-  // failure clears token_refresh_event_id, so a redelivery of the same event
-  // key finds no claim and must no-op.
   let claim: Record<string, unknown> | undefined = tokenRefreshRow();
   const updates: Array<[string, readonly unknown[] | undefined]> = [];
   const query = vi.fn((sql: string, values?: readonly unknown[]) => {
@@ -410,18 +400,11 @@ function tokenRefreshHarness() {
     updates.push([sql, values]);
     return Effect.succeed({ rowCount: 1, rows: [] });
   });
-  const transactionMock = vi.fn(
-    <T>(
-      _env: AutomationEnv,
-      operation: (client: EffectTransactionClient) => Effect.Effect<T, unknown>,
-    ): Effect.Effect<T, unknown> => operation({ query } as unknown as EffectTransactionClient),
+  const transaction = fakeSystemTransaction((sql, values) =>
+    query(sql, values ? [...values] : undefined),
   );
-  const transaction = transactionMock as unknown as NonNullable<
-    ProviderSyncProcessingDependencies["transaction"]
-  >;
   const env = {
     ENVIRONMENT: "test",
-    // Exactly 32 UTF-8 bytes so TokenCipher accepts it as raw key material.
     TOKEN_ENCRYPTION_KEY: "0".repeat(32),
     VERSION: "test",
   } as AutomationEnv;

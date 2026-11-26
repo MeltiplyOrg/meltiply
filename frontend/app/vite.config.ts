@@ -9,24 +9,13 @@ import { previewContractPlugin } from "./preview-contract";
 const environmentAssignmentPattern = /^([^#=]+)=(.*)$/;
 const sourceExtensionPattern = /\.(tsx?|jsx?)$/;
 
-// The repo root .env is the single source of truth for frontend public vars:
-// dev-backend.sh already sources it for Wrangler, and here its two public
-// values feed Vite's import.meta.env. The Cloudflare plugin only loads
-// CLOUDFLARE_-prefixed vars from the app directory, so without this define
-// the root .env would not reach the app at all.
+// @cloudflare/vite-plugin only loads CLOUDFLARE_-prefixed vars from the app directory.
 const rootEnvFile = fileURLToPath(new URL("../../.env", import.meta.url));
 const sharedUiManifest = fileURLToPath(new URL("../shared/package.json", import.meta.url));
 const themeBootstrapRuntimeFile = fileURLToPath(
   new URL("../shared/theme-bootstrap.js", import.meta.url),
 );
-/**
- * Synchronously reads and parses key-value environment pairs from an ini-style `.env` file.
- *
- * Ignores empty lines and comments (`#`).
- *
- * @param filePath Absolute path to the `.env` file on disk.
- * @returns Map of parsed environment keys to trimmed string values.
- */
+const srcRoot = fileURLToPath(new URL("./src", import.meta.url)).replaceAll("\\", "/");
 function parseEnvFile(filePath: string): Record<string, string> {
   if (!existsSync(filePath)) return {};
   const content = readFileSync(filePath, "utf-8");
@@ -42,11 +31,6 @@ function parseEnvFile(filePath: string): Record<string, string> {
   return parsed;
 }
 
-/**
- * Restarts Vite when root environment values or shared UI package exports change.
- *
- * @returns Vite `Plugin` object configuring server file watch hooks.
- */
 function rootEnvReloadPlugin(): Plugin {
   return {
     name: "meltiply-root-env-reload",
@@ -62,13 +46,6 @@ function rootEnvReloadPlugin(): Plugin {
   };
 }
 
-/**
- * Vite plugin redirecting non-canonical host requests (such as raw IP or localhost) to the canonical
- * `APP_URL` origin (e.g. MagicDNS domain) with a 308 Permanent Redirect for HTML requests.
- *
- * @param canonical Parsed public frontend origin, if configured.
- * @returns Vite `Plugin` object with Connect middleware.
- */
 function canonicalFrontendOriginPlugin(canonical: URL | undefined): Plugin {
   return {
     name: "meltiply-canonical-frontend-origin",
@@ -81,52 +58,32 @@ function canonicalFrontendOriginPlugin(canonical: URL | undefined): Plugin {
           return;
         }
 
-        response.writeHead(308, {
-          Location: `${canonical.origin}${request.url ?? "/"}`,
-        });
+        const candidate = new URL(request.url ?? "/", canonical.origin);
+        const location =
+          candidate.origin === canonical.origin ? candidate.href : `${canonical.origin}/`;
+        response.writeHead(308, { Location: location });
         response.end();
       });
     },
   };
 }
 
-/**
- * Development-only modules replaced with inert source outside UI previews.
- * Local sign-in credentials remain excluded from every deployed build.
- *
- * `isDevMode()` is a runtime check — bundlers cannot fold the branches around
- * it, so dev tooling (axe-core, query devtools, agentation) and the
- * local sign-in fixture would otherwise still be emitted to `dist`. The stubs
- * remove developer tools from production/staging, while previews retain them.
- * Keeping credentials in a separate module makes one entry enough to exclude
- * them; the built-app browser smoke verifies production artifact exclusion.
- */
-const devOnlyStubModules: Readonly<Record<string, string>> = {
-  "components/devbox/dev-box":
+const devOnlyStubModules = new Map<string, string>([
+  [
+    `${srcRoot}/components/devbox/dev-box`,
     "export const DevBox = () => null; export const DevBoxClientBridge = () => null;",
-  "lib/dev-sign-in": 'export const localDevOwnerSignIn = { email: "", password: "" };',
-  // Pseudo-localization is a DevBox preview tool. Its event constant stays so
-  // the production i18n listener keeps a stable module shape, but the expander
-  // never ships.
-  "lib/pseudo-locale":
+  ],
+  [`${srcRoot}/lib/dev-sign-in`, 'export const localDevOwnerSignIn = { email: "", password: "" };'],
+  [
+    `${srcRoot}/lib/pseudo-locale`,
     'export const pseudoLocaleEvent = "meltiply:pseudo-locale"; export const isPseudoLocalized = () => false; export const setPseudoLocalization = () => undefined; export const pseudoLocalize = (message) => message;',
-};
+  ],
+]);
 
-/**
- * Excludes preview entry graphs outside ui-preview mode, including Vite's
- * development dependency scanner. Ordinary development retains its tools;
- * deployed builds additionally strip tooling and local sign-in credentials.
- *
- * @param uiPreview Whether preview modules are enabled.
- * @param building Whether Vite is emitting a deployed artifact.
- * @returns Module substitutions appropriate to the active command and mode.
- */
 function devOnlyStubPlugin(uiPreview: boolean, building: boolean): Plugin {
   return {
     name: "dev-only-stub",
     enforce: "pre",
-    // Virtual entry ids keep the dependency scanner from reading preview-only
-    // files directly; the regular load hook supplies their inactive exports.
     resolveId(id) {
       const normalized = id.replaceAll("\\", "/").replace(sourceExtensionPattern, "");
       if (
@@ -144,24 +101,12 @@ function devOnlyStubPlugin(uiPreview: boolean, building: boolean): Plugin {
         return "export const PreviewControls = () => null;";
       }
       if (!building) return null;
-      if (uiPreview && !normalized.endsWith("/lib/dev-sign-in")) return null;
-      const stub = Object.entries(devOnlyStubModules).find(([suffix]) =>
-        normalized.endsWith(suffix),
-      )?.[1];
-      return stub ?? null;
+      if (uiPreview && normalized !== `${srcRoot}/lib/dev-sign-in`) return null;
+      return devOnlyStubModules.get(normalized) ?? null;
     },
   };
 }
 
-/**
- * Injects the public site's shared before-paint theme runtime into the static
- * app shell. The runtime stays a blocking inline script (no module import), so
- * the stored or transferred palette is committed before React or CSS can paint
- * the wrong theme. The docs link is marked with `data-theme-link`, so the app
- * does not need an allowlisted public origin.
- *
- * @returns Vite plugin replacing `themeBootstrapMarker` in `index.html`.
- */
 function themeBootstrapPlugin(): Plugin {
   return {
     name: "meltiply-theme-bootstrap",
@@ -170,7 +115,7 @@ function themeBootstrapPlugin(): Plugin {
       const runtime = readFileSync(themeBootstrapRuntimeFile, "utf8");
       return html.replace(
         themeBootstrapMarker,
-        `<script>${renderThemeBootstrap(runtime, { mode: "class" })}</script>`,
+        `<script>${renderThemeBootstrap(runtime)}</script>`,
       );
     },
   };
@@ -179,42 +124,29 @@ function themeBootstrapPlugin(): Plugin {
 export default defineConfig(({ mode, command }) => {
   const uiPreview = mode === "ui-preview";
   const rootFileEnv = uiPreview ? {} : parseEnvFile(rootEnvFile);
-  const publicEnv = Object.fromEntries(
-    ["APP_URL"]
-      .map((key) => {
-        const value = process.env[key]?.trim() || rootFileEnv[key]?.trim();
-        return [key, value || undefined];
-      })
-      .filter(([, value]) => value !== undefined),
-  );
   const frontendUrl = uiPreview
     ? undefined
     : process.env.APP_URL?.trim() || rootFileEnv.APP_URL?.trim() || undefined;
   const canonical = frontendUrl ? new URL(frontendUrl) : undefined;
-  const localApiPort = process.env.WRANGLER_DEV_PORT || rootFileEnv.WRANGLER_DEV_PORT || "8787";
+  const rawLocalApiPort = process.env.WRANGLER_DEV_PORT || rootFileEnv.WRANGLER_DEV_PORT || "8787";
+  const localApiPort = Number(rawLocalApiPort);
+  if (!Number.isInteger(localApiPort) || localApiPort < 1 || localApiPort > 65535) {
+    throw new Error(`Invalid WRANGLER_DEV_PORT: ${rawLocalApiPort}`);
+  }
   const localApp =
     canonical !== undefined && ["localhost", "127.0.0.1", "[::1]"].includes(canonical.hostname);
   return {
-    // Statically substitute the whitelisted root .env values into import.meta.env.
-    // Launcher-provided values override the file so detected MagicDNS origins
-    // and configured ports reach browser code.
     define: uiPreview
       ? { "import.meta.env.APP_URL": JSON.stringify("") }
-      : Object.fromEntries(
-          Object.entries(publicEnv).map(([key, value]) => [
-            `import.meta.env.${key}`,
-            JSON.stringify(value),
-          ]),
-        ),
+      : frontendUrl
+        ? { "import.meta.env.APP_URL": JSON.stringify(frontendUrl) }
+        : {},
     build: uiPreview ? { outDir: "dist/ui-preview" } : {},
     plugins: lazyPlugins(() => [
       react(),
       uiPreview && previewContractPlugin(),
-      // Local builds must reach the Wrangler API process directly; deployed
-      // environments omit API_ORIGIN and route through the API service binding.
       !uiPreview &&
         cloudflare({
-          // Stable output path for release packaging, independent of a fork's Worker name.
           viteEnvironment: { name: "frontend" },
           config: (config) =>
             localApp
@@ -234,8 +166,6 @@ export default defineConfig(({ mode, command }) => {
     server: {
       host: process.env.FRONTEND_DEV_HOST ?? "127.0.0.1",
       port: Number(process.env.FRONTEND_DEV_PORT ?? 3000),
-      // Vite already permits IP addresses and localhost. Add the configured
-      // MagicDNS hostname without opening the server to arbitrary Host headers.
       allowedHosts: canonical ? [canonical.hostname] : [],
     },
     resolve: {

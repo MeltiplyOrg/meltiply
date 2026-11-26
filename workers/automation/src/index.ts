@@ -59,27 +59,9 @@ import type { UsageReportResult } from "./usage-reporting";
 
 const publishQueuePattern = /publish-(facebook|instagram|threads|tiktok|youtube)(?:-|$)/;
 
-/**
-
- * Bound on the eager relay a single API request performs. Anything left behind
- * stays pending and is delivered by the hourly sweep.
- */
 const EAGER_RELAY_BATCH_SIZE = 50;
 
 export class ReplyWorkflow extends WorkflowEntrypoint<AutomationEnv, ReplyWorkflowPayload> {
-  /**
-   * Executes a durable workflow step to deliver or reconcile a social media comment reply.
-   *
-   * Enforces exponential backoff across up to 10 retries within a 5-minute timeout window,
-   * isolating long-running provider API calls and reconciliation loops from worker queue timeouts.
-   * Provider programs execute in the same job fiber as the step, retaining its
-   * logger/tracer context through database preparation and outcome recording.
-   *
-   * @param event - Durable workflow event wrapping the ReplyWorkflowPayload and instance metadata.
-   * @param step - Cloudflare Workflow step handle used to schedule idempotent retryable steps.
-   * @returns Resolves to an object containing the terminal outcome of the reply processing attempt.
-   * @throws Rethrows any unhandled error caught during reply processing to trigger workflow retry.
-   */
   async run(event: Readonly<WorkflowEvent<ReplyWorkflowPayload>>, step: WorkflowStep) {
     configureJobLogging(this.env);
     if (!isReplyWorkflowPayload(event.payload)) {
@@ -95,11 +77,6 @@ export class ReplyWorkflow extends WorkflowEntrypoint<AutomationEnv, ReplyWorkfl
       async () => {
         const env = { ...this.env };
         const startedAt = performance.now();
-        // Approved boundary: the workflow step body runs as one Effect program
-        // through the same mapper as queue/scheduled paths. Ambiguous provider
-        // writes surface as AmbiguousJobError and must NOT trigger the
-        // workflow retry: rethrow only retryable failures so reconciliation
-        // owns ambiguous outcomes instead of duplicating remote writes.
         const scope = jobScope(
           env,
           makeJobContext({
@@ -140,9 +117,6 @@ export class ReplyWorkflow extends WorkflowEntrypoint<AutomationEnv, ReplyWorkfl
           return { outcome };
         }
         if (mapped.outcome === "ambiguous") {
-          // Ambiguous: park on reconciliation instead of workflow retry. The
-          // reply processor armed the next lookup; return the ambiguous marker
-          // so the step succeeds without duplicating the remote write.
           log(
             "warn",
             context(this.env, traceId, {
@@ -165,8 +139,6 @@ export class ReplyWorkflow extends WorkflowEntrypoint<AutomationEnv, ReplyWorkfl
         const cause = Exit.isSuccess(exit)
           ? new Error("reply workflow step failed")
           : Cause.squash(exit.cause);
-        // Terminal (poison) payloads must not burn the 10-retry workflow
-        // budget: surface and succeed the step so the DLQ path owns them.
         if (mapped.outcome === "rejected") {
           log(
             "warn",
@@ -187,10 +159,6 @@ export class ReplyWorkflow extends WorkflowEntrypoint<AutomationEnv, ReplyWorkfl
           );
           return { outcome: "rejected" as const };
         }
-        // The step body executes after the queue producer already returned, so
-        // this is where a later reply failure actually happens. Reporting here
-        // is additive: the same cause is rethrown below, so the workflow's own
-        // retry backoff and DLQ handling are unchanged.
         registerDiagnostic(
           this.ctx,
           env,
@@ -224,22 +192,11 @@ export class ReplyWorkflow extends WorkflowEntrypoint<AutomationEnv, ReplyWorkfl
   }
 }
 
-// The Container-backed media processor runs as its own Durable Object, so
-// Wrangler binds the class re-exported from this module. Jobs reach it only
-// through the private MediaProcessor binding used by the Asset job processor;
-// no public route accepts arbitrary processor work.
-//
-// It is re-exported from `./native-processor-container` rather than
-// `./native-processor` on purpose: that module owns the only `cloudflare:workers`
-// import in this pipeline, so the injectable adapter stays loadable from plain
-// Node/Vitest integration suites.
 export { MediaProcessorContainer } from "./native-processor-container";
 
 export interface AutomationDependencies {
-  /** Selects publication adapters; omission uses the environment-configured registry. */
   providerRegistry?: ProviderRegistry;
   assetProcessorFor?: (env: AutomationEnv) => AssetJobProcessor | Promise<AssetJobProcessor>;
-  /** Overrides the bounded hourly follower-history sweep for tests. */
   sweepAccountAnalytics?: (
     env: AutomationEnv,
   ) => Effect.Effect<{ failed: number; recorded: number; scanned: number }, unknown>;
@@ -249,9 +206,7 @@ export interface AutomationDependencies {
   sweepProviderDue?: (env: AutomationEnv) => Effect.Effect<ProviderDueResult, unknown>;
   enqueueDueReplyReconciliations?: (env: AutomationEnv) => Effect.Effect<number, unknown>;
   runRetention?: (env: AutomationEnv) => Effect.Effect<RetentionResult, unknown>;
-  /** Overrides the daily bounded improvement-reporting delivery pass for tests. */
   deliverImprovementReports?: (env: AutomationEnv) => Effect.Effect<DeliverySummary, unknown>;
-  /** Overrides the daily bounded usage-summary producer for tests. */
   enqueueDailyUsageReport?: (env: AutomationEnv) => Effect.Effect<UsageReportResult, unknown>;
   providerSyncProcessor?: (
     env: AutomationEnv,
@@ -287,18 +242,9 @@ type ScheduledWorkName =
   | "retention";
 
 interface ScheduledWorkUnit {
-  /** Result reported for this unit when its tier does not run. */
   empty: unknown;
-  /** Log field carrying this unit's result in automation_scheduled events. */
   field: string;
   name: ScheduledWorkName;
-  /**
-   * Unit program executed as one Effect inside the invocation's job scope.
-   * Production units call the migrated module functions directly; injected
-   * Effect-valued test doubles are adapted at declaration with
-   * Effect.suspend + classifyJobError so the scheduled loop runs a single
-   * uniform program shape.
-   */
   run: (
     env: AutomationEnv,
   ) => Effect.Effect<
@@ -315,16 +261,6 @@ interface CorrelationIds {
   workflowId?: string;
 }
 
-/**
- * Assembles a standardized logging context object from environment bindings and correlation identifiers.
- *
- * Ensures consistent metadata formatting across all structured logs emitted by the automation worker.
- *
- * @param env - Automation worker environment bindings containing environment and version.
- * @param traceId - Distributed tracing identifier for the active operation.
- * @param correlation - Optional correlation IDs including jobId, requestId, and workflowId.
- * @returns Structured object containing service name, environment, version, trace, and correlation IDs.
- */
 function context(env: AutomationEnv, traceId: string, correlation: CorrelationIds = {}) {
   return {
     environment: env.ENVIRONMENT,
@@ -337,16 +273,6 @@ function context(env: AutomationEnv, traceId: string, correlation: CorrelationId
   };
 }
 
-/**
- * Extracts correlation and tracing identifiers from an incoming queue message payload.
- *
- * Prefers the message's internal event_id and request_id if present in recognized payload formats,
- * falling back to the queue envelope messageId to ensure traceable execution.
- *
- * @param body - Raw queue message body.
- * @param messageId - Cloudflare Queue envelope message identifier.
- * @returns Object containing the extracted jobId, requestId, and derived traceId.
- */
 function queueCorrelation(body: unknown, messageId: string) {
   const jobId = isProviderSyncMessage(body) || isOutboxMessage(body) ? body.event_id : messageId;
   const requestId =
@@ -360,15 +286,6 @@ function queueCorrelation(body: unknown, messageId: string) {
   };
 }
 
-/**
- * Determines the high-level event categorization string for an incoming queue message.
- *
- * Inspects payload structure and topic prefixes to classify messages into provider sync,
- * distribution, channel revocation, comment reply, asset processing, or unsupported categories.
- *
- * @param body - Raw queue message body to inspect.
- * @returns String identifier classifying the event type for logging and metric emission.
- */
 function queueEvent(body: unknown): string {
   if (isProviderSyncMessage(body)) return "provider_sync_job";
   if (isOutboxMessage(body)) {
@@ -389,44 +306,16 @@ function queueEvent(body: unknown): string {
   return "unsupported_queue_message";
 }
 
-/**
- * Resolves the specific granular job or workload name from a queue message payload.
- *
- * Maps provider sync workloads or outbox message topics to their operational job name,
- * returning "unsupported" for unrecognized message shapes.
- *
- * @param body - Raw queue message payload.
- * @returns String indicating the specific operation or topic name.
- */
 function queueJob(body: unknown): string {
   if (isProviderSyncMessage(body)) return body.workload;
   if (isOutboxMessage(body)) return body.topic;
   return "unsupported";
 }
 
-/**
- * Parses the target social media provider name from a Cloudflare Queue name.
- *
- * Matches queue names following the `publish-{provider}` pattern (e.g. facebook, instagram,
- * threads, tiktok, youtube) to associate log and telemetry events with the respective provider.
- *
- * @param queue - Name of the Cloudflare Queue receiving the message batch.
- * @returns Extracted provider name string, or undefined if the queue is not provider-specific.
- */
 function queueProvider(queue: string): string | undefined {
   return publishQueuePattern.exec(queue)?.[1];
 }
 
-/**
- * Emits a unified structured info log recording the completion of a queue message dispatch.
- *
- * Consolidates logging attributes across provider sync, distribution, reply, and asset jobs,
- * tracking delivery latency, retry attempt counters, queue origins, and outcomes.
- *
- * @param env - Automation worker environment bindings.
- * @param correlation - Tracing and correlation identifiers for the operation.
- * @param opts - Dispatch details including attempts, latency, queue name, and execution outcome.
- */
 function logQueueOutcome(
   env: AutomationEnv,
   correlation: { jobId?: string; requestId?: string; traceId: string },
@@ -457,17 +346,6 @@ function logQueueOutcome(
   });
 }
 
-/**
- * Initializes best-effort flow explorer ledger recording for a queue message processing lifecycle.
- *
- * Links asynchronous queue execution to the originating API request trace if correlation is present
- * and database bindings are available. Returns an object with a `finish(outcome)` callback that closes
- * open ledger steps and runs upon completion.
- *
- * @param env - Automation worker environment bindings.
- * @param input - Flow tracking metadata including correlation IDs, event type, queue, and org ID.
- * @returns Object containing a `finish(outcome)` method to finalize flow steps, or null if tracing is inactive.
- */
 async function beginQueueFlow(
   env: AutomationEnv,
   input: {
@@ -539,23 +417,12 @@ async function beginQueueFlow(
 }
 
 interface QueueDispatchInput {
-  /** Raw queue body, narrowed inside dispatchQueueMessage by the payload guards. */
   body: unknown;
-  /** Publication adapters selected by the Worker factory, not by queue payloads. */
   providerRegistry?: ProviderRegistry;
-  /**
-   * Reply-workflow enqueue as an Effect: the production path resolves the
-   * ReplyWorkflowDispatcher service (supplied by the job scope runtime
-   * layer); the Effect-valued test override is adapted at the call site.
-   */
   enqueueReplyWorkflow: (
     env: AutomationEnv,
     message: OutboxMessage,
   ) => Effect.Effect<"enqueued", AutomationJobError, ReplyWorkflowDispatcher>;
-  /**
-   * Provider sync processor program; the production path calls the module
-   * function while tests inject an Effect override adapted at the call site.
-   */
   processProviderSync: (
     env: AutomationEnv,
     message: ProviderSyncMessage,
@@ -564,41 +431,13 @@ interface QueueDispatchInput {
     AutomationJobError | ProviderAdapterError,
     QueuePublisher
   >;
-  /**
-   * Channel revocation processor program; the production path calls the
-   * channel-revocation module while tests inject an Effect override adapted
-   * at the call site, mirroring processProviderSync.
-   */
   processChannelRevocation: (
     env: AutomationEnv,
     message: OutboxMessage,
   ) => Effect.Effect<"processed" | "skipped", unknown>;
-  /**
-   * Per-batch memoized asset processor factory: the queue handler caches the
-   * Promise once per batch so N asset messages share one object store
-   * instead of constructing a processor per message.
-   */
   processorFor: () => Promise<AssetJobProcessor>;
 }
 
-/**
- * Dispatches one queue message to its dedicated processor as an Effect program.
- *
- * Provider programs compose directly in the job fiber; the asset processor
- * factory stays a Promise adapter converted once at this boundary.
- * Publication uses the factory's registry when supplied; queue payloads never
- * select adapters or replace the real claim, snapshot, or delivery lifecycle.
- * Payload guards route known shapes — provider sync, distribution, channel
- * revocation, comment reply, then generic asset outbox events; any body
- * matching neither guard fails with a terminal unknown_message_type error so
- * the queue boundary records the producer-contract bug as rejected instead of
- * retrying it.
- *
- * @param env - Automation worker environment bindings.
- * @param input - Raw message body plus injected processor overrides.
- * @returns Effect resolving to the processor outcome label
- *   ("processed"/"skipped"/"enqueued"), failing with AutomationJobError.
- */
 function dispatchQueueMessage(
   env: AutomationEnv,
   input: QueueDispatchInput,
@@ -657,29 +496,22 @@ function dispatchQueueMessage(
   );
 }
 
-/**
- * Factory creating the Cloudflare Worker exported handler for the automation service.
- *
- * Assembles HTTP health check (`fetch`), queue consumption (`queue`), and cron trigger (`scheduled`)
- * dispatchers, accepting dependency injection overrides for testability without loading Node pg in tests.
- * Composes production provider programs in the invocation fiber; Effect test
- * overrides are adapted here without spawning a second Effect runtime.
- *
- * @param dependencies - Optional task, processor, workflow, and publication-registry dependencies.
- * @returns Cloudflare Worker ExportedHandler object implementing fetch, queue, and scheduled.
- */
+export interface AutomationHandler extends ExportedHandler<AutomationEnv, unknown> {
+  fetch: NonNullable<ExportedHandler<AutomationEnv, unknown>["fetch"]>;
+  queue: NonNullable<ExportedHandler<AutomationEnv, unknown>["queue"]>;
+  scheduled: (
+    controller: ScheduledController | null | undefined,
+    env: AutomationEnv,
+    ctx: ExecutionContext,
+  ) => void | Promise<void>;
+}
+
 export function createAutomationHandler(
   dependencies: AutomationDependencies = {},
-): ExportedHandler<AutomationEnv, unknown> {
+): AutomationHandler {
   const processorFor =
     dependencies.assetProcessorFor ??
     (async (env) => (await import("./assets")).createAssetJobProcessor(env));
-  // Each unit of scheduled work is resolved by name from this list;
-  // injected test doubles override individual units instead of switching
-  // production branches off. Production units call the migrated module
-  // functions (already Effects) through a classified dynamic import so tests
-  // never evaluate the Node pg client; Effect-valued overrides are adapted
-  // per unit with Effect.suspend + classifyJobError.
   const scheduledWork: readonly ScheduledWorkUnit[] = [
     {
       empty: 0,
@@ -723,9 +555,6 @@ export function createAutomationHandler(
       empty: undefined,
       field: "maintenance",
       name: "asset-maintenance",
-      // The asset processor factory stays a Promise adapter: construction is
-      // converted here via tryPromise, while runMaintenance is already an
-      // Effect composed through flatMap.
       run: (env) =>
         Effect.flatMap(
           Effect.tryPromise({
@@ -832,10 +661,6 @@ export function createAutomationHandler(
       tier: "daily",
     },
     {
-      // The producer runs immediately before the delivery pass it feeds: it only
-      // freezes and queues measurements, and the delivery unit that follows in
-      // array order drains the same queue. A measurement failure therefore cannot
-      // suppress an already-queued report, and vice versa.
       empty: { considered: 0, queued: 0 },
       field: "usage",
       name: "usage-reporting",
@@ -855,9 +680,6 @@ export function createAutomationHandler(
       tier: "daily",
     },
     {
-      // Best-effort maintainer reporting drains its own bounded queue. It never
-      // computes measurements and never touches publishing, so a PostHog outage
-      // or a disabled category leaves domain retry/DLQ behavior untouched.
       empty: { claimed: 0, delivered: 0, discarded: 0, failed: 0, released: 0, skipped: 0 },
       field: "reporting",
       name: "improvement-reporting-delivery",
@@ -891,9 +713,6 @@ export function createAutomationHandler(
           }),
           (module) => module.processProviderSyncMessage(env, message),
         );
-  // pg-backed scheduled modules stay behind dynamic imports so injected
-  // unit tests never load the Node pg module; overrides replace units
-  // individually instead of disabling them.
   const replyEnqueueOverride = dependencies.replyWorkflowEnqueue;
   const enqueueReplyWorkflow: QueueDispatchInput["enqueueReplyWorkflow"] = replyEnqueueOverride
     ? (env, message) =>
@@ -922,13 +741,6 @@ export function createAutomationHandler(
           );
 
   return {
-    /**
-     * Handles HTTP requests for the automation worker, serving basic health check metadata.
-     *
-     * @param _request - Incoming HTTP Request object.
-     * @param env - Automation worker environment bindings.
-     * @returns JSON response reporting worker service name, environment, version, and "ok" status.
-     */
     fetch(_request, env) {
       configureJobLogging(env);
       return Response.json({
@@ -939,29 +751,9 @@ export function createAutomationHandler(
       });
     },
 
-    /**
-     * Consumes batches of messages from Cloudflare Queues and routes them to dedicated processors.
-     *
-     * Dispatches provider sync tasks, scheduled distribution jobs, channel
-     * revocation commands, comment reply workflow triggers, and asset
-     * maintenance jobs. Automatically logs outcomes and applies exponential
-     * retry backoff
-     * (`min(3600s, 15s * 2^attempts)`) on transient failures. Every body flows through
-     * dispatchQueueMessage: unroutable shapes fail terminally there and surface through the
-     * rejected branch below (ack-and-surface, AUD-039).
-     * Opt-in publish batches may overlap two distinct Provider accounts; each
-     * account remains ordered and infrastructure still limits the Queue to one
-     * invocation. Asset and other job kinds stay serial.
-     *
-     * @param batch - Batch of incoming queue messages with delivery attempt metadata and queue name.
-     * @param bindings - Automation worker bindings, copied into this invocation's ownership scope.
-     */
     async queue(batch, bindings, executionCtx) {
       const env = { ...bindings };
       configureJobLogging(env);
-      // One asset processor per batch: construction builds the configured
-      // object storage store, so the dispatcher resolves it lazily through this
-      // memoized thunk rather than paying per message.
       let assetProcessor: Promise<AssetJobProcessor> | undefined;
       const provider = queueProvider(batch.queue);
       if (
@@ -999,8 +791,6 @@ export function createAutomationHandler(
           provider,
           queue: batch.queue,
         });
-        // Approved boundary: exactly one Effect program per queue message;
-        // runJobProgram owns the single Effect.run* call.
         const program = dispatchQueueMessage(env, {
           body,
           enqueueReplyWorkflow,
@@ -1015,9 +805,6 @@ export function createAutomationHandler(
         if (outcome === "processed") {
           message.ack();
           await flow?.finish("succeeded");
-          // Log the processor's own success label: "skipped" redeliveries
-          // (dedup hits) must not be flattened to "processed", and the reply
-          // branch reports "enqueued".
           const processorOutcome =
             Exit.isSuccess(exit) && typeof exit.value === "string" ? exit.value : "processed";
           logQueueOutcome(env, correlation, {
@@ -1034,9 +821,6 @@ export function createAutomationHandler(
           return;
         }
         if (outcome === "rejected") {
-          // Terminal: ack-and-surface producer-contract bugs (AUD-039), and
-          // close the flow ledger as failed — a rejected poison message must
-          // not mark the run succeeded.
           message.ack();
           await flow?.finish("failed");
           log("warn", context(env, correlation.traceId, correlation), {
@@ -1064,9 +848,6 @@ export function createAutomationHandler(
           return;
         }
         if (outcome === "ambiguous") {
-          // Ambiguous provider writes must never auto-retry: the distribution
-          // and reply processors already armed the next lookup/reconciliation,
-          // so ack here to avoid a duplicate remote write on redelivery.
           message.ack();
           await flow?.finish("succeeded");
           log("warn", context(env, correlation.traceId, correlation), {
@@ -1094,11 +875,6 @@ export function createAutomationHandler(
           return;
         }
         await flow?.finish("failed");
-        // Deliberate: mirrors the outbox's own exponential backoff
-        // (2^attempts * 15s, capped at 1h) so ailing work re-delivers on the
-        // same schedule the database retry path uses. The Terraform-managed
-        // consumer still enforces max_retries and the DLQ; this only
-        // overrides the fixed retry_delay between attempts (AUD-040).
         message.retry({
           delaySeconds: queueBackoffDelaySeconds(message.attempts),
         });
@@ -1134,17 +910,6 @@ export function createAutomationHandler(
       }
     },
 
-    /**
-     * Dispatches cron-triggered background maintenance tasks across hourly and daily tiers.
-     *
-     * Executes outbox relay, asset cleanup, distribution sweep, due distribution scan, provider sync
-     * sweep, reply reconciliation, and data retention based on the trigger's cron schedule. Isolates
-     * failures so subsequent scheduled units continue running before reporting errors.
-     *
-     * @param _controller - ScheduledController providing the triggering cron pattern, or null for direct invocation.
-     * @param bindings - Automation worker bindings, copied into this invocation's ownership scope.
-     * @throws Rethrows the first encountered scheduled task failure after all due units have finished.
-     */
     async scheduled(_controller, bindings, executionCtx) {
       const env = { ...bindings };
       configureJobLogging(env);
@@ -1152,8 +917,6 @@ export function createAutomationHandler(
       const jobId = crypto.randomUUID();
       const scheduledContext = context(env, jobId, { jobId });
       const cron = _controller?.cron;
-      // A missing controller or expression (direct invocation) dispatches
-      // every tier; an unrecognized expression dispatches nothing.
       const tierRuns: Record<ScheduledTier, boolean> = {
         daily: !cron || cron === SCHEDULED_TIERS.daily,
         hourly: !cron || cron === SCHEDULED_TIERS.hourly,
@@ -1162,20 +925,12 @@ export function createAutomationHandler(
       const results: Record<string, unknown> = Object.fromEntries(
         scheduledWork.map((unit) => [unit.field, unit.empty]),
       );
-      // Units run independently: a failure is reported and the remaining
-      // scheduled work for this invocation still executes. Each unit runs as
-      // one Effect program through the same boundary mapper as queue messages
-      // (runJobProgram + exitToJobOutcome), so retryable/terminal/ambiguous
-      // classification is uniform across entry points; the original throw is
-      // preserved for the failure log and rethrow below.
       const failures: Array<{ cause: unknown; unit: ScheduledWorkName }> = [];
       for (const unit of dueWork) {
         const unitScope: JobScope = jobScope(
           env,
           makeJobContext({ jobId, source: "scheduled", traceId: jobId }),
         );
-        // suspend defers the unit factory so a synchronous throw lands in the
-        // Exit cause (defect → retry) instead of escaping the loop.
         const program = Effect.suspend(() => unit.run(env));
         const programExit = await runJobProgram(Effect.provide(program, unitScope.runtimeLayer));
         if (programExit._tag === "Success") {
@@ -1187,17 +942,12 @@ export function createAutomationHandler(
           });
           continue;
         }
-        // The failure log and rethrow below need the original throw, not the
-        // typed wrapper: recoverJobErrorCause unwraps the classified error so
-        // errorDiagnostic groups on the real error type.
         const cause = recoverJobErrorCause(programExit.cause);
         failures.push({ cause, unit: unit.name });
       }
       const [firstFailure] = failures;
       if (firstFailure) {
         for (const failure of failures) {
-          // failures already store the unwrapped error, so errorDiagnostic
-          // reads the original throw's name and message directly.
           log("error", scheduledContext, {
             error_code: "scheduled_job_failed",
             event: "automation_scheduled",
@@ -1208,9 +958,6 @@ export function createAutomationHandler(
             ...errorDiagnostic(failure.cause),
             retry_class: "platform_retry",
           });
-          // Additive and lifecycle-registered: the local log above and the
-          // rethrow below are unchanged, and the reporting unit never reports
-          // its own failure.
           registerDiagnostic(
             executionCtx,
             env,
@@ -1242,21 +989,6 @@ export function createAutomationHandler(
     },
   };
 }
-/**
- * Runs a module program at an RPC or bounded publish-batch lookup boundary.
- *
- * Builds a fresh "direct" job scope so the program resolves the same queue
- * services the queue/scheduled paths use, then translates the finished Exit
- * back into the caller's contract: the success value resolves the call, while a
- * failure rejects with the original throw — recoverJobErrorCause restores the
- * name/message classifyJobError stored on the typed wrapper so callers see
- * the pre-migration error shape.
- *
- * @param env - Automation worker environment bindings.
- * @param program - Module Effect to run within the scope's runtime layer.
- * @returns The program's success value.
- * @throws The unwrapped program failure or defect.
- */
 async function runDirectProgram<A, E>(
   env: AutomationEnv,
   program: Effect.Effect<A, E, QueuePublisher | PublishQueueResolver | ReplyWorkflowDispatcher>,
@@ -1277,19 +1009,6 @@ async function runDirectProgram<A, E>(
 export class AutomationEntrypoint extends WorkerEntrypoint<AutomationEnv> {
   readonly #handler = createAutomationHandler();
 
-  /**
-   * Eager Outbox relay invoked by the API Worker over its Service Binding on
-   * the request's background continuation, immediately after the mutating
-   * transaction commits. Entries this bounded batch does not reach — or that it
-   * fails to publish — stay pending for the hourly sweep, so the delivery
-   * guarantee is unchanged.
-   *
-   * The relay module returns an Effect; this boundary runs it through the
-   * direct-scope program runner and returns its result (or rejects with the
-   * unwrapped failure).
-   *
-   * @returns Counts of outbox messages claimed, published, failed, and dead during eager relay.
-   */
   async relayOutbox(): Promise<OutboxRelayResult> {
     const env = { ...this.env };
     configureJobLogging(env);
@@ -1303,23 +1022,6 @@ export class AutomationEntrypoint extends WorkerEntrypoint<AutomationEnv> {
     return runDirectProgram(env, program);
   }
 
-  /**
-   * Demand-driven Comment fetch invoked by the API Worker over its Service
-   * Binding when a creator opens the Inbox, on that request's background
-   * continuation. Distributions past `demandDrivenCommentsAgeSeconds` have no
-   * scheduled Comment sync, so this is what fetches their Comments.
-   *
-   * Both identifiers are already validated by the API Worker and are bound as
-   * `::uuid` statement parameters. The claim is bounded and rate limited per
-   * Distribution, so the number of Provider calls one open can cause does not
-   * depend on the caller. The provider-sync module returns an Effect; this
-   * boundary runs it through the direct-scope program runner and returns the
-   * enqueued count (or rejects with the unwrapped failure).
-   *
-   * @param organizationId - UUID of the organization requesting comment synchronization.
-   * @param distributionId - Optional UUID of a specific distribution, or null to synchronize all due distributions.
-   * @returns Number of distributions enqueued for comment synchronization.
-   */
   async requestCommentsSync(
     organizationId: string,
     distributionId: string | null,
@@ -1340,35 +1042,17 @@ export class AutomationEntrypoint extends WorkerEntrypoint<AutomationEnv> {
     return runDirectProgram(env, program);
   }
 
-  /**
-   * Delegates incoming HTTP requests to the internal automation handler.
-   *
-   * @param request - Incoming HTTP Request.
-   * @returns Response generated by the automation handler.
-   */
   fetch(request: Request) {
-    const handler = this.#handler.fetch!;
+    const handler = this.#handler.fetch;
     return handler(request as Parameters<typeof handler>[0], this.env, this.ctx);
   }
 
-  /**
-   * Delegates incoming Cloudflare Queue message batches to the internal automation queue consumer.
-   *
-   * @param batch - Batch of queue messages delivered to this worker.
-   * @returns Promise resolving when batch processing finishes.
-   */
   queue(batch: MessageBatch<unknown>) {
-    return this.#handler.queue!(batch, this.env, this.ctx);
+    return this.#handler.queue(batch, this.env, this.ctx);
   }
 
-  /**
-   * Delegates cron trigger invocations to the internal automation scheduled task dispatcher.
-   *
-   * @param controller - ScheduledController containing the triggering cron expression.
-   * @returns Promise resolving when all due scheduled work units complete.
-   */
   scheduled(controller: ScheduledController) {
-    return this.#handler.scheduled!(controller, this.env, this.ctx);
+    return this.#handler.scheduled(controller, this.env, this.ctx);
   }
 }
 

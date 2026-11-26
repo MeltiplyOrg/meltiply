@@ -4,13 +4,6 @@ import { signIn, waitForWorkspace } from "./workspace-session";
 
 const password = "MeltiplyLocal1!";
 
-/**
- * Opens a fresh browser context and signs into the seeded shared Workspace.
- *
- * @param browser - Playwright browser fixture.
- * @param email - Seeded account email.
- * @returns The isolated page and its context.
- */
 async function openSeededAccount(browser: Browser, email: string) {
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -19,11 +12,6 @@ async function openSeededAccount(browser: Browser, email: string) {
   return { context, page };
 }
 
-/**
- * Opens the administration section inside the merged Settings surface.
- *
- * @param page - Signed-in page.
- */
 async function openAdministration(page: import("@playwright/test").Page) {
   await page.goto("/settings");
   await page.getByRole("button", { name: "Administration", exact: true }).click();

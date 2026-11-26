@@ -28,7 +28,6 @@ const databaseEnvironment = {
     "postgresql://meltiply_rls:secret@ep-staging.us-east-2.aws.neon.tech/meltiply?sslmode=require",
 };
 
-/** Adds the protected login/catalog boundary to a staged migration database client. */
 function migrationClientFactory(
   client,
   { missing, installation = {}, systemBypass = true, authenticatedBypass = false, identity } = {},
@@ -225,8 +224,6 @@ test("migrator holds one advisory lock and records each migration transactionall
     2,
   );
   assert.equal(ended, true);
-  // Evidence must not carry the connection string or its credential; the
-  // fixture host lives in the Neon pooler domain, so it is checked by value.
   const serialized = JSON.stringify(evidence);
   assert.ok(!serialized.includes("system:secret"));
   assert.ok(!serialized.includes("ep-staging-pooler.us-east-2.aws.neon.tech"));

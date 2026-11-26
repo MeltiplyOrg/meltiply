@@ -62,11 +62,6 @@ const agentationStoragePrefixes = [
 ] as const;
 const agentationStorageKeys = ["feedback-toolbar-settings"] as const;
 
-/**
- * Removes Agentation's optional durable and tab-scoped records after consent
- * is denied. It inspects key names only, deletes matching keys without using
- * their values, and tolerates browsers that block either storage area.
- */
 function clearAgentationStorage(): void {
   if (typeof window === "undefined") return;
   for (const storageName of ["localStorage", "sessionStorage"] as const) {
@@ -85,16 +80,11 @@ function clearAgentationStorage(): void {
       }
       for (const key of keys) storage.removeItem(key);
     } catch {
-      // Storage cleanup must not prevent the in-memory developer dock from working.
+      continue;
     }
   }
 }
 
-/**
- * Bridge rendered inside `ScopedAppProviders` (dashboard layout) that exposes
- * the per-workspace `QueryClient` to the root-mounted DevBox dock through the
- * module registry. Rendered only in development builds.
- */
 export function DevBoxClientBridge(): null {
   const queryClient = useQueryClient();
   useEffect(() => {
@@ -112,19 +102,12 @@ const tabLabels: Record<DevBoxTab, string> = {
   preview: "Preview",
 };
 
-/**
- * Measures the live dock box, including borders. Returns `null` when the panel
- * has no usable geometry (for example before layout or in a headless DOM).
- */
 function measureDock(panel: HTMLDivElement | null): DevBoxSize | null {
   if (!panel) return null;
   const rect = panel.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0 ? { width: rect.width, height: rect.height } : null;
 }
 
-/**
- * Clamps a dock position to the current viewport using the measured dock size.
- */
 function clampPosition(position: DevBoxPosition, size: DevBoxSize): DevBoxPosition {
   return clampDevBoxPosition(position, size, {
     width: window.innerWidth,
@@ -132,12 +115,6 @@ function clampPosition(position: DevBoxPosition, size: DevBoxSize): DevBoxPositi
   });
 }
 
-/**
- * Removes every page-level mutation the dock can install: layout overlays, the
- * viewport frame, audit highlights, and pseudo-localization.
- * Runs when the dock is hidden or unmounted so no inspection state outlives the
- * control surface that owns it.
- */
 function clearPageMutations(): void {
   clearLayoutOverlays();
   clearViewportFrame();
@@ -145,28 +122,6 @@ function clearPageMutations(): void {
   setPseudoLocalization(false);
 }
 
-/**
- * Unified in-app developer toolbox dock ("Meltiply DevBox").
- *
- * A draggable, collapsible floating dock anchored bottom-left, mounted only in
- * development and isolated UI preview builds. The standard Radix tabs cover
- * loading-state auditing, query/telemetry tracing, routes, and design-system/
- * accessibility helpers. An optional Preview tab hosts the
- * isolated build's scenario controls; the feature owns its browser data.
- * Position, collapsed state, active tab, and latency selection persist across
- * refreshes only after functional consent. The collapsed pill is itself a drag
- * surface: presses inside a small dead zone expand the dock, while real
- * movement repositions it.
- *
- * The dock renders outside the router tree; the query client reaches it
- * through `DevBoxClientBridge` + the module registry. Heavy developer
- * dependencies load lazily; Agentation mounts only with functional consent
- * because it maintains its own browser storage outside the shared helpers.
- * Agentation-owned local and session keys are removed by name when consent is
- * absent, preventing its private persistence from bypassing withdrawal cleanup.
- * Copying Agentation's feedback markdown surfaces the shared Sileo toast so
- * developers see success, or failure with guidance, instead of silence.
- */
 export function DevBox({
   previewControls,
 }: {
@@ -186,22 +141,11 @@ export function DevBox({
   const activeTab = state.tab === "preview" && !previewControls ? "skeletons" : state.tab;
 
   const hasInteractedRef = useRef(false);
-  /**
-   * Applies a dock patch in memory and remembers user changes made before
-   * consent so later acceptance persists those choices instead of replacing them.
-   *
-   * @param patch Partial dock state to apply.
-   */
   const update = useCallback((patch: Partial<DevBoxState>) => {
     hasInteractedRef.current = true;
     setState((current) => ({ ...current, ...patch }));
   }, []);
 
-  /**
-   * Re-clamps a persisted or dragged position against the dock's current
-   * measured box. Runs before paint on mount, after expand/collapse, on window
-   * resize, and whenever the dock's own box changes.
-   */
   const revalidatePosition = useCallback(() => {
     setState((current) => {
       if (!current.position) return current;
@@ -214,9 +158,6 @@ export function DevBox({
     });
   }, []);
 
-  // Persisted coordinates may come from a wider window, an older dock width, or
-  // hand-edited storage. Validate before paint and whenever the viewport or the
-  // dock itself (expand/collapse, content reflow) changes size.
   useLayoutEffect(() => {
     revalidatePosition();
     window.addEventListener("resize", revalidatePosition);
@@ -234,9 +175,6 @@ export function DevBox({
   useLayoutEffect(() => {
     revalidatePosition();
   }, [revalidatePosition, state.collapsed]);
-  // Persist state changes, debounced: drag emits a position update per
-  // pointermove, so writes are coalesced to one trailing flush per burst. A
-  // ref keeps the latest state reachable so unmount can flush synchronously.
   const stateRef = useRef(state);
   useEffect(() => {
     stateRef.current = state;
@@ -244,8 +182,6 @@ export function DevBox({
     return () => window.clearTimeout(timer);
   }, [state]);
   useEffect(() => () => writeDevBoxState(stateRef.current), []);
-  // Keep DevBox and its third-party feedback tool in step with consent changes;
-  // cleanup removes Agentation's own keys that shared storage cannot identify.
   useEffect(() => {
     if (!hasCookieConsent("functional")) clearAgentationStorage();
     return subscribeCookieConsent(() => {
@@ -261,18 +197,12 @@ export function DevBox({
     });
   }, []);
 
-  // The throttle wraps fetch for the dock's whole lifetime so the latency
-  // slider and skeleton hold apply to every request, not just query fetches.
   useEffect(() => {
     installNetworkThrottle();
     return () => uninstallNetworkThrottle();
   }, []);
   useEffect(() => setThrottleLatency(state.latency), [state.latency]);
 
-  // Developer tools mutate the page outside their own React tree. Remove those
-  // mutations when the dock is hidden or unmounted; hiding already unmounts
-  // tab-local effects, and overlays/frame must not remain without their
-  // controls.
   useEffect(() => {
     if (state.hidden) clearPageMutations();
   }, [state.hidden]);
@@ -281,9 +211,6 @@ export function DevBox({
   useHotkey(hotkeys.devBox, () => update({ hidden: !state.hidden }));
   const onDragStart = (event: React.PointerEvent<HTMLDivElement>) => {
     const panel = panelRef.current;
-    // Header buttons must keep their click: pointer capture retargets the
-    // release to the header, so a press that starts on a control would swallow
-    // its click and leave Collapse/Hide inert.
     if (!panel || event.target !== event.currentTarget) return;
     const rect = panel.getBoundingClientRect();
     dragRef.current = {
@@ -295,7 +222,7 @@ export function DevBox({
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
-      // Pointer capture is unavailable in some headless/test environments.
+      return;
     }
   };
   const onDragMove = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -312,10 +239,6 @@ export function DevBox({
     if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
   };
 
-  // Collapsed-pill drag: the whole pill is the drag surface, so a dead zone
-  // separates a click (expand) from a drag (reposition). `suppressClickRef`
-  // swallows the click event that follows a real drag; it is re-armed on every
-  // new press so a cancelled drag can never eat a later click.
   const pillDragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -343,7 +266,7 @@ export function DevBox({
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
-      // Pointer capture is unavailable in some headless/test environments.
+      return;
     }
   };
   const onPillDragMove = (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -436,13 +359,7 @@ export function DevBox({
               </span>
             </div>
 
-            <Tabs
-              value={activeTab}
-              onValueChange={(tab) =>
-                // Radix only emits registered trigger values, so the string is already a DevBoxTab.
-                update({ tab: tab as DevBoxTab })
-              }
-            >
+            <Tabs value={activeTab} onValueChange={(tab) => update({ tab: tab as DevBoxTab })}>
               <TabsList
                 aria-label="DevBox tools"
                 className="h-auto flex-nowrap justify-start gap-1 overflow-x-auto rounded-none border-b border-line bg-transparent px-2 py-1.5 text-inherit"
@@ -507,10 +424,6 @@ export function DevBox({
           <LazyAgentation
             copyToClipboard={false}
             onCopy={(markdown) => {
-              // Agentation hands off the markdown because its own clipboard
-              // write is disabled; the shared copyText handles insecure-origin
-              // fallbacks. Surface the outcome through Sileo — Agentation's
-              // toolbar gives no visible copy feedback of its own.
               void copyText(markdown)
                 .then(() =>
                   toast("Feedback copied to clipboard", {

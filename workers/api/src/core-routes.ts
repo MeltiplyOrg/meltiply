@@ -1,7 +1,7 @@
 import type { components } from "@meltiply/contracts/schema";
 import type { OAuthSelectionCandidate } from "@meltiply/contracts";
 import type { SessionClaims } from "@meltiply/auth";
-import { DatabaseError, oauthCallbackPath, type Platform } from "@meltiply/domain";
+import { DatabaseError, oauthCallbackPath, PLATFORM_IDS, type Platform } from "@meltiply/domain";
 import { Cause, Effect, type Layer } from "effect";
 import {
   createProviderRegistryFromEnvironment,
@@ -24,7 +24,12 @@ import {
   type YouTubePrivacyStatus,
 } from "@meltiply/providers";
 import { errorDiagnostic, log } from "@meltiply/observability";
-import { createObjectStoreFromEnv, type ConfiguredObjectStore } from "@meltiply/storage";
+import {
+  createObjectStoreFromEnv,
+  PROVIDER_MEDIA_ROUTE_PREFIX,
+  verifyProviderMediaSignature,
+  type ConfiguredObjectStore,
+} from "@meltiply/storage";
 import type { Context, Hono } from "hono";
 import { CoreApiError, type CoreApiService } from "./core-types";
 import {
@@ -92,7 +97,6 @@ import type { OAuthConnectionOwner } from "./oauth-connection";
 
 const weakEtagPrefixPattern = /^W\//;
 const base64PaddingPattern = /=+$/;
-const base64UrlPattern = /^[A-Za-z0-9_-]+$/;
 const unsafeMediaKeyPattern = /[/\\\p{Cc}]/u;
 const expiryPattern = /^\d{1,15}$/;
 const deterministicDatabaseErrorPattern = /^(22|23)[0-9A-Z]{3}$/;
@@ -138,37 +142,15 @@ type PublicationRequirementsReader = (
   registry: ProviderRegistry,
 ) => Effect.Effect<ProviderPublicationRequirements, CoreApiError | DatabaseError, ProviderService>;
 
-/**
- * Retrieves the unique request identifier stored on the Hono execution context.
- *
- * @param c - Hono request context.
- * @returns Request ID string (from `X-Request-ID` or generated).
- */
 function requestId(c: Context<ApiWorkerEnvironment>): string {
   return c.get("requestId");
 }
 
-/**
- * Parses the optional Brand Profile query selector shared by aggregate read routes.
- *
- * Omission preserves the read-only workspace aggregate; a supplied selector
- * must be a canonical UUID before it reaches a scoped service query.
- *
- * @param c - Hono request context carrying the query string.
- * @returns Selected Brand Profile UUID, or undefined for the aggregate view.
- * @throws {CoreApiError} 400 if the supplied selector is not a UUID.
- */
 function optionalBrandProfileParam(c: Context<ApiWorkerEnvironment>): string | undefined {
   const value = c.req.query("brand_profile_id");
   return value ? uuidParam(value, "brand_profile_id") : undefined;
 }
 
-/**
- * Computes a quoted SHA-256 hex digest ETag header value for a JSON-serializable payload.
- *
- * @param body - JSON-serializable response data object.
- * @returns Quoted hex string formatted for HTTP `ETag` headers.
- */
 async function entityTag(body: unknown): Promise<string> {
   const digest = await globalThis.crypto.subtle.digest(
     "SHA-256",
@@ -180,15 +162,6 @@ async function entityTag(body: unknown): Promise<string> {
   return `"${hexadecimal}"`;
 }
 
-/**
- * Compares an incoming HTTP `If-None-Match` header value against the current ETag.
- *
- * Handles wildcard `*`, comma-separated values, and strips weak validator prefixes (`W/`).
- *
- * @param header - Content of the client's `If-None-Match` header.
- * @param current - Current unquoted or quoted ETag value.
- * @returns `true` if the ETag matches; otherwise `false`.
- */
 function entityTagMatches(header: string | undefined, current: string): boolean {
   return (
     header?.split(",").some((candidate) => {
@@ -198,15 +171,6 @@ function entityTagMatches(header: string | undefined, current: string): boolean 
   );
 }
 
-/**
- * Produces an HTTP 200 JSON response or 304 Not Modified based on `If-None-Match` validation.
- *
- * Computes an ETag digest of the response body and attaches standard tracing headers.
- *
- * @param c - Hono request context.
- * @param body - Response body payload.
- * @returns HTTP 304 empty response if cached, or HTTP 200 JSON response.
- */
 async function conditionalJsonResponse(
   c: Context<ApiWorkerEnvironment>,
   body: unknown,
@@ -221,16 +185,6 @@ async function conditionalJsonResponse(
   return jsonResponse(body, 200, requestId(c), { ETag: etag });
 }
 
-/**
- * Resolves an explicit StorageService Layer from route dependencies if configured.
- *
- * Prefers the injected storageServiceLayer dependency (e.g. for testing doubles).
- * When unconfigured, returns undefined allowing AssetApiService.withStorage to self-provide.
- *
- * @param env - Worker environment bindings.
- * @param dependencies - Route dependencies containing optional storage layer override.
- * @returns Configured Layer providing StorageService, or undefined.
- */
 function resolveStorageLayer(
   env: ApiWorkerEnv,
   dependencies: CoreRouteDependencies,
@@ -243,13 +197,6 @@ function resolveStorageLayer(
   return undefined;
 }
 
-/**
- * Conditionally provides a StorageService Layer to an Effect program if one was resolved.
- *
- * @param program - Effect route program.
- * @param layer - Optional StorageService Layer.
- * @returns Effect program with layer applied if present.
- */
 function withStorageLayer<A, E, R>(
   program: Effect.Effect<A, E, R>,
   layer: Layer.Layer<StorageService, unknown, never> | undefined,
@@ -257,27 +204,12 @@ function withStorageLayer<A, E, R>(
   return layer ? (program.pipe(Effect.provide(layer)) as Effect.Effect<A, E, R>) : program;
 }
 
-/**
- * YouTube `privacy_status` values accepted at the request boundary; mirrors the
- * `YouTubePrivacyStatus` contract enum for runtime validation.
- */
 const YOUTUBE_PRIVACY_STATUSES: Record<YouTubePrivacyStatus, true> = {
   private: true,
   public: true,
   unlisted: true,
 };
 
-/**
- * Validates and normalizes saved Provider choices from a Post request body.
- *
- * Unknown keys and malformed supplied values are rejected, while unanswered
- * audience/privacy choices remain absent for drafts. Scheduling checks
- * completeness separately before creating strict publication options.
- *
- * @param body - Raw request payload record.
- * @returns Structured Post options or undefined if omitted.
- * @throws {CoreApiError} 400 `validation_error` if option keys or types violate schema rules.
- */
 function providerOptionsField(body: Record<string, unknown>): PostProviderOptions | undefined {
   const value = body.provider_options;
   if (value === undefined) return undefined;
@@ -285,7 +217,7 @@ function providerOptionsField(body: Record<string, unknown>): PostProviderOption
     throw new CoreApiError(400, "validation_error", "provider_options must be an object.");
   }
   const options = value as Record<string, unknown>;
-  onlyKeys(options, ["facebook", "tiktok", "youtube", "instagram", "threads"]);
+  onlyKeys(options, PLATFORM_IDS);
   const threads =
     options.threads === undefined ? undefined : parseThreadsPostOptions(options.threads);
   if (threads === null)
@@ -301,10 +233,6 @@ function providerOptionsField(body: Record<string, unknown>): PostProviderOption
   };
 }
 
-/**
- * Validates Page method and link-carousel choices without requiring media-ready
- * draft content. Attachment/method compatibility is checked before scheduling.
- */
 function facebookOptionsField(value: unknown): FacebookPublishOptions {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new CoreApiError(400, "validation_error", "provider_options.facebook must be an object.");
@@ -408,10 +336,6 @@ function facebookOptionsField(value: unknown): FacebookPublishOptions {
   };
 }
 
-/**
- * Bounds supplied experiment fields while preserving unanswered draft choices.
- * Publishing separately requires two to four draft videos and a member control.
- */
 function facebookABTestOptionsField(value: unknown): NonNullable<FacebookPublishOptions["abTest"]> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new CoreApiError(400, "validation_error", "ab_test must be an object.");
@@ -459,17 +383,6 @@ function facebookABTestOptionsField(value: unknown): NonNullable<FacebookPublish
   };
 }
 
-/**
- * Validates and normalizes the `provider_options.instagram` subtree.
- *
- * Accepts an unanswered post type for drafts while rejecting unknown enum
- * values, non-boolean trial flags, and a graduation strategy without a trial.
- * Scheduling validates that the chosen shape matches the actual media set.
- *
- * @param value - Raw `provider_options.instagram` value from the request payload.
- * @returns Saved Instagram choices with camelCase fields.
- * @throws {CoreApiError} 400 `validation_error` if option keys or types violate schema rules.
- */
 function instagramOptionsField(value: unknown): NonNullable<PostProviderOptions["instagram"]> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new CoreApiError(
@@ -513,16 +426,6 @@ function instagramOptionsField(value: unknown): NonNullable<PostProviderOptions[
   };
 }
 
-/**
- * Validates and normalizes the `provider_options.tiktok` subtree.
- *
- * Enforces the strict key whitelist, optional creator privacy enum, boolean
- * interaction/disclosure flags, and mandatory music-usage confirmation.
- *
- * @param value - Raw `provider_options.tiktok` value from the request payload.
- * @returns Saved TikTok choices with camelCase fields; privacy may be unanswered.
- * @throws {CoreApiError} 400 `validation_error` if option keys or types violate schema rules.
- */
 function tiktokOptionsField(value: unknown): NonNullable<PostProviderOptions["tiktok"]> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new CoreApiError(400, "validation_error", "provider_options.tiktok must be an object.");
@@ -588,18 +491,6 @@ function tiktokOptionsField(value: unknown): NonNullable<PostProviderOptions["ti
   };
 }
 
-/**
- * Validates and normalizes the `provider_options.youtube` subtree.
- *
- * Accepts an unanswered audience declaration in a draft without substituting
- * false. Supplied audience and visibility values remain strictly validated;
- * scheduling requires the explicit audience before creating delivery work.
- * Enum membership rejects inherited Object.prototype names.
- *
- * @param value - Raw `provider_options.youtube` value from the request payload.
- * @returns Saved YouTube choices with camelCase fields.
- * @throws {CoreApiError} 400 `validation_error` if option keys or types violate schema rules.
- */
 function youtubeOptionsField(value: unknown): NonNullable<PostProviderOptions["youtube"]> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new CoreApiError(400, "validation_error", "provider_options.youtube must be an object.");
@@ -629,14 +520,6 @@ function youtubeOptionsField(value: unknown): NonNullable<PostProviderOptions["y
   };
 }
 
-/**
- * Converts provider publication requirements domain entity into the API schema representation.
- *
- * Formats creator details, privacy level arrays, and video duration constraints.
- *
- * @param value - Internal domain provider publication requirements.
- * @returns OpenAPI-compliant `PublishingRequirements` response schema.
- */
 function publishingRequirementsBody(
   value: ProviderPublicationRequirements,
 ): Schemas["PublishingRequirements"] {
@@ -655,20 +538,6 @@ function publishingRequirementsBody(
   };
 }
 
-/**
- * Parses one saved per-Channel target from a Post create, save, or schedule
- * request body.
- *
- * The target mirrors what a Channel will publish: optional caption overrides,
- * hashtags, provider options, and an ordered attachment subset. `attachment_ids`
- * distinguishes three states: omitted or `null` inherits the Post's own
- * attachments, an array overrides both membership and order, and `[]` publishes
- * that Channel as text only without splitting the Post identity.
- *
- * @param body - Raw target definition object.
- * @returns Validated target settings.
- * @throws {CoreApiError} 400 `validation_error` if the payload violates the target contract.
- */
 function postTarget(body: Record<string, unknown>): PostTargetInput {
   onlyKeys(body, [
     "platform_account_id",
@@ -694,17 +563,6 @@ function postTarget(body: Record<string, unknown>): PostTargetInput {
   };
 }
 
-/**
- * Parses the ordered target array of a Post request body.
- *
- * An empty array explicitly saves a draft without Channels or clears its saved
- * target choices; scheduling enforces its separate nonempty intent requirement.
- * At most twenty targets keeps each composition transaction bounded.
- *
- * @param body - Parsed JSON body carrying an optional `targets` member.
- * @returns Validated targets, or `undefined` when the member was omitted.
- * @throws {CoreApiError} 400 `validation_error` when the member is not an array of up to 20 targets.
- */
 function postTargets(body: Record<string, unknown>): PostTargetInput[] | undefined {
   const value = body.targets;
   if (value === undefined) return undefined;
@@ -722,17 +580,6 @@ function postTargets(body: Record<string, unknown>): PostTargetInput[] | undefin
   });
 }
 
-/**
- * Parses the editable composition members of a Post create or draft-save body.
- *
- * `brand_profile_id` is mandatory on every mutation: it is the scope proof that
- * a composer edit belongs to the selected Brand Profile rather than the
- * workspace-wide aggregate view, which stays read-only.
- *
- * @param body - Raw JSON request body.
- * @returns Validated composition fields shared by create and draft save.
- * @throws {CoreApiError} 400 `validation_error` on unknown keys or malformed members.
- */
 function postComposition(body: Record<string, unknown>): {
   attachmentIds?: string[];
   brandProfileId: string;
@@ -750,17 +597,6 @@ function postComposition(body: Record<string, unknown>): {
   };
 }
 
-/**
- * Parses a complete publishing-preferences replacement.
- *
- * The document is intentionally whole-document: template create, edit,
- * reorder, delete, and default selection are one authoritative write, so a
- * partial merge can never leave two defaults or a stale position.
- *
- * @param body - Raw JSON body.
- * @returns Validated replacement document with contract field names.
- * @throws {CoreApiError} 400 when keys, types, or bounds violate the contract.
- */
 function publishingPreferencesInput(
   body: Record<string, unknown>,
 ): components["schemas"]["PublishingPreferencesUpdate"] {
@@ -868,16 +704,6 @@ function publishingPreferencesInput(
   };
 }
 
-/**
- * Obtains a Durable Object stub for managing OAuth state and CSRF tokens.
- *
- * Partitions Durable Object instances by deterministic organization routing key.
- *
- * @param env - Worker environment bindings containing `OAUTH_STATE` namespace.
- * @param routingKey - Deterministic routing key derived from organization ID.
- * @returns Durable Object stub instance.
- * @throws {CoreApiError} 503 `service_unavailable` if `OAUTH_STATE` namespace binding is missing.
- */
 function oauthStateStub(env: ApiWorkerEnv, routingKey: string): OAuthStateStub {
   if (!env.OAUTH_STATE) {
     throw new CoreApiError(503, "service_unavailable", "OAuth state storage is unavailable.");
@@ -885,16 +711,6 @@ function oauthStateStub(env: ApiWorkerEnv, routingKey: string): OAuthStateStub {
   return env.OAUTH_STATE.getByName(routingKey);
 }
 
-/**
- * Constructs the canonical public OAuth callback URL for a given social platform provider.
- *
- * Enforces HTTPS except for local/test callbacks against localhost.
- *
- * @param env - Worker environment bindings containing `APP_URL`.
- * @param provider - Social platform identifier (e.g. `'tiktok'`, `'youtube'`).
- * @returns Fully qualified OAuth redirect URI.
- * @throws {CoreApiError} 503 `service_unavailable` if `APP_URL` is missing or insecure.
- */
 function oauthCallbackUrl(env: ApiWorkerEnv, provider: Platform): string {
   if (!env.APP_URL) {
     throw new CoreApiError(503, "service_unavailable", "The public API URL is unavailable.");
@@ -912,154 +728,28 @@ function oauthCallbackUrl(env: ApiWorkerEnv, provider: Platform): string {
   return target.toString();
 }
 
-/**
- * Encodes a byte array into a URL-safe Base64 string without padding.
- *
- * Converts `+` to `-`, `/` to `_`, and strips trailing `=` characters.
- *
- * @param bytes - Byte buffer to encode.
- * @returns URL-safe Base64 string.
- */
 function base64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(base64PaddingPattern, "");
 }
 
-/**
- * Generates a cryptographically random URL-safe Base64 string of the specified byte length.
- *
- * @param length - Number of random bytes to generate.
- * @returns URL-safe Base64 string.
- */
 function randomBase64Url(length: number): string {
   return base64Url(crypto.getRandomValues(new Uint8Array(length)));
 }
 
-/**
- * Computes a deterministic 16-byte SHA-256 routing key from an organization ID.
- *
- * Used to route OAuth initiation and callback requests to the identical Durable Object instance.
- *
- * @param organizationId - Unique tenant organization identifier.
- * @returns Base64URL-encoded routing key.
- */
 export async function oauthStateRoutingKey(organizationId: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(organizationId));
   return base64Url(new Uint8Array(digest).slice(0, 16));
 }
 
-/**
- * Computes the S256 PKCE code challenge from a code verifier string.
- *
- * Computes SHA-256 digest of the verifier and returns its URL-safe Base64 encoding.
- *
- * @param verifier - PKCE code verifier string.
- * @returns PKCE S256 code challenge string.
- */
 async function pkceChallenge(verifier: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
   return base64Url(new Uint8Array(digest));
 }
 
-/**
- * Route prefix serving verified-domain provider media.
- * Exported so `app.ts` mounts its authentication and flow-ledger exemptions on the
- * exact same prefix instead of duplicating the literal; the Automation Worker keeps
- * its own byte-identical copy in `workers/automation/src/provider-media.ts` because
- * separate worker bundles cannot share source modules. The Automation Worker signs
- * `<APP_URL>/api/v1/provider-media/<key>?expires=<unix>&signature=<b64url>` URLs;
- * this route verifies the HMAC before streaming the private R2 object. The provider
- * registry derives TikTok's media prefix from this route on APP_URL by default;
- * any explicit TIKTOK_MEDIA_URL_PREFIX must still cover emitted URLs.
- */
-export const providerMediaRoutePrefix = "/api/v1/provider-media/";
+export const providerMediaRoutePrefix = PROVIDER_MEDIA_ROUTE_PREFIX;
 
-/**
- * Canonical signing payload bound into every provider-media URL signature.
- * The versioned domain-separation prefix keeps these HMACs distinct from any other
- * `TOKEN_ENCRYPTION_KEY`-derived MAC; expiry and object key are the only signed fields,
- * so a valid signature proves the Automation Worker authorized read access to exactly
- * that key until exactly that second.
- *
- * @param expiresAtSeconds - Unix seconds after which the URL stops verifying.
- * @param key - R2 object key the bearer may read.
- * @returns Canonical `v1\n<expires>\n<key>` payload string.
- */
-function providerMediaPayload(expiresAtSeconds: number, key: string): string {
-  return `meltiply-provider-media-v1\n${expiresAtSeconds}\n${key}`;
-}
-
-/**
- * Decodes an unpadded Base64url string into bytes.
- *
- * @param value - Base64url text from the `signature` query parameter.
- * @returns Decoded bytes, or undefined when the text is not well-formed Base64url.
- */
-function base64UrlDecode(value: string): Uint8Array | undefined {
-  if (!base64UrlPattern.test(value)) return undefined;
-  const base64 = value.replaceAll("-", "+").replaceAll("_", "/");
-  try {
-    const binary = atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4));
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) {
-      bytes[index] = binary.charCodeAt(index);
-    }
-    return bytes;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Verifies a provider-media bearer signature in constant time via WebCrypto.
- * Returns true only when `signature` is the HMAC-SHA256 of the canonical payload under
- * `TOKEN_ENCRYPTION_KEY`. Missing key material or malformed input returns false rather
- * than throwing so the route can deny every failure mode with one response.
- *
- * @param env - Worker environment containing TOKEN_ENCRYPTION_KEY.
- * @param expiresAtSeconds - Signed expiry claim from the URL.
- * @param key - Signed object key claim from the URL path.
- * @param signature - Base64url HMAC-SHA256 digest from the `signature` query parameter.
- * @returns Whether the signature authenticates the expiry and key claims.
- */
-async function verifyProviderMediaSignature(
-  env: ApiWorkerEnv,
-  expiresAtSeconds: number,
-  key: string,
-  signature: string,
-): Promise<boolean> {
-  const secret = env.TOKEN_ENCRYPTION_KEY;
-  const digest = base64UrlDecode(signature);
-  if (!secret || !digest || digest.length !== 32) return false;
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { hash: "SHA-256", name: "HMAC" },
-    false,
-    ["verify"],
-  );
-  return crypto.subtle.verify(
-    "HMAC",
-    cryptoKey,
-    // `digest` is typed over `ArrayBufferLike`, but BufferSource requires an
-    // `ArrayBuffer`-backed view; slice() copies the exact decoded bytes into one.
-    digest.slice(),
-    new TextEncoder().encode(providerMediaPayload(expiresAtSeconds, key)),
-  );
-}
-
-/**
- * Decodes and validates the object key embedded after the provider-media route prefix.
- * Each path segment is percent-decoded independently; the decoded key must keep the asset
- * storage shape (at least three segments, none empty, `.`, `..`, or containing control,
- * slash, or backslash characters) so a signed URL can only ever address a well-formed
- * asset object — never an arbitrary bucket key. Hyphens are legal: canonical storage
- * keys are `<org-uuid>/<asset-uuid>/<file>` and UUID segments are hyphenated.
- *
- * @param pathname - Raw request path beginning with providerMediaRoutePrefix.
- * @returns Decoded object key, or undefined when the path is malformed.
- */
 function providerMediaKey(pathname: string): string | undefined {
   const suffix = pathname.slice(providerMediaRoutePrefix.length);
   if (!suffix) return undefined;
@@ -1071,14 +761,7 @@ function providerMediaKey(pathname: string): string | undefined {
     } catch {
       return undefined;
     }
-    if (
-      !segment ||
-      segment === "." ||
-      segment === ".." ||
-      // Decoded separators would let one segment smuggle extra path depth past the
-      // split, and control characters can hide traversal in downstream tooling.
-      unsafeMediaKeyPattern.test(segment)
-    ) {
+    if (!segment || segment === "." || segment === ".." || unsafeMediaKeyPattern.test(segment)) {
       return undefined;
     }
     segments.push(segment);
@@ -1086,18 +769,6 @@ function providerMediaKey(pathname: string): string | undefined {
   return segments.length >= 3 ? segments.join("/") : undefined;
 }
 
-/**
- * Constructs a browser redirect to the real Channels route with OAuth outcome and
- * provider query parameters.
- *
- * Appends `oauth` status code and `provider` query parameters.
- *
- * @param env - Worker environment bindings containing `APP_URL`.
- * @param provider - Social platform provider identifier.
- * @param outcome - Result status code string (e.g. `'success'` or error code).
- * @returns Fully qualified frontend redirection URL string.
- * @throws {CoreApiError} 503 `service_unavailable` if `APP_URL` is missing.
- */
 function frontendRedirect(
   env: ApiWorkerEnv,
   provider: Platform,
@@ -1123,11 +794,6 @@ function frontendRedirect(
   return target.toString();
 }
 
-/**
- * Preserves provider classification and request facts alongside the shared
- * sanitized error envelope. Original causes and stacks reach operator logs
- * without changing the frontend outcome or exposing OAuth credentials.
- */
 function oauthExchangeDiagnostic(failure: unknown) {
   return {
     ...errorDiagnostic(failure),
@@ -1135,17 +801,6 @@ function oauthExchangeDiagnostic(failure: unknown) {
   };
 }
 
-/**
- * Chooses the frontend OAuth outcome for a failed authorization-code exchange.
- * A provider failure whose code ends in `_selection_required` means the account
- * authorized fine but exposed no single publishable destination (e.g. YouTube
- * channel ambiguity), which is an actionable user decision rather than a
- * provider malfunction. Routing it to the generic `provider_error` message
- * hides the one action that would fix it.
- *
- * @param failure - Squashed Effect failure from the exchange.
- * @returns `selection_required` for destination-selection failures, otherwise `provider_error`.
- */
 function oauthExchangeOutcome(failure: unknown): string {
   return failure instanceof ProviderAdapterError &&
     failure.failure.code.endsWith("_selection_required")
@@ -1153,20 +808,6 @@ function oauthExchangeOutcome(failure: unknown): string {
     : "provider_error";
 }
 
-/**
- * Mounts the complete Meltiply Core API HTTP routes onto the Hono application router.
- *
- * Registers REST endpoints for platform accounts, OAuth connect flows, publication requirements,
- * Posts and their per-Channel publication outcomes, content calendar, analytics, audience comment
- * inbox, asset upload sessions and per-Asset reads. Assets are reachable only
- * through Post attachments and the scoped upload/preview/download helpers, and publication targets
- * are created only by scheduling a Post.
- * Throwing request validators run through the typed bridge before application calls,
- * preserving their public 400 errors rather than turning them into Effect defects.
- *
- * @param app - Hono application instance.
- * @param dependencies - Optional service dependency overrides for unit testing.
- */
 export function registerCoreRoutes(
   app: Hono<ApiWorkerEnvironment>,
   dependencies: CoreRouteDependencies = {},
@@ -1178,7 +819,7 @@ export function registerCoreRoutes(
     }
     return providerRegistry;
   };
-  app.use("*", async (c, next) => {
+  app.use("/api/v1/*", async (c, next) => {
     providerRegistry ??= createProviderRegistryFromEnvironment(c.env);
     await next();
   });
@@ -1513,14 +1154,6 @@ export function registerCoreRoutes(
         ),
       ));
 
-  // Verified-domain provider media: a public surface authenticated by the URL's HMAC
-  // bearer credential rather than a user session (the auth middleware exempts this
-  // prefix). The signature is verified in constant time and the expiry checked before
-  // any object storage access, so invalid, expired, or tampered URLs never reach
-  // storage; the object stays private and streams only to a bearer the Automation
-  // Worker authorized for exactly this key until exactly that second. The read goes
-  // through the configured provider store, so delivery works on R2 and on any
-  // S3-compatible origin alike.
   app.get(`${providerMediaRoutePrefix}*`, async (c) => {
     const key = providerMediaKey(c.req.path);
     const expires = c.req.query("expires");
@@ -1530,7 +1163,12 @@ export function registerCoreRoutes(
       !key ||
       !signature ||
       !Number.isSafeInteger(expiresAt) ||
-      !(await verifyProviderMediaSignature(c.env, expiresAt, key, signature)) ||
+      !(await verifyProviderMediaSignature(
+        c.env.TOKEN_ENCRYPTION_KEY,
+        expiresAt,
+        key,
+        signature,
+      )) ||
       expiresAt <= Math.floor(Date.now() / 1000)
     ) {
       return errorResponse(
@@ -1811,12 +1449,6 @@ export function registerCoreRoutes(
     ),
   );
 
-  /**
-   * Reads current requirements with per-caller validation and response correlation.
-   * Keep the bounded request operation alive after a client disconnect so an
-   * initiating request cannot terminate Provider I/O needed by another waiter.
-   * The execution context stays at this boundary and is never retained by the flight owner.
-   */
   app.get("/api/v1/platforms/:accountId/publishing-requirements", (c) => {
     const response = runRouteEffect(
       c,
@@ -1842,7 +1474,7 @@ export function registerCoreRoutes(
         ),
       );
     } catch {
-      // Synthetic app requests have no execution context; their caller still awaits the operation.
+      return response;
     }
     return response;
   });
@@ -1872,9 +1504,6 @@ export function registerCoreRoutes(
           );
         }
         const actor = c.get("actor");
-        // Actor resolution already proved membership, so the resolved
-        // workspace id is the authoritative OAuth state tenant — no
-        // client-supplied organization header may substitute for it.
         const organizationId = actor.workspace.id;
         const routingKey = yield* fromPromise(() => oauthStateRoutingKey(organizationId));
         const state = `${routingKey}.${randomBase64Url(32)}`;
@@ -1924,13 +1553,9 @@ export function registerCoreRoutes(
       c,
       Effect.gen(function* () {
         const selected = yield* fromPromise(() => platformParam(c.req.param("platform")));
-        // Redirect targets are built inside fromPromise so a missing APP_URL
-        // surfaces as a typed 503 service unavailable failure.
         const redirectTo = (outcome: string) =>
           fromPromise(() => Response.redirect(frontendRedirect(c.env, selected, outcome), 302));
         const state = c.req.query("state")?.trim() ?? "";
-        // The callback is a browser navigation, so every rejection returns to
-        // the Channels surface with an outcome instead of a JSON error page.
         if (state.length < 16) {
           return yield* redirectTo("state_invalid");
         }
@@ -1947,9 +1572,6 @@ export function registerCoreRoutes(
         ) {
           return yield* redirectTo("state_invalid");
         }
-        // `access_denied` is the provider reporting a deliberate refusal; any
-        // other `error` describes a failed exchange and must not be described
-        // to the user as a cancelled grant.
         const providerError = c.req.query("error");
         if (providerError) {
           return yield* redirectTo(
@@ -1965,9 +1587,6 @@ export function registerCoreRoutes(
         }
         const codeVerifier = record.pkce_verifier;
         const authorizationCode = c.req.query("code")!;
-        // Configuration resolution shares the exchange redirect boundary: a consumed
-        // callback must return a failure redirect on either failure, with the outcome
-        // chosen from the provider failure so the banner stays actionable.
         const exchanged: OAuthExchangeResult | Response = yield* Effect.gen(function* () {
           const redirectUri = yield* fromPromise(() => oauthCallbackUrl(c.env, selected));
           const service = yield* ProviderService;
@@ -2015,10 +1634,6 @@ export function registerCoreRoutes(
         if (exchanged instanceof Response) return exchanged;
         const discovered = "accounts" in exchanged ? exchanged.accounts : [exchanged];
         const selectionId = `${routingKey}.${randomBase64Url(32)}`;
-        // Staging is the browser-facing write that arms the assignment ticket.
-        // A storage or encryption failure must return to Channels with
-        // `connection_failed`, not strand the browser on the API callback URL
-        // with a JSON error page.
         const staged: Response | undefined = yield* Effect.gen(function* () {
           const cipher = tokenCipherFor(c.env);
           yield* fromPromise(() =>
@@ -2112,8 +1727,6 @@ export function registerCoreRoutes(
           uuidParam(c.req.param("accountId"), "account_id"),
         );
         const disconnectKey = yield* fromPromise(() => idempotencyKey(c));
-        // Remote revoke is best-effort: a failed upstream revoke logs a warning
-        // and does not block local disconnect.
         yield* revokeConnection(c.env, c.get("actor").claims, accountId, registry()).pipe(
           Effect.catchCause((cause) =>
             Effect.sync(() =>
@@ -2253,9 +1866,6 @@ export function registerCoreRoutes(
           uuidParam(stringField(body, "brand_profile_id"), "brand_profile_id"),
         );
         const actor = c.get("actor");
-        // The chosen profile is validated at the point of persistence, after
-        // authorization has completed. A deleted profile rejects with 409,
-        // while a missing or foreign profile remains a 404.
         const brandProfileService = yield* fromPromise(brandProfiles);
         const profile = yield* brandProfileService.getBrandProfile(
           c.env,
@@ -2334,11 +1944,22 @@ export function registerCoreRoutes(
           catch: () =>
             new CoreApiError(500, "internal_error", "Invalid connection credentials payload."),
           try: () => {
-            const parsed = JSON.parse(plaintext) as OAuthConnection;
-            if (!parsed.accessToken || !parsed.account?.id || parsed.account.id !== accountId) {
+            const parsed: unknown = JSON.parse(plaintext);
+            if (
+              typeof parsed !== "object" ||
+              parsed === null ||
+              !("accessToken" in parsed) ||
+              typeof parsed.accessToken !== "string" ||
+              !parsed.accessToken ||
+              !("account" in parsed) ||
+              typeof parsed.account !== "object" ||
+              parsed.account === null ||
+              !("id" in parsed.account) ||
+              parsed.account.id !== accountId
+            ) {
               throw new TypeError("Invalid connection credentials payload.");
             }
-            return parsed;
+            return parsed as OAuthConnection;
           },
         });
         yield* saveConnection(
@@ -2356,8 +1977,6 @@ export function registerCoreRoutes(
             Effect.gen(function* () {
               const failure = Cause.squash(cause);
               const databaseCause = failure instanceof DatabaseError ? failure.cause : undefined;
-              // SQL data/constraint rejections cannot commit. Connection loss or a
-              // failed COMMIT is ambiguous: retain its profile fence for a safe retry.
               const deterministicDatabaseFailure =
                 databaseCause !== null &&
                 typeof databaseCause === "object" &&
@@ -2590,9 +2209,6 @@ export function registerCoreRoutes(
       c,
       Effect.gen(function* () {
         const postId = yield* fromPromise(() => uuidParam(c.req.param("postId"), "post_id"));
-        // Deletion is scoped like every other Post mutation: the body must name
-        // the Brand Profile expected to own the Post so the workspace-wide
-        // aggregate view can never select one implicitly.
         const body = yield* fromPromise(() => jsonBody(c));
         yield* fromPromise(() => onlyKeys(body, ["brand_profile_id"]));
         const input = {
@@ -3069,10 +2685,6 @@ export function registerCoreRoutes(
           ...(replyStatus ? { replyStatus } : {}),
           unreplied,
         });
-        // Distributions past the demand-driven age threshold have no scheduled
-        // Comment sync; this open is what fetches their Comments. The resolved
-        // actor already proved workspace membership, so the workspace id is
-        // passed directly instead of re-resolving it in the background.
         scheduleInboxCommentSync(c, c.get("actor").workspace.id, distributionId);
         return jsonResponse(inbox, 200, requestId(c));
       }),

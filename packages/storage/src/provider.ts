@@ -1,23 +1,12 @@
-import type { ConfiguredObjectStore, ObjectWriteUrlSigner } from "./object-store";
-import { createR2SignerFromEnv, R2ObjectStore, type R2BucketLike } from "./r2";
+import type { ConfiguredObjectStore } from "./object-store";
+import { createR2SignerFromEnv, R2ObjectStore, type R2BucketLike, type R2SigV4Signer } from "./r2";
 import { S3ObjectStore, type S3SigV4SignerOptions, S3SigV4Signer } from "./s3";
 
 const regionPattern = /^[a-z0-9-]+$/;
 
-/**
- * Object-storage provider selection.
- *
- * Cloudflare R2 remains the default so every existing deployment keeps working
- * untouched; an operator who sets `OBJECT_STORAGE_PROVIDER=s3` moves the same
- * code paths to any S3-compatible origin. Selection happens once, here, so no
- * worker can accidentally construct a store or signer for a different provider
- * than the one its configuration declares.
- */
-
 /** Object storage backends Meltiply can be pointed at. */
 export type ObjectStorageProvider = "r2" | "s3";
 
-/** Provider assumed when `OBJECT_STORAGE_PROVIDER` is unset. */
 const defaultObjectStorageProvider: ObjectStorageProvider = "r2";
 
 /**
@@ -28,11 +17,8 @@ const defaultObjectStorageProvider: ObjectStorageProvider = "r2";
  * sweeps, and private media delivery.
  */
 export interface ObjectStorageEnv {
-  /** R2 bucket binding; only read when the provider is `r2`. */
   ASSETS?: R2BucketLike;
-  /** Worker environment label; only `local`/`test` may sign a plain-HTTP origin. */
   ENVIRONMENT?: string;
-  /** `r2` (default) or `s3`. */
   OBJECT_STORAGE_PROVIDER?: string;
   R2_ACCESS_KEY_ID?: string;
   R2_ACCOUNT_ID?: string;
@@ -42,11 +28,8 @@ export interface ObjectStorageEnv {
   R2_SECRET_ACCESS_KEY?: string;
   S3_ACCESS_KEY_ID?: string;
   S3_BUCKET?: string;
-  /** Origin only (no path), e.g. `https://minio.internal:9000`. */
   S3_ENDPOINT?: string;
-  /** `true` (default) addresses the bucket in the path, `false` in the host. */
   S3_FORCE_PATH_STYLE?: string;
-  /** Lowercase letters, digits, and hyphens; defaults to `us-east-1`. */
   S3_REGION?: string;
   S3_SECRET_ACCESS_KEY?: string;
 }
@@ -59,10 +42,6 @@ export interface ObjectStorageBindingStatus {
 
 /**
  * Resolves the configured provider, defaulting to Cloudflare R2.
- *
- * @param env - Worker environment bindings.
- * @returns The selected provider name.
- * @throws {TypeError} When `OBJECT_STORAGE_PROVIDER` names an unknown provider.
  */
 export function objectStorageProvider(env: ObjectStorageEnv): ObjectStorageProvider {
   const configured = env.OBJECT_STORAGE_PROVIDER?.trim();
@@ -71,18 +50,10 @@ export function objectStorageProvider(env: ObjectStorageEnv): ObjectStorageProvi
   throw new TypeError("OBJECT_STORAGE_PROVIDER must be r2 or s3");
 }
 
-/** True only in the environments that may sign a plain-HTTP origin. */
 function allowsInsecureEndpoint(env: ObjectStorageEnv): boolean {
   return env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test";
 }
 
-/**
- * Parses the path-style addressing switch.
- *
- * @param value - Raw `S3_FORCE_PATH_STYLE` setting; unset means `true`.
- * @returns Whether the bucket belongs in the request path.
- * @throws {TypeError} When the value is present but not `true` or `false`.
- */
 function forcePathStyle(value: string | undefined): boolean {
   const configured = value?.trim();
   if (!configured) return true;
@@ -92,13 +63,6 @@ function forcePathStyle(value: string | undefined): boolean {
   throw new TypeError("S3_FORCE_PATH_STYLE must be true or false");
 }
 
-/**
- * Parses an optional S3 signing region without allowing credential-scope separators.
- *
- * @param value - Raw `S3_REGION`; unset or blank uses the signer's default.
- * @returns Trimmed region, or undefined to retain the default.
- * @throws {TypeError} When a nonblank value contains anything except lowercase letters, digits, or hyphens.
- */
 function s3Region(value: string | undefined): string | undefined {
   const region = value?.trim();
   if (!region) return undefined;
@@ -108,14 +72,6 @@ function s3Region(value: string | undefined): string | undefined {
   return region;
 }
 
-/**
- * Validates the S3 settings and returns them as signer options.
- *
- * @param env - Worker environment bindings carrying the S3 settings.
- * @param allowInsecureEndpoint - Development-only plain-HTTP allowance.
- * @returns Fully resolved signer configuration.
- * @throws {TypeError} When any required setting is missing or malformed.
- */
 function s3SignerOptions(
   env: ObjectStorageEnv,
   allowInsecureEndpoint: boolean,
@@ -138,8 +94,6 @@ function s3SignerOptions(
     endpoint,
     forcePathStyle: forcePathStyle(env.S3_FORCE_PATH_STYLE),
     ...(now ? { now } : {}),
-    // Unset region falls back to the signer's own default, so the fallback
-    // lives in exactly one place.
     ...(region ? { region } : {}),
     secretAccessKey,
   };
@@ -152,16 +106,11 @@ function s3SignerOptions(
  * uploads, previews, and downloads without this worker holding the R2 binding.
  * The development-only permission to sign a plain-HTTP origin is derived from
  * `ENVIRONMENT` alone, so no configuration value can enable it in deployment.
- *
- * @param env - Worker environment bindings.
- * @param now - Optional clock override for deterministic tests.
- * @returns Configured signer for download, upload, multipart, and exact-write grants.
- * @throws {TypeError} When the provider is unknown or its credentials are incomplete or untrusted.
  */
 export function createObjectUrlSignerFromEnv(
   env: ObjectStorageEnv,
   now?: () => Date,
-): ObjectWriteUrlSigner {
+): R2SigV4Signer | S3SigV4Signer {
   if (objectStorageProvider(env) === "s3") {
     return new S3SigV4Signer(s3SignerOptions(env, allowsInsecureEndpoint(env), now));
   }
@@ -173,10 +122,6 @@ export function createObjectUrlSignerFromEnv(
  *
  * Every worker that touches stored bytes goes through this factory, so a
  * provider switch changes one configuration value rather than every call site.
- *
- * @param env - Worker environment bindings.
- * @returns Store implementing the full object contract, including streaming reads.
- * @throws {TypeError} When the provider is unknown, its bucket binding is missing, or its settings are incomplete.
  */
 export function createObjectStoreFromEnv(env: ObjectStorageEnv): ConfiguredObjectStore {
   if (objectStorageProvider(env) === "s3") {
@@ -198,10 +143,6 @@ export function createObjectStoreFromEnv(env: ObjectStorageEnv): ConfiguredObjec
  * boolean, and `S3_REGION` must be safe to include in a signing scope. The probe
  * agrees with `createObjectStoreFromEnv` rather than contradicting it. The R2
  * list keeps the historical binding names and readiness output unchanged.
- *
- * @param env - Worker environment bindings.
- * @returns One entry per binding the selected provider requires.
- * @throws {TypeError} When `OBJECT_STORAGE_PROVIDER` names an unknown provider.
  */
 export function objectStorageBindings(
   env: ObjectStorageEnv,
@@ -225,18 +166,10 @@ export function objectStorageBindings(
   ];
 }
 
-/**
- * Reports whether `S3_ENDPOINT` is present and accepted as a signing origin.
- *
- * @param env - Worker environment bindings.
- * @returns True when the signer would accept the configured endpoint.
- */
 function isUsableS3Endpoint(env: ObjectStorageEnv): boolean {
   const endpoint = env.S3_ENDPOINT?.trim();
   if (!endpoint) return false;
   try {
-    // Constructing the signer is the single definition of "acceptable origin";
-    // readiness reports it rather than re-deriving the rules.
     new S3SigV4Signer({
       accessKeyId: "readiness",
       allowInsecureEndpoint: allowsInsecureEndpoint(env),
@@ -250,12 +183,6 @@ function isUsableS3Endpoint(env: ObjectStorageEnv): boolean {
   }
 }
 
-/**
- * Reports whether `S3_FORCE_PATH_STYLE` is unset or a valid boolean.
- *
- * @param env - Worker environment bindings.
- * @returns True when the setting is absent or parses.
- */
 function isUsablePathStyle(env: ObjectStorageEnv): boolean {
   try {
     forcePathStyle(env.S3_FORCE_PATH_STYLE);
@@ -265,12 +192,6 @@ function isUsablePathStyle(env: ObjectStorageEnv): boolean {
   }
 }
 
-/**
- * Reports whether the optional region can form a valid SigV4 credential scope.
- *
- * @param env - Worker environment bindings.
- * @returns True when `S3_REGION` is absent, blank, or valid.
- */
 function isUsableS3Region(env: ObjectStorageEnv): boolean {
   try {
     s3Region(env.S3_REGION);

@@ -11,8 +11,6 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 const { withTenantTransactionEffect } = vi.hoisted(() => ({
   withTenantTransactionEffect: vi.fn(),
 }));
-// pg cannot run inside the workerd test isolate. Only database I/O is scripted;
-// the HTTP guard, broadcast program, token cryptography and Provider Layer run.
 vi.mock("../src/database", () => ({ withTenantTransactionEffect }));
 
 import { createApiApp } from "../src/app";
@@ -44,7 +42,6 @@ const actor: ResolvedActor = {
   workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Workspace", slug: "workspace" },
 };
 
-/** Supplies explicit database outcomes; unexpected I/O fails rather than silently authorizing a request. */
 function databaseAnswers(...answers: Array<Record<string, unknown>[]>) {
   const query = vi.fn<EffectTransactionClient["query"]>();
   for (const rows of answers)
@@ -67,7 +64,6 @@ function databaseAnswers(...answers: Array<Record<string, unknown>[]>) {
   );
 }
 
-/** Builds one eligible encrypted Channel row; individual cases override database-derived authorization/state. */
 async function broadcastRow(patch: Record<string, unknown> = {}) {
   return {
     org_id: actor.workspace.id,
@@ -83,7 +79,6 @@ async function broadcastRow(patch: Record<string, unknown> = {}) {
   };
 }
 
-/** Runs the actual authenticated routes with a per-test Provider adapter; no broadcast service is replaced. */
 function appWithProvider(overrides: Partial<ProviderAdapter> = {}) {
   const provider: ProviderAdapter = {
     capability: {

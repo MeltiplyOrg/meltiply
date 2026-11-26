@@ -18,16 +18,6 @@ import { createApiApp } from "../src/app";
 import { systemPoolFor, withSystemTransactionEffect } from "../src/database";
 import type { ApiWorkerEnv } from "../src/env";
 
-/**
- * Real acceptance coverage for improvement reporting.
- *
- * The HTTP surface is the production one (`createApiApp`, unmodified), the state
- * is real PostgreSQL, and the destination is a real loopback HTTP receiver that
- * records the bytes the transport actually sent. No module-level mock stands in
- * for the reporting module: a passing reporting path means an outbound request
- * body was observed, or definitively was not.
- */
-
 const connectionString = process.env.MELTIPLY_DATABASE_TEST_URL;
 if (!connectionString) {
   throw new Error("MELTIPLY_DATABASE_TEST_URL is required for PostgreSQL integration suites");
@@ -38,7 +28,6 @@ const workspaceId = "20000000-0000-4000-8000-000000000005";
 const ownerUserId = "10000000-0000-4000-8000-000000000001";
 const viewerUserId = "10000000-0000-4000-8000-000000000004";
 
-/** One recorded capture request; the assertion surface for every egress case. */
 interface CapturedRequest {
   body: Record<string, unknown>;
   url: string;
@@ -49,9 +38,7 @@ const receiver = {
     kind: "ok",
   } as { kind: "ok" } | { kind: "status"; status: number },
   requests: [] as CapturedRequest[],
-  /** How many recorded requests a test has already observed. */
   consumed: 0,
-  /** Signalled once per accepted capture request, so no test polls on a clock. */
   listeners: [] as (() => void)[],
 };
 
@@ -61,8 +48,10 @@ const server = createServer((request, response) => {
   request.on("end", () => {
     const text = Buffer.concat(chunks).toString("utf8");
     if (text.length > 0) {
+      const parsed: unknown = JSON.parse(text);
       receiver.requests.push({
-        body: JSON.parse(text) as Record<string, unknown>,
+        body:
+          parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {},
         url: request.url ?? "",
       });
     }
@@ -75,10 +64,7 @@ const server = createServer((request, response) => {
 
 let receiverOrigin = "";
 
-/** Resolves on the next capture request; rejects if none arrives in time. */
 function nextCapture(timeoutMilliseconds = 5_000): Promise<CapturedRequest> {
-  // A report can already be on the wire: the diagnostic route delivers on the
-  // request's background continuation before the response reaches this test.
   if (receiver.requests.length > receiver.consumed) {
     receiver.consumed += 1;
     return Promise.resolve(receiver.requests[receiver.consumed - 1]!);
@@ -121,12 +107,9 @@ const identities: Record<string, JwtIdentity> = {
 };
 
 const app = createApiApp({
-  // Only token verification is a fixture. Memberships, authorization,
-  // idempotency, Audit and reporting state all run against the real database.
   verifyJwtToken: async (_env, token) => identities[token]!,
 });
 
-/** Sends an authenticated request to the real HTTP surface. */
 function request(
   path: string,
   role: keyof typeof identities,
@@ -171,14 +154,12 @@ interface FeedbackBody {
   submitted_at: string | null;
 }
 
-/** Reads the reporting policy over real HTTP. */
 async function readPolicy(role: keyof typeof identities = "owner"): Promise<PolicyBody> {
   const response = await request("/installation/reporting", role);
   expect(response.status).toBe(200);
   return response.json<PolicyBody>();
 }
 
-/** Sets the reporting choices through the Owner-only route. */
 function setPreferences(
   usage: boolean,
   diagnostics: boolean,
@@ -190,25 +171,12 @@ function setPreferences(
   });
 }
 
-/**
- * Restores a clean, unconsented reporting state and the original Owner.
- *
- * The single-owner flag is cleared first: the partial unique index forbids two
- * simultaneous owners, so one statement that flips both rows can transiently
- * violate it depending on row order.
- */
 async function resetReportingState() {
   const database = systemPoolFor(env);
   await database.query("DELETE FROM reporting_pending_reports");
   await database.query("DELETE FROM reporting_attribution_responses");
   await database.query("DELETE FROM reporting_preferences");
-  // Reporting is the only writer of these actions in this suite, so clearing
-  // them keeps the audit count assertion scoped to the current test.
   await database.query("DELETE FROM workspace_audit_entries WHERE action LIKE 'reporting.%'");
-  // Handing ownership to another account is deliberately exercised below, and
-  // actor resolution promotes the current Owner to Workspace Admin. That write
-  // outlives the ownership flip, so the canonical roles are restored here —
-  // otherwise a later suite in the same run sees the Viewer as an Admin.
   await database.query(
     `UPDATE org_members SET role = 'viewer', updated_at = now()
      WHERE org_id = $1 AND user_id = $2`,
@@ -220,7 +188,6 @@ async function resetReportingState() {
   ]);
 }
 
-/** Builds the production reporting service for the current bindings. */
 function reportingService(
   options: Partial<Pick<ReportingServiceOptions, "now" | "transport">> = {},
 ) {
@@ -238,7 +205,6 @@ function reportingService(
   });
 }
 
-/** Runs one service program with the production layer. */
 function withReporting<A, E>(
   program: (service: ReportingServiceShape) => Effect.Effect<A, E>,
   options: Partial<Pick<ReportingServiceOptions, "now" | "transport">> = {},
@@ -248,7 +214,6 @@ function withReporting<A, E>(
   );
 }
 
-/** Enqueues one aggregate usage summary for the current interval. */
 function enqueueUsage(reportDate = "2026-01-02"): Promise<"queued" | "skipped"> {
   return withReporting(
     (reporting) =>
@@ -278,12 +243,10 @@ function enqueueUsage(reportDate = "2026-01-02"): Promise<"queued" | "skipped"> 
   );
 }
 
-/** Runs one real delivery pass. */
 function runDelivery(limit = 10): Promise<DeliverySummary> {
   return withReporting((reporting) => reporting.deliverPending({ limit }));
 }
 
-/** Reads every pending row, including terminal states. */
 async function pendingRows() {
   const result = await systemPoolFor(env).query<{
     attempts: number;
@@ -371,7 +334,6 @@ describe("reporting policy over real HTTP", () => {
       [workspaceId],
     );
     expect(audit.rows[0]?.after_state).toMatchObject({ usage: true, usage_effective: true });
-    // The trail never carries the pseudonymous identifier.
     expect(JSON.stringify(audit.rows[0]?.after_state)).not.toContain(
       updated.installation_reporting_id!,
     );
@@ -421,8 +383,6 @@ describe("reporting policy over real HTTP", () => {
 
     expect((await setPreferences(true, true, "owner")).status).toBe(403);
     expect((await setPreferences(true, true, "viewer")).status).toBe(200);
-    // `afterEach` restores the canonical Owner and the membership roles this
-    // case changed, so the next suite never inherits a promoted Viewer.
   });
 
   it("replays an idempotent preference change without a second audit entry", async () => {
@@ -539,7 +499,6 @@ describe("discovery-source feedback", () => {
     const rows = await pendingRows();
     expect(rows).toHaveLength(1);
 
-    // The frozen UUID and timestamp are what PostHog de-duplicates on.
     const before = rows[0]!;
     await runDelivery();
     const after = (await pendingRows())[0]!;
@@ -580,8 +539,6 @@ describe("discovery-source feedback", () => {
   });
 
   it("still shares when neither reporting category is enabled", async () => {
-    // Feedback has its own consent: enabling reporting is not required, and
-    // submitting feedback is not consent for reporting.
     const response = await request("/installation/reporting/feedback", "owner", {
       body: { discovery_source: "ai_assistant" },
     });
@@ -665,8 +622,6 @@ describe("diagnostic ingestion", () => {
       platform: "threads",
       provider_failure_class: "rate_limit",
     });
-    // The expected condition stays countable and handled, and its group value is
-    // the fixed category rather than any Provider message.
     expect(properties.$exception_list).toMatchObject([
       {
         mechanism: { handled: true },
@@ -696,10 +651,6 @@ describe("diagnostic ingestion", () => {
 
     const captured = await nextCapture();
     const serialized = JSON.stringify(captured.body);
-    // Every sensitive value the boundary saw is a canary, including the module
-    // file and function the stack named. The exact frame shape is the
-    // sanitizer's business and is proven in its own unit suite, so it is not
-    // pinned here.
     for (const canary of [
       "Acme launch",
       "alpha@meltiply.local",
@@ -786,7 +737,6 @@ describe("bounded local delivery", () => {
     expect(reenabled.categories.usage.interval_started_at).not.toBe(
       enabled.categories.usage.interval_started_at,
     );
-    // The installation identity is minted once and never rotated by a toggle.
     expect(reenabled.installation_reporting_id).toBe(enabled.installation_reporting_id);
   });
 
@@ -795,7 +745,6 @@ describe("bounded local delivery", () => {
     await enqueueUsage();
     expect(await pendingRows()).toHaveLength(1);
 
-    // Withdraw before the queued report is delivered.
     await setPreferences(false, false);
     const summary = await runDelivery();
 
@@ -816,13 +765,9 @@ describe("bounded local delivery", () => {
     expect((await pendingRows())[0]!.state).toBe("pending");
 
     env.REPORTING_FORCED_OFF = "true";
-    // The failed row is inside its backoff window, so this pass claims nothing
-    // and therefore sends nothing.
     expect((await runDelivery()).claimed).toBe(0);
     expect(receiver.requests).toHaveLength(1);
 
-    // Make the retry due: the operator override must now discard the row rather
-    // than let the retry reach the network.
     await systemPoolFor(env).query(
       "UPDATE reporting_pending_reports SET available_at = now() - INTERVAL '1 second'",
     );
@@ -831,16 +776,12 @@ describe("bounded local delivery", () => {
     expect(discarded.discarded).toBe(1);
     expect((await pendingRows())[0]!.state).toBe("discarded");
     expect((await pendingRows())[0]!.last_error_code).toBe("policy_revoked");
-    // Only the first (failed) attempt reached the network.
     expect(receiver.requests).toHaveLength(1);
   });
 
   it("discards a report that outlived the seven-day window instead of sending it late", async () => {
     await setPreferences(true, false);
     await enqueueUsage();
-    // Age the row beyond the delivery horizon. Creation moves with it so the
-    // seven-day horizon constraint still holds: the row existed eight days and
-    // expired one day ago.
     await systemPoolFor(env).query(
       `UPDATE reporting_pending_reports
        SET created_at = now() - INTERVAL '8 days',
@@ -875,8 +816,6 @@ describe("bounded local delivery", () => {
 
     const summary = await runDelivery();
 
-    // A transport failure is a bounded value, not an exception: the pending row
-    // is rescheduled and no domain record changed.
     expect(summary.failed).toBe(1);
     expect(receiver.requests).toHaveLength(0);
   });
@@ -885,7 +824,6 @@ describe("bounded local delivery", () => {
 describe("sensitive canaries never reach the destination", () => {
   it("keeps workspace names, emails, content and credentials out of the payload", async () => {
     await setPreferences(true, true);
-    // Deliberate canaries in a diagnostic stack and in the reporting period.
     const canaryStack = [
       "Error: failed to publish 'Quarterly launch teaser' to @acme-channels",
       "    at publish (workers/automation/src/distribution.ts:42:7)",
@@ -913,9 +851,6 @@ describe("sensitive canaries never reach the destination", () => {
     ]) {
       expect(serialized, canary).not.toContain(canary);
     }
-    // The report stays useful — a stack frame survives — while the module file
-    // and function the stack named never ride along. The exact emitted token is
-    // the sanitizer's own unit concern, so it is not pinned here.
     expect(serialized).toContain("stacktrace");
     expect(serialized).not.toContain("distribution.ts");
     expect(serialized).not.toContain("publishDistribution");
@@ -923,16 +858,6 @@ describe("sensitive canaries never reach the destination", () => {
 });
 
 describe("consent-interval fencing over real HTTP", () => {
-  /**
-   * Enqueues one diagnostic through the real service producer.
-   *
-   * The HTTP ingestion route also drains on the request's background
-   * continuation, so its row is already sent by the time the response returns.
-   * The fencing property under test starts from a row that is still queued, and
-   * the automation producer is that same production write without the drain.
-   *
-   * @returns The producer's decision for the report.
-   */
   async function enqueueDiagnostic() {
     return withReporting((reporting) =>
       reporting.enqueueDiagnostic({
@@ -945,19 +870,12 @@ describe("consent-interval fencing over real HTTP", () => {
     );
   }
 
-  /**
-   * Proves the withdrawn interval's rows can never reach egress after the Owner
-   * re-enables: a detached batch claimed before the withdrawal is not
-   * authorized by the new interval.
-   */
   it("never sends a row claimed before a withdrawal after re-enabling", async () => {
     await setPreferences(false, true);
     expect(await enqueueDiagnostic()).toBe("queued");
     const firstIntervalRow = (await pendingRows())[0]!;
     expect(firstIntervalRow.state).toBe("pending");
 
-    // Claim the row without sending it: this is the detached batch state a
-    // delivery pass holds while the Owner changes their mind.
     await systemPoolFor(env).query(
       `UPDATE reporting_pending_reports
        SET state = 'leased', attempts = attempts + 1,
@@ -970,7 +888,6 @@ describe("consent-interval fencing over real HTTP", () => {
     const reenabled = await setPreferences(false, true);
     expect(reenabled.status).toBe(200);
 
-    // Make the claimed row due again and run a real pass.
     await systemPoolFor(env).query(
       `UPDATE reporting_pending_reports
        SET state = 'pending', lease_token = NULL, lease_expires_at = NULL,
@@ -983,7 +900,6 @@ describe("consent-interval fencing over real HTTP", () => {
     expect(row!.state).toBe("discarded");
     expect(row!.last_error_code).toBe("stale_interval");
 
-    // A newly consented failure in the new interval still transmits exactly once.
     await request("/installation/reporting/diagnostics", "owner", {
       body: {
         category: "request_failure",
@@ -996,10 +912,6 @@ describe("consent-interval fencing over real HTTP", () => {
     expect(receiver.requests).toHaveLength(1);
   });
 
-  /**
-   * A withdrawn row is discarded rather than transmitted when the live policy no
-   * longer authorizes its category at all.
-   */
   it("discards a claimed row whose category was withdrawn", async () => {
     await setPreferences(false, true);
     expect(await enqueueDiagnostic()).toBe("queued");
@@ -1023,18 +935,12 @@ describe("consent-interval fencing over real HTTP", () => {
     expect((await pendingRows())[0]!.state).toBe("discarded");
   });
 
-  /**
-   * A failure repeated in the same hour after a withdrawal and re-enable belongs
-   * to the new interval, so it must not be absorbed by the old discarded row.
-   */
   it("admits a same-hour failure from the re-enabled interval", async () => {
     await setPreferences(false, true);
     expect(await enqueueDiagnostic()).toBe("queued");
     await setPreferences(false, false);
     await setPreferences(false, true);
 
-    // The repeat is produced after the re-enable, so it belongs to the new
-    // interval and must not be absorbed by the withdrawn interval's row.
     expect(await enqueueDiagnostic()).toBe("queued");
 
     const summary = await runDelivery();
@@ -1042,17 +948,11 @@ describe("consent-interval fencing over real HTTP", () => {
     const captured = await nextCapture();
     expect(captured.body.event).toBe("$exception");
     const rows = await pendingRows();
-    // One discarded row from the withdrawn interval, one sendable from the new.
     expect(rows.map((row) => row.state).sort()).toEqual(["discarded", "sent"]);
   });
 });
 
 describe("delivery-lease recovery over real HTTP", () => {
-  /**
-   * An invocation that claimed a row and then died leaves an expired lease. A
-   * later real pass must resume the same frozen row rather than waiting for the
-   * seven-day discard.
-   */
   it("reclaims an expired lease with the frozen event identity", async () => {
     await setPreferences(true, false);
     await enqueueUsage();
@@ -1070,17 +970,12 @@ describe("delivery-lease recovery over real HTTP", () => {
     expect(captured.body.uuid).toBe(claimed!.event_uuid);
     const [after] = await pendingRows();
     expect(after!.state).toBe("sent");
-    // The retry repeated the original identity rather than minting a new one.
     expect(after!.event_uuid).toBe(claimed!.event_uuid);
     expect(after!.event_timestamp).toEqual(claimed!.event_timestamp);
   });
 });
 
 describe("terminal payload retention over real HTTP", () => {
-  /**
-   * A delivered report's payload must not outlive its window. Only the minimal
-   * receipt stays, and it keeps the logical identity from being replayed.
-   */
   it("prunes the delivered payload and keeps the identity from being replayed", async () => {
     await setPreferences(true, false);
     await enqueueUsage();
@@ -1088,7 +983,6 @@ describe("terminal payload retention over real HTTP", () => {
     await runDelivery();
     expect(receiver.requests).toHaveLength(1);
 
-    // Age the terminal row past the prune window and run the pass that prunes.
     await systemPoolFor(env).query(
       `UPDATE reporting_pending_reports SET updated_at = now() - INTERVAL '2 hours'`,
     );
@@ -1104,16 +998,11 @@ describe("terminal payload retention over real HTTP", () => {
     );
     expect(receipts.rows).toEqual([{ state: "sent" }]);
 
-    // The same logical report cannot be re-created and re-sent.
     expect(await enqueueUsage()).toBe("skipped");
     expect(receiver.requests).toHaveLength(1);
     expect(before!.event_uuid).toBeDefined();
   });
 
-  /**
-   * Pruning a feedback receipt must not make the surface forget it was
-   * delivered: the receipt is the honest second source of truth.
-   */
   it("keeps the feedback delivery state after its payload is pruned", async () => {
     await request("/installation/reporting/feedback", "owner", {
       body: { discovery_source: "github" },
@@ -1130,10 +1019,6 @@ describe("terminal payload retention over real HTTP", () => {
 });
 
 describe("concurrent first attribution submission over real HTTP", () => {
-  /**
-   * Two first submissions with different idempotency keys must converge on one
-   * recorded answer and one outbound event, not race the singleton insert.
-   */
   it("converges on one answer and one outbound event", async () => {
     const [first, second] = await Promise.all([
       request("/installation/reporting/feedback", "owner", {
@@ -1162,10 +1047,6 @@ describe("concurrent first attribution submission over real HTTP", () => {
 });
 
 describe("disclosure-version enforcement over real HTTP", () => {
-  /**
-   * A requested category whose stored disclosure version is missing or unknown
-   * must not transmit, and the retained metadata must stay truthful.
-   */
   it("fails closed on a null, stale, or unknown category disclosure version", async () => {
     await setPreferences(false, true);
     for (const version of [null, 7]) {
@@ -1189,20 +1070,12 @@ describe("disclosure-version enforcement over real HTTP", () => {
       expect(await pendingRows()).toHaveLength(0);
     }
 
-    // A genuine new decision restores transmission. Re-saving the same value
-    // deliberately does not: an unchanged choice must not silently upgrade a
-    // stale disclosure to the current version, so the Owner has to decline and
-    // accept again for the stored version to advance.
     expect((await readPolicy()).categories.diagnostics.effective).toBe(false);
     await setPreferences(false, false);
     await setPreferences(false, true);
     expect((await readPolicy()).categories.diagnostics.effective).toBe(true);
   });
 
-  /**
-   * Changing one category must not silently upgrade the other's recorded
-   * decision to the current disclosure version.
-   */
   it("preserves the unchanged category's decision metadata", async () => {
     await setPreferences(true, false);
     await systemPoolFor(env).query(
@@ -1210,7 +1083,6 @@ describe("disclosure-version enforcement over real HTTP", () => {
       ["2026-01-01T00:00:00.000Z"],
     );
 
-    // Change only diagnostics.
     await setPreferences(true, true);
 
     const stored = await systemPoolFor(env).query<{
@@ -1221,7 +1093,6 @@ describe("disclosure-version enforcement over real HTTP", () => {
     expect(new Date(stored.rows[0]!.usage_decided_at).toISOString()).toBe(
       "2026-01-01T00:00:00.000Z",
     );
-    // Usage is not effective under a stale disclosure version, so nothing sends.
     const policy = await readPolicy();
     expect(policy.categories.usage.effective).toBe(false);
     expect(policy.categories.diagnostics.effective).toBe(true);

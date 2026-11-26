@@ -7,7 +7,6 @@ export interface TopToolbarButtonProps extends React.ButtonHTMLAttributes<HTMLBu
   label: string;
 }
 
-/** Canonical named filter trigger; forwards menu refs while keeping labels and focus stable. */
 export const TopToolbarButton = React.forwardRef<HTMLButtonElement, TopToolbarButtonProps>(
   ({ label, className, ...props }, ref) => (
     <Button

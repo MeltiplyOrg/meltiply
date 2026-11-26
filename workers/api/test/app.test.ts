@@ -5,7 +5,7 @@ import { createExecutionContext } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { createApiApp } from "../src/app";
+import { createApiApp, responseErrorCode } from "../src/app";
 import type { ResolvedActor } from "../src/actor-resolution";
 import { CoreApiError } from "../src/core-types";
 import worker from "../src/index";
@@ -77,8 +77,6 @@ const actor: ResolvedActor = {
   },
 };
 
-// Verified Better Auth JWT identity returned by the `verifyJwtToken` test
-// double; the bearer JWT is the only credential protected routes may accept.
 const jwtIdentity: JwtIdentity = {
   email: "alpha@example.com",
   name: "Alpha User",
@@ -89,10 +87,6 @@ const bearerAuthorization = "Bearer test-only.jwt";
 
 type UserProfile = components["schemas"]["UserProfile"];
 
-/**
- * Minimal contract-shaped profile returned by the `loadCurrentUser` test double
- * whenever a route must reach the current-user handler.
- */
 const userProfile: UserProfile = {
   active_organization: {
     id: actor.workspace.id,
@@ -599,8 +593,6 @@ describe("API Worker foundation", () => {
       } as Hyperdrive,
     };
 
-    // A successful probe caches ready components for this database pair; the
-    // next request under a different mail configuration must not reuse them.
     const ready = await app.request(
       "/api/v1/ready",
       {},
@@ -849,9 +841,6 @@ describe("API Worker foundation", () => {
   });
 
   it("exposes the Better Auth JWT header on credentialed cross-origin responses", async () => {
-    // The JWT plugin answers session reads with `set-auth-jwt`; browsers only
-    // let frontend code read response headers named by
-    // Access-Control-Expose-Headers, so the wrapper must list it.
     const jwtAuth = {
       ...fakeBetterAuth,
       handler: vi.fn(
@@ -978,8 +967,6 @@ describe("API Worker foundation", () => {
         resolveActor,
         verifyJwtToken,
       });
-      // A session cookie rides along on every row: it must never substitute
-      // for a missing or malformed bearer JWT.
       const response = await app.request(
         "/api/v1/users/me",
         {
@@ -1145,6 +1132,42 @@ describe("API Worker foundation", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "workspace_forbidden" },
     });
+  });
+
+  it("extracts error codes from small JSON error bodies", async () => {
+    await expect(
+      responseErrorCode(
+        Response.json({ error: { code: "quota_exceeded", message: "slow down" } }, { status: 429 }),
+      ),
+    ).resolves.toBe("quota_exceeded");
+  });
+
+  it("reads at most the 8 KiB probe cap when Content-Length is absent", async () => {
+    const oversized = Response.json(
+      {
+        error: { code: "internal_error", message: "x".repeat(16 * 1024) },
+      },
+      { status: 500 },
+    );
+    expect(oversized.headers.get("Content-Length")).toBeNull();
+    await expect(responseErrorCode(oversized)).resolves.toBeUndefined();
+
+    const small = Response.json({ error: { code: "internal_error" } }, { status: 500 });
+    await expect(responseErrorCode(small)).resolves.toBe("internal_error");
+  });
+
+  it("ignores non-error and non-JSON responses", async () => {
+    await expect(
+      responseErrorCode(Response.json({ ok: true }, { status: 200 })),
+    ).resolves.toBeUndefined();
+    await expect(
+      responseErrorCode(
+        new Response("plain failure", {
+          headers: { "Content-Type": "text/plain" },
+          status: 500,
+        }),
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("routes /api/auth/* to the Better Auth handler", async () => {

@@ -1,12 +1,95 @@
-/**
- * Owns consent, closed event schemas, minimization and durable PostHog delivery.
- * Canonical operational observability remains installation-local and separate.
- */
-export * from "./configuration";
-export * from "./contracts";
-export * from "./diagnostics";
-export * from "./policy";
-export * from "./sanitize";
-export * from "./service";
-export * from "./transport";
-export * from "./usage";
+export {
+  reportedAppVersion,
+  reportingConfiguration,
+  reportingDestination,
+  type ReportingBindingValues,
+  type ReportingConfiguration,
+  type ReportingDestination,
+} from "./configuration";
+export {
+  DIAGNOSTIC_CATEGORIES,
+  DISCOVERY_SOURCES,
+  isDiagnosticCategory,
+  isDiscoverySource,
+  isOperationCategory,
+  isProviderFailureClass,
+  OPERATION_CATEGORIES,
+  PROVIDER_FAILURE_CLASSES,
+  REPORTING_CATEGORIES,
+  REPORTING_DELIVERY_BUDGET_MILLISECONDS,
+  REPORTING_DISCLOSURE_VERSION,
+  REPORTING_MAX_DELIVERY_BATCH,
+  REPORTING_MAX_DIAGNOSTICS_PER_HOUR,
+  REPORTING_MAX_PENDING_AGE_DAYS,
+  REPORTING_MAX_PENDING_ROWS,
+  REPORTING_SCHEMA_VERSION,
+  ReportingInputError,
+  USAGE_ENGAGEMENT_METRICS,
+  type CaptureEvent,
+  type CaptureResult,
+  type CaptureTransport,
+  type DeliverySummary,
+  type DeploymentCategory,
+  type DiagnosticCategory,
+  type DiagnosticReportInput,
+  type DiscoverySource,
+  type FeedbackDeliveryStatus,
+  type OperationCategory,
+  type PendingReportCategory,
+  type ProviderFailureClass,
+  type ReportingCategory,
+  type ReportingCategoryReason,
+  type ReportingCategoryStatus,
+  type ReportingFeedbackState,
+  type ReportingPolicySnapshot,
+  type UsageEngagement,
+  type UsageEngagementCoverage,
+  type UsageEngagementMetric,
+  type UsageReportInput,
+} from "./contracts";
+export {
+  diagnosticReportInput,
+  extractProviderFailureClass,
+  type DiagnosticBoundaryInput,
+} from "./diagnostics";
+export {
+  categoryEffective,
+  categoryStatus,
+  feedbackEffective,
+  isoOrNull,
+  policySnapshot,
+  retryDelaySeconds,
+  type PreferencesRow,
+} from "./policy";
+export {
+  boundedCount,
+  containsForbiddenValue,
+  diagnosticProperties,
+  feedbackProperties,
+  payloadViolation,
+  REPORTING_EVENTS,
+  sanitizedFrames,
+  usageProperties,
+} from "./sanitize";
+export {
+  createReportingServiceLive,
+  createReportingServiceTest,
+  loadPreferences,
+  lockReportingMeasurement,
+  ReportingService,
+  type ReportingClient,
+  type ReportingQueryResult,
+  type ReportingServiceOptions,
+  type ReportingServiceShape,
+  type ReportingTransactionRunner,
+} from "./service";
+export {
+  CAPTURE_TIMEOUT_MILLISECONDS,
+  createPostHogTransport,
+  type PostHogTransportOptions,
+} from "./transport";
+export {
+  recordPublicationUsage,
+  type PublicationConfirmation,
+  type PublicationMeasurementOutcome,
+} from "./usage";

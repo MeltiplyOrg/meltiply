@@ -7,8 +7,6 @@ import { cn } from "@meltiply/ui/utils";
 
 import { appendDevBoxEvent, subscribeDevBoxEvents, type DevBoxEvent } from "./event-log";
 
-// The official TanStack Query devtools panel is a devDependency loaded on
-// demand — it never ships to production and only mounts while this tab is open.
 const LazyQueryDevtools = lazy(async () => {
   const { ReactQueryDevtoolsPanel } = await import("@tanstack/react-query-devtools");
   return { default: ReactQueryDevtoolsPanel };
@@ -24,14 +22,6 @@ interface TraceTabProps {
   queryClient: QueryClient | null;
 }
 
-/**
- * Trace tab: embedded query cache inspector plus a live event stream.
- *
- * The official `ReactQueryDevtoolsPanel` covers query key filtering, fetch
- * statuses, observer counts, and manual refetch/invalidate/mutation controls.
- * Below it, a capped live log renders `meltiply:frontend-telemetry` and
- * runtime-status/auth events with severity badges and expandable payloads.
- */
 export function TraceTab({ queryClient }: TraceTabProps): React.ReactElement {
   const [events, setEvents] = useState<DevBoxEvent[]>([]);
   const { theme } = useTheme();

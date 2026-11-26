@@ -1,15 +1,3 @@
-/**
- * `@meltiply/storage` — object storage for Meltiply.
- *
- * The package is organized around three seams:
- *
- * - `object-store` defines the provider-neutral contract every store implements
- *   and the shared Effect surface derived from it.
- * - `r2` and `s3` are the two adapters; both sign with the same SigV4 core, so a
- *   provider switch changes where bytes live, never what Meltiply may do.
- * - `provider` resolves `OBJECT_STORAGE_PROVIDER` and constructs the store and
- *   signer workers use, which is the only place provider selection happens.
- */
 export { readyObjectKey, stagingObjectKey } from "./keys";
 export type {
   ConfiguredObjectStore,
@@ -26,7 +14,7 @@ export type {
   SignedUploadRequest,
   UploadedPart,
 } from "./object-store";
-export type { SignedRequest } from "./sigv4";
+export type { SignedRequest, SigV4UrlSigner } from "./sigv4";
 export {
   createR2SignerFromEnv,
   R2ObjectStore,
@@ -50,6 +38,13 @@ export {
   type ObjectStorageEnv,
   type ObjectStorageProvider,
 } from "./provider";
+export {
+  PROVIDER_MEDIA_ROUTE_PREFIX,
+  providerMediaPayload,
+  signProviderMediaSignature,
+  signProviderMediaUrl,
+  verifyProviderMediaSignature,
+} from "./provider-media";
 export {
   createStorageServiceLive,
   createStorageServiceTest,

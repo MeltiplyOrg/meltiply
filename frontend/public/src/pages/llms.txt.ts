@@ -2,12 +2,6 @@ import type { APIRoute } from "astro";
 import { getPageTree, source } from "@/lib/source";
 import { getMarkdownPath } from "@/lib/markdown";
 
-/**
- * Prerenders /llms.txt from the same public collection and section/order tree
- * as the sidebar, so new guides and metadata edits enter the index on build.
- * Links use the configured site (production by default) and point to generated
- * Markdown guides; this index neither exposes internal docs nor grants crawl access.
- */
 export const GET: APIRoute = ({ site }) => {
   const baseUrl = site ?? "https://meltiply.com";
   const pages = source.getPages();

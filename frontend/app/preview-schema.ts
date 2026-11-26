@@ -5,7 +5,6 @@ import {
   type PreviewValue,
 } from "./src/preview/contract-types";
 
-/** Resolves local OpenAPI references at build time. External/missing references fail explicitly instead of creating misleading mock responses. */
 export function resolvePreviewReference(value: unknown, document: PreviewObject): PreviewObject {
   const object = Schema.decodeUnknownSync(previewObjectSchema)(value);
   if (typeof object.$ref !== "string") return object;
@@ -23,7 +22,6 @@ export function resolvePreviewReference(value: unknown, document: PreviewObject)
   return resolvePreviewReference(target, document);
 }
 
-/** Builds deterministic examples only when the canonical catalog lacks a documented response. Existing examples/defaults/enums win; required fields, local refs, unions, and collection bounds follow the schema. */
 export function exampleForSchema(value: unknown, document: PreviewObject, depth = 0): PreviewValue {
   if (depth > 32) throw new Error("Recursive preview response schema needs a canonical example");
   const schema = resolvePreviewReference(value, document);

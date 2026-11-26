@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { BarChart3, TriangleAlert } from "lucide-react";
@@ -44,7 +45,6 @@ import { comparablePlatformRows, PlatformEngagementChart } from "./platform-enga
 import { TopPostsTable } from "./top-posts-table";
 import type { Platform } from "@/types";
 
-/** Scrollable page body shared by every resolved state, keeping the header fixed. */
 function AnalyticsBody({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto" data-lenis-prevent>
@@ -53,7 +53,6 @@ function AnalyticsBody({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Skeleton that preserves the KPI, chart, and table geometry while data loads. */
 function AnalyticsLoadingSkeleton() {
   return (
     <AnalyticsBody>
@@ -69,7 +68,6 @@ function AnalyticsLoadingSkeleton() {
   );
 }
 
-/** One cohort empty state; the no-capable-channel variant links to Channels. */
 function AnalyticsEmpty({
   title,
   description,
@@ -98,15 +96,6 @@ function AnalyticsEmpty({
   );
 }
 
-/**
- * Standalone Analytics route.
- *
- * Read-only and scoped by the active Brand Profile (or the All Brand Profiles
- * aggregate), it reports a published cohort rather than activity in the range:
- * each Distribution contributes its latest stored snapshot as of the range end.
- * Missing coverage is named as unsupported or awaiting sync, never rendered as
- * a measured zero.
- */
 export function AnalyticsView(): React.ReactElement {
   const scope = useSessionScope();
   const { brandProfiles, selectedBrandProfile, selectedBrandProfileId, setSelectedBrandProfileId } =
@@ -127,9 +116,6 @@ export function AnalyticsView(): React.ReactElement {
     analyticsPlatforms,
   );
 
-  // A range/platform/metric/profile change starts a new top-N window without an
-  // effect: the stored key that owns the limit no longer matches, so the derived
-  // value falls back to the initial page until Load more sets it again.
   const limitKey = `${range}|${platform ?? ""}|${accountId ?? ""}|${format ?? ""}|${metric}|${scope.brandProfileId ?? ""}`;
   const [limitState, setLimitState] = useState({
     key: limitKey,
@@ -159,7 +145,7 @@ export function AnalyticsView(): React.ReactElement {
     platform: Platform | undefined;
     range: typeof range;
   }) => {
-    navigate(`${pathname}?${formatAnalyticsSearchParams(next)}`);
+    void navigate(`${pathname}?${formatAnalyticsSearchParams(next)}`);
   };
 
   const connectedPlatforms = new Set(
@@ -195,9 +181,6 @@ export function AnalyticsView(): React.ReactElement {
   const comparableRowCount = summary
     ? comparablePlatformRows(summary.by_platform, summary.unsupported_platforms).length
     : 0;
-  // Hide immediately when the filter narrows to one Platform; placeholder data
-  // from the aggregate view must not leave the old card title on screen while
-  // the filtered summary loads.
   const showComparison = platform === undefined && comparableRowCount > 1;
   const rangeLabel = analyticsRangeLabel(range, t);
 
@@ -240,8 +223,6 @@ export function AnalyticsView(): React.ReactElement {
         selectedBrandProfileId={selectedBrandProfileId}
         onBrandProfileChange={(id) => {
           setSelectedBrandProfileId(id);
-          // Accounts belong to one profile; do not carry a stale account into a
-          // different cohort. Other filters remain valid across profile scopes.
           updateSearch({ accountId: undefined, format, metric, platform, range });
         }}
         onResetFilters={() => {
@@ -301,7 +282,7 @@ export function AnalyticsView(): React.ReactElement {
             <div>
               <p className="font-medium">{t("Analytics could not be loaded")}</p>
               <p className="mt-0.5 text-xs">
-                {error instanceof Error ? error.message : t("We could not load analytics.")}
+                {errorMessage(error, t("We could not load analytics."))}
               </p>
             </div>
             <Button

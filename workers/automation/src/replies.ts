@@ -12,8 +12,9 @@ import {
 } from "@meltiply/providers";
 
 import { withSystemTransactionEffect } from "./database";
-import { classifyJobError, type AutomationJobError } from "./effect/index";
-import { maximumReconciliationAttempts, reconciliationDedupeKey } from "./due-work";
+import { classifyJobError, RetryableJobError, type AutomationJobError } from "./effect/index";
+import { maximumReconciliationAttempts } from "./due-work";
+import { armOutboxCommand, outboxDedupeKey } from "./outbox-commands";
 import {
   executeProviderLookupEffect,
   executeProviderReplyEffect,
@@ -23,13 +24,9 @@ import {
 import type { AutomationEnv } from "./env";
 import { isOutboxMessage, type OutboxMessage } from "./messages";
 import { decryptStoredToken } from "./provider-credentials";
+import { nextDelaySeconds, REPLY_RECONCILIATION_RETRY_POLICY } from "./retry-policy";
 
 type ReplyMessage = OutboxMessage;
-/**
- * Transaction runner for reply processing: the Effect-native system
- * transaction contract, so lease/state statements compose inside the
- * caller's program.
- */
 type SystemTransaction = typeof withSystemTransactionEffect;
 
 interface ReplySelection extends Record<string, unknown> {
@@ -67,93 +64,46 @@ export interface ReplyProcessingDependencies {
   transaction?: SystemTransaction;
 }
 
-export class RetryableReplyError extends Error {
-  /**
-   * Constructs a retryable reply error to trigger message redelivery.
-   *
-   * @param message - Error description detailing why the reply or reconciliation should be retried.
-   */
-  constructor(message = "reply delivery should be retried") {
-    super(message);
-    this.name = "RetryableReplyError";
-  }
-}
-
 const leaseSeconds = 300;
 
-/**
- * Arms the next reconciliation attempt as a delayed Outbox command.
- *
- * The dedupe key carries the attempt number so re-delivery of the current message
- * cannot arm the same attempt twice, and the relay reads `delay_seconds` to schedule
- * delivery at the cadence instead of relying on an immediate poll.
- *
- * @param client - Transactional database client.
- * @param row - Target comment selection fields including comment ID and attempt count.
- * @param delaySeconds - Delay in seconds before the reconciliation event should be dispatched.
- */
 function emitDelayedReconciliation(
   client: EffectTransactionClient,
   row: Pick<ReplyRow, "comment_id" | "org_id" | "reply_reconciliation_attempt_count">,
   delaySeconds: number,
 ): Effect.Effect<void, DatabaseError> {
-  return client
-    .query(
-      `INSERT INTO outbox_events
-       (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-     VALUES
-       ($1::uuid, 'comment.reply.requested', 'comment', $2::uuid,
-        ${reconciliationDedupeKey("$2::text", "$3::int")},
-        jsonb_build_object(
-          'comment_id', $2::uuid,
-          'reconciliation', true,
-          'delay_seconds', $4::int
-        ))
-     ON CONFLICT (org_id, topic, dedupe_key) DO NOTHING`,
-      [row.org_id, row.comment_id, row.reply_reconciliation_attempt_count, delaySeconds],
-    )
-    .pipe(Effect.asVoid);
+  return armOutboxCommand(client, {
+    aggregateId: row.comment_id,
+    aggregateType: "comment",
+    dedupeKey: outboxDedupeKey.commentReplyReconcile(
+      row.comment_id,
+      row.reply_reconciliation_attempt_count,
+    ),
+    onConflict: "nothing",
+    orgId: row.org_id,
+    payload: {
+      comment_id: row.comment_id,
+      delay_seconds: delaySeconds,
+      reconciliation: true,
+    },
+    topic: "comment.reply.requested",
+  }).pipe(Effect.asVoid);
 }
 
-/**
- * Calculates the exponential backoff delay in seconds for comment reply reconciliation.
- *
- * Delays double with each attempt (60s, 120s, 240s, ...) up to a maximum cap of 3,600s (1 hour).
- *
- * @param attemptCount - Current 1-based reconciliation attempt count.
- * @returns Calculated delay interval in seconds.
- */
 export function replyReconciliationCadenceSeconds(attemptCount: number): number {
-  return Math.min(3_600, 60 * 2 ** Math.max(0, attemptCount - 1));
+  return (
+    nextDelaySeconds(REPLY_RECONCILIATION_RETRY_POLICY, attemptCount) ??
+    REPLY_RECONCILIATION_RETRY_POLICY.maxSeconds
+  );
 }
 
-/**
- * Generates the distributed lease event key for an outbox message.
- *
- * @param message - Outbox message containing the event ID.
- * @returns Formatted event key string.
- */
 function eventKey(message: ReplyMessage): string {
   return `outbox:${message.event_id}`;
 }
 
-/**
- * Generates an idempotent provider operation key for a comment reply action.
- *
- * @param commentId - UUID of the comment being replied to.
- * @returns Formatted idempotency key string.
- */
 function idempotencyKey(commentId: string): string {
   return `reply:${commentId}`;
 }
 
-/**
- * Selects and row-locks a comment record and its distribution account details for processing.
- *
- * @param client - Transactional database client.
- * @param message - Outbox message identifying the comment and organization.
- * @returns Locked comment selection row, or undefined if not found.
- */
 function selectReply(
   client: EffectTransactionClient,
   message: ReplyMessage,
@@ -184,17 +134,6 @@ function selectReply(
   );
 }
 
-/**
- * Flags a comment and its provider operation as requiring manual reconciliation.
- *
- * Used when maximum automated reconciliation attempts are exceeded or required provider
- * identifiers are missing, releasing the job lease as succeeded to avoid stuck retries.
- *
- * @param client - Transactional database client.
- * @param row - Comment row selection being updated.
- * @param operationId - Database ID of the provider operation record.
- * @param message - Outbox message being completed.
- */
 function markManualReconciliation(
   client: EffectTransactionClient,
   row: ReplySelection,
@@ -221,18 +160,6 @@ function markManualReconciliation(
   });
 }
 
-/**
- * Claims a distributed job lease and prepares a comment reply for provider execution.
- *
- * Acquires a 300-second lease in `async_job_events`, inspects existing provider operations,
- * detects prior successes or in-progress ambiguous states requiring reconciliation lookup,
- * and increments attempt counters while placing the record in progress.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Outbox message carrying reply request context.
- * @param transaction - Database transaction runner.
- * @returns Preparation result indicating whether work is deferred, skipped, or ready for lookup/send.
- */
 function prepare(
   env: AutomationEnv,
   message: ReplyMessage,
@@ -309,9 +236,6 @@ function prepare(
           yield* markManualReconciliation(client, row, existing.id, message);
           return { outcome: "skipped" };
         }
-        // The claim below owns the increment, so the claimed attempt number is
-        // captured before the write: deriving it from the row afterwards would
-        // count the claim twice when the selected row already reflects it.
         const claimedAttempt = row.reply_reconciliation_attempt_count + 1;
         yield* client.query(
           `UPDATE provider_operations
@@ -413,16 +337,6 @@ function prepare(
   );
 }
 
-/**
- * Flags the platform account as requiring reconnection when authentication errors occur.
- *
- * Checks if the provider failure is classified as 'auth' and updates the linked platform
- * account status to 'reconnect_required'.
- *
- * @param client - Transactional database client.
- * @param row - Reply row containing the distribution reference.
- * @param failure - Provider failure descriptor, or null if successful.
- */
 function markAccountReconnectRequired(
   client: EffectTransactionClient,
   row: ReplyRow,
@@ -442,19 +356,6 @@ function markAccountReconnectRequired(
     .pipe(Effect.asVoid);
 }
 
-/**
- * Records a successful comment reply delivery in both the provider operations and comments tables.
- *
- * Marks the operation as succeeded, updates the comment with replied = true, clears lease expirations,
- * and finalizes the async job lease.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Outbox message being processed.
- * @param row - Reply row being updated.
- * @param providerOperationId - Platform-assigned operation or reply ID, if returned.
- * @param providerPostId - Platform-assigned post identifier, if returned.
- * @param transaction - Database transaction runner.
- */
 function recordReplySuccess(
   env: AutomationEnv,
   message: ReplyMessage,
@@ -489,19 +390,6 @@ function recordReplySuccess(
   );
 }
 
-/**
- * Records a permanent or retryable failure for a comment reply attempt.
- *
- * Updates provider operations and comments status, marks the account for reconnection if auth
- * failed, and finalizes or releases the job lease depending on whether retries remain.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Outbox message being processed.
- * @param row - Reply row being updated.
- * @param failure - Provider failure metadata including message and classification.
- * @param retry - Boolean indicating whether the reply will be retried.
- * @param transaction - Database transaction runner.
- */
 function recordReplyFailure(
   env: AutomationEnv,
   message: ReplyMessage,
@@ -535,19 +423,6 @@ function recordReplyFailure(
   );
 }
 
-/**
- * Records an ambiguous reply dispatch outcome and arms delayed reconciliation if an operation ID exists.
- *
- * When an unknown outcome occurs, marks comment and operation status as 'needs_reconciliation'.
- * If a provider operation ID was captured, schedules a delayed reconciliation outbox event.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Outbox message being processed.
- * @param row - Reply row being updated.
- * @param result - Provider operation result with unknown outcome.
- * @param transaction - Database transaction runner.
- * @returns True if reconciliation lookup can proceed, false otherwise.
- */
 function recordReplyAmbiguous(
   env: AutomationEnv,
   message: ReplyMessage,
@@ -587,23 +462,6 @@ function recordReplyAmbiguous(
     return canLookup;
   });
 }
-/**
- * Records a confirmed reply dispatch that produced only a provider operation identity.
- *
- * A 'confirmed_success' without a post identity means the platform accepted a
- * durable operation (for example a Threads reply media container) whose
- * publication is still pending: the operation identity is evidence for
- * reconciliation, never permission to mark the reply sent. The comment and its
- * provider operation therefore move to 'needs_reconciliation' without
- * `replied = true`, and a delayed reconciliation Outbox event is armed at the
- * cadence so a lost Queue delivery can never strand the pending container.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Outbox message being processed.
- * @param row - Reply row being updated.
- * @param providerOperationId - Platform-assigned operation identity to persist.
- * @param transaction - Database transaction runner.
- */
 function recordReplyPending(
   env: AutomationEnv,
   message: ReplyMessage,
@@ -636,22 +494,6 @@ function recordReplyPending(
   );
 }
 
-/**
- * Processes the outcome of a provider reply publication call.
- *
- * Routes confirmed successes carrying post evidence to recordReplySuccess,
- * confirmed successes carrying only an operation identity to recordReplyPending
- * (the reply stays pending platform processing, never `replied`), ambiguous
- * outcomes to recordReplyAmbiguous, or classifies failures and triggers retries
- * if permitted by the adapter's retry policy.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Outbox message being processed.
- * @param row - Active reply row being processed.
- * @param execution - Result object returned from provider reply invocation.
- * @param transaction - Database transaction runner.
- * @returns True if the reply attempt should be retried, false otherwise.
- */
 function recordSendOutcome(
   env: AutomationEnv,
   message: ReplyMessage,
@@ -662,9 +504,6 @@ function recordSendOutcome(
   return Effect.gen(function* () {
     const { result } = execution;
     if (result.outcome === "confirmed_success") {
-      // A confirmed operation identity without a post identity is a pending
-      // container, not a delivered reply: persist the evidence and arm delayed
-      // reconciliation instead of recording reply success (#256 story 3).
       if (!result.providerPostId) {
         yield* recordReplyPending(
           env,
@@ -703,16 +542,6 @@ interface LookupState {
   state: "failed" | "manual" | "retry" | "succeeded";
 }
 
-/**
- * Computes the normalized state resolution from a distribution lookup execution result.
- *
- * Maps lookup status states (published, failed, processing, not_found, unknown) into
- * state transitions ('succeeded', 'failed', 'retry', 'manual') and extracts provider IDs.
- *
- * @param execution - Distribution lookup execution result from the provider adapter.
- * @param row - Current reply row with attempt counters and existing IDs.
- * @returns Derived lookup state resolution containing status and failure details.
- */
 function lookupState(execution: DistributionLookupExecution, row: ReplyRow): LookupState {
   if (execution.result.kind === "lookup_failure") {
     const { failure } = execution.result;
@@ -768,19 +597,6 @@ function lookupState(execution: DistributionLookupExecution, row: ReplyRow): Loo
   };
 }
 
-/**
- * Records the outcome of a provider status lookup during comment reply reconciliation.
- *
- * If confirmed succeeded or failed, transitions the comment accordingly. If still ambiguous,
- * schedules the next delayed reconciliation attempt if retry limits have not been reached.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Outbox message being processed.
- * @param row - Active reply row being reconciled.
- * @param execution - Result of the provider status lookup.
- * @param transaction - Database transaction runner.
- * @returns True if reconciliation should be retried, false otherwise.
- */
 function recordLookupOutcome(
   env: AutomationEnv,
   message: ReplyMessage,
@@ -850,22 +666,6 @@ function recordLookupOutcome(
   });
 }
 
-/**
- * Main queue consumer handler for processing comment reply requested outbox messages.
- *
- * Manages leases, sends or reconciles replies, and records outcomes in the caller's
- * job fiber. Existing transactions remain intact; retry signals and persistence
- * rejections travel on the Effect failure channel without an internal runner.
- * RetryableReplyError retries stay site-local: the trailing classification maps
- * them by name to RetryableJobError (the original exception name survives in the
- * wrapper's `cause`), so the channel carries only typed AutomationJobError or
- * propagated ProviderAdapterError failures.
- *
- * @param env - Automation worker environment bindings.
- * @param message - Outbox message from the queue.
- * @param dependencies - Optional dependency overrides for testing (credentials, time, registry, transaction).
- * @returns Effect producing 'processed' or 'skipped'; fails with a classified AutomationJobError (retryable reply outcomes become RetryableJobError).
- */
 export function processReplyMessage(
   env: AutomationEnv,
   message: ReplyMessage,
@@ -880,7 +680,12 @@ export function processReplyMessage(
       Effect.mapError(classifyJobError),
     );
     if (prepared.outcome === "deferred") {
-      return yield* Effect.fail(new RetryableReplyError("reply event lease is still active"));
+      return yield* Effect.fail(
+        new RetryableJobError({
+          cause: "RetryableReplyError",
+          message: "reply event lease is still active",
+        }),
+      );
     }
     if (prepared.outcome === "skipped") return "skipped" as const;
 
@@ -944,7 +749,14 @@ export function processReplyMessage(
         Effect.mapError(classifyJobError),
       );
     }
-    if (retry) return yield* Effect.fail(new RetryableReplyError());
+    if (retry) {
+      return yield* Effect.fail(
+        new RetryableJobError({
+          cause: "RetryableReplyError",
+          message: "reply delivery should be retried",
+        }),
+      );
+    }
     return "processed" as const;
   }).pipe(Effect.mapError((cause) => classifyJobError(cause)));
 }

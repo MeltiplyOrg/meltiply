@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -48,23 +48,24 @@ vi.mock("@/lib/queries", () => ({
 vi.mock("@/lib/auth-client", () => ({
   authClient: { signUpEmail: state.signUpEmail },
 }));
-vi.mock("@/lib/i18n", () => ({
-  useI18n: () => ({
-    t: (message: string, values?: Record<string, string>) =>
-      message.replace(/\{(\w+)\}/g, (_match, key: string) => values?.[key] ?? `{${key}}`),
-  }),
-}));
+vi.mock("@/lib/i18n", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/i18n")>();
+  return {
+    ...actual,
+    useI18n: () => ({
+      language: "en",
+      setLanguage: () => undefined,
+      t: (message: string, values?: Record<string, string>) =>
+        message.replace(/\{(\w+)\}/g, (_match, key: string) => values?.[key] ?? `{${key}}`),
+      tStatus: (status: string) => status,
+    }),
+  };
+});
 
 import InvitationAcceptRoute from "@/app/invitation-accept-route";
 
 const token = "permission-preview-token-for-ui";
 
-/**
- * Renders the acceptance route with a query token.
- *
- * @param search - Query string following the route path.
- * @returns Testing-library render result.
- */
 function renderRoute(search: string) {
   return render(
     <MemoryRouter initialEntries={[`/invitations/accept${search}`]}>
@@ -127,6 +128,41 @@ describe("invitation acceptance route", () => {
     expect(screen.getByText("Accepting your invitation…")).toBeInTheDocument();
   });
 
+  it("keeps the joined state when the invitation preview refreshes to accepted", async () => {
+    state.isSignedIn = true;
+    state.preview = {
+      data: {
+        email: "invitee@meltiply.local",
+        expires_at: "2026-01-08T00:00:00.000Z",
+        role: "viewer",
+        status: "pending",
+        workspace_name: "Shared Studio",
+      },
+      error: null,
+      isPending: false,
+    };
+    state.acceptMutate.mockImplementationOnce(
+      (_token: string, callbacks: { onSuccess: () => Promise<void> }) => {
+        void callbacks.onSuccess();
+      },
+    );
+    const view = renderRoute(`?token=${token}`);
+    await screen.findByText("You joined the workspace.");
+
+    state.preview = {
+      ...state.preview,
+      data: { ...state.preview.data!, status: "accepted" },
+    };
+    view.rerender(
+      <MemoryRouter initialEntries={[`/invitations/accept?token=${token}`]}>
+        <InvitationAcceptRoute />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("You joined the workspace.")).toBeInTheDocument();
+    expect(screen.queryByText(/no longer pending/)).not.toBeInTheDocument();
+  });
+
   it("reports an invalid or expired invitation", () => {
     state.preview = {
       data: null,
@@ -137,5 +173,69 @@ describe("invitation acceptance route", () => {
     expect(
       screen.getByText("This invitation is invalid, expired, or already used."),
     ).toBeInTheDocument();
+  });
+
+  it("guides an unverified invitee to verify their email", async () => {
+    state.isSignedIn = true;
+    state.preview = {
+      data: {
+        email: "invitee@meltiply.local",
+        expires_at: "2026-01-08T00:00:00.000Z",
+        role: "editor",
+        status: "pending",
+        workspace_name: "Shared Studio",
+      },
+      error: null,
+      isPending: false,
+    };
+    renderRoute(`?token=${token}`);
+
+    await waitFor(() => expect(state.acceptMutate).toHaveBeenCalled());
+    const options = state.acceptMutate.mock.calls[0]?.[1] as {
+      onError: (cause: unknown) => void;
+    };
+    act(() => {
+      options.onError({
+        code: "email_verification_required",
+        message: "Verify your email before joining the workspace.",
+        status: 403,
+      });
+    });
+
+    expect(
+      await screen.findByText("Verify your email address, then return to this page to join."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows safe copy for a non-verification acceptance failure", async () => {
+    state.isSignedIn = true;
+    state.preview = {
+      data: {
+        email: "invitee@meltiply.local",
+        expires_at: "2026-01-08T00:00:00.000Z",
+        role: "editor",
+        status: "pending",
+        workspace_name: "Shared Studio",
+      },
+      error: null,
+      isPending: false,
+    };
+    renderRoute(`?token=${token}`);
+
+    await waitFor(() => expect(state.acceptMutate).toHaveBeenCalled());
+    const options = state.acceptMutate.mock.calls[0]?.[1] as {
+      onError: (cause: unknown) => void;
+    };
+    act(() => {
+      options.onError(
+        Object.assign(new Error("We could not verify this invitation."), {
+          code: "invitation_conflict",
+        }),
+      );
+    });
+
+    expect(await screen.findByText("An error has occurred.")).toBeInTheDocument();
+    expect(screen.queryByText(/Verify your email address/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/We could not verify/)).not.toBeInTheDocument();
   });
 });

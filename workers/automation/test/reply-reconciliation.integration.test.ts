@@ -19,9 +19,6 @@ if (!connectionString) {
 }
 const describeIntegration = describe;
 const organizationId = "20000000-0000-4000-8000-000000000001";
-// The seeded Alpha workspace profile owns the fixture Posts and distributions
-// below; brand_profile_id is mandatory and the composite FKs require
-// same-profile references.
 const seededAlphaProfileId = "a0000000-0000-4000-8000-000000000001";
 
 const env = {
@@ -32,12 +29,6 @@ const env = {
   VERSION: "test",
 } satisfies AutomationEnv;
 
-/**
- * Inserts one retained Post owning the fixture's text-only composition.
- * Reply reconciliation is Post-independent, so a text-only Post with zero
- * attachments is the minimal faithful fixture: distributions reference the
- * Post, never a stored Asset.
- */
 async function insertTextPost(client: Queryable, postId: string) {
   await client.query(
     `INSERT INTO posts (id, org_id, brand_profile_id, title, default_text, status)
@@ -165,8 +156,6 @@ describeIntegration("reply reconciliation enqueue with PostgreSQL", () => {
   });
 
   it.each([0, -1, 101, 1.5, Number.NaN])("rejects invalid limits (%s)", async (limit) => {
-    // Invalid limits fail the Effect with a classified RetryableJobError
-    // (the RangeError name is preserved on the wrapper's `cause`).
     await expect(Effect.runPromise(enqueueDueReplyReconciliations(env, limit))).rejects.toThrow(
       RetryableJobError,
     );
@@ -196,10 +185,6 @@ describeIntegration("reply container lifecycle with PostgreSQL", () => {
     });
   });
 
-  /**
-   * Builds an OutboxMessage for the reply topic with a fresh event identity so
-   * each delivery claims its own job lease, mirroring real Queue redelivery.
-   */
   function replyMessage(eventId: string): OutboxMessage {
     return {
       aggregate_id: commentId,
@@ -213,10 +198,6 @@ describeIntegration("reply container lifecycle with PostgreSQL", () => {
     };
   }
 
-  /**
-   * Registers a Threads-shaped adapter whose reply creates a media container
-   * (operation identity only) and whose lookup reports the scripted status.
-   */
   function containerRegistry(lookupPublication: ProviderAdapter["lookupPublication"]) {
     const registry = new ProviderRegistry();
     registry.register("threads", {
@@ -253,8 +234,6 @@ describeIntegration("reply container lifecycle with PostgreSQL", () => {
     return registry;
   }
 
-  // The reply container fixture records every dependency under one seeded
-  // Brand Profile, matching the production ownership and composite-key model.
   it("keeps an operation-only reply pending, then finalizes it exactly once", async () => {
     await runSystemTransaction(env, async (client) => {
       await insertTextPost(client, postId);
@@ -297,8 +276,6 @@ describeIntegration("reply container lifecycle with PostgreSQL", () => {
       ),
     };
 
-    // The container create confirms only an operation identity: the reply must
-    // stay pending with durable reconciliation work, never replied = true.
     await expect(
       Effect.runPromise(processReplyMessage(env, replyMessage(sendEventId), dependencies)),
     ).resolves.toBe("processed");
@@ -345,8 +322,6 @@ describeIntegration("reply container lifecycle with PostgreSQL", () => {
       },
     ]);
 
-    // The delayed reconciliation delivery performs the lookup, which finalizes
-    // the ready container and marks the reply succeeded exactly once.
     await expect(
       Effect.runPromise(processReplyMessage(env, replyMessage(lookupEventId), dependencies)),
     ).resolves.toBe("processed");
@@ -369,7 +344,6 @@ describeIntegration("reply container lifecycle with PostgreSQL", () => {
       reply_status: "succeeded",
     });
 
-    // A further reconciliation delivery observes the terminal state and skips.
     await expect(
       Effect.runPromise(processReplyMessage(env, replyMessage(replayEventId), dependencies)),
     ).resolves.toBe("skipped");
@@ -400,14 +374,9 @@ describeIntegration("distribution reconciliation recovery with PostgreSQL", () =
     });
   });
 
-  // The stranded-reconcile fixtures retain a single seeded Brand Profile so
-  // recovery tests cover scheduling rather than violating ownership FKs.
   it("re-arms a lost reconcile trigger instead of stranding the row", async () => {
     await runSystemTransaction(env, async (client) => {
       await insertTextPost(client, postId);
-      // A stalled processing row the scanner already recovered once: its
-      // armed reconcile event died in the relay, and next_attempt_at was
-      // cleared when the event was armed — the stranded signature (#256).
       await client.query(
         `INSERT INTO distributions
              (id, org_id, brand_profile_id, post_id, platform, status,
@@ -434,10 +403,6 @@ describeIntegration("distribution reconciliation recovery with PostgreSQL", () =
       );
     });
 
-    // The dead event's dedupe key must not block recovery: the claim revives
-    // it as pending, and the row with no event at all gains a fresh trigger.
-    // The scan is workspace-global, so seeded demo rows may be due alongside
-    // the fixture pair; both owned rows must still be claimed.
     await expect(
       Effect.runPromise(enqueueDueDistributions(env, 100)),
     ).resolves.toBeGreaterThanOrEqual(2);
@@ -456,8 +421,6 @@ describeIntegration("distribution reconciliation recovery with PostgreSQL", () =
         [[deadEventId, strandedId]],
       ),
     );
-    // Exactly one live trigger per fixture row: keying by aggregate_id alone
-    // would collapse a duplicate arm into the same entry and still match.
     expect(recovered.rows).toHaveLength(2);
     const recoveredById: Record<string, (typeof recovered.rows)[number]> = {};
     for (const row of recovered.rows) recoveredById[row.aggregate_id] = row;
@@ -474,7 +437,6 @@ describeIntegration("distribution reconciliation recovery with PostgreSQL", () =
       state: "pending",
     });
 
-    // A second scan finds both events live and arms nothing new.
     await expect(Effect.runPromise(enqueueDueDistributions(env, 100))).resolves.toBe(0);
   });
 });

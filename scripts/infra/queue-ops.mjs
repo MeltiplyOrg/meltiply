@@ -23,29 +23,12 @@ export const KNOWN_QUEUE_WORKLOADS = Object.freeze([
 ]);
 const workloads = new Set(KNOWN_QUEUE_WORKLOADS);
 
-/**
- * Retrieves a non-empty trimmed value for a required environment variable.
- *
- * @param {string} name - Variable name
- * @param {Record<string, string | undefined>} environment - Environment lookup object
- * @returns {string} Trimmed environment variable value
- * @throws {Error} If the variable is unset or contains only whitespace
- */
 function requiredEnvironment(name, environment) {
   const value = environment[name]?.trim();
   if (!value) throw new Error(`${name} is required`);
   return value;
 }
 
-/**
- * Validates and parses a positive integer within an inclusive maximum bound [1, maximum].
- *
- * @param {string | number} value - Input value to parse
- * @param {string} name - Option name for error reporting
- * @param {number} maximum - Maximum allowed integer value
- * @returns {number} Parsed positive integer
- * @throws {TypeError} If the value is not an integer within the range [1, maximum]
- */
 function positiveInteger(value, name, maximum) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > maximum) {
@@ -54,14 +37,6 @@ function positiveInteger(value, name, maximum) {
   return parsed;
 }
 
-/**
- * Validates and parses a non-negative integer (>= 0).
- *
- * @param {string | number} value - Input value to parse
- * @param {string} name - Option name for error reporting
- * @returns {number} Parsed non-negative integer
- * @throws {TypeError} If the value is not an integer >= 0
- */
 function nonNegativeInteger(value, name) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) {
@@ -70,16 +45,6 @@ function nonNegativeInteger(value, name) {
   return parsed;
 }
 
-/**
- * Parses and validates command-line arguments for queue operations (`metrics` or `replay-dlq`).
- * Enforces DNS-safe environment names, recognized queue workload types, operator identification,
- * justification reason text limits (8 to 500 characters), and mandatory confirmation string
- * (`replay <workload> <environment>`) when mutating with `--apply`.
- *
- * @param {Array<string>} argv - Command-line argument vector
- * @returns {object} Validated options object for metrics or DLQ replay
- * @throws {TypeError} If unknown options, missing values, or invalid inputs are supplied
- */
 export function parseQueueArguments(argv) {
   const [command, ...rawArguments] = argv;
   if (command !== "metrics" && command !== "replay-dlq") {
@@ -158,35 +123,15 @@ export function parseQueueArguments(argv) {
   };
 }
 
-/**
- * Derives canonical Cloudflare Queue names for a workload and its dead-letter queue.
- *
- * @param {{ environment: string, workload: string }} options - Workload and environment options
- * @returns {{ source: string, target: string }} Source DLQ name and target workload queue name
- */
 function queueNames(options) {
   const target = `meltiply-${options.workload}-${options.environment}`;
   return { source: `${target}-dlq`, target };
 }
 
-/**
- * Computes a SHA-256 hex digest of a message's content type and raw body.
- * Enables deterministic audit tracking without storing or logging sensitive plaintext payload data.
- *
- * @param {object} message - Message object
- * @param {string} contentType - Content-Type header string
- * @returns {string} Hexadecimal SHA-256 digest
- */
 function messageDigest(message, contentType) {
   return createHash("sha256").update(`${contentType}\0${message.body}`).digest("hex");
 }
 
-/**
- * Extracts non-sensitive audit metadata from a dead-letter queue message.
- *
- * @param {object} message - Raw message object pulled from Cloudflare Queue
- * @returns {{ attempts: number, digest: string | null, id: string, timestamp_ms: number }} Sanitized audit record
- */
 function auditMessage(message) {
   const contentType = String(message?.metadata?.["CF-Content-Type"] ?? "json").toLowerCase();
   return {
@@ -197,13 +142,6 @@ function auditMessage(message) {
   };
 }
 
-/**
- * Decodes a JSON message body from either direct JSON text or base64-encoded JSON.
- *
- * @param {string} body - Raw string payload
- * @returns {any} Parsed JavaScript value
- * @throws {TypeError} If the payload is neither valid JSON nor valid base64-encoded JSON
- */
 function decodeJsonBody(body) {
   try {
     return JSON.parse(body);
@@ -216,14 +154,6 @@ function decodeJsonBody(body) {
   }
 }
 
-/**
- * Normalizes and validates a dead-letter queue message into a push payload and an audit record.
- * Handles both JSON and plain-text payloads; rejects unsupported content types.
- *
- * @param {object} message - DLQ message object containing body, lease_id, and metadata
- * @returns {{ audit: object, push: { body: any, content_type: string } }} Structured replay bundle
- * @throws {TypeError} If message structure, lease_id, or content type are invalid
- */
 export function replayPayload(message) {
   if (!message || typeof message !== "object") {
     throw new TypeError("DLQ message must be an object");
@@ -248,17 +178,6 @@ export function replayPayload(message) {
   throw new TypeError(`DLQ content type ${contentType} cannot be safely replayed`);
 }
 
-/**
- * Constructs an authenticated HTTP client for interacting with the Cloudflare Queues v4 REST API.
- * Provides wrappers for acknowledge, list, metrics, pull, and push with bounded response parsing,
- * a ten-second transport deadline, and no credential-bearing redirects.
- *
- * @param {object} params - Client options
- * @param {string} params.accountId - Cloudflare account ID
- * @param {string} params.apiToken - Cloudflare API token
- * @param {typeof fetch} params.fetchImpl - HTTP fetch implementation
- * @returns {object} Queues API client interface
- */
 function apiClient({ accountId, apiToken, fetchImpl }) {
   const root = `https://api.cloudflare.com/client/v4/accounts/${accountId}/queues`;
   const call = async (path, init = {}) => {
@@ -308,15 +227,6 @@ function apiClient({ accountId, apiToken, fetchImpl }) {
   };
 }
 
-/**
- * Resolves both source DLQ and target workload Cloudflare Queue records from the Cloudflare account.
- *
- * @param {object} client - Cloudflare Queues API client
- * @param {{ source: string, target: string }} names - Canonical source and target queue names
- * @returns {Promise<{ source: object, target: object }>} Resolved Cloudflare queue descriptor objects
- * @throws {TypeError} If the queue list response is invalid
- * @throws {Error} If either required queue is missing from the account
- */
 async function resolveQueues(client, names) {
   const queues = await client.list();
   if (!Array.isArray(queues)) throw new TypeError("Cloudflare Queue list is invalid");
@@ -329,17 +239,6 @@ async function resolveQueues(client, names) {
   return { source, target };
 }
 
-/**
- * Normalizes raw Cloudflare Queue metric counters into a consistent snapshot.
- * Computes oldest-message age; rejects missing/non-finite counters instead of
- * converting an incomplete monitoring response into a healthy empty Queue.
- *
- * @param {string} name - Queue name
- * @param {object} metrics - Raw metrics object from Cloudflare API
- * @param {number} now - Current epoch timestamp in milliseconds
- * @returns {{ backlog_bytes: number, backlog_count: number, name: string, oldest_age_seconds: number }} Normalized metric snapshot
- * @throws {TypeError} If counters or a nonempty Queue's oldest timestamp are invalid.
- */
 function metricSnapshot(name, metrics, now) {
   if (!metrics || typeof metrics !== "object" || Array.isArray(metrics)) {
     throw new TypeError("Cloudflare Queue metrics are invalid");
@@ -361,15 +260,6 @@ function metricSnapshot(name, metrics, now) {
   };
 }
 
-/**
- * Collects and evaluates health metrics for a target workload queue and its associated DLQ.
- * Flags backlog or message age threshold breaches as active alerts.
- *
- * @param {object} client - Cloudflare Queues API client
- * @param {object} options - Queue options containing workload, environment, maxBacklog, maxAgeSeconds
- * @param {number} now - Current epoch timestamp in milliseconds
- * @returns {Promise<object>} Combined metrics health report with alert status
- */
 async function queueMetrics(client, options, now) {
   const names = queueNames(options);
   const queues = await resolveQueues(client, names);
@@ -397,15 +287,6 @@ async function queueMetrics(client, options, now) {
   };
 }
 
-/**
- * Releases unacknowledged message leases on a Cloudflare Queue by requesting immediate retries.
- * Used to avoid message starvation and restore messages to the queue after inspection or failure.
- *
- * @param {object} client - Cloudflare Queues API client
- * @param {string} queueId - Source queue identifier
- * @param {Array<object>} messages - Array of pulled message objects containing lease_ids
- * @returns {Promise<void>}
- */
 async function releaseLeases(client, queueId, messages) {
   if (messages.length === 0) return;
   await client.acknowledge(queueId, {
@@ -414,17 +295,6 @@ async function releaseLeases(client, queueId, messages) {
   });
 }
 
-/**
- * Builds a structured, tamper-evident audit record of a dead-letter replay attempt.
- * Includes operator identity, justification reason, message digests, and execution outcome.
- *
- * @param {object} options - Command options (apply, operator, reason, workload, environment)
- * @param {{ source: string, target: string }} names - Source and target queue names
- * @param {Array<object>} messages - Raw messages examined during the operation
- * @param {number} now - Operation timestamp in milliseconds
- * @param {object} outcome - Outcome details (name, counts, errorCode)
- * @returns {object} Formatted audit object
- */
 function replayAudit(options, names, messages, now, outcome) {
   return {
     acknowledged_count: outcome.acknowledgedCount,
@@ -447,17 +317,6 @@ function replayAudit(options, names, messages, now, outcome) {
   };
 }
 
-/**
- * Performs dead-letter queue inspection, validation, and optional message replay.
- * Pulls a batch of messages from the DLQ, validates payload structures, and either simulates
- * replay (dry-run) by releasing leases, or pushes messages into the target workload queue
- * and acknowledges original DLQ messages upon success.
- *
- * @param {object} client - Cloudflare Queues API client
- * @param {object} options - Execution options (apply, limit, operator, reason, workload, environment)
- * @param {number} now - Execution timestamp in milliseconds
- * @returns {Promise<object>} Structured audit result describing the operation
- */
 async function replayDeadLetter(client, options, now) {
   const names = queueNames(options);
   const queues = await resolveQueues(client, names);
@@ -572,17 +431,6 @@ async function replayDeadLetter(client, options, now) {
   });
 }
 
-/**
- * Top-level dispatcher for queue operations commands ('metrics' or 'replay-dlq').
- * Injects environment variables and fetch dependencies to perform Cloudflare Queues operations.
- *
- * @param {object} options - Parsed command options
- * @param {object} [dependencies={}] - Injected dependencies
- * @param {Record<string, string | undefined>} [dependencies.environment=process.env] - Environment variable lookup
- * @param {typeof fetch} [dependencies.fetchImpl=fetch] - HTTP fetch implementation
- * @param {() => number} [dependencies.now=() => Date.now()] - Timestamp generator
- * @returns {Promise<object>} Command execution result report
- */
 export async function runQueueCommand(options, dependencies = {}) {
   const environment = dependencies.environment ?? process.env;
   const client = apiClient({

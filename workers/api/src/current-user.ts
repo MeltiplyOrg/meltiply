@@ -22,19 +22,6 @@ interface CurrentUserRow extends Record<string, unknown> {
   updated_at: Date | string;
 }
 
-/**
- * Loads the user profile and active workspace details for the authenticated actor.
- *
- * Executes within a tenant-scoped database transaction configured with the actor's
- * verified claims, joining `users`, `org_members`, and `organizations` while verifying
- * that the workspace matches the one resolved by `public.auth_active_org_id()`.
- * The internal user is bound exclusively through `users.auth_user_id` — the Better
- * Auth subject — so no other identity column can attach a session to an account.
- *
- * @param env - Worker environment bindings containing database connection and Hyperdrive config.
- * @param claims - Verified actor claims identifying the auth subject and resolved workspace.
- * @returns The user profile schema representation with active workspace details, or `null` if the user or membership is not found.
- */
 export async function loadCurrentUser(
   env: ApiWorkerEnv,
   claims: SessionClaims,

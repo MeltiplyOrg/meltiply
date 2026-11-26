@@ -14,6 +14,7 @@ import { loadCurrentUser } from "../src/current-user";
 import { createThreadsAdapter, createYouTubeAdapter, ProviderRegistry } from "@meltiply/providers";
 import { authenticatedPoolFor, systemPoolFor, withSystemTransactionEffect } from "../src/database";
 import type { ApiWorkerEnv } from "../src/env";
+import { wrapPoolConnect } from "../test-support/fakes";
 
 const connectionString = process.env.MELTIPLY_DATABASE_TEST_URL;
 if (!connectionString) {
@@ -35,9 +36,6 @@ const env = {
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
 
-// Claims mirror the ResolvedActor contract: subject is the Better Auth "user".id
-// backing users.auth_user_id, userId the internal users.id UUID, and
-// organizationId the internal workspace UUID with its org_members role.
 const alpha = {
   organizationId: "20000000-0000-4000-8000-000000000001",
   organizationRole: "admin",
@@ -67,8 +65,6 @@ const queryBudgetActor: ResolvedActor = {
   },
 };
 
-// Verified Better Auth JWT identity returned by the `verifyJwtToken` test
-// double; the bearer JWT is the only credential protected routes may accept.
 const jwtIdentity: JwtIdentity = {
   email: "query-budget@meltiply.local",
   name: "Query Budget User",
@@ -144,17 +140,12 @@ function statementKind(text: string): QuerySample["kind"] {
 
 async function measure(operation: () => Promise<RouteResult>): Promise<Measurement> {
   const pool = authenticatedPoolFor(env);
-  const mutablePool = pool as unknown as {
-    connect: () => Promise<TransactionClient>;
-  };
-  const originalConnect = mutablePool.connect;
-  const connect = originalConnect.bind(pool);
   const queries: QuerySample[] = [];
   let acquireMs = 0;
   let transactionStartedAt = 0;
   let transactionMs = 0;
 
-  mutablePool.connect = async () => {
+  const restoreConnect = wrapPoolConnect(pool, (connect) => async () => {
     const acquireStartedAt = performance.now();
     const client = await connect();
     acquireMs = performance.now() - acquireStartedAt;
@@ -183,7 +174,7 @@ async function measure(operation: () => Promise<RouteResult>): Promise<Measureme
       query: measuredQuery,
       release: () => client.release(),
     };
-  };
+  });
 
   const startedAt = performance.now();
   try {
@@ -200,16 +191,10 @@ async function measure(operation: () => Promise<RouteResult>): Promise<Measureme
       transactionMs,
     };
   } finally {
-    mutablePool.connect = originalConnect;
+    restoreConnect();
   }
 }
 
-/**
- * Removes the scaled query-budget fixture inside a system transaction.
- *
- * Deleting the Better Auth "user" row cascades to the internal users row; the
- * organizations row cascades to members, assets, distributions, and fixtures.
- */
 async function deleteFixture(): Promise<void> {
   await Effect.runPromise(
     withSystemTransactionEffect(env, (client) =>
@@ -224,9 +209,6 @@ async function deleteFixture(): Promise<void> {
   );
 }
 
-/**
- * Removes the maximum-range analytics fixture inside a system transaction.
- */
 async function deleteRangeFixture(): Promise<void> {
   await Effect.runPromise(
     withSystemTransactionEffect(env, (client) =>
@@ -250,8 +232,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       signUpload: ({ key }) => Effect.succeed(`https://r2.example/upload/${key}`),
     }),
   });
-  // Both scheduling targets use real adapter capabilities. A ready vertical
-  // video satisfies YouTube and Threads without weakening either media contract.
   const providerRegistry = new ProviderRegistry();
   providerRegistry.register(
     "threads",
@@ -269,7 +249,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       redirectUri: "https://query-budget.invalid/oauth/youtube/callback",
     }),
   );
-  // Keep unsupported coverage inside the measured analytics summary path.
   const configuredCapabilities = providerRegistry
     .capabilities()
     .map((capability) =>
@@ -285,42 +264,24 @@ describeIntegration("core API PostgreSQL query budgets", () => {
     verifyJwtToken: async () => jwtIdentity,
   });
   const start = new Date("2026-07-01T00:00:00.000Z");
-  // Keep the scaled read fixture independent from distributions created by the
-  // mutation budget cases later in the same run.
   const end = new Date("2026-07-19T23:59:59.999Z");
-  // Bounded sub-window over the scaled fixture: published_at/event_at values
-  // span 12:00:01Z..12:02:00Z, so [12:00:30Z, 12:01:30Z] selects exactly the
-  // 61 fixtures seeded with item offsets 30 through 90 inclusive.
   const windowStart = new Date("2026-07-18T12:00:30.000Z");
   const windowEnd = new Date("2026-07-18T12:01:30.000Z");
   const assetId = "a1000000-0000-4000-8000-000000000001";
   const postId = "c0000000-0000-4000-8000-000000000001";
   const distributionId = "d1000000-0000-4000-8000-000000000001";
-  // First Brand Profile in the query-budget workspace; owner of the scaled read
-  // fixture (assets, distributions, and their Posts). Profiles
-  // b4000…002–020 own the remaining scheduling pairs.
   const brandProfileId = "b4000000-0000-4000-8000-000000000001";
   let batchCreateSample = 0;
   let createSample = 0;
   let scheduledBatchCreateSample = 0;
   let uploadSample = 0;
-  // Forty-two saved video Posts each target their Profile's YouTube and Threads
-  // Channels. The immediate/deferred cases use disjoint Posts (0–20 and 21–41),
-  // so every sample measures creation, not rescheduling an earlier outcome.
   const scheduledPostIds = Array.from(
     { length: 42 },
     (_, index) => `c1000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
   );
-  // Posts cycle through the twenty Profiles in insertion order; both target
-  // Channels and the video attachment belong to the same owning Profile.
   const scheduledPostProfileId = (index: number) =>
     `b4000000-0000-4000-8000-${String((index % 20) + 1).padStart(12, "0")}`;
 
-  /**
-   * Gives each mutation sample independent monthly headroom outside measurement.
-   * Removes only uncompleted upload fixtures from previous samples; seeded read
-   * rows and real quota admission remain intact throughout the benchmark.
-   */
   async function prepareMutationSample(): Promise<void> {
     await Effect.runPromise(
       withSystemTransactionEffect(env, (client) =>
@@ -361,11 +322,10 @@ describeIntegration("core API PostgreSQL query budgets", () => {
           );
           yield* client.query(
             `INSERT INTO organizations
-               (id, name, slug, plan, billing_status)
+               (id, name, slug)
              VALUES (
                'b2000000-0000-4000-8000-000000000001',
-               'Query Budget Studio', 'query-budget-studio',
-               'agency', 'active'
+               'Query Budget Studio', 'query-budget-studio'
              )`,
           );
           yield* client.query(
@@ -376,8 +336,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
                'b1000000-0000-4000-8000-000000000001', 'admin'
              )`,
           );
-          // Each of the twenty Profiles owns one Channel per Provider: YouTube
-          // and Threads. Saved video Posts exercise both targets together.
           yield* client.query(
             `INSERT INTO brand_profiles (id, org_id, name, color)
              SELECT
@@ -402,7 +360,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
                '{"fixture": true}'::jsonb
              FROM generate_series(1, 20) AS item`,
           );
-          // Threads and YouTube share each Profile's verified video attachment.
           yield* client.query(
             `INSERT INTO platform_accounts
                (id, org_id, brand_profile_id, platform, platform_user_id,
@@ -444,9 +401,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
             FROM generate_series(1, $2::integer) AS item`,
             [fixturePrefix, fixtureCount],
           );
-          // One Post per fixture publication: the scaled read surface is
-          // exercised through stable Post identity, and each Post owns exactly
-          // one ordered attachment just as a media Post would.
           yield* client.query(
             `INSERT INTO posts
                (id, org_id, brand_profile_id, title, default_text, status,
@@ -460,12 +414,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
             FROM generate_series(1, $2::integer) AS item`,
             [fixturePrefix, fixtureCount],
           );
-          // One attachment per seeded Post. Bound values are positional:
-          // PostgreSQL numbers placeholders by the `$n` written in the SQL, so
-          // this statement carries exactly one placeholder and one value. The
-          // cast fixes the type PostgreSQL infers for the `generate_series`
-          // bound; a second placeholder would leave it expecting a second,
-          // unbound value.
           yield* client.query(
             `INSERT INTO post_attachments
                (post_id, asset_id, org_id, brand_profile_id, position)
@@ -498,9 +446,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
             FROM generate_series(1, $2::integer) AS item`,
             [fixturePrefix, fixtureCount],
           );
-          // Ready media is owned separately by each Profile. The benchmark never
-          // fetches object bytes: these verified inventory facts are the scheduler's
-          // real validation input, not a replacement capability or HTTP adapter.
           yield* client.query(
             `INSERT INTO assets
                (id, org_id, brand_profile_id, uploaded_by, asset_type, title,
@@ -685,7 +630,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
     );
     expect(listed.distributions).toHaveLength(61);
     expect(listed.has_more).toBe(false);
-    // Tenant reads order by event_at DESC, id DESC over the RLS org scope.
     expect(listed.distributions.map((distribution) => distribution.id)).toEqual(
       [...expectedIds].reverse(),
     );
@@ -693,7 +637,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
     const calendarRows = await Effect.runPromise(
       coreService.calendar(env, queryBudgetClaims, windowStart, windowEnd),
     );
-    // The calendar window orders by event_at ASC, id ASC.
     expect(calendarRows.map((row) => row.id)).toEqual(expectedIds);
   });
 
@@ -723,9 +666,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 100,
-        // Paged Posts plus grouped attachments, targets, distributions, and
-        // latest analytics: five statements independent of page size. A
-        // per-Post or per-Channel analytics request still exceeds this bound.
         maxStatements: 5,
         minRows: 100,
         name: "post list",
@@ -744,7 +684,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 100,
-        // Same fixed projection as the list, including batched latest analytics.
         maxStatements: 5,
         minRows: 1,
         name: "post detail",
@@ -816,9 +755,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 1,
-        // A text-only draft needs only the tenant check, idempotency reserve,
-        // Workspace lock, Brand Profile guard, Post insert, and idempotency
-        // completion; all response collections are known empty.
         maxStatements: 6,
         minRows: 1,
         name: "post draft create",
@@ -841,9 +777,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 20,
-        // One rendition lookup and one attachment projection extend the text-only
-        // budget by two statements. Both Channels must produce outcomes while the
-        // insert/outbox work stays set-based rather than growing per target.
         maxStatements: 17,
         minRows: 2,
         name: "post schedule create",
@@ -868,7 +801,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 20,
-        // Deferred work omits only the immediate outbox insert.
         maxStatements: 16,
         minRows: 2,
         name: "scheduled post schedule create",
@@ -893,8 +825,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 1,
-        // Reuse the inserted session for grant planning: creation retains the
-        // quota checks and persisted staging write hold without a session read.
         maxStatements: 11,
         minRows: 1,
         name: "upload session create",
@@ -956,7 +886,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 5,
-        // series, combined breakdowns, follower baseline/daily, accumulation
         maxStatements: 4,
         minRows: 1,
         name: "analytics dashboard",
@@ -1092,10 +1021,8 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       userId: "f1000000-0000-4000-8000-000000000001",
     };
     const rangeStart = new Date("2026-01-01T00:00:00.000Z");
-    // Maximum permitted span: exactly 366 days.
     const rangeEnd = new Date(rangeStart.getTime() + 366 * 24 * 60 * 60 * 1_000);
     const publishedCount = 400;
-    /** Per-platform analytics bucket plus its latest snapshot instant. */
     interface AnalyticsBucket {
       comments: number;
       impressions: number;
@@ -1141,11 +1068,11 @@ describeIntegration("core API PostgreSQL query budgets", () => {
           );
           yield* client.query(
             `INSERT INTO organizations
-               (id, name, slug, plan, billing_status)
+               (id, name, slug)
              VALUES (
                'f2000000-0000-4000-8000-000000000001',
                'Analytics Range Studio',
-               'analytics-range-studio', 'agency', 'active'
+               'analytics-range-studio'
              )`,
           );
           yield* client.query(
@@ -1176,9 +1103,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
                'image', 'Analytics range fixture', 'ready'
              )`,
           );
-          // Every publication row in this fixture belongs to its own Post, so
-          // the maximum-range analytics summary counts Post publications
-          // through stable identity rather than Asset identity.
           yield* client.query(
             `INSERT INTO posts
                (id, org_id, brand_profile_id, title, default_text, status,
@@ -1228,8 +1152,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
                TIMESTAMP '2027-01-02 00:00:00+00'
              FROM generate_series(1, 10) AS item`,
           );
-          // Published posts spread across the whole window on both analytics
-          // platforms; item * 21 hours keeps every post inside the range.
           yield* client.query(
             `INSERT INTO distributions
                (id, org_id, brand_profile_id, post_id, platform, status,
@@ -1249,8 +1171,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
              FROM generate_series(1, $1::integer) AS item`,
             [publishedCount],
           );
-          // In range but scheduled, and published but outside the range on both
-          // sides: all three groups must stay out of the summary.
           yield* client.query(
             `INSERT INTO distributions
                (id, org_id, brand_profile_id, post_id, platform, status,
@@ -1299,8 +1219,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
                'https://example.invalid/analytics-range/late/' || item
              FROM generate_series(1, 10) AS item`,
           );
-          // Two in-window snapshots per post except the last one, which keeps
-          // none; only the newest as of the range end may be summarized.
           yield* client.query(
             `INSERT INTO analytics_snapshots
                (id, distribution_id, org_id, views, likes, comments, shares,
@@ -1348,8 +1266,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
     );
 
     try {
-      // Mirror of the seed rules above: the latest as-of-end snapshot wins,
-      // and the last published post contributes to post_count only.
       const expected = new Map<string, ReturnType<typeof zeroBucket>>();
       for (let item = 1; item <= publishedCount; item += 1) {
         const platform = item % 2 === 0 ? "youtube" : "tiktok";
@@ -1374,8 +1290,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       }
 
       const summarize = async () => {
-        // Each observation owns a fresh cache so the history query, not a warm
-        // summary-cache hit, is subject to the statement and latency budgets.
         const coldService = createCoreApiService(configuredCapabilities);
         const body = await Effect.runPromise(
           coldService.summaryAnalytics(env, rangeClaims, {
@@ -1425,9 +1339,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
         new Date(rangeStart.getTime() + 8_378 * 60 * 60 * 1_000).toISOString(),
       );
 
-      // One authorization query and one aggregation query per cold read. Every
-      // sample must remain within the authenticated 10s statement timeout,
-      // independently of the seeded history size.
       for (let sample = 0; sample < 5; sample += 1) {
         const measurement = await measure(summarize);
         expect(measurement.applicationStatements).toBeLessThanOrEqual(2);
@@ -1448,8 +1359,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
   }, 60_000);
   it("walks scaled list pages within a constant per-page statement count and correct page flags", async () => {
     const pageSize = 50;
-    // Each surface declares its fixed statements-per-page ceiling: the bound
-    // must not scale with the page, so a per-row lookup still trips the walk.
     const measuredListPage = async <Body>(
       name: string,
       run: () => Promise<Body>,
@@ -1464,13 +1373,10 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       return measurement.result.body as Body;
     };
 
-    // Seeded Posts and the draft Post mutation case share this workspace, so
-    // the walk pages until exhausted rather than assuming a fixed total.
     const postIds = new Set<string>();
     let postOffset = 0;
     let postPageCount = 0;
     let sawFinalPostPage = false;
-    // Bounded ceiling: the seeded fixture plus one row per draft save sample.
     const maxPostPages =
       Math.ceil((fixtureCount + scheduledPostIds.length + samplesPerRoute + 100) / pageSize) + 5;
     while (!sawFinalPostPage) {
@@ -1486,15 +1392,12 @@ describeIntegration("core API PostgreSQL query budgets", () => {
             }),
           ),
         (page) => page.posts.length,
-        // Page plus grouped attachments, targets, distributions, and latest
-        // analytics: five statements at every offset, independent of page size.
         5,
       );
       expect(body.limit).toBe(pageSize);
       expect(body.offset).toBe(postOffset);
       expect(body.posts.length).toBeLessThanOrEqual(pageSize);
       for (const post of body.posts) {
-        // Stable identity: no Post is served twice across the walk.
         expect(postIds.has(post.id)).toBe(false);
         postIds.add(post.id);
       }
@@ -1511,7 +1414,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
     let distributionOffset = 0;
     let sawFinalDistributionPage = false;
     let distributionPageCount = 0;
-    // Bounded safety ceiling derived from seeded fixture plus batch/single mutation sample volume
     const maxDistributionPages =
       Math.ceil((fixtureCount + samplesPerRoute * (1 + 20 + 20) + 100) / pageSize) + 5;
     while (!sawFinalDistributionPage) {

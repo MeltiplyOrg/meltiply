@@ -1,18 +1,3 @@
-/**
- * Layout inspection overlays for the DevBox Helpers tab.
- *
- * Two toggles, both delivered through a single injected stylesheet keyed off
- * `data-devbox-*` attributes on `<html>`:
- *
- * - **Baseline grid**: a fixed 8px repeating-linear-gradient overlay using the
- *   `--grid-line` token, for verifying vertical rhythm.
- * - **Element outlines**: a universal 1px outline on every element, for
- *   inspecting margins, padding, and clipping across nested layouts.
- *
- * Both skip the DevBox dock itself (`[data-devbox]` subtree) so the overlays
- * never obscure the controls that toggle them.
- */
-
 import { ensureStyleTag } from "./dom";
 
 const gridAttribute = "data-devbox-grid";
@@ -44,9 +29,6 @@ html[data-devbox-outlines] body *:not([data-devbox] *):not([data-devbox]) {
 }
 `;
 
-/**
- * Lazily injects the overlay stylesheet and grid element on first use.
- */
 function ensureOverlayDom(): void {
   ensureStyleTag(overlayStyleId, overlayStylesheet);
   if (!document.getElementById(gridElementId)) {
@@ -57,10 +39,6 @@ function ensureOverlayDom(): void {
   }
 }
 
-/**
- * Removes the grid element and stylesheet once neither overlay is active, so a
- * disabled overlay leaves no persistent DOM mutation behind.
- */
 function pruneOverlayDom(): void {
   if (
     document.documentElement.hasAttribute(gridAttribute) ||
@@ -72,28 +50,18 @@ function pruneOverlayDom(): void {
   document.getElementById(overlayStyleId)?.remove();
 }
 
-/**
- * Toggles the 8px baseline grid overlay.
- */
 export function setBaselineGrid(enabled: boolean): void {
   if (enabled) ensureOverlayDom();
   document.documentElement.toggleAttribute(gridAttribute, enabled);
   pruneOverlayDom();
 }
 
-/**
- * Toggles the element boundary outline overlay.
- */
 export function setElementOutlines(enabled: boolean): void {
   if (enabled) ensureOverlayDom();
   document.documentElement.toggleAttribute(outlinesAttribute, enabled);
   pruneOverlayDom();
 }
 
-/**
- * Removes both overlay attributes and their injected DOM. Called when the
- * DevBox unmounts so layout inspection cannot outlive the dock.
- */
 export function clearLayoutOverlays(): void {
   document.documentElement.removeAttribute(gridAttribute);
   document.documentElement.removeAttribute(outlinesAttribute);
@@ -101,9 +69,6 @@ export function clearLayoutOverlays(): void {
   document.getElementById(overlayStyleId)?.remove();
 }
 
-/**
- * Reports current overlay state for restoring persisted toggles.
- */
 export function overlayState(): { grid: boolean; outlines: boolean } {
   return {
     grid: document.documentElement.hasAttribute(gridAttribute),

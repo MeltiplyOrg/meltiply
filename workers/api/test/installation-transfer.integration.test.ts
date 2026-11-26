@@ -5,12 +5,6 @@ import type { JwtIdentity } from "@meltiply/auth";
 import type { ApiWorkerEnv } from "../src/env";
 import type * as BetterAuthModule from "../src/better-auth";
 
-/**
- * Narrows a parsed auth request body to the password field.
- *
- * @param value - Parsed JSON body.
- * @returns The supplied password, or undefined for an invalid body.
- */
 function passwordFrom(value: unknown): string | undefined {
   if (
     value !== null &&
@@ -99,14 +93,6 @@ const app = createApiApp({
   verifyJwtToken: async (_env, token) => identities[token]!,
 });
 
-/**
- * Sends one authenticated request through the real API app.
- *
- * @param path - API path.
- * @param init - Request method, body, and headers.
- * @param as - Identity key performing the request.
- * @returns The HTTP response.
- */
 function request(
   path: string,
   init: { body?: string; headers?: Record<string, string>; method: string },
@@ -126,13 +112,6 @@ function request(
   );
 }
 
-/**
- * Narrows an installation response body to its owner id.
- *
- * @param value - Parsed JSON body.
- * @returns The installation owner user id.
- * @throws Error when the payload does not carry a string owner id.
- */
 function installationOwnerId(value: unknown): string {
   if (
     value !== null &&
@@ -145,12 +124,6 @@ function installationOwnerId(value: unknown): string {
   throw new Error("Installation response must include installation_owner_user_id");
 }
 
-/**
- * Reads the installation owner id from an installation response.
- *
- * @param response - Installation response.
- * @returns The owner user id.
- */
 async function ownerIdFrom(response: Response): Promise<string> {
   return installationOwnerId(await response.json());
 }
@@ -181,13 +154,6 @@ interface AuditEntry {
   target_id: string;
 }
 
-/**
- * Narrows an audit response to its entries.
- *
- * @param value - Parsed JSON body.
- * @returns The Audit entries.
- * @throws Error when the payload does not carry an entries array.
- */
 function auditEntries(value: unknown): AuditEntry[] {
   if (
     value !== null &&
@@ -227,9 +193,6 @@ describe("installation ownership transfer", () => {
       expect(wrongPassword.status).toBe(401);
 
       const invalidTarget = await transfer("owner", editorId, "MeltiplyLocal1!");
-      // Only the "target must be an active admin" guard can fire here: the
-      // target is a different user than the actor, so the self-transfer guard
-      // (the other 409 producer) cannot satisfy this assertion.
       expect(invalidTarget.status).toBe(409);
       await expect(invalidTarget.json()).resolves.toMatchObject({
         error: { code: "owner_transfer_invalid" },
@@ -310,13 +273,8 @@ describe("installation ownership transfer", () => {
         "owner",
       );
       await staleStarted;
-      // Only the stale request is held; later sign-ins (the first transfer)
-      // must proceed normally.
       reauthGate.hold = false;
 
-      // The first transfer completes while the stale request is waiting in
-      // reauthentication. Releasing it must not let the former Owner transfer
-      // ownership a second time.
       const first = await request(
         "/api/v1/installation/ownership-transfer",
         {

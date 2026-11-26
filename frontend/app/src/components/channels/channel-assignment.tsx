@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { useCallback, useState } from "react";
 import { AlertCircle, ArrowLeft, Check, Link2, Loader2 } from "lucide-react";
 import { Link } from "react-router";
@@ -22,23 +23,11 @@ import { brandProfileColorClass, type OAuthSelectionAccount } from "@/types";
 import { cn } from "@meltiply/ui/utils";
 
 export interface ChannelAssignmentProps {
-  /** Opaque server assignment ticket nonce from callback parameters. */
   selectionId: string;
-  /** Returns to the workspace without connecting a Channel. */
   onClose: () => void;
-  /** Fired after the Channel is persisted under the chosen Brand Profile. */
   onSuccess: () => void;
 }
 
-/**
- * Resolves the authorized accounts and offers the Brand Profile choice.
- *
- * Account and Profile choices use native radios. Only connectable Profiles
- * appear in the bounded scrolling list, preserving workspace order. An already
- * connected account can only refresh its current owner; other accounts require
- * an empty Platform slot.
- * Confirmation supplies both ids; dismissal discards the ticket.
- */
 function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAssignmentProps) {
   const { t } = useI18n();
   const scope = useSessionScope();
@@ -85,7 +74,6 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
       ? selectedProfileId
       : null;
 
-  /** Persists the chosen account under the chosen Profile; API conflicts stay visible for retry. */
   const handleConfirm = useCallback(() => {
     if (!effectiveAccountId || !selectedProfile || workspaceLoading || isSubmitting) return;
     setActionError(null);
@@ -99,9 +87,7 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
           onSuccess();
         },
         onError: (err) => {
-          setActionError(
-            err instanceof Error ? err.message : t("The selected Channel could not be connected."),
-          );
+          setActionError(errorMessage(err, t("The selected Channel could not be connected.")));
         },
       },
     );
@@ -112,12 +98,10 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
     isSubmitting,
     confirmMutation,
     selectionId,
-
     onSuccess,
     t,
   ]);
 
-  /** Cancels a usable ticket before dismissal; missing/expired tickets close locally. */
   const handleCancel = useCallback(() => {
     if (isSubmitting) return;
     if (selectionUnavailable) {
@@ -133,9 +117,7 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
           return;
         }
         setActionError(
-          error instanceof Error
-            ? error.message
-            : t("We could not complete that request. Try again in a moment."),
+          errorMessage(error, t("We could not complete that request. Try again in a moment.")),
         );
       },
     });
@@ -244,9 +226,10 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
                 <div className="space-y-1">
                   <p className="font-semibold">{t("Unable to load authorized accounts")}</p>
                   <p className="text-xs">
-                    {selectionQuery.error instanceof Error
-                      ? selectionQuery.error.message
-                      : t("The assignment ticket has expired or could not be found.")}
+                    {errorMessage(
+                      selectionQuery.error,
+                      t("The assignment ticket has expired or could not be found."),
+                    )}
                   </p>
                 </div>
               </Alert>
@@ -467,19 +450,6 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
   );
 }
 
-/**
- * Full-page Channel assignment surface rendered after the OAuth callback.
- *
- * The callback hands over a sealed, owner-bound ticket; this view chooses the
- * authorized account (when more than one exists) and the owning Brand Profile
- * before any Channel is persisted. Success returns to Channels with the
- * connected outcome; cancel discards the ticket.
- *
- * @param props.selectionId - Sealed assignment ticket.
- * @param props.onClose - Returns without a connected Channel.
- * @param props.onSuccess - Reports the connected account before returning.
- * @returns Full-page assignment surface.
- */
 export function ChannelAssignment({
   selectionId,
   onClose,

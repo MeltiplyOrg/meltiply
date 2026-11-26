@@ -10,16 +10,6 @@ interface WorkspaceSurfaceProps {
   contentClassName?: string;
 }
 
-/**
- * Gr8r's full-bleed operational page: the header and toolbar own the shared
- * gutter while Table rows reach the working-area edges and Grid owns its
- * inner gutters. No inset page card or stacked outer gaps survive.
- * Controls and collection state remain mounted under the persistent shell.
- *
- * On phones the title and primary actions share one row and the description
- * sits beneath them, so a page does not pay three stacked rows before its
- * collection. Action groups still wrap when they cannot fit beside the title.
- */
 export function WorkspaceSurface({
   title,
   description,

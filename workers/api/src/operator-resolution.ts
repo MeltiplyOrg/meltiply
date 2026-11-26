@@ -24,11 +24,6 @@ interface OperatorResolutionResult {
   status: OperatorDistributionResolution;
 }
 
-/**
- * Operator reconciliation contract: each method returns an Effect program the
- * operator route boundary executes once via runRouteEffect, keeping transaction
- * work and typed CoreApiError/DatabaseError failures on the Effect channel.
- */
 export interface OperatorReconciliationService {
   resolveDistribution(
     env: ApiWorkerEnv,
@@ -43,23 +38,10 @@ export interface OperatorReconciliationService {
 const safeCode = /^[a-z0-9][a-z0-9._-]{0,99}$/;
 const safeIdentifier = /^[^\u0000-\u0020\u007f]{1,512}$/;
 
-/**
- * Type guard verifying an unknown value is a non-null, non-array object dictionary.
- *
- * @param value - Candidate value.
- * @returns `true` if value is an object record.
- */
 function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-/**
- * Validates and trims an operator reconciliation justification reason string.
- *
- * @param value - Candidate reason string from operator request.
- * @returns Trimmed reason string.
- * @throws {CoreApiError} 400 `invalid_operator_resolution` if length is outside 8-500 characters.
- */
 function reason(value: unknown): string {
   const normalized = typeof value === "string" ? value.trim() : "";
   if (normalized.length < 8 || normalized.length > 500) {
@@ -72,13 +54,6 @@ function reason(value: unknown): string {
   return normalized;
 }
 
-/**
- * Validates that an optional provider URL is a bounded, canonical HTTPS URL without credentials or query fragments.
- *
- * @param value - Candidate URL value.
- * @returns Canonical HTTPS URL string, or `null` if empty/omitted.
- * @throws {CoreApiError} 400 `invalid_operator_resolution` if the URL is malformed, non-HTTPS, or contains search/hash/auth fragments.
- */
 function canonicalUrl(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value !== "string" || value.length > 2_048) {
@@ -110,20 +85,6 @@ function canonicalUrl(value: unknown): string | null {
   }
 }
 
-/**
- * Parses and validates an operator manual reconciliation resolution for a publication distribution.
- *
- * Enforces field allowlisting, exact confirmation phrasing (`"resolve <id> as <resolution>"`),
- * and validates terminal evidence: `published` requires a public Post ID;
- * `delivered` is an externally verified native handoff without a public Post ID;
- * `failed` requires a failure code and optional boolean retryability.
- *
- * @param distributionId - UUID of the target distribution.
- * @param value - Raw request body payload.
- * @returns Validated `OperatorResolutionInput` object.
- * @throws {CoreApiError} 400 `invalid_operator_resolution` if payload or evidence fails validation.
- * @throws {CoreApiError} 400 `operator_confirmation_required` if confirmation string is mismatched.
- */
 export function parseOperatorResolution(
   distributionId: string,
   value: unknown,

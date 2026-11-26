@@ -1,18 +1,3 @@
-/**
- * Dev-only 390px viewport frame and breakpoint readout for the DevBox dock.
- *
- * The frame constrains `#root` to a centered 390px column with a dimmed
- * ambient backdrop and a floating boundary label, so responsive checks against
- * the mandatory 390px mobile gate run without browser devtools. Styling is
- * delivered through a dedicated stylesheet toggled by a `data-devbox-viewport`
- * attribute on `<html>` — no inline styles on the app tree, and removal is a
- * single attribute flip.
- *
- * `breakpointForWidth` mirrors the Tailwind default ramp so the dock can show
- * which media-query rules are active for the *real* window width (the frame is
- * a visual constraint; viewport media queries still follow the real window).
- */
-
 import { ensureStyleTag } from "./dom";
 
 const viewportAttribute = "data-devbox-viewport";
@@ -54,10 +39,6 @@ html[data-devbox-viewport] #devbox-viewport-label {
 
 export type TailwindBreakpoint = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 
-/**
- * Maps a viewport width in pixels to the active Tailwind breakpoint label.
- * Mirrors the default Tailwind ramp (sm 640, md 768, lg 1024, xl 1280, 2xl 1536).
- */
 export function breakpointForWidth(width: number): TailwindBreakpoint {
   if (width >= 1536) return "2xl";
   if (width >= 1280) return "xl";
@@ -67,11 +48,6 @@ export function breakpointForWidth(width: number): TailwindBreakpoint {
   return "xs";
 }
 
-/**
- * Enables or disables the 390px frame. Lazily injects the stylesheet and the
- * floating "390px" boundary label on first enable; disabling removes both so a
- * stopped frame leaves no DOM mutation behind.
- */
 export function setViewportFrame(enabled: boolean): void {
   if (!enabled) {
     clearViewportFrame();
@@ -88,18 +64,12 @@ export function setViewportFrame(enabled: boolean): void {
   }
 }
 
-/**
- * Removes the viewport frame attribute, boundary label, and stylesheet.
- */
 export function clearViewportFrame(): void {
   document.documentElement.removeAttribute(viewportAttribute);
   document.getElementById(labelElementId)?.remove();
   document.getElementById(styleElementId)?.remove();
 }
 
-/**
- * Reports whether the 390px frame is currently applied.
- */
 export function isViewportFrameActive(): boolean {
   return document.documentElement.hasAttribute(viewportAttribute);
 }

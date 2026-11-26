@@ -9,7 +9,6 @@ const nonAlphanumericPattern = /[^a-z0-9]/g;
 
 const TIMEZONES = ["UTC", ...Intl.supportedValuesOf("timeZone")];
 
-/** Ranks normalized IANA names by exact substring, then ordered character gaps. Spaces, slashes and underscores are interchangeable; missing letters are allowed (e.g. "ktm" finds Asia/Katmandu). Returns null for nonmatches, keeping the finite timezone catalog bounded. */
 function timezoneScore(zone: string, query: string): number | null {
   const text = zone.toLowerCase().replace(nonAlphanumericPattern, "");
   const needle = query.toLowerCase().replace(nonAlphanumericPattern, "");
@@ -27,15 +26,6 @@ function timezoneScore(zone: string, query: string): number | null {
   return 100 + gaps;
 }
 
-/**
- * Searchable IANA timezone selector for Queue configuration. The panel renders
- * inline rather than in a portal: a portalled list inside a modal dialog has its
- * wheel events cancelled by the dialog's scroll lock, so it could not scroll.
- * Composes the shared menu surface, Input, Button and React Aria's keyboard
- * listbox; the finite browser catalog includes UTC plus any saved alias so
- * editing never silently renames a valid timezone. Search never commits;
- * choosing an identifier closes the panel and restores the trigger.
- */
 export function QueueTimezonePicker({
   value,
   onChange,
@@ -45,10 +35,8 @@ export function QueueTimezonePicker({
 }: {
   value: string;
   onChange: (zone: string) => void;
-  /** Lets the owning dialog keep Escape scoped to the panel while it is open. */
   onOpenChange?: (open: boolean) => void;
   disabled: boolean;
-  /** Field label; defaults to the Queue configuration label. */
   label?: string;
 }) {
   const { t } = useI18n();
@@ -58,24 +46,17 @@ export function QueueTimezonePicker({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
-  // The owning dialog needs the panel's layer state so Escape closes one layer
-  // at a time; report unmount as closed so the dialog never stays locked open.
   useEffect(() => {
     onOpenChange?.(open);
   }, [open, onOpenChange]);
   useEffect(() => () => onOpenChange?.(false), [onOpenChange]);
   const zones = useMemo(() => [...new Set([value, ...TIMEZONES])].sort(), [value]);
-  // Opening lands on the saved zone instead of the top of a 400-row catalog;
-  // typing a new query restarts from the best match.
   useEffect(() => {
     if (!open) return;
-    // Layout is not final in the commit that mounts the panel, so reveal the
-    // saved zone on the next frame instead of measuring a zero-height list.
     const frame = requestAnimationFrame(() => {
       const list = listRef.current;
       const selected = list?.querySelector<HTMLElement>('[aria-selected="true"]');
       if (!list || !selected) return;
-      // The list is the offset parent, so this is scroll-independent.
       list.scrollTop = selected.offsetTop - (list.clientHeight - selected.offsetHeight) / 2;
     });
     return () => cancelAnimationFrame(frame);
@@ -93,7 +74,6 @@ export function QueueTimezonePicker({
         .sort((a, b) => a.score - b.score || a.id.localeCompare(b.id)),
     [zones, search],
   );
-  /** Closes the panel, clears the query, and returns focus to the trigger that owns it. */
   function close() {
     setOpen(false);
     setSearch("");
@@ -138,8 +118,6 @@ export function QueueTimezonePicker({
               placeholder={t("Search timezones…")}
               className="pl-8"
               onKeyDown={(event) => {
-                // Typing a query must never submit the Queue form; Enter selects
-                // only once focus is on an option inside the listbox.
                 if (event.key === "Enter") event.preventDefault();
                 if (event.key !== "ArrowDown") return;
                 event.preventDefault();

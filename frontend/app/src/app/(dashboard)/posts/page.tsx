@@ -1,31 +1,15 @@
 import { useMemo } from "react";
-import { useNavigate } from "react-router";
 
-import { workspaceViewPath, type WorkspaceView } from "@/lib/navigation";
+import { useSearchParams, useWorkspaceNavigate } from "@/lib/navigation";
 import { PostsView } from "@/components/posts/posts-view";
 import type { PostStatusFilter, PostViewMode } from "@/components/posts/types";
-import { useSearchParams } from "@/lib/navigation";
 
-/**
- * Resolves the posts hub's initial collection view from the `?view=` deep-link
- * param. `?view=composer` is a composition request rather than a collection view,
- * so it falls back to Table while `initialComposerOpen` opens the drawer.
- *
- * @param viewParam - Parsed `?view=` query value, if present.
- * @returns The initial `PostViewMode` for `PostsView` (`table` when absent/unknown).
- */
 function resolveViewMode(viewParam: string | null): PostViewMode {
   return viewParam === "table" || viewParam === "calendar" || viewParam === "grid"
     ? viewParam
     : "table";
 }
 
-/**
- * Resolves the posts hub's initial status filter from the `?status=` deep-link param.
- *
- * @param statusParam - Parsed `?status=` query value, if present.
- * @returns The initial `PostStatusFilter` for `PostsView` (`all` when absent/unknown).
- */
 function resolveStatusFilter(statusParam: string | null): PostStatusFilter {
   return statusParam === "scheduled" ||
     statusParam === "draft" ||
@@ -35,26 +19,11 @@ function resolveStatusFilter(statusParam: string | null): PostStatusFilter {
     : "all";
 }
 
-/**
- * Canonical RFC 4122 UUID form. A deep link that is not one can never identify an
- * existing Post, so it is ignored instead of driving a doomed composer load.
- */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/**
- * Unified posts hub route hosting the `PostsView` at the canonical `/posts` path.
- *
- * Derives the initial view mode and status filter from `?view=`/`?status=` deep
- * links, and opens the composer on an existing Post through `?editPostId=<uuid>`
- * — the stable Post identity rather than a composite key derived from an asset
- * and a timestamp. Forwards in-view navigation (e.g. "open composer") back into
- * React Router through the canonical workspace route map.
- *
- * @returns React element rendering the posts workspace view.
- */
 export default function PostsPage(): React.ReactElement {
   const searchParams = useSearchParams();
-  const navigate = useNavigate();
+  const handleNavigate = useWorkspaceNavigate();
 
   const initialViewMode = useMemo(() => resolveViewMode(searchParams.get("view")), [searchParams]);
   const initialStatusFilter = useMemo(
@@ -64,15 +33,6 @@ export default function PostsPage(): React.ReactElement {
   const editPostIdParam = searchParams.get("editPostId");
   const initialPostId =
     editPostIdParam && UUID_PATTERN.test(editPostIdParam) ? editPostIdParam : undefined;
-
-  const handleNavigate = (view: WorkspaceView, options?: { search?: string }) => {
-    const query = options?.search
-      ? options.search.startsWith("?")
-        ? options.search
-        : `?${options.search}`
-      : "";
-    navigate(`${workspaceViewPath(view)}${query}`);
-  };
 
   return (
     <PostsView

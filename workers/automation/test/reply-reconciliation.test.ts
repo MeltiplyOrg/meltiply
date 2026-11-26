@@ -1,5 +1,4 @@
 import { Effect } from "effect";
-import type { EffectTransactionClient } from "@meltiply/database";
 import { ProviderRegistry, type ProviderAdapter } from "@meltiply/providers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -9,12 +8,9 @@ import { withSystemTransactionEffect } from "../src/database";
 import { RetryableJobError } from "../src/effect/index";
 import type { AutomationEnv } from "../src/env";
 import type { OutboxMessage } from "../src/messages";
-import {
-  processReplyMessage,
-  replyReconciliationCadenceSeconds,
-  type ReplyProcessingDependencies,
-} from "../src/replies";
+import { processReplyMessage, replyReconciliationCadenceSeconds } from "../src/replies";
 import { enqueueDueReplyReconciliations } from "../src/reply-reconciliation";
+import { fakeSystemTransaction } from "./test-doubles";
 
 const env = {
   ENVIRONMENT: "test",
@@ -25,8 +21,6 @@ describe("reply reconciliation enqueue", () => {
   it.each([0, -1, 101, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
     "rejects invalid limit %s",
     async (limit) => {
-      // The RangeError contract surfaces as a classified failure inside the
-      // Effect: RetryableJobError keeps "RangeError" on its `cause` field.
       const failure = await Effect.runPromise(
         Effect.flip(enqueueDueReplyReconciliations(env, limit)),
       );
@@ -93,11 +87,6 @@ describe("reply reconciliation delayed triggers", () => {
     };
   }
 
-  /**
-   * Records every statement the reply path issues against a stub client so a test
-   * can read back the Outbox entry it emitted. Comment and provider-operation updates
-   * are mirrored onto the fixture rows so a later delivery observes persisted state.
-   */
   function recordingTransaction(
     comment: Record<string, unknown>,
     operation: Record<string, unknown> | null,
@@ -156,12 +145,9 @@ describe("reply reconciliation delayed triggers", () => {
       }
       return Effect.succeed({ rowCount: 1, rows: [] });
     });
-    const transaction = vi.fn(
-      <T>(
-        _env: AutomationEnv,
-        run: (client: EffectTransactionClient) => Effect.Effect<T, unknown>,
-      ): Effect.Effect<T, unknown> => run({ query } as unknown as EffectTransactionClient),
-    ) as unknown as NonNullable<ReplyProcessingDependencies["transaction"]>;
+    const transaction = fakeSystemTransaction((sql, params) =>
+      query(sql, params ? [...params] : undefined),
+    );
     return { statements, transaction };
   }
 
@@ -237,10 +223,14 @@ describe("reply reconciliation delayed triggers", () => {
       ),
     ).rejects.toThrow(RetryableJobError);
 
-    const entry = reconciliationEntry(statements);
-    expect(entry?.sql).toContain("comment.reply.requested");
-    expect(entry?.sql).toContain("comment-reply-reconcile:");
-    expect(entry?.params).toEqual([orgId, commentId, 0, 60]);
+    expect(reconciliationEntry(statements)?.params).toEqual([
+      orgId,
+      "comment.reply.requested",
+      "comment",
+      commentId,
+      `comment-reply-reconcile:${commentId}:1`,
+      JSON.stringify({ comment_id: commentId, delay_seconds: 60, reconciliation: true }),
+    ]);
   });
 
   it("advances the cadence on each reconciliation lookup that must retry", async () => {
@@ -275,12 +265,17 @@ describe("reply reconciliation delayed triggers", () => {
       ),
     ).rejects.toThrow(RetryableJobError);
 
-    // Attempt count advanced to 2 while claiming, so the next attempt is 3.
     expect(reconciliationEntry(statements)?.params).toEqual([
       orgId,
+      "comment.reply.requested",
+      "comment",
       commentId,
-      2,
-      replyReconciliationCadenceSeconds(3),
+      `comment-reply-reconcile:${commentId}:3`,
+      JSON.stringify({
+        comment_id: commentId,
+        delay_seconds: replyReconciliationCadenceSeconds(3),
+        reconciliation: true,
+      }),
     ]);
   });
 
@@ -302,7 +297,6 @@ describe("reply reconciliation delayed triggers", () => {
       ),
     ).resolves.toBe("processed");
 
-    // The reply stays pending platform processing: no premature success write.
     expect(statements.some(({ sql }) => sql.includes("replied = true"))).toBe(false);
     const commentUpdate = statements.find(
       ({ sql }) =>
@@ -315,12 +309,17 @@ describe("reply reconciliation delayed triggers", () => {
         sql.includes("status = 'needs_reconciliation'"),
     );
     expect(operationUpdate?.params).toEqual(["op-db-1", "created:reply-container-1"]);
-    // Durable due work is armed at the first cadence delay.
     expect(reconciliationEntry(statements)?.params).toEqual([
       orgId,
+      "comment.reply.requested",
+      "comment",
       commentId,
-      0,
-      replyReconciliationCadenceSeconds(1),
+      `comment-reply-reconcile:${commentId}:1`,
+      JSON.stringify({
+        comment_id: commentId,
+        delay_seconds: replyReconciliationCadenceSeconds(1),
+        reconciliation: true,
+      }),
     ]);
   });
 
@@ -362,8 +361,6 @@ describe("reply reconciliation delayed triggers", () => {
       ),
     ).resolves.toBe("processed");
 
-    // The success write is atomic: it lands only while the comment is still
-    // in a reply-pending status, so a duplicate finalization cannot re-mark it.
     const successUpdate = statements.find(({ sql }) => sql.includes("SET replied = true"));
     expect(successUpdate?.sql).toContain("reply_status IN ('in_progress', 'needs_reconciliation')");
     expect(successUpdate?.params).toEqual([
@@ -373,8 +370,6 @@ describe("reply reconciliation delayed triggers", () => {
     ]);
     expect(reconciliationEntry(statements)).toBeUndefined();
 
-    // A replayed reconciliation delivery observes the persisted success and
-    // skips without invoking the provider again.
     await expect(
       Effect.runPromise(
         processReplyMessage(env, lookupMessage, {

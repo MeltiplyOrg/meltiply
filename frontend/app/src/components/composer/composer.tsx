@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { codePointLength } from "@meltiply/domain";
 import { Schema } from "effect";
 import { persistProfileCopies, type ProfileCopy, type ProfileCopyProgress } from "./profile-copies";
 import {
@@ -94,36 +95,16 @@ import { Trans, useI18n } from "@/lib/i18n";
 import { ApiError } from "@/lib/api";
 import { userFacingErrorMessage } from "@/lib/frontend-errors";
 
-/**
- * Per-destination overrides for post body content and platform-specific settings.
- * `hasOverride` distinguishes a Channel that inherits the shared `default_text`
- * from one carrying its own caption, which the Post target persists as
- * `description_override` (null means inherit).
- */
 interface ChannelOverride {
   content: string;
   hasOverride: boolean;
   settings: Record<string, unknown>;
-  /**
-   * Saved signature snapshot. Present (including explicit null) on a hydrated
-   * target so a later template edit cannot rewrite existing content; absent on
-   * a newly selected target, where the current default template resolves.
-   */
   signature?: string | null;
 }
 
-/** Publishing intents the composer submits; the pinned bar acts on the chosen one. */
 const PUBLISH_MODES = ["draft", "queue", "schedule", "now"] as const;
 type PublishMode = (typeof PUBLISH_MODES)[number];
 
-/**
- * Label of one publishing-mode option in the selector. Kept as literal calls so
- * the translation catalog can still see every message statically.
- *
- * @param mode - Publishing intent the option selects.
- * @param t - Active translator.
- * @returns Localized option label.
- */
 function publishModeOption(mode: PublishMode, t: (message: string) => string): string {
   switch (mode) {
     case "draft":
@@ -137,15 +118,6 @@ function publishModeOption(mode: PublishMode, t: (message: string) => string): s
   }
 }
 
-/**
- * Label of the pinned action for a publishing mode: it names the action the
- * button performs rather than repeating the mode's own label.
- *
- * @param mode - Selected publishing intent.
- * @param postId - Existing Post id, which makes a draft submission a plain save.
- * @param t - Active translator.
- * @returns Localized action label.
- */
 function publishModeAction(
   mode: PublishMode,
   postId: string | null,
@@ -157,88 +129,34 @@ function publishModeAction(
   return t("Publish Now");
 }
 
-/** Icon per publishing mode, matching the action the pinned bar performs. */
 const PUBLISH_MODE_ICONS = { draft: Save, queue: Layers, schedule: Calendar, now: Send } as const;
 
-/**
- * Number of characters a platform counts a caption by: code points, matching
- * `captionLength` in `@meltiply/providers`, so one emoji costs one character
- * here exactly as it does when the API validates the published text.
- *
- * @param text - Caption text as typed.
- * @returns Character count in code points.
- */
 function captionLength(text: string): number {
-  return [...text].length;
+  return codePointLength(text);
 }
 
-/**
- * Locks a caption being typed to a platform limit. Only an incoming value is
- * clamped: text restored from a saved draft or a switched Channel override stays
- * intact, so nothing the creator wrote is destroyed silently. An over-limit
- * restore is reported by the field's own counter and by submit validation.
- *
- * @param text - Value the input event produced.
- * @param limit - Maximum length in code points, or null when the platform publishes none.
- * @returns The caption to store.
- */
 function clampCaption(text: string, limit: number | null): string {
-  if (limit === null || captionLength(text) <= limit) return text;
+  if (limit === null || codePointLength(text) <= limit) return text;
   return [...text].slice(0, limit).join("");
 }
 
-/**
- * One composer attachment row: a durable Asset reference plus, while the file
- * is still in the browser, the live upload task driving it.
- *
- * `assetId` is null only until the upload session exists; `uploadStatus` is the
- * local pipeline state (null once the row has no local task), while `assetStatus`
- * mirrors the server-owned `Asset.status` for anything the Post already holds.
- */
 interface AttachmentEntry {
-  /** Stable React key; also the upload-task map key. */
   key: string;
-  /** Durable Asset id, or null while the upload session is still being created. */
   assetId: string | null;
-  /** Display name shown under the preview. */
   name: string;
-  /** Declared MIME type, used for video detection before the Asset record exists. */
   mimeType: string | null;
-  /** Contract asset type once known. */
   assetType: Asset["asset_type"] | null;
-  /** Local upload pipeline status; null when the row has no in-browser task. */
   uploadStatus: AssetUploadStatus | null;
-  /** Uploaded percentage (0–100) reported by the task. */
   percent: number;
-  /** Server-owned Asset status, refreshed by Post polling. */
   assetStatus: Asset["status"] | null;
-  /** Actionable failure text from the local task or the Asset record. */
   failureMessage: string | null;
-  /** Blob URL for previewing a local file before its Asset is readable. */
   previewUrl: string;
-  /** Live task for pause/resume/cancel while uploading. */
   task: AssetUploadTask | null;
-  /**
-   * True while the browser still holds the local `File`, which is what makes an
-   * in-place retry possible after a failure; rows restored from a saved Post do
-   * not and therefore offer replace/remove instead.
-   */
   hasLocalFile: boolean;
 }
 
-/**
- * Where the Channels that had explicitly selected a replaced Asset kept it:
- * `[channelId, position]` pairs captured before the old row was detached, so the
- * replacement takes those selections over instead of dropping them.
- */
 type ReplacedSelections = ReadonlyArray<readonly [string, number]>;
 
-/**
- * Browser-local recovery record. It supplements the authoritative server Post
- * so an interrupted session can resume typing, but it is scoped per
- * Workspace/Brand Profile/Post so it can never surface under another identity,
- * and a successful save deletes it.
- */
 const composerRecoverySchema = Schema.Struct({
   attachmentOverrides: Schema.Record(Schema.String, Schema.Array(Schema.String)),
   attachments: Schema.Array(
@@ -277,10 +195,8 @@ const composerRecoverySchema = Schema.Struct({
 });
 type ComposerRecoveryRecord = typeof composerRecoverySchema.Type;
 
-/** localStorage namespace for supplemental composer recovery. */
 const recoveryKeyPrefix = "meltiply.composer.v2.";
 
-/** Upload statuses whose lifecycle is finished: the file's bytes no longer need it. */
 const terminalUploadStatuses: ReadonlySet<AssetUploadStatus> = new Set([
   "cancelled",
   "complete",
@@ -289,7 +205,6 @@ const terminalUploadStatuses: ReadonlySet<AssetUploadStatus> = new Set([
   "processing",
 ]);
 
-/** Upload statuses that still hold the file's bytes: only these may pause/resume. */
 const activeUploadStatuses: ReadonlySet<AssetUploadStatus> = new Set([
   "creating",
   "uploading",
@@ -297,29 +212,10 @@ const activeUploadStatuses: ReadonlySet<AssetUploadStatus> = new Set([
   "offline",
 ]);
 
-/**
- * Type guard distinguishing an intentional upload cancellation from a real
- * failure, so a cancelled file is not reported as an actionable error.
- *
- * @param error - Rejection reason from an upload task.
- * @returns True when the task was cancelled by the creator or by an abort.
- */
 function isUploadCancellation(error: unknown): boolean {
   return error instanceof Error && error.name === "UploadCancelledError";
 }
 
-/**
- * Resolves one attachment row to the lifecycle phase the composer reports:
- * `ready` is the only phase that may be published, `failed` blocks the
- * affected Channel with an actionable reason, and everything else is still in
- * flight. Only the byte-transfer statuses (creating/uploading/paused/offline)
- * are local: once the task reports `processing` or `complete` the Asset record
- * is the authority, so the server status and its failure reason decide.
- *
- * @param attachment - The composer attachment row.
- * @param t - Localized translate function.
- * @returns Phase name, its localized label, and any actionable failure text.
- */
 function attachmentPhase(
   attachment: AttachmentEntry,
   t: (message: string) => string,
@@ -343,8 +239,6 @@ function attachmentPhase(
   if (uploadStatus === "uploading") {
     return { failed: false, label: t("Uploading"), message: null, ready: false };
   }
-  // `processing`/`completing`/`complete` deliberately fall through: the Asset
-  // record owns every stage after the bytes arrive, including its failure.
   if (uploadStatus === "cancelled") {
     return { failed: false, label: t("Cancelled"), message: null, ready: false };
   }
@@ -366,19 +260,6 @@ function attachmentPhase(
   return { failed: false, label: t("Ready"), message: null, ready: true };
 }
 
-/**
- * Follows one uploaded Asset's server-side processing while the composition has
- * no Post id yet, so a finished upload still reports Processing until the Asset
- * is verified ready. Once a Post exists its own `usePost` poll already carries
- * attachment state, so this poller stays unmounted to avoid a second request
- * stream for the same data.
- *
- * @param props.assetId - Durable Asset id learned from the upload session.
- * @param props.assetStatus - Status already known for the row; the query stops
- *   enabling itself once the Asset leaves an active state.
- * @param props.onAssetUpdate - Merges a fresher Asset snapshot into the row.
- * @returns Nothing visible; exists only to host the `useAsset` query.
- */
 function AttachmentStatusPoller({
   assetId,
   assetStatus,
@@ -406,21 +287,6 @@ function AttachmentStatusPoller({
   return null;
 }
 
-/**
- * Rebuilds per-channel composer overrides from a saved Post: provider settings
- * come from the descriptor's `readTarget`, and the caption override is only
- * flagged when it actually differs from the shared default text.
- *
- * A target that has never been scheduled carries no Distribution, so its
- * platform is resolved from the workspace's Channel list and the Distribution
- * stays a fallback for a Channel the list no longer contains. Resolving against
- * an empty list would rebuild every provider panel empty and erase those
- * options on the next save.
- *
- * @param post - The hydrated Post.
- * @param platformByAccountId - Provider identifier per Platform account id.
- * @returns Channel-id keyed override map.
- */
 function overridesFromPost(
   post: Post,
   platformByAccountId: Readonly<Record<string, string | undefined>>,
@@ -454,14 +320,6 @@ function overridesFromPost(
   return overrides;
 }
 
-/**
- * Extracts per-channel attachment selections from a saved Post. `null`
- * (`inherit`) stays absent from the map; `[]` (text-only) and explicit ordered
- * lists are preserved so a reopened draft publishes what it published before.
- *
- * @param post - The hydrated Post.
- * @returns Channel-id keyed attachment id lists for targets that override them.
- */
 function attachmentOverridesFromPost(post: Post): Record<string, string[]> {
   const overrides: Record<string, string[]> = {};
   for (const target of post.targets) {
@@ -471,18 +329,6 @@ function attachmentOverridesFromPost(post: Post): Record<string, string[]> {
   return overrides;
 }
 
-/**
- * Rebuilds composer rows from a recovery record. The record's Asset order is
- * the creator's unsaved order, an Asset the creator detached is never restored,
- * and rows the record cannot name — an upload that has not learned a durable
- * Asset id yet, or a row the server owns that this record predates — keep their
- * own rows after the restored ones, so applying recovery never drops a row.
- *
- * @param previous - Rows currently in the composer.
- * @param record - Recovery record being applied.
- * @param removedAssetIds - Asset ids the creator detached before the record was written.
- * @returns Rows reordered to the record and stripped of detached Assets.
- */
 function restoredAttachmentRows(
   previous: AttachmentEntry[],
   record: ComposerRecoveryRecord,
@@ -520,23 +366,6 @@ function restoredAttachmentRows(
   return rows;
 }
 
-/**
- * One titled section of the composer panel.
- *
- * The panel has a single section grammar — an optional leading icon, a
- * `--font-size-ui` title, an optional right-aligned action cluster, and content
- * below — so the compose column, the targeting rail, and the per-Channel panels
- * read as one surface instead of three stacked widgets. The Destinations block
- * owns the same header shape inside `DestinationSelector`, which is why this
- * renderer mirrors its type scale rather than introducing a second convention.
- *
- * @param props.icon - Optional Lucide icon or provider id, sized by the renderer.
- * @param props.title - Localized section title.
- * @param props.action - Optional right-aligned action cluster (counts, buttons).
- * @param props.className - Extra classes for the section wrapper.
- * @param props.children - Section content.
- * @returns The section element.
- */
 function ComposerSection({
   icon: Icon,
   title,
@@ -570,40 +399,6 @@ function ComposerSection({
   );
 }
 
-/**
- * Multi-Channel Post composer: shared text, composer-owned media uploads with
- * ordered attachments, per-Channel captions/options/attachment selections, and
- * authoritative save/schedule/publish with one stable Post per selected profile.
- *
- * One profile keeps the existing single-Post path. Multi-profile composition
- * uses `persistProfileCopies`: independent draft identities, profile-owned media,
- * and per-profile delivery progress survive partial failures. Repeated saves
- * update the same copies; opening the composer never creates a Post.
- *
- * Uploads run through `createAssetUpload` directly (file picker or drag and
- * drop), so per-file progress, processing state, pause/resume, cancel, and retry
- * live here instead of in the retired media library. When an upload session
- * starts while editing an already-saved Post, the new Asset id is persisted as
- * an attachment immediately so a draft never drops a still-uploading file.
- *
- * Scheduling/publishing goes through `useSchedulePost`, which validates every
- * affected Channel and rewrites only editable pending Distributions; published
- * outcomes are never rewritten by editing.
- *
- * Browser-local recovery supplements (never replaces) the server Post only
- * after functional consent. It is namespaced by Workspace/Brand Profile/Post,
- * cleared on a successful save or consent withdrawal, and can never surface an
- * upload under another profile. Recovery is read before persistence opens, so a
- * reload restores unsaved work instead of replacing it with an empty first frame.
- *
- * Invariant: no failed action clears creator input, and a saved indication is
- * only shown after the server acknowledged the save.
- *
- * @param props.initialPostId - Optional stable Post UUID to hydrate and edit.
- * @param props.initialDate - Optional Date or ISO string pre-populating the schedule slot.
- * @param props.onPostSuccess - Callback executed after a successful schedule/publish.
- * @param props.onNavigate - Callback to navigate to another workspace view.
- */
 export interface ComposerProps {
   initialPostId?: string;
   initialDate?: Date | string;
@@ -611,17 +406,6 @@ export interface ComposerProps {
   onNavigate?: (view: WorkspaceView, options?: { search?: string }) => void;
 }
 
-/**
- * Renders the composer with one authoritative Post as its state boundary.
- * Controls remain disabled until server hydration and browser recovery settle,
- * so their deferred restores cannot overwrite a creator's first edit or save.
- * Wide scroll columns reserve 4px for outward control focus rings. Compensated
- * editor margins preserve the shared content edge while keeping rings inside
- * each column's clipping boundary.
- *
- * @param props - Deep-link Post id, optional schedule seed, and navigation callbacks.
- * @returns The Post composer surface.
- */
 export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate }: ComposerProps) {
   const {
     brandProfiles,
@@ -633,26 +417,17 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   } = useWorkspace();
   const scope = useSessionScope();
   const { t, tStatus, language } = useI18n();
-  // Share workspace-owned labels across validation, ownership guidance, and batch
-  // progress without re-scanning every profile for each destination/progress row.
   const profileNames = useMemo(
     () => new Map(brandProfiles.map((profile) => [profile.id, profile.name])),
     [brandProfiles],
   );
 
-  // The deep link is the Post identity; a composition that has not been saved yet
-  // has none, so the id only appears once the first save returns it.
   const [createdPostId, setCreatedPostId] = useState<string | null>(null);
   const postId = initialPostId ?? createdPostId;
   const [sharedContent, setSharedContent] = useState("");
   const [attachments, setAttachments] = useState<AttachmentEntry[]>([]);
   const [channelOverrides, setChannelOverrides] = useState<Record<string, ChannelOverride>>({});
   const [attachmentOverrides, setAttachmentOverrides] = useState<Record<string, string[]>>({});
-  /**
-   * Publishing intent the composer submits: a calendar entry point seeds
-   * `schedule` so the seeded slot is editable on arrival, and everything else
-   * starts on the non-destructive draft mode.
-   */
   const [publishMode, setPublishMode] = useState<PublishMode>(
     initialDate !== undefined ? "schedule" : "draft",
   );
@@ -674,12 +449,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [hydratedPostId, setHydratedPostId] = useState<string | null>(null);
-  /**
-   * Brand Profile that owns this composition. Seeded once from the opened Post
-   * or the collection selection and then held here, so the composer's picker is
-   * independent of the Posts list filter: changing either must not re-scope the
-   * other, and opening this panel must not reload the collection behind it.
-   */
   const [ownerProfileId, setOwnerProfileId] = useState<string | null>(() =>
     initialPostId === undefined ? collectionProfileId : null,
   );
@@ -689,24 +458,13 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const [profileProgress, setProfileProgress] = useState<ProfileCopyProgress[]>([]);
   const profileCopiesRef = useRef(new Map<string, ProfileCopy>());
   const batchAbortRef = useRef<AbortController | null>(null);
-  // Recovery is neither read nor written until functional consent is active.
   const [functionalConsent, setFunctionalConsent] = useState(() => hasCookieConsent("functional"));
   const [recoveryReadNamespace, setRecoveryReadNamespace] = useState<string | null>(null);
-  /**
-   * Live TikTok publishing requirements reported by a Channel's settings panel.
-   * Availability gates publishing as well as validation, so arriving requirements
-   * update state; unchanged records retain identity to avoid notification loops.
-   */
   const [tiktokRequirements, setTikTokRequirements] = useState<
     Record<string, TikTokPublishingRequirements | null>
   >({});
   const [pendingOwnershipAssetIds, setPendingOwnershipAssetIds] = useState<string[] | null>(null);
   const [isDragActive, setDragActive] = useState(false);
-  /**
-   * Destination a composer-initiated navigation asked for while its unsaved
-   * work could not survive the unmount. The dialog stays until the creator
-   * saves a draft or explicitly discards; `null` means no departure is waiting.
-   */
   const [pendingNavigation, setPendingNavigation] = useState<{
     view: WorkspaceView;
     options?: { search?: string };
@@ -724,12 +482,10 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const composerIdentityRef = useRef("");
   const dirtyRef = useRef(false);
   const postIdRef = useRef<string | null>(null);
-  const persistedOwnershipRef = useRef(new Set<string>());
+  const ownershipSyncAttemptedRef = useRef(new Set<string>());
+  const ownershipSyncRef = useRef<Promise<void> | null>(null);
   const removedAssetIdsRef = useRef<Set<string>>(new Set());
 
-  // Session identity stays stable when the first single-Post save learns its id,
-  // but subsequent edits must recover under that Post's durable identity. A new
-  // batch keeps its copy ids in one new-composition record instead.
   const composerIdentity = `${scope.workspaceId ?? "personal"}::${ownerProfileId ?? "all"}::${initialPostId ?? "new"}`;
   const recoveryNamespace = `${scope.workspaceId ?? "personal"}::${ownerProfileId ?? "all"}::${postId ?? "new"}`;
   const [previousComposerIdentity, setPreviousComposerIdentity] = useState(composerIdentity);
@@ -738,15 +494,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     setSelectedProfileIds(ownerProfileId ? [ownerProfileId] : []);
     setProfileProgress([]);
   }
-  // Async upload callbacks need the *current* identity without re-subscribing,
-  // so the refs are synced after commit rather than during render.
   useEffect(() => {
     recoveryNamespaceRef.current = recoveryNamespace;
     composerIdentityRef.current = composerIdentity;
     postIdRef.current = postId;
   }, [composerIdentity, postId, recoveryNamespace]);
-  // Consent can change while the composer is open; keep recovery reads and
-  // writes closed until the current page has an explicit functional choice.
   useEffect(
     () =>
       subscribeCookieConsent(() => {
@@ -758,13 +510,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const postQuery = usePost(scope, postId ?? "", postId !== null);
   const capabilitiesQuery = usePlatformCapabilities(scope);
 
-  // Adopt the composition's owner once, as soon as it can be resolved: an
-  // opened Post supplies its own owner, and a new composition starts from the
-  // current collection selection (the first profile when the collection is
-  // aggregate). Deriving it during render keeps the value local instead of
-  // calling `setSelectedBrandProfileId`, which would re-filter and reload the
-  // Posts collection behind the open drawer. Once adopted, the owner never
-  // follows later collection changes.
   const candidateOwnerId =
     initialPostId !== undefined
       ? postQuery.data?.brand_profile_id
@@ -778,15 +523,16 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     selectedProfileIds.length === 1 ? selectedProfileIds[0]! : null,
     publishMode === "queue",
   );
-  const publishingQueues = queueQuery.data?.pages.flatMap((page) => page.items) ?? [];
-  const selectedQueue = publishingQueues.find((queue) => queue.id === selectedQueueId);
+  const publishingQueues = useMemo(
+    () => queueQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    [queueQuery.data],
+  );
+  const selectedQueue = useMemo(
+    () => publishingQueues.find((queue) => queue.id === selectedQueueId),
+    [publishingQueues, selectedQueueId],
+  );
   const hasSelectedQueue = selectedQueue !== undefined;
 
-  // A saved target that has never been scheduled names no platform of its own,
-  // so the Channel list is where its provider settings are resolved from. The
-  // workspace provider already runs this exact query; subscribing here shares
-  // its cache entry (no second request) purely for its settledness, so
-  // hydration cannot race the Channel list it depends on.
   const platformsQuery = usePlatforms(scope, { brandProfileId: null });
   const preferencesQuery = usePublishingPreferences(scope);
   const publishingTimeZone =
@@ -809,8 +555,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     attachmentsRef.current = attachments;
   }, [attachments]);
 
-  // Mirrors the committed per-Channel selections so an event handler can read
-  // where a detaching Asset sat without running logic inside a state updater.
   useEffect(() => {
     attachmentOverridesRef.current = attachmentOverrides;
   }, [attachmentOverrides]);
@@ -829,20 +573,12 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     };
   }, []);
 
-  // Seed the schedule slot from a calendar click unless an existing Post is open.
   useEffect(() => {
     if (!initialDate || initialPostId || scheduleTouchedRef.current) return;
     scheduleTimeZoneRef.current = publishingTimeZone;
     setScheduleDate(instantToWallClock(initialDate, publishingTimeZone));
   }, [initialDate, initialPostId, publishingTimeZone]);
 
-  /**
-   * Returns every composer row to its empty state for a new Post. Runs when the
-   * deep-linked identity changes and after a successful schedule/publish, so the
-   * composer never shows another Post's content under a new Post id.
-   *
-   * @returns Nothing; performs the state resets.
-   */
   const resetComposer = useCallback(() => {
     batchAbortRef.current?.abort();
     profileCopiesRef.current.clear();
@@ -851,10 +587,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     setChannelOverrides({});
     setAttachmentOverrides({});
     setSelectedQueueId("");
-    // Back to the eligible defaults rather than an empty set: abandoning a
-    // composition (or finishing one) must not leave the next one with no
-    // destinations, which is what the previous explicit [] produced after a
-    // composition identity switch.
     setSelectedChannelIds(null);
     setSavedAt(null);
     setHydratedPostId(null);
@@ -863,22 +595,14 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     setPendingOwnershipAssetIds(null);
     dirtyRef.current = false;
     removedAssetIdsRef.current = new Set();
-    persistedOwnershipRef.current = new Set();
+    ownershipSyncAttemptedRef.current = new Set();
+    ownershipSyncRef.current = null;
     setIsDirty(false);
   }, [setSelectedChannelIds]);
 
-  // Opening a different Post — or a composition whose owner was adopted for a
-  // different Profile — abandons in-flight composer state so nothing from the
-  // previous identity can leak into it — including the upload tasks the
-  // detached rows still own; without the abort their callbacks keep running
-  // (guarded off by composerIdentityRef) and the ref's stale value would make
-  // every later switch a no-op. Changing the collection Brand Profile filter is
-  // not an identity switch. This runs before the hydration and recovery effects
-  // below, so the new identity's authoritative state is what lands last.
   const cancelledIdentityRef = useRef<string | null>(null);
   useEffect(() => {
     if (cancelledIdentityRef.current === null) {
-      // First commit: there is no previous identity to abandon.
       cancelledIdentityRef.current = composerIdentity;
       return;
     }
@@ -891,10 +615,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     resetComposer();
   }, [composerIdentity, resetComposer]);
 
-  /**
-   * Reads the supplemental browser-local record for the active identity only
-   * after functional consent; unavailable or invalid data yields null.
-   */
   const readRecovery = useCallback((): ComposerRecoveryRecord | null => {
     try {
       const raw = readFunctionalStorage(recoveryKeyPrefix + recoveryNamespaceRef.current);
@@ -905,34 +625,19 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     }
   }, []);
 
-  /**
-   * Writes or deletes the supplemental browser-local record only when
-   * functional consent allows it; deletion remains available after withdrawal.
-   */
   const writeRecovery = useCallback((record: ComposerRecoveryRecord | null) => {
     try {
       const key = recoveryKeyPrefix + recoveryNamespaceRef.current;
       writeFunctionalStorage(key, record ? JSON.stringify(record) : null);
     } catch {
-      // Storage may be disabled or full; the server Post remains authoritative.
+      return;
     }
   }, []);
 
-  /**
-   * Deletes the supplemental record superseded by a successful save. A single
-   * Post's later edits use its durable id; new batches retain all copy ids together.
-   * Removal remains permitted after consent withdrawal and never clears another
-   * composition that became active while the request was in flight.
-   *
-   * @param namespaceAtSubmit - Recovery namespace active when the save started.
-   */
   const clearRecoveryAfterSave = useCallback((namespaceAtSubmit: string) => {
     writeFunctionalStorage(recoveryKeyPrefix + namespaceAtSubmit, null);
   }, []);
 
-  // Persist unsaved work only after functional consent and after the active
-  // namespace has been read. Records hold durable Asset ids only; uploads with
-  // no server session cannot resume after reload because the File handle is gone.
   useEffect(() => {
     if (!functionalConsent || recoveryReadNamespace !== recoveryNamespace) return;
     if (postId && !dirtyRef.current) return;
@@ -984,10 +689,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     writeRecovery,
   ]);
 
-  // Hydrate shared text, Channel selection, settings, attachments, and schedule
-  // only after sign-in and the composition's owner settle. Hydrating before the
-  // owner is known could commit a Post's content into an unscoped composer.
-  // Each Post hydrates once so later polling never overwrites creator input.
   useEffect(() => {
     const post = postQuery.data;
     if (
@@ -998,9 +699,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       hydratedPostId === postId
     )
       return;
-    // Provider settings are rebuilt per saved target, and a draft that has never
-    // been scheduled names no platform of its own, so hydration waits for the
-    // Channel list instead of rebuilding every provider panel empty.
     if (platformsQuery.isPending) return;
     const channelIds = new Set<string>(post.targets.map((target) => target.platform_account_id));
     for (const distribution of post.distributions) {
@@ -1009,9 +707,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     const scheduledAt = post.distributions.find(
       (distribution) => distribution.status === "scheduled" && distribution.scheduled_at,
     )?.scheduled_at;
-    // The rows are adopted in a deferred callback (the pattern this composer used
-    // before the cutover) so hydration never interrupts the commit that first
-    // rendered the loading state.
     const timer = window.setTimeout(() => {
       setHydratedPostId(postId);
       setSharedContent(post.default_text);
@@ -1045,22 +740,13 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     setSelectedChannelIds,
   ]);
 
-  // Read and apply the browser-local record only after functional consent, and
-  // only when it is newer than the server Post it would overwrite: a reloaded
-  // tab restores unsaved content and attachments, while a saved Post wins.
   useEffect(() => {
     if (!functionalConsent || recoveryReadNamespace === recoveryNamespace) return;
     if (postId && (!postQuery.data || hydratedPostId !== postId)) return;
     const record = readRecovery();
-    // A record only wins when it is newer than the server Post it would
-    // overwrite: a freshly saved Post keeps the authority it already holds.
     const shouldRestore =
       record !== null &&
       (!postQuery.data || Date.parse(record.updatedAt) > Date.parse(postQuery.data.updated_at));
-    // The restore — and the opening of the persistence gate — land in a
-    // deferred callback so hydration commits first, and the namespace is only
-    // marked read once the callback ran: a StrictMode remount or dep change
-    // that clears the timer re-reads the record instead of losing it.
     const timer = window.setTimeout(() => {
       if (record && shouldRestore) {
         const removedAssetIds = new Set(record.removedAssetIds);
@@ -1082,8 +768,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           ]),
         );
         if (record.scheduleDate) setScheduleDate(record.scheduleDate);
-        // Restored work is unsaved: it is reported as such and can be saved
-        // over the server Post the creator was editing.
         markDirty();
       }
       setRecoveryReadNamespace(recoveryNamespace);
@@ -1101,40 +785,49 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     setSelectedChannelIds,
   ]);
 
-  // Merge server-owned attachment state into composer rows. Locally removed
-  // Assets and locally diverged ordering are never re-added: the creator's
-  // in-progress edit stays authoritative until the next save.
+  const mergeAssetSnapshot = useCallback(
+    (
+      entry: AttachmentEntry,
+      asset: Pick<Asset, "status" | "asset_type" | "failure" | "mime_type" | "title">,
+    ): AttachmentEntry => {
+      const merged: AttachmentEntry = {
+        ...entry,
+        assetStatus: asset.status,
+        assetType: asset.asset_type,
+        failureMessage: asset.failure?.message ?? entry.failureMessage,
+        mimeType: asset.mime_type ?? entry.mimeType,
+        name: asset.title || entry.name,
+        percent: asset.status === "failed" ? entry.percent : 100,
+      };
+      return merged.assetStatus === entry.assetStatus &&
+        merged.failureMessage === entry.failureMessage &&
+        merged.name === entry.name &&
+        merged.assetType === entry.assetType
+        ? entry
+        : merged;
+    },
+    [],
+  );
+
   useEffect(() => {
     const post = postQuery.data;
     if (!post) return;
+    const remoteByAssetId = new Map(post.attachments.map((item) => [item.asset_id, item]));
     setAttachments((previous) => {
       let changed = false;
+      const seenIds = new Set<string>();
       const next = previous.map((entry) => {
         if (!entry.assetId) return entry;
-        const remote = post.attachments.find((item) => item.asset_id === entry.assetId);
+        seenIds.add(entry.assetId);
+        const remote = remoteByAssetId.get(entry.assetId);
         if (!remote) return entry;
-        const merged: AttachmentEntry = {
-          ...entry,
-          assetStatus: remote.asset.status,
-          assetType: remote.asset.asset_type,
-          failureMessage: remote.asset.failure?.message ?? entry.failureMessage,
-          mimeType: remote.asset.mime_type ?? entry.mimeType,
-          name: remote.asset.title || entry.name,
-          percent: remote.asset.status === "failed" ? entry.percent : 100,
-        };
-        if (
-          merged.assetStatus !== entry.assetStatus ||
-          merged.failureMessage !== entry.failureMessage ||
-          merged.name !== entry.name ||
-          merged.assetType !== entry.assetType
-        ) {
-          changed = true;
-        }
-        return changed ? merged : entry;
+        const merged = mergeAssetSnapshot(entry, remote.asset);
+        if (merged !== entry) changed = true;
+        return merged;
       });
       for (const remote of post.attachments) {
         if (removedAssetIdsRef.current.has(remote.asset_id)) continue;
-        if (next.some((entry) => entry.assetId === remote.asset_id)) continue;
+        if (seenIds.has(remote.asset_id)) continue;
         if (dirtyRef.current) continue;
         next.push({
           assetId: remote.asset_id,
@@ -1154,61 +847,41 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       }
       return changed ? next : previous;
     });
-  }, [postQuery.data]);
+  }, [mergeAssetSnapshot, postQuery.data]);
 
-  /**
-   * Merges a fresh Asset snapshot into its composer row, used by the per-asset
-   * processing poller while the composition has no Post id. Mirrors the merge
-   * rules of the Post-driven effect above but never adds or reorders rows.
-   *
-   * @param asset - Latest Asset record for the row's durable id.
-   */
-  const handleAssetUpdate = useCallback((asset: Asset) => {
-    setAttachments((previous) =>
-      previous.map((entry) => {
-        if (entry.assetId !== asset.id) return entry;
-        const merged: AttachmentEntry = {
-          ...entry,
-          assetStatus: asset.status,
-          assetType: asset.asset_type,
-          failureMessage: asset.failure?.message ?? entry.failureMessage,
-          mimeType: asset.mime_type ?? entry.mimeType,
-          name: asset.title || entry.name,
-          percent: asset.status === "failed" ? entry.percent : 100,
-        };
-        return merged.assetStatus === entry.assetStatus &&
-          merged.failureMessage === entry.failureMessage &&
-          merged.name === entry.name &&
-          merged.assetType === entry.assetType
-          ? entry
-          : merged;
-      }),
-    );
-  }, []);
+  const handleAssetUpdate = useCallback(
+    (asset: Asset) => {
+      setAttachments((previous) => {
+        let changed = false;
+        const next = previous.map((entry) => {
+          if (entry.assetId !== asset.id) return entry;
+          const merged = mergeAssetSnapshot(entry, asset);
+          if (merged !== entry) changed = true;
+          return merged;
+        });
+        return changed ? next : previous;
+      });
+    },
+    [mergeAssetSnapshot],
+  );
 
   const orderedAssetIds = useCallback(
     () =>
       attachments.map((attachment) => attachment.assetId).filter((id): id is string => Boolean(id)),
     [attachments],
   );
-  // A saved Post must retain ownership of an upload whose Asset id only became
-  // known after the save, otherwise the Asset would look orphaned and the draft
-  // would silently lose the file.
   useEffect(() => {
     const assetIds = pendingOwnershipAssetIds;
     if (!postId || !assetIds || assetIds.length === 0) return;
     const profileId = ownerProfileId;
     if (profileId === null || !selectedProfileIds.includes(profileId)) return;
-    // Ids already handed to a PATCH are not resent; the effect re-runs when the
-    // ordered rows change so a freshly known id still lands in the same patch.
-    // An Asset the creator detached never reaches the Post, even when its id was
-    // learned moments before the row was removed.
     const fresh = assetIds.filter(
       (assetId) =>
-        !persistedOwnershipRef.current.has(assetId) && !removedAssetIdsRef.current.has(assetId),
+        !ownershipSyncAttemptedRef.current.has(assetId) && !removedAssetIdsRef.current.has(assetId),
     );
     if (fresh.length === 0) return;
-    for (const assetId of fresh) persistedOwnershipRef.current.add(assetId);
+    for (const assetId of fresh) ownershipSyncAttemptedRef.current.add(assetId);
+    const identityAtStart = composerIdentityRef.current;
     const attachmentIds = [...orderedAssetIds()];
     const claimed = new Set(attachmentIds);
     for (const assetId of fresh) {
@@ -1216,15 +889,22 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       attachmentIds.push(assetId);
       claimed.add(assetId);
     }
-    void updatePost
-      .mutateAsync({
-        id: postId,
-        input: { brand_profile_id: profileId, attachment_ids: attachmentIds },
+    ownershipSyncRef.current = (ownershipSyncRef.current ?? Promise.resolve())
+      .then(async () => {
+        if (composerIdentityRef.current !== identityAtStart) return;
+        await updatePost.mutateAsync({
+          id: postId,
+          input: { brand_profile_id: profileId, attachment_ids: attachmentIds },
+        });
       })
-      .catch(() => {
-        // Ownership is retried on the next explicit save; never claim it is saved.
+      .catch((error: unknown) => {
+        if (composerIdentityRef.current !== identityAtStart) return;
+        markDirty();
+        setErrorMessage(userFacingErrorMessage(error, language));
       });
   }, [
+    language,
+    markDirty,
     orderedAssetIds,
     pendingOwnershipAssetIds,
     postId,
@@ -1244,12 +924,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     );
   }, [integrations, selectedProfileIds, selectedChannelIds]);
 
-  /**
-   * Label for one target Channel inside the composer. Customization is per social
-   * provider, so a Channel is named by its platform — and the account handle is
-   * appended only when the same provider appears more than once in the selection,
-   * where the platform alone would name two different targets identically.
-   */
   const targetLabels = useMemo(() => {
     const perProvider = new Map<string, number>();
     for (const channel of selectedChannels) {
@@ -1268,22 +942,12 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     return labels;
   }, [selectedChannels]);
 
-  /**
-   * Provider-first label of one target Channel.
-   *
-   * @param channel - Target Channel being labelled.
-   * @returns The platform's display name, with the account handle when it has to disambiguate.
-   */
   const targetLabelFor = useCallback(
     (channel: ChannelIntegration): string =>
       targetLabels.get(channel.id) ?? platformDisplayName(channel.providerIdentifier),
     [targetLabels],
   );
 
-  /**
-   * Published capabilities indexed once per result. First row per platform wins;
-   * rendering and submission share the same limits without rebuilding the index.
-   */
   const capabilityByPlatform = useMemo(() => {
     const byPlatform = new Map<string, PlatformCapability>();
     for (const capability of capabilitiesQuery.data ?? []) {
@@ -1293,12 +957,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     return byPlatform;
   }, [capabilitiesQuery.data]);
 
-  /**
-   * Caption limit for one Channel, or null when its platform publishes none.
-   *
-   * @param channel - Target Channel whose platform limit is being read.
-   * @returns Maximum caption length in code points, else null.
-   */
   const captionLimitFor = useCallback(
     (channel: ChannelIntegration): number | null =>
       capabilityByPlatform.get(channel.providerIdentifier.toLowerCase())?.max_caption_length ??
@@ -1306,12 +964,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [capabilityByPlatform],
   );
 
-  /**
-   * Tightest caption limit across the selected Channels, or null when none of
-   * their platforms publishes one. The shared field's text reaches every
-   * selected Channel, so the strictest limit is the one that keeps the post
-   * publishable everywhere it targets.
-   */
   const sharedCaptionLimit = useMemo(() => {
     let limit: number | null = null;
     for (const channel of selectedChannels) {
@@ -1322,17 +974,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     return limit;
   }, [captionLimitFor, selectedChannels]);
 
-  /** Whether the shared caption has reached its tightest platform limit. */
   const isAtSharedCaptionLimit =
     sharedCaptionLimit !== null && captionLength(sharedContent) >= sharedCaptionLimit;
 
-  /**
-   * Receives live TikTok publishing requirements from a Channel's settings panel
-   * and records them for submit-time validation.
-   *
-   * @param channelId - Platform account id the requirements belong to.
-   * @param requirements - Live requirements, or null when unavailable.
-   */
   const handleRequirementsChange = useCallback(
     (channelId: string, requirements: TikTokPublishingRequirements | null) => {
       setTikTokRequirements((previous) =>
@@ -1344,13 +988,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [],
   );
 
-  /**
-   * Resolves the effective caption for a Channel: its custom override when
-   * enabled, otherwise the shared composer text.
-   *
-   * @param channelId - Target Channel id.
-   * @returns Caption text for that Channel.
-   */
   const resolvedContentFor = useCallback(
     (channelId: string): string =>
       channelOverrides[channelId]?.hasOverride
@@ -1359,22 +996,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [channelOverrides, sharedContent],
   );
 
-  /**
-   * Converts the visible wall-clock schedule into the selected publishing
-   * timezone. Validation runs the same conversion before submission, so a
-   * malformed value never reaches the API.
-   *
-   * @returns ISO instant, or null when the value is invalid.
-   */
   const scheduleInstant = useCallback(
     () => wallClockToInstant(scheduleDate, publishingTimeZone),
     [publishingTimeZone, scheduleDate],
   );
 
-  // The initial field value is browser-local until preferences settle. When the
-  // saved timezone arrives, reinterpret that same wall clock through the
-  // previous zone so the intended instant is preserved; a value the creator has
-  // already edited is never rewritten.
   useEffect(() => {
     const previous = scheduleTimeZoneRef.current;
     if (previous === publishingTimeZone) return;
@@ -1384,15 +1010,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     if (instant) setScheduleDate(instantToWallClock(instant, publishingTimeZone, false));
   }, [publishingTimeZone, scheduleDate]);
 
-  /**
-   * Resolves the signature snapshot for one Channel. A hydrated target keeps the
-   * signature stored with it, including an explicit null, so later template
-   * edits never rewrite an existing Post. A newly selected Channel resolves the
-   * current default template against its Brand Profile, Platform, and Channel.
-   *
-   * @param channel - Target Channel.
-   * @returns Resolved signature text, or null when no template applies.
-   */
   const signatureFor = useCallback(
     (channel: ChannelIntegration): string | null => {
       const saved = channelOverrides[channel.id];
@@ -1407,56 +1024,56 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [channelOverrides, defaultSignature, profileNames],
   );
 
-  /**
-   * Resolves which attachments a Channel publishes: its own ordered selection
-   * when set, otherwise the Post's ordered attachments (inherit).
-   *
-   * @param channelId - Target Channel id.
-   * @returns Ordered attachment rows for that Channel.
-   */
+  const attachmentsByAssetId = useMemo(() => {
+    const map = new Map<string, AttachmentEntry>();
+    for (const attachment of attachments) {
+      if (attachment.assetId) map.set(attachment.assetId, attachment);
+    }
+    return map;
+  }, [attachments]);
+
+  const distributionByAccountId = useMemo(() => {
+    const map = new Map<string, Post["distributions"][number]>();
+    for (const item of postQuery.data?.distributions ?? []) {
+      if (item.platform_account_id && !map.has(item.platform_account_id)) {
+        map.set(item.platform_account_id, item);
+      }
+    }
+    return map;
+  }, [postQuery.data?.distributions]);
+
   const attachmentsForChannel = useCallback(
     (channelId: string): AttachmentEntry[] => {
       const override = attachmentOverrides[channelId];
       if (!override) return attachments;
-      return override
-        .map((assetId) => attachments.find((attachment) => attachment.assetId === assetId))
-        .filter((attachment): attachment is AttachmentEntry => Boolean(attachment));
+      const ordered: AttachmentEntry[] = [];
+      for (const assetId of override) {
+        const attachment = attachmentsByAssetId.get(assetId);
+        if (attachment) ordered.push(attachment);
+      }
+      return ordered;
     },
-    [attachmentOverrides, attachments],
+    [attachmentOverrides, attachments, attachmentsByAssetId],
   );
 
-  /**
-   * Builds the saved Post targets for the current Channel selection, mapping
-   * provider settings through the descriptor boundary and recording per-channel
-   * caption and attachment overrides. `attachment_ids` is omitted when the
-   * Channel inherits the Post's attachments. Drafts retain creator choices;
-   * publication targets clamp them to current Provider permissions.
-   *
-   * @param purpose - Draft persistence by default, or validated delivery.
-   * @returns One Post target input per selected Channel.
-   */
   const buildTargets = useCallback(
     (purpose: "draft" | "publication" = "draft"): PostTargetDraft[] => {
       return selectedChannels.map((channel) => {
         const override = channelOverrides[channel.id];
         const target: PostTargetDraft = { platform_account_id: channel.id };
+        const channelAttachments = attachmentsForChannel(channel.id);
         providerDescriptorFor(channel.providerIdentifier)?.applyTarget?.(
           target,
           settingsForAttachmentOrder(
             override?.settings ?? {},
-            attachmentsForChannel(channel.id).map(
-              (attachment) => attachment.assetId ?? attachment.key,
-            ),
+            channelAttachments.map((attachment) => attachment.assetId ?? attachment.key),
           ),
-          attachmentsForChannel(channel.id).flatMap((attachment) =>
+          channelAttachments.flatMap((attachment) =>
             attachment.assetType ? [attachment.assetType] : [],
           ),
           tiktokRequirements[channel.id] ?? null,
           purpose,
         );
-        // `null` means "inherit the shared caption"; an enabled override stays a
-        // string even when blank, because a blank caption is a real choice that
-        // `null` would silently turn back into the shared text on the next save.
         target.description_override = override?.hasOverride ? override.content : null;
         target.signature = signatureFor(channel);
         const attachmentIds = attachmentOverrides[channel.id];
@@ -1474,18 +1091,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     ],
   );
 
-  /**
-   * Merges partial override updates (custom caption, override enablement, or
-   * provider settings) for one Channel.
-   *
-   * The previous entry is spread first so the saved signature snapshot — which
-   * may be an explicit `null` — survives an edit. Rebuilding the row from its
-   * individual fields would drop that key, and `signatureFor` would then resolve
-   * the current default template over an existing Post.
-   *
-   * @param channelId - Target Channel id.
-   * @param updates - Partial override fields to merge.
-   */
   const handleChannelOverrideChange = useCallback(
     (channelId: string, updates: Partial<ChannelOverride>) => {
       setChannelOverrides((previous) => ({
@@ -1513,21 +1118,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [markDirty, sharedContent, attachmentsForChannel],
   );
 
-  /**
-   * Starts the composer-owned upload pipeline for one local file.
-   *
-   * Uploads run only while the identity that started them is still active, so a
-   * changed composition identity can never attach a file to another profile's
-   * Post.
-   * `onSessionStart` records the durable Asset id, which both enables saving a
-   * draft mid-upload and persists ownership on an already-saved Post.
-   *
-   * @param file - Local image/video selected by the creator.
-   * @param key - Stable row key created by the caller.
-   * @param index - Ordered position the new row takes, or null to append.
-   * @param replaced - Channel selections the row this upload replaces carried;
-   *   the new Asset takes them over as soon as its id is known.
-   */
   const startUpload = useCallback(
     (file: File, key: string, index: number | null, replaced: ReplacedSelections | null) => {
       const brandProfileId = ownerProfileId;
@@ -1568,13 +1158,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         );
       };
 
-      /**
-       * Moves the Channels that had selected the replaced Asset onto the new
-       * Asset id at the same position, leaving every other selection — and any
-       * Channel that has since gone back to inheriting — untouched.
-       *
-       * @param newAssetId - Durable id the replacement upload just learned.
-       */
       const adoptReplacedAsset = (newAssetId: string) => {
         if (!replaced || replaced.length === 0) return;
         setAttachmentOverrides((previous) => {
@@ -1582,8 +1165,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           const next = { ...previous };
           for (const [channelId, position] of replaced) {
             const current = next[channelId];
-            // One membership test per channel against that channel's own list:
-            // not a repeated scan, so a Set here would only add construction.
             if (!current || current.includes(newAssetId)) continue;
             const ordered = [...current];
             ordered.splice(Math.min(position, ordered.length), 0, newAssetId);
@@ -1666,23 +1247,12 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [language, markDirty, scope.isSignedIn, scope.workspaceId, ownerProfileId],
   );
 
-  /**
-   * Detaches one attachment row from the composition: its in-flight task is
-   * cancelled, the browser blob backing its preview is released, and the local
-   * File handle is dropped, so an abandoned row leaves no live transfer, no
-   * retained bytes, and no retry target behind.
-   *
-   * @param target - Row being removed, replaced, or retried.
-   * @returns The row's durable Asset id when it already had one, else null.
-   */
   const detachAttachmentRow = useCallback((target: AttachmentEntry): string | null => {
     const task = target.task ?? tasksRef.current.get(target.key);
     tasksRef.current.delete(target.key);
     filesRef.current.delete(target.key);
     if (task) void task.cancel();
     if (target.previewUrl) {
-      // Revoke before forgetting the handle: dropping the tracked URL without
-      // revoking keeps the file's bytes alive for the life of the document.
       URL.revokeObjectURL(target.previewUrl);
       objectUrlsRef.current.delete(target.previewUrl);
     }
@@ -1690,19 +1260,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     return target.assetId;
   }, []);
 
-  /**
-   * Records that an Asset left the composition: it is blocked from being
-   * re-adopted from server state, dropped from the queue of ids whose ownership
-   * still has to reach the Post, and pruned from every Channel's explicit
-   * selection so no saved target keeps naming a detached Asset.
-   *
-   * @param assetId - Durable Asset id that left, when the row had one.
-   * @returns Where each Channel had selected it, so a replacement can take over.
-   */
   const forgetDetachedAsset = useCallback((assetId: string | null): ReplacedSelections => {
     if (!assetId) return [];
     removedAssetIdsRef.current.add(assetId);
-    // An id whose ownership PATCH has not gone out yet must never reach it.
     setPendingOwnershipAssetIds((previous) =>
       previous ? previous.filter((id) => id !== assetId) : previous,
     );
@@ -1726,16 +1286,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     return positions;
   }, []);
 
-  /**
-   * Swaps one existing row for a freshly chosen file at exactly the position it
-   * occupied: the old row leaves the composition first, so the attachment count
-   * and order stay exact instead of growing by one, and the Channels that had
-   * selected the old Asset move onto the new one once its id is known.
-   *
-   * @param file - Local image/video chosen for the row.
-   * @param key - Stable row key for the new upload.
-   * @param index - Position the outgoing row occupied.
-   */
   const replaceAttachmentRow = useCallback(
     (file: File, key: string, index: number) => {
       const outgoing = attachmentsRef.current[index];
@@ -1748,14 +1298,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [detachAttachmentRow, forgetDetachedAsset, startUpload],
   );
 
-  /**
-   * Adopts files chosen through the hidden file input, either appending them or
-   * replacing the row the creator targeted. A replacement is a swap rather than
-   * an insert: the targeted row is detached before the new file takes its
-   * position, so caption, ordering, and Channel settings survive the media swap.
-   *
-   * @param event - Change event from the hidden file input.
-   */
   const handleFilesSelected = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(event.target.files ?? []);
@@ -1767,9 +1309,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         ? attachmentsRef.current.findIndex((attachment) => attachment.key === replaceKey)
         : -1;
       files.forEach((file, offset) => {
-        const key = `upload-${Date.now()}-${offset}-${file.size}-${file.name}`;
-        // Only the first chosen file takes the targeted row's place; the rest
-        // follow it, so a multi-file swap never leaves the old row behind.
+        const key = `upload-${crypto.randomUUID()}`;
         if (offset === 0 && index >= 0) {
           replaceAttachmentRow(file, key, index);
           return;
@@ -1780,11 +1320,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [replaceAttachmentRow, startUpload],
   );
 
-  /**
-   * Starts uploads for files dropped onto the attachment area.
-   *
-   * @param event - Drag event carrying the dropped files.
-   */
   const handleDrop = useCallback(
     (event: React.DragEvent<HTMLDivElement>) => {
       event.preventDefault();
@@ -1798,23 +1333,14 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         return;
       }
       const files = Array.from(event.dataTransfer.files);
-      files.forEach((file, offset) => {
-        const key = `upload-${Date.now()}-${offset}-${file.size}-${file.name}`;
+      files.forEach((file) => {
+        const key = `upload-${crypto.randomUUID()}`;
         startUpload(file, key, null, null);
       });
     },
     [scope.isSignedIn, ownerProfileId, startUpload, t],
   );
 
-  /**
-   * Removes one attachment while keeping the caption and every Channel's
-   * settings intact. A row whose upload is still in flight is cancelled as
-   * well, which reclaims its session server-side so the abandoned file stops
-   * consuming upload and storage resources. Removed Assets stay referenced
-   * until the next save.
-   *
-   * @param key - Row key to remove.
-   */
   const handleRemoveAttachment = useCallback(
     (key: string) => {
       const target = attachmentsRef.current.find((attachment) => attachment.key === key);
@@ -1825,12 +1351,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [detachAttachmentRow, forgetDetachedAsset, markDirty],
   );
 
-  /**
-   * Moves an attachment one position earlier or later in the published order.
-   *
-   * @param index - Current ordered position of the attachment.
-   * @param delta - -1 to move earlier, +1 to move later.
-   */
   const handleMoveAttachment = useCallback(
     (index: number, delta: number) => {
       setAttachments((previous) => {
@@ -1846,29 +1366,16 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [markDirty],
   );
 
-  /**
-   * Re-runs a failed upload with the same local file, keeping the row and its
-   * position so ordering and Channel settings survive the retry.
-   *
-   * @param key - Row key of the failed upload.
-   */
   const handleRetryUpload = useCallback(
     (key: string) => {
       const file = filesRef.current.get(key);
       const index = attachmentsRef.current.findIndex((attachment) => attachment.key === key);
       if (!file || index < 0) return;
-      replaceAttachmentRow(file, `upload-retry-${Date.now()}-${key}`, index);
+      replaceAttachmentRow(file, `upload-retry-${crypto.randomUUID()}`, index);
     },
     [replaceAttachmentRow],
   );
 
-  /**
-   * Toggles one attachment's membership in a Channel's own selection, or
-   * restores the full ordered set when the Channel was inheriting.
-   *
-   * @param channelId - Target Channel id.
-   * @param assetId - Attachment the creator toggled.
-   */
   const handleToggleChannelAttachment = useCallback(
     (channelId: string, assetId: string) => {
       setAttachmentOverrides((previous) => {
@@ -1886,12 +1393,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [markDirty],
   );
 
-  /**
-   * Sets a Channel's attachment selection explicitly.
-   *
-   * @param channelId - Target Channel id.
-   * @param attachmentIds - Ordered selection, or null to inherit the Post's order.
-   */
   const handleSetChannelAttachments = useCallback(
     (channelId: string, attachmentIds: string[] | null) => {
       setAttachmentOverrides((previous) => {
@@ -1905,11 +1406,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [markDirty],
   );
 
-  /**
-   * Provider settings gate every sending mode, but not draft saves. The same
-   * violations drive submission validation and the pinned action's readiness;
-   * each descriptor receives only this Channel's selected media kinds.
-   */
   const providerValidationErrors = useMemo(
     () =>
       selectedChannels.flatMap(
@@ -1935,25 +1431,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     ],
   );
 
-  /**
-   * Validates composer state against the Post contract and live Platform
-   * capabilities before any mutation runs.
-   *
-   * Publish modes additionally require publishable media: count bounds (minimum
-   * and maximum media constraints per Channel), multi-attachment combinations,
-   * permitted asset kinds, and upload/processing readiness are validated per
-   * target so an Asset still uploading or processing blocks scheduling for that
-   * Channel instead of sending an unverified file. All messages are per Channel
-   * so a rejected target never forces changes to the shared Post.
-   *
-   * Capability-gated checks only run once the capability list has arrived:
-   * while it is still in flight the submission is refused with a retry hint,
-   * because letting it through would bypass every local rule and surface the
-   * API's masked generic error for violations the composer could have named.
-   *
-   * @param type - Draft, Queue, manual Schedule, or Publish Now mode.
-   * @returns Localized violation messages; empty when submission may proceed.
-   */
   const validateSubmission = useCallback(
     (type: PublishMode): string[] => {
       const errors: string[] = [];
@@ -2108,8 +1585,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             }),
           );
         }
-        // Per-channel acceptance sets: each attachment below re-tests membership
-        // against these lists, so build them once for the channel.
         const acceptedAssetTypes = new Set(capability?.asset_types ?? []);
         const combinedAssetTypes = new Set(capability?.multi_asset_types ?? []);
         if (channelAttachments.length > 1 && capability) {
@@ -2184,11 +1659,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     ],
   );
 
-  /**
-   * Validation messages keyed for rendering. A message may repeat verbatim (the
-   * same rule can fail for two Channels), so identity is the message plus its
-   * occurrence count - stable across re-renders and unique within the list.
-   */
   const validationErrorRows = useMemo(() => {
     const occurrences = new Map<string, number>();
     return validationErrors.map((message) => {
@@ -2198,13 +1668,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     });
   }, [validationErrors]);
 
-  /**
-   * Persists the current composer state as one authoritative Post, creating it on
-   * first save and updating the same Post afterwards.
-   *
-   * @param brandProfileId - Scoped Brand Profile that owns the Post.
-   * @returns The saved Post as returned by the API.
-   */
   const persistPost = useCallback(
     async (brandProfileId: string): Promise<Post> => {
       const input: CreatePostInput = {
@@ -2220,38 +1683,21 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [buildTargets, createPost, orderedAssetIds, postId, sharedContent, updatePost],
   );
 
-  /**
-   * Validates composer state, then saves the Post and — for publish modes —
-   * schedules or publishes it against the selected Channels.
-   *
-   * On success the composer clears its local recovery and reports durable saved
-   * state; on any failure every input, attachment, and Channel setting is kept
-   * so no creator work is lost and no saved state is claimed. When the API
-   * rejects with structured per-field violations (`Error.details`), those
-   * messages are shown verbatim in the fix-list alert instead of the masked
-   * generic error, so a server-side rule the local checks cannot observe still
-   * names its constraint.
-   *
-   * @param type - Submission mode: `'draft'`, `'schedule'`, or `'now'`.
-   * @returns True when the requested save/schedule/publish was accepted; false
-   *   on validation, identity change, or request failure, with every input kept.
-   */
   const handleSubmit = useCallback(
     async (type: PublishMode): Promise<boolean> => {
       setErrorMessage(null);
       const errors = validateSubmission(type);
       setValidationErrors(errors);
       if (errors.length > 0) return false;
-      // validateSubmission already reported the aggregate view as an error, so a
-      // null selection cannot reach the scoped mutations.
       if (ownerProfileId === null) return false;
       const brandProfileId = ownerProfileId;
-      // Async completion must affect only the composition that submitted it.
       const recoveryNamespaceAtSubmit = recoveryNamespaceRef.current;
       const composerIdentityAtSubmit = composerIdentityRef.current;
 
       setIsSubmitting(true);
       try {
+        await ownershipSyncRef.current;
+        setErrorMessage(null);
         if (
           type !== "queue" &&
           (selectedProfileIds.length !== 1 ||
@@ -2351,8 +1797,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         removedAssetIdsRef.current = new Set();
         setSavedAt(saved.updated_at);
         setIsDirty(false);
-        // The local rows already equal what was just persisted, so the Post is
-        // treated as hydrated: a later poll must not overwrite post-save edits.
         setHydratedPostId(saved.id);
 
         if (type === "draft") {
@@ -2403,9 +1847,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         return true;
       } catch (error) {
         if (composerIdentityRef.current !== composerIdentityAtSubmit) return false;
-        // A rejected mutation that carried structured per-field violations names
-        // each one in the fix-list; anything else falls back to the masked
-        // user-facing message so internals never surface.
         const details =
           error instanceof ApiError
             ? error.details
@@ -2445,11 +1886,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     ],
   );
 
-  /**
-   * Leaves for the waiting destination after the creator accepted the loss or
-   * the draft was saved; the guard is not re-evaluated because that decision
-   * already happened.
-   */
   const continuePendingNavigation = useCallback(() => {
     if (!pendingNavigation) return;
     const { view, options } = pendingNavigation;
@@ -2457,16 +1893,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     onNavigate?.(view, options);
   }, [onNavigate, pendingNavigation]);
 
-  /**
-   * Routes composer-initiated navigation (Manage Queues, Add Channel) through
-   * an explicit decision when unmounting would destroy work that recovery
-   * cannot restore: without functional-storage consent nothing is persisted,
-   * so an unsaved composition survives only while this mount stays alive.
-   * Recoverable work leaves immediately and restores when the composer reopens.
-   *
-   * @param view - Workspace destination requested from inside the composer.
-   * @param options - Optional query deep link forwarded to the destination page.
-   */
   const requestNavigate = useCallback(
     (view: WorkspaceView, options?: { search?: string }) => {
       if (!onNavigate) return;
@@ -2479,11 +1905,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [functionalConsent, isDirty, onNavigate],
   );
 
-  /**
-   * Saves the composition as a draft, then leaves only when the server accepted
-   * it. Validation or request failures keep the creator in the composer with
-   * the existing inline errors instead of navigating away from unsaved work.
-   */
   const saveDraftAndContinue = useCallback(async () => {
     if (isSavingBeforeLeave) return;
     setIsSavingBeforeLeave(true);
@@ -2499,16 +1920,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     postQuery.data !== undefined &&
     ownerProfileId !== null &&
     postQuery.data.brand_profile_id !== ownerProfileId;
-  // Recovery is optional consent-gated storage: without functional consent the
-  // read effect never opens and the namespace stays unread, so that gate only
-  // blocks initialization while consent is active (including when consent
-  // arrives later and the read settles before persistence).
   const isInitializing =
     !postLoadError &&
     (isPostLoading ||
       (postId !== null && hydratedPostId !== postId) ||
       (functionalConsent && recoveryReadNamespace !== recoveryNamespace));
-  /** Icon of the selected publishing mode, shown on the pinned action. */
   const PublishModeIcon = PUBLISH_MODE_ICONS[publishMode];
   const submitDisabled =
     isSubmitting ||
@@ -2623,9 +2039,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         )}
       </div>
 
-      {/* The editor takes the remaining width beside a compact destinations and
-          publishing column. The split follows the panel's own width; narrower
-          panels stack in reading order. Each wide column scrolls independently. */}
       <div className="flex min-w-0 grow flex-col gap-6 @4xl:min-h-0 @4xl:flex-1 @4xl:flex-row @4xl:items-stretch">
         <div
           aria-label={t("Post content")}
@@ -2646,10 +2059,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                   autoGrow
                   className="min-h-36 max-h-72 resize-none text-base font-normal bg-field"
                 />
-                {/* The destination count only means something once the Post
-                        has an owning Brand Profile: in the aggregate view the
-                        banner above already says what is missing, and the
-                        Destinations block shows the accounts as unavailable. */}
                 <div className="flex flex-wrap items-center justify-between gap-2 text-(length:--font-size-micro) text-ink-3">
                   <span>
                     {ownerProfileId !== null && (
@@ -2886,9 +2295,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                                     <Pause className="size-3" />
                                   </Button>
                                 ))}
-                              {/* An unfinished upload is stopped by the same action that
-                                  removes it, so the row shows exactly one destructive
-                                  control whose label states the real effect. */}
                               {attachment.uploadStatus !== null &&
                               !terminalUploadStatuses.has(attachment.uploadStatus) ? (
                                 <Button
@@ -2921,10 +2327,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                           </div>
                         );
                       })}
-                      {/* Once a Post has media, the picker stays inside the
-                              grid as a dashed tile so adding one more is the
-                              same gesture as the first; the dropzone wrapper
-                              remains the drag target for the whole area. */}
                       <Button
                         type="button"
                         variant="outline"
@@ -2961,10 +2363,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
               hasOverride: false,
               settings: {},
             };
-            const distribution = postQuery.data?.distributions.find(
-              (item) => item.platform_account_id === channel.id,
-            );
+            const distribution = distributionByAccountId.get(channel.id);
             const channelAttachments = attachmentsForChannel(channel.id);
+            const channelAttachmentAssetIds = new Set(
+              channelAttachments.flatMap((item) => (item.assetId ? [item.assetId] : [])),
+            );
             const inheritsAttachments = !attachmentOverrides[channel.id];
             const includesAttachments = inheritsAttachments || channelAttachments.length > 0;
             const channelCaptionLimit = captionLimitFor(channel);
@@ -3011,7 +2414,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                         className={cn(
                           "text-(length:--font-size-micro) text-ink-3 self-end font-mono",
                           channelCaptionLimit !== null &&
-                            captionLength(channelContent) >= channelCaptionLimit &&
+                            captionLength(channelCaption) >= channelCaptionLimit &&
                             "text-red",
                         )}
                         title={
@@ -3116,9 +2519,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                         {attachments.map((attachment, index) => {
                           const assetId = attachment.assetId;
                           if (!assetId) return null;
-                          const selected = channelAttachments.some(
-                            (item) => item.assetId === assetId,
-                          );
+                          const selected = channelAttachmentAssetIds.has(assetId);
                           return (
                             <Button
                               key={attachment.key}
@@ -3148,6 +2549,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                     provider={channel.providerIdentifier}
                     channelName={channel.name}
                     channelId={channel.id}
+                    capability={capabilityByPlatform.get(channel.providerIdentifier.toLowerCase())}
                     settings={settingsForAttachmentOrder(
                       override.settings,
                       channelAttachments.map((attachment) => attachment.assetId ?? attachment.key),
@@ -3166,8 +2568,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           })}
         </div>
 
-        {/* Targeting and timing stay together in a bounded rail rather than
-            stretching to half the composer. Mobile retains the same DOM order. */}
         <div className="flex min-w-0 flex-col gap-6 @4xl:-my-1 @4xl:min-h-0 @4xl:w-85 @4xl:shrink-0 @4xl:overflow-y-auto @4xl:border-l @4xl:border-line @4xl:py-1 @4xl:pr-1 @4xl:pl-6">
           <DestinationSelector
             onNavigate={requestNavigate}
@@ -3263,8 +2663,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
               </div>
             )}
 
-            {/* What the selected mode will do, in the mode's own words: the
-                action bar names the commit, this line names its effect. */}
             <p className="text-(length:--font-size-micro) text-ink-3">
               {publishMode === "draft"
                 ? t("Saves this post's text, attachments, and channel settings without publishing")
@@ -3284,9 +2682,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         </div>
       </div>
 
-      {/* The action bar carries the draft's real save state and the one primary
-          action; the publishing selector in the rail decides what it submits, so
-          the bar never repeats a control the body owns. */}
       <div className="sticky bottom-0 -mx-4 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-line bg-surface px-4 pb-(--safe-control-bottom) pt-2.5 sm:-mx-6 sm:px-6">
         <p
           className="min-w-0 basis-full text-(length:--font-size-micro) text-ink-3 @sm:basis-0 @sm:flex-1"
@@ -3328,10 +2723,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         </Button>
       </div>
 
-      {/* Navigation out of the composer unmounts it. With functional-storage
-          consent the recovery record restores the composition on return; without
-          it, leaving would silently destroy the creator's work, so the departure
-          waits for an explicit save-or-discard decision. */}
       <CenterAlertDialog
         open={pendingNavigation !== null}
         onOpenChange={(open) => {

@@ -1,5 +1,3 @@
-// Production Queue handler + workerd + PostgreSQL, with controlled Provider
-// transport for account serialization, bounded fanout and redelivery checks.
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
@@ -8,17 +6,16 @@ import { Miniflare, convertV4MiniflareOptions, Log, LogLevel } from "miniflare";
 import pg from "pg";
 import { z } from "zod";
 import { TokenCipher } from "../../packages/secrets/src/index";
+import { LOCAL_ADMIN_URL, LOCAL_SYSTEM_URL } from "../lib/integration-database";
 
 const bundle = process.env.QUEUE_CAPACITY_BUNDLE;
 if (!bundle)
   throw new Error("QUEUE_CAPACITY_BUNDLE must name the built controlled-Provider Worker");
 const scriptPath = resolve(bundle);
 const database = new pg.Pool({
-  connectionString:
-    "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable",
+  connectionString: LOCAL_ADMIN_URL,
 });
-const systemUrl =
-  "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const systemUrl = LOCAL_SYSTEM_URL;
 const key = randomBytes(32).toString("base64url");
 const cipher = new TokenCipher({
   currentKeyId: "primary",
@@ -35,7 +32,6 @@ const providerRequest = z.object({
   caption: z.string(),
 });
 
-/** Verifies durable outcomes, per-account ordering and redelivery for one bounded batch mode. */
 async function verifyBatch(concurrency: 1 | 2) {
   const organizationId = randomUUID();
   const profiles = Array.from({ length: 4 }, () => randomUUID());

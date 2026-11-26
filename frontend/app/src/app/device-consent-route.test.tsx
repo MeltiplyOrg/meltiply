@@ -66,14 +66,6 @@ vi.mock("@/lib/i18n", () => ({
 
 import DeviceConsentRoute from "@/app/device-consent-route";
 
-/**
- * Builds a JSON HTTP response for the fake auth transport.
- *
- * @param body - JSON-serializable response body.
- * @param status - HTTP status code.
- * @param headers - Additional response headers.
- * @returns Response observed by the consent route.
- */
 function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     headers: { "content-type": "application/json", ...headers },
@@ -81,12 +73,6 @@ function jsonResponse(body: unknown, status = 200, headers: Record<string, strin
   });
 }
 
-/**
- * A review response describing a pending melti-cli request, unless overridden.
- *
- * @param overrides - Partial review payload.
- * @returns Pending review response.
- */
 function pendingReview(overrides: Record<string, unknown> = {}): Response {
   return jsonResponse({
     client_id: "melti-cli",
@@ -97,11 +83,6 @@ function pendingReview(overrides: Record<string, unknown> = {}): Response {
   });
 }
 
-/**
- * Records the HTTP methods of device-authorization requests the page issues.
- *
- * @returns Mutable list of request methods in call order.
- */
 function installDeviceFetch(): string[] {
   const methods: string[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -124,11 +105,6 @@ function installDeviceFetch(): string[] {
   return methods;
 }
 
-/**
- * Mirrors the router location so redirects and retained codes are observable.
- *
- * @returns Plain-text pathname and search.
- */
 function LocationProbe(): React.ReactElement {
   const location = useLocation();
   return (
@@ -139,12 +115,6 @@ function LocationProbe(): React.ReactElement {
   );
 }
 
-/**
- * Renders the device consent route with the router entry under test.
- *
- * @param entry - Router path including any prefilled user code.
- * @returns Testing-library render result.
- */
 function renderRoute(entry: string) {
   return render(
     <MemoryRouter initialEntries={[entry]}>
@@ -154,20 +124,12 @@ function renderRoute(entry: string) {
   );
 }
 
-/**
- * Resolves the redirect query value from the observed location.
- *
- * @returns The decoded redirect path, or null when absent.
- */
 function redirectTarget(): string | null {
   const location = screen.getByTestId("location").textContent ?? "";
   const query = location.split("?")[1];
   return query ? new URLSearchParams(query).get("redirect") : null;
 }
 
-/**
- * Clicks the explicit matching-code confirmation.
- */
 function confirmMatchingCode(): void {
   fireEvent.click(
     screen.getByRole("checkbox", { name: "The code in my terminal matches this code." }),

@@ -1,7 +1,19 @@
 import assert from "node:assert/strict";
 import { chromium, expect } from "@playwright/test";
 
-/** Signs the seeded local Installation Owner in through the real form; returns only cookies and suppresses sensitive form errors. */
+const analyticsPaths = new Set(["/api/v1/analytics/dashboard", "/api/v1/analytics/posts"]);
+
+function waitForAnalytics(page) {
+  return Promise.all(
+    [...analyticsPaths].map(async (path) => {
+      const response = await page.waitForResponse(
+        (response) => new URL(response.url()).pathname === path && response.ok(),
+      );
+      assert.equal(await response.finished(), null);
+    }),
+  );
+}
+
 export async function managedOwnerCookie(origin) {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -20,7 +32,6 @@ export async function managedOwnerCookie(origin) {
   }
 }
 
-/** Observes warm private reads, shared Analytics cohorts and explicit Refresh through real SPA controls in both palettes/sizes. */
 export async function capabilityNavigation({ origin, cookie, label, progressFixture }) {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -36,26 +47,13 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
     let channelReads = 0;
     let profileReads = 0;
     const analyticsReads = [];
-    let completedAnalyticsReads = 0;
-    page.on("response", async (response) => {
-      if (
-        ["/api/v1/analytics/dashboard", "/api/v1/analytics/posts"].includes(
-          new URL(response.url()).pathname,
-        ) &&
-        response.ok() &&
-        (await response.finished()) === null
-      ) {
-        completedAnalyticsReads++;
-      }
-    });
     page.on("request", (request) => {
       if (new URL(request.url()).pathname === "/api/v1/platforms/capabilities") reads++;
       const url = new URL(request.url());
       if (url.pathname === "/api/v1/platforms") channelReads++;
       if (url.pathname === "/api/v1/brand-profiles" && !url.searchParams.has("deleted"))
         profileReads++;
-      if (["/api/v1/analytics/dashboard", "/api/v1/analytics/posts"].includes(url.pathname))
-        analyticsReads.push(url);
+      if (analyticsPaths.has(url.pathname)) analyticsReads.push(url);
     });
     await page.goto(`${origin}/posts`);
     await expect(page.getByRole("heading", { name: "Posts", exact: true })).toBeVisible();
@@ -89,14 +87,22 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
       }
       await page.setViewportSize({ width: 1280, height: 900 });
     }
-    await page.getByRole("button", { name: "Channels", exact: true }).click();
+    const [capabilities] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v1/platforms/capabilities" && response.ok(),
+      ),
+      page.getByRole("button", { name: "Channels", exact: true }).click(),
+    ]);
+    assert.equal(await capabilities.finished(), null);
     await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
-    await expect.poll(() => reads).toBe(1);
-    await page.getByRole("button", { name: "Analytics", exact: true }).click();
+    assert.equal(reads, 1);
+    await Promise.all([
+      waitForAnalytics(page),
+      page.getByRole("button", { name: "Analytics", exact: true }).click(),
+    ]);
     await expect(page.getByRole("heading", { name: "Analytics", exact: true })).toBeVisible();
-    await expect.poll(() => analyticsReads.length).toBe(2);
-    // A started read can be canceled on unmount; only completed reads are warm.
-    await expect.poll(() => completedAnalyticsReads).toBe(2);
+    assert.equal(analyticsReads.length, 2);
     assert.equal(
       analyticsReads[0].searchParams.get("start"),
       analyticsReads[1].searchParams.get("start"),
@@ -146,11 +152,11 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
           dark,
         );
         const previous = analyticsReads.at(-1)?.searchParams.get("end");
-        await page.waitForTimeout(25);
+        assert.ok(previous);
+        await page.clock.setFixedTime(new Date(Date.parse(previous) + 1_000));
         const expected = analyticsReads.length + 2;
-        await refresh.click();
-        await expect.poll(() => analyticsReads.length).toBe(expected);
-        await expect.poll(() => completedAnalyticsReads).toBe(expected);
+        await Promise.all([waitForAnalytics(page), refresh.click()]);
+        assert.equal(analyticsReads.length, expected);
         await expect(refresh).toBeEnabled();
         const [dashboard, ranked] = analyticsReads.slice(-2);
         assert.equal(dashboard.searchParams.get("start"), ranked.searchParams.get("start"));
@@ -168,9 +174,16 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
     }
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole("button", { name: "Channels", exact: true }).click();
-    await page.reload();
+    const [reloadedCapabilities] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v1/platforms/capabilities" && response.ok(),
+      ),
+      page.reload(),
+    ]);
+    assert.equal(await reloadedCapabilities.finished(), null);
     await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
-    await expect.poll(() => reads).toBe(2);
+    assert.equal(reads, 2);
     console.log(
       JSON.stringify({
         scenario: "browser-private-cache",

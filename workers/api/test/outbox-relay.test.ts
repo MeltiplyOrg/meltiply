@@ -2,14 +2,11 @@ import type { JwtIdentity } from "@meltiply/auth";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { Effect } from "effect";
 
-// Unit tests exercise resolveActor + core service seams only: the database
-// module pulls in `pg`, which cannot load in the workers vitest pool. Mocking
-// it keeps actor resolution's dynamic database import from evaluating pg.
 vi.mock("../src/database", () => ({}));
 
 import type { ResolvedActor } from "../src/actor-resolution";
 import { createApiApp } from "../src/app";
-import type { CoreApiService } from "../src/core-types";
+import { fakeCoreService, fakeExecutionContext } from "../test-support/fakes";
 import type { ApiWorkerEnv, AutomationRelayStub } from "../src/env";
 import { logRecords } from "./log-records";
 
@@ -20,10 +17,6 @@ const baseEnv = {
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
 
-// Better Auth subject plus the internal Workspace membership the server
-// resolved from org_members, mirroring the confirmed actor claims contract:
-// subject = Better Auth user id, userId = internal users.id UUID,
-// organizationId = resolved workspace UUID, organizationRole = member role.
 const actor: ResolvedActor = {
   authUserId: "auth_user_alpha",
   claims: {
@@ -44,8 +37,6 @@ const actor: ResolvedActor = {
   },
 };
 
-// Verified Better Auth JWT identity returned by the `verifyJwtToken` test
-// double; the bearer JWT is the only credential protected routes may accept.
 const jwtIdentity: JwtIdentity = {
   email: "alpha@example.test",
   name: "Alpha",
@@ -64,20 +55,26 @@ const replyToComment = () =>
     Effect.succeed({
       replayed: false,
       value: {
-        comment_id: commentId,
-        created_at: "2026-08-24T00:00:00.000Z",
-        id: "00000000-0000-4000-8000-000000000002",
-        status: "queued" as const,
-        text: "Thanks!",
+        author_avatar: null,
+        author_name: "Commenter",
+        body: "Nice post!",
+        brand_profile_id: brandProfileId,
+        commented_at: "2026-08-24T00:00:00.000Z",
+        distribution_id: "00000000-0000-4000-8000-000000000003",
+        failure: null,
+        id: commentId,
+        platform: "threads" as const,
+        platform_comment_id: "platform-comment-1",
+        post_id: "00000000-0000-4000-8000-000000000004",
+        reply_attempted_at: "2026-08-24T00:00:00.000Z",
+        reply_status: "queued" as const,
+        reply_text: "Thanks!",
+        synced_at: "2026-08-24T00:00:00.000Z",
+        updated_at: "2026-08-24T00:00:00.000Z",
       },
     }),
   );
 
-/**
- * Drives the reply mutation through the API entry point with a recording
- * execution context, so a test can observe what the relay does on the
- * background continuation without awaiting it on the response path.
- */
 async function postReply(
   options: {
     automation?: AutomationRelayStub;
@@ -94,20 +91,19 @@ async function postReply(
     options.executionContext === null
       ? undefined
       : (options.executionContext ??
-        ({
+        fakeExecutionContext({
           passThroughOnException: vi.fn(),
-          props: {},
           waitUntil,
-        } as unknown as ExecutionContext));
+        }));
 
   const app = createApiApp({
     betterAuth: {
       api: { getSession: async () => null },
       handler: async () => new Response("ok"),
     } as never,
-    coreService: {
+    coreService: fakeCoreService({
       replyToComment: replyToComment(),
-    } as unknown as CoreApiService,
+    }),
     resolveActor: async () => actor,
     verifyJwtToken: async () => jwtIdentity,
   });
@@ -153,8 +149,6 @@ describe("API eager Outbox relay", () => {
       idempotencyKey: "eager-relay-success",
     });
 
-    // The response resolves while the relay is still in flight, and the relay
-    // was handed to the background continuation rather than awaited.
     expect(response.status).toBe(202);
     expect(relayOutbox).toHaveBeenCalledTimes(1);
     expect(waitUntil).toHaveBeenCalled();
@@ -232,10 +226,8 @@ describe("API eager Outbox relay", () => {
     expect(waitUntil).toHaveBeenCalled();
     expect(waited.length).toBeGreaterThan(0);
 
-    // The promise passed to waitUntil must resolve cleanly without unhandled rejection.
     await expect(Promise.all(waited)).resolves.not.toThrow();
 
-    // The entry stays pending for the hourly sweep; the failure is logged with structured diagnostics.
     expect(logRecords(errors)).toContainEqual(
       expect.objectContaining({
         context: expect.objectContaining({

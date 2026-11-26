@@ -1,19 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
-/**
- * Release-readiness verification for the separate public Astro project.
- *
- * These journeys use the static production preview documented in the
- * `frontend-ui` lane (`MELTIPLY_E2E_PUBLIC_URL`). They prove the landing page's
- * interactive sample stays visibly illustrative and cannot persist, that the
- * guides and their build-time search navigate, and that theme, keyboard, mobile,
- * and reduced-motion behavior match the workspace contract. The app owns the
- * actual publishing journeys; this file never claims the sample publishes.
- */
-
 const publicUrl = process.env.MELTIPLY_E2E_PUBLIC_URL?.trim();
 
-/** Consent is the only way the public site persists the theme; grant it before boot. */
 async function allowFunctionalConsent(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const consent = encodeURIComponent(
@@ -27,7 +15,6 @@ async function allowFunctionalConsent(page: Page): Promise<void> {
   });
 }
 
-/** Joins the public preview origin for a route without assuming a trailing slash. */
 function publicPath(baseUrl: string, pathname: string): string {
   return new URL(pathname, baseUrl).href;
 }
@@ -49,27 +36,23 @@ test.describe("public site verification", () => {
     await page.goto(publicPath(origin, "/"));
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Finally, in sync.");
 
-    // The skip link is first in keyboard order and targets the real main region.
     await page.keyboard.press("Tab");
     const skipLink = page.getByRole("link", { name: "Skip to content", exact: true });
     await expect(skipLink).toBeFocused();
     await skipLink.press("Enter");
     await expect(page.locator("#main")).toBeVisible();
 
-    // Marketing navigation reaches the sections it advertises.
     for (const section of ["product", "features", "workflow"]) {
       await page.locator(`a[href="#${section}"]`).first().click();
       await expect(page).toHaveURL(new RegExp(`#${section}$`));
       await expect(page.locator(`#${section}`)).toBeInViewport();
     }
 
-    // The sample is labeled twice: as sample content and as an illustrative workflow.
     await expect(page.getByText("Interactive demo · sample content")).toBeVisible();
     await expect(page.getByText("Illustrative workflow").first()).toBeVisible();
     await expect(page.getByTitle("Demo connection").first()).toBeVisible();
     await expect(page.getByText("Demo account", { exact: true })).toBeVisible();
 
-    // Demo tabs are keyboard-complete and lazily hidden, never unmounted.
     const postsTab = page.getByRole("tab", { name: "Posts", exact: true });
     const channelsTab = page.getByRole("tab", { name: "Channels", exact: true });
     const postsPanel = page.getByRole("tabpanel", { name: "Posts", exact: true });
@@ -85,7 +68,6 @@ test.describe("public site verification", () => {
     await expect(postsTab).toHaveAttribute("aria-selected", "true");
     await expect(postsPanel).toBeVisible();
 
-    // The sample's only actions open the real app at sign-in; it has no API or form.
     const sampleActions = page.locator(".preview-main a.button");
     expect(await sampleActions.count()).toBeGreaterThan(0);
     for (const href of await sampleActions.evaluateAll((links) =>
@@ -97,8 +79,6 @@ test.describe("public site verification", () => {
     }
     expect(await page.locator(".preview-main form, .preview-main input").count()).toBe(0);
 
-    // Theme intent survives reload, and the capture-phase transfer adds the live
-    // choice when the sample's action actually navigates toward the app.
     const toDark = page.getByRole("button", { name: "Switch to dark theme", exact: true });
     await toDark.click();
     await expect(page.locator("html")).toHaveClass(/dark/);
@@ -129,7 +109,6 @@ test.describe("public site verification", () => {
       path: testInfo.outputPath("public-landing-dark-1440.png"),
     });
 
-    // Phones keep the same sample, a keyboard-operable disclosure, and no overflow.
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();
     await expect
@@ -169,7 +148,6 @@ test.describe("public site verification", () => {
     await expect(page).toHaveURL(/\/docs\/?$/);
     await expect(page.getByRole("heading", { level: 1, name: "Meltiply Docs" })).toBeVisible();
 
-    // The shared sidebar lists the approved guides and marks the current one.
     const channelsLink = page.locator("a.docs-nav-item", { hasText: "Channels" }).first();
     await expect(channelsLink).toBeVisible();
     await channelsLink.click();
@@ -177,7 +155,6 @@ test.describe("public site verification", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Channels" })).toBeVisible();
     await expect(channelsLink).toHaveAttribute("aria-current", "page");
 
-    // The build-time index is the documented public search, reachable by keyboard.
     const searchTrigger = page.getByRole("button", { name: "Search documentation", exact: true });
     await searchTrigger.focus();
     await searchTrigger.press("Enter");
@@ -190,14 +167,12 @@ test.describe("public site verification", () => {
     await expect(page).toHaveURL(/\/docs\/resource-limits(?:\/|#|$)/);
     await expect(page.getByRole("heading", { level: 1, name: "Resource usage" })).toBeVisible();
 
-    // Search dismissal restores the trigger after a same-origin swap.
     await searchTrigger.click();
     await expect(dialog).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
     await expect(searchTrigger).toBeFocused();
 
-    // The article's Markdown alternate and agent index are real resources.
     const markdownHref = await page.locator(".docs-agent-metadata a").last().getAttribute("href");
     expect(markdownHref).toMatch(/^\/docs\/resource-limits\.md$/);
     const markdown = await page.request.get(publicPath(origin, markdownHref!));
@@ -207,7 +182,6 @@ test.describe("public site verification", () => {
     expect(index.status()).toBe(200);
     await expect(index.text()).resolves.toContain("/docs/resource-limits.md");
 
-    // Theme choice crosses the persistent docs/landing boundary and survives there.
     const toggle = page
       .locator(".docs-prefs")
       .getByRole("button", { name: /Switch to dark theme/ });
@@ -222,13 +196,11 @@ test.describe("public site verification", () => {
     await expect(page).toHaveURL(new RegExp(`${new URL(origin).origin}/?$`));
     await expect(page.locator("html")).toHaveClass(/dark/);
 
-    // Unknown guide paths keep the public 404 and its way back.
     await page.goto(publicPath(origin, "/docs/not-a-guide"));
     await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
     await page.getByRole("link", { name: "Back to docs", exact: true }).click();
     await expect(page).toHaveURL(/\/docs\/?$/);
 
-    // Guide reading stays inside the phone viewport in the dark palette.
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(publicPath(origin, "/docs/channels"));
     await expect(page.getByRole("heading", { level: 1, name: "Channels" })).toBeVisible();
@@ -250,9 +222,6 @@ test.describe("public site verification", () => {
     expect(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(
       true,
     );
-    // Dispatch the selection inside the page so WAAPI creation can be inspected
-    // synchronously. Polling for eventual inactivity would also pass if the
-    // shared engine ignored reduced motion and let a 240ms effect finish.
     const panelAnimationTargets = await page.evaluate(() => {
       const tab = document.getElementById("tab-channels");
       if (!(tab instanceof HTMLButtonElement)) throw new Error("Channels tab is missing");

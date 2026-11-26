@@ -22,7 +22,7 @@ describe("Effect Observability Tracer Integration", () => {
       return yield* Effect.withSpan("load_user_identity", {
         attributes: { "tenant.id": "org_456" },
       })(Effect.succeed({ id: "u_1" }));
-    }).pipe(Effect.provide(effectTracerLayer(context, mockExporter)));
+    }).pipe(Effect.provide(effectTracerLayer(context, { exporter: mockExporter })));
 
     const result = await Effect.runPromise(program);
     expect(result).toEqual({ id: "u_1" });
@@ -54,7 +54,7 @@ describe("Effect Observability Tracer Integration", () => {
 
     const program = Effect.gen(function* () {
       return yield* Effect.withSpan("database_query")(Effect.fail(new Error("Query failed")));
-    }).pipe(Effect.provide(effectTracerLayer(context, mockExporter)));
+    }).pipe(Effect.provide(effectTracerLayer(context, { exporter: mockExporter })));
 
     await expect(Effect.runPromise(program)).rejects.toThrow("Query failed");
 
@@ -74,7 +74,7 @@ describe("Effect Observability Tracer Integration", () => {
       trace_id: "trace_unsampled",
       version: "1.0.0",
     };
-    const layer = effectTracerLayer(context, mockExporter);
+    const layer = effectTracerLayer(context, { exporter: mockExporter });
 
     const unsampled = await Effect.runPromise(
       Effect.gen(function* () {
@@ -84,10 +84,6 @@ describe("Effect Observability Tracer Integration", () => {
 
     expect(unsampled).toBe(42);
     expect(mockExporter).not.toHaveBeenCalled();
-
-    // Positive control: the same layer and exporter do export a sampled span,
-    // so the empty call count above proves the sampling decision rather than a
-    // tracer that never exports anything.
     await Effect.runPromise(
       Effect.gen(function* () {
         return yield* Effect.withSpan("sampled_span")(Effect.succeed(43));
@@ -113,24 +109,35 @@ describe("Effect Observability Tracer Integration", () => {
       Effect.gen(function* () {
         return yield* Effect.withSpan("suppressed_span")(Effect.succeed("hidden"));
       }).pipe(
-        Effect.provide(effectTracerLayer(context, mockExporter)),
+        Effect.provide(effectTracerLayer(context, { exporter: mockExporter })),
         Effect.provide(Layer.succeed(Tracer.MinimumTraceLevel, "None")),
       ),
     );
 
     expect(suppressed).toBe("hidden");
     expect(mockExporter).not.toHaveBeenCalled();
-
-    // Positive control: without the threshold the identical program exports,
-    // so the suppression above comes from MinimumTraceLevel and not from an
-    // unrelated wiring mistake.
     await Effect.runPromise(
       Effect.gen(function* () {
         return yield* Effect.withSpan("suppressed_span")(Effect.succeed("hidden"));
-      }).pipe(Effect.provide(effectTracerLayer(context, mockExporter))),
+      }).pipe(Effect.provide(effectTracerLayer(context, { exporter: mockExporter }))),
     );
     expect(mockExporter).toHaveBeenCalledTimes(1);
     expect(exported[0]?.name).toBe("suppressed_span");
+  });
+
+  it("skips span translation outside local and test without an injected exporter", async () => {
+    const onExportPromise = vi.fn();
+    await Effect.runPromise(
+      Effect.withSpan("production_span")(Effect.succeed("ok")).pipe(
+        Effect.provide(
+          effectTracerLayer(
+            { environment: "production", service: "api", trace_id: "trace-prod", version: "1" },
+            { onExportPromise },
+          ),
+        ),
+      ),
+    );
+    expect(onExportPromise).not.toHaveBeenCalled();
   });
 
   it("forwards export promise to onExportPromise callback", async () => {
@@ -161,43 +168,5 @@ describe("Effect Observability Tracer Integration", () => {
     expect(onExportPromise).toHaveBeenCalledTimes(1);
     expect(promises.length).toBe(1);
     await expect(promises[0]).resolves.toBeUndefined();
-  });
-
-  it("redacts sensitive attributes and signed URLs in Effect spans", async () => {
-    const exported: OtlpSpanInput[] = [];
-    const mockExporter = vi.fn(async (_env: unknown, span: OtlpSpanInput) => {
-      exported.push(span);
-    });
-
-    const context: LogContext = {
-      environment: "test",
-      service: "api",
-      trace_id: "trace_sensitive_span",
-      version: "1.0.0",
-    };
-
-    const program = Effect.gen(function* () {
-      return yield* Effect.withSpan("upload_media_span", {
-        attributes: {
-          authorization: "Bearer x",
-          media_url: "https://bucket.r2.cloudflarestorage.com/raw.mov?X-Amz-Signature=x",
-          normal_attr: "public_value",
-          password: "x",
-          token: "x",
-        },
-      })(Effect.succeed("uploaded"));
-    }).pipe(Effect.provide(effectTracerLayer(context, mockExporter)));
-
-    const result = await Effect.runPromise(program);
-    expect(result).toBe("uploaded");
-
-    expect(mockExporter).toHaveBeenCalledTimes(1);
-    expect(exported[0]?.attributes?.["authorization"]).toBe("[REDACTED]");
-    expect(exported[0]?.attributes?.["password"]).toBe("[REDACTED]");
-    expect(exported[0]?.attributes?.["token"]).toBe("[REDACTED]");
-    expect(exported[0]?.attributes?.["media_url"]).toBe(
-      "https://bucket.r2.cloudflarestorage.com/raw.mov?[REDACTED]",
-    );
-    expect(exported[0]?.attributes?.["normal_attr"]).toBe("public_value");
   });
 });

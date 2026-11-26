@@ -12,7 +12,7 @@ type Middleware = (
   next: () => void,
 ) => void;
 
-function canonicalMiddleware(frontendUrl: string): Middleware {
+async function canonicalMiddleware(frontendUrl: string): Promise<Middleware> {
   vi.stubEnv("APP_URL", frontendUrl);
   const config = viteConfig({ command: "serve", mode: "test" });
   const plugin = config.plugins?.find(
@@ -32,7 +32,7 @@ function canonicalMiddleware(frontendUrl: string): Middleware {
   if (!configureServer) {
     throw new Error("canonical frontend origin plugin is unavailable");
   }
-  configureServer.call(
+  await configureServer.call(
     {} as never,
     {
       middlewares: { use: (handler: Middleware) => (middleware = handler) },
@@ -45,8 +45,8 @@ function canonicalMiddleware(frontendUrl: string): Middleware {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("Vite frontend configuration", () => {
-  it("redirects alternate HTML navigations without redirecting canonical or asset requests", () => {
-    const middleware = canonicalMiddleware("http://dashboard.example.test:3000");
+  it("redirects alternate HTML navigations without redirecting canonical or asset requests", async () => {
+    const middleware = await canonicalMiddleware("http://dashboard.example.test:3000");
     const response = { end: vi.fn(), writeHead: vi.fn() };
     const next = vi.fn();
 
@@ -75,5 +75,15 @@ describe("Vite frontend configuration", () => {
       next,
     );
     expect(next).toHaveBeenCalledTimes(2);
+
+    const openRedirectResponse = { end: vi.fn(), writeHead: vi.fn() };
+    middleware(
+      { headers: { accept: "text/html", host: "100.64.0.1:3000" }, url: "//evil.test/phish" },
+      openRedirectResponse,
+      next,
+    );
+    expect(openRedirectResponse.writeHead).toHaveBeenCalledWith(308, {
+      Location: "http://dashboard.example.test:3000/",
+    });
   });
 });

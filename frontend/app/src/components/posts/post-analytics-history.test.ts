@@ -2,7 +2,6 @@ import { describe, expect, it } from "vite-plus/test";
 import { postAnalyticsHistory } from "./post-analytics-history";
 import type { components } from "@meltiply/contracts/schema";
 
-/** Builds deterministic measurements; changing likes also changes the exposure counters. */
 function snapshot(
   id: string,
   channel: string,

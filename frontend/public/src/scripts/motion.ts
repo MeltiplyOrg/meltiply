@@ -5,27 +5,10 @@ import {
   revealEffect,
 } from "@meltiply/ui/effects";
 
-/*
- * Landing motion orchestration on top of the shared WAAPI engine in
- * `@meltiply/ui/effects`. The engine owns per-element replacement and tracked
- * cancellation; this file maps landing selectors onto the existing recipes.
- */
-
-/**
- * Gives the mobile disclosure a short entrance without delaying visibility,
- * focus, or native hidden-state dismissal.
- */
 export function animateDisclosure(element: HTMLElement): void {
   disclosureEffect(element);
 }
 
-/**
- * Animates a newly selected demo panel and any change in the containing
- * window's height, preserving mounted tab controls and keyboard focus.
- * `previousHeight` is the container's previous viewport-space height in CSS
- * pixels; absent/equal heights skip morphing. Landing-owned selectors pick
- * which descendants join the stagger.
- */
 export function animatePanel(panel: HTMLElement, previousHeight?: number): void {
   const container = panel.parentElement;
   if (container) morphHeightEffect(container, previousHeight);
@@ -35,12 +18,6 @@ export function animatePanel(panel: HTMLElement, previousHeight?: number): void 
   });
 }
 
-/**
- * Orchestrates one-time viewport entrances for every landing component family.
- * Content stays visible without JS/IntersectionObserver. Astro route swaps
- * cancel active effects and release observers, so detached pages retain no
- * animation layers or subscriptions.
- */
 export function initializeMotion(): () => void {
   const targets = document.querySelectorAll(
     [

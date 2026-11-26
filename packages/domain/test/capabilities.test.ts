@@ -1,61 +1,58 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  can,
-  INSTALLATION_OWNER_CAPABILITIES,
-  isWorkspaceRole,
-  roleCan,
-  WORKSPACE_ROLE_CAPABILITIES,
-} from "../src/capabilities";
+import { can, isWorkspaceRole, type WorkspaceCapability } from "../src/capabilities";
 
 describe("workspace capability model", () => {
   it("grants admins administration and configuration but not Admin assignment", () => {
-    expect(roleCan("admin", "member:read")).toBe(true);
-    expect(roleCan("admin", "member:invite")).toBe(true);
-    expect(roleCan("admin", "brand-profile:manage")).toBe(true);
-    expect(roleCan("admin", "channel:manage")).toBe(true);
-    expect(roleCan("admin", "content:delete-published")).toBe(true);
-    expect(roleCan("admin", "audit:read")).toBe(true);
-    expect(roleCan("admin", "member:assign-editor")).toBe(true);
-    expect(roleCan("admin", "member:assign-viewer")).toBe(true);
-    expect(roleCan("admin", "member:assign-admin")).toBe(false);
-    expect(roleCan("admin", "installation:manage")).toBe(false);
+    const granted: WorkspaceCapability[] = [
+      "member:read",
+      "member:invite",
+      "brand-profile:manage",
+      "channel:manage",
+      "content:delete-published",
+      "audit:read",
+      "member:assign-editor",
+      "member:assign-viewer",
+    ];
+    for (const capability of granted) expect(can("admin", false, capability)).toBe(true);
+    expect(can("admin", false, "member:assign-admin")).toBe(false);
+    expect(can("admin", false, "installation:manage")).toBe(false);
   });
 
   it("grants editors content work while keeping configuration read-only", () => {
-    expect(roleCan("editor", "content:read")).toBe(true);
-    expect(roleCan("editor", "content:write")).toBe(true);
-    expect(roleCan("editor", "channel:read")).toBe(true);
-    expect(roleCan("editor", "brand-profile:read")).toBe(true);
-    expect(roleCan("editor", "content:delete-published")).toBe(false);
-    expect(roleCan("editor", "channel:manage")).toBe(false);
-    expect(roleCan("editor", "brand-profile:manage")).toBe(false);
-    expect(roleCan("editor", "member:read")).toBe(false);
-    expect(roleCan("editor", "audit:read")).toBe(false);
+    for (const capability of [
+      "content:read",
+      "content:write",
+      "channel:read",
+      "brand-profile:read",
+    ] as const) {
+      expect(can("editor", false, capability)).toBe(true);
+    }
+    for (const capability of [
+      "content:delete-published",
+      "channel:manage",
+      "brand-profile:manage",
+      "member:read",
+      "audit:read",
+    ] as const) {
+      expect(can("editor", false, capability)).toBe(false);
+    }
   });
 
   it("makes viewers read-only", () => {
-    expect(roleCan("viewer", "content:read")).toBe(true);
-    expect(roleCan("viewer", "channel:read")).toBe(true);
-    expect(roleCan("viewer", "content:write")).toBe(false);
-    expect(roleCan("viewer", "channel:manage")).toBe(false);
-    expect(roleCan("viewer", "brand-profile:read")).toBe(false);
+    expect(can("viewer", false, "content:read")).toBe(true);
+    expect(can("viewer", false, "channel:read")).toBe(true);
+    expect(can("viewer", false, "content:write")).toBe(false);
+    expect(can("viewer", false, "channel:manage")).toBe(false);
+    expect(can("viewer", false, "brand-profile:read")).toBe(false);
   });
 
-  it("layers installation authority over the owner's admin membership", () => {
+  it("layers installation authority over any membership role without removing admin powers", () => {
     expect(can("admin", true, "member:assign-admin")).toBe(true);
     expect(can("admin", true, "installation:manage")).toBe(true);
-    expect(can("admin", false, "member:assign-admin")).toBe(false);
-    expect(can("admin", false, "installation:manage")).toBe(false);
-    expect(can("editor", false, "content:write")).toBe(true);
-    expect(can("viewer", false, "content:write")).toBe(false);
-    expect(INSTALLATION_OWNER_CAPABILITIES).toContain("member:assign-admin");
-    // Ownership only adds authority: every Workspace Admin capability survives
-    // in the Installation Owner set, so an owner never loses an Admin power.
-    expect(INSTALLATION_OWNER_CAPABILITIES).toEqual(
-      expect.arrayContaining([...WORKSPACE_ROLE_CAPABILITIES.admin]),
-    );
-    expect(WORKSPACE_ROLE_CAPABILITIES.admin).not.toContain("installation:manage");
+    expect(can("viewer", true, "installation:manage")).toBe(true);
+    expect(can("viewer", true, "member:manage")).toBe(true);
+    expect(can("editor", true, "content:write")).toBe(true);
   });
 
   it("narrows untrusted role values", () => {

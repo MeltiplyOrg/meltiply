@@ -1,12 +1,3 @@
-/**
- * Optional UI state for the DevBox dock.
- *
- * Functional consent enables a single versioned localStorage record for dock
- * position, collapsed/hidden state, active tab, and network latency selection.
- * Every field is validated on read so stale or hand-edited data cannot crash
- * the dock; without consent, the same controls remain session-local.
- */
-
 import { readFunctionalStorage, writeFunctionalStorage } from "@meltiply/ui/cookie-consent";
 
 export type DevBoxTab = "skeletons" | "trace" | "helpers" | "routes" | "preview";
@@ -19,11 +10,6 @@ export const devBoxTabs: readonly DevBoxTab[] = [
   "preview",
 ];
 
-/**
- * Artificial network latency applied to every `fetch` while DevBox is mounted.
- * `"infinite"` holds requests forever (used to keep skeletons pinned); finite
- * values delay each request by that many milliseconds.
- */
 export type DevBoxLatency = 0 | 300 | 1500 | "infinite";
 
 const devBoxLatencies: readonly DevBoxLatency[] = [0, 300, 1500, "infinite"];
@@ -43,16 +29,6 @@ export interface DevBoxViewport {
   height: number;
 }
 
-/**
- * Clamps a dock position so its measured box stays fully inside the viewport.
- * When the dock is larger than the viewport, the result pins it to the top-left
- * corner instead of producing a negative offset.
- *
- * @param position Persisted or pointer-derived top-left position.
- * @param size Measured dock dimensions, including borders.
- * @param viewport Current viewport dimensions.
- * @returns A finite position whose dock box cannot extend past any edge.
- */
 export function clampDevBoxPosition(
   position: DevBoxPosition,
   size: DevBoxSize,
@@ -64,30 +40,32 @@ export function clampDevBoxPosition(
   };
 }
 
-/**
- * Validates a persisted position, rejecting non-finite numbers so malformed
- * storage cannot produce an unclampable `left`/`top`.
- */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isDevBoxTab(value: unknown): value is DevBoxTab {
+  return typeof value === "string" && devBoxTabs.some((tab) => tab === value);
+}
+
+function isDevBoxLatency(value: unknown): value is DevBoxLatency {
+  return devBoxLatencies.some((item) => item === value);
+}
+
 function readPosition(value: unknown): DevBoxPosition | null {
-  if (!value || typeof value !== "object") return null;
-  const { x, y } = value as Partial<DevBoxPosition>;
+  if (!isRecord(value)) return null;
+  const { x, y } = value;
   return typeof x === "number" && Number.isFinite(x) && typeof y === "number" && Number.isFinite(y)
     ? { x, y }
     : null;
 }
 
 export interface DevBoxState {
-  /** Dock fully hidden (revealed again via the keyboard shortcut). */
   hidden: boolean;
-  /** Dock collapsed to the compact pill. */
   collapsed: boolean;
-  /** Active tab while expanded. */
   tab: DevBoxTab;
-  /** Bottom-left anchored dock position in viewport pixels, or null for the default slot. */
   position: DevBoxPosition | null;
-  /** Selected artificial latency. */
   latency: DevBoxLatency;
-  /** Whether the Agentation feedback toolbar is mounted. */
   agentation: boolean;
 }
 
@@ -102,41 +80,26 @@ const defaultDevBoxState: DevBoxState = {
   agentation: false,
 };
 
-/**
- * Reads the dock state only after functional consent, falling back field-by-field
- * to defaults when the record is missing, malformed, or from an older shape.
- *
- * @returns Validated `DevBoxState`; never throws on bad input.
- */
 export function readDevBoxState(): DevBoxState {
   const raw = readFunctionalStorage(devBoxStorageKey);
   if (!raw) return defaultDevBoxState;
   try {
-    const parsed = JSON.parse(raw) as Partial<DevBoxState> | null;
-    if (!parsed || typeof parsed !== "object") return defaultDevBoxState;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return defaultDevBoxState;
     const position = readPosition(parsed.position);
     return {
       hidden: parsed.hidden === true,
       collapsed: parsed.collapsed !== false,
-      tab: devBoxTabs.includes(parsed.tab as DevBoxTab)
-        ? (parsed.tab as DevBoxTab)
-        : defaultDevBoxState.tab,
+      tab: isDevBoxTab(parsed.tab) ? parsed.tab : defaultDevBoxState.tab,
       position,
-      latency: devBoxLatencies.includes(parsed.latency as DevBoxLatency)
-        ? (parsed.latency as DevBoxLatency)
-        : defaultDevBoxState.latency,
+      latency: isDevBoxLatency(parsed.latency) ? parsed.latency : defaultDevBoxState.latency,
       agentation: parsed.agentation === true,
     };
   } catch {
-    // Malformed JSON falls back to defaults; the storage helper handles denied storage.
     return defaultDevBoxState;
   }
 }
 
-/**
- * Persists the dock state only after functional consent. Denied or unavailable
- * storage is non-fatal, so the dock remains usable for this session.
- */
 export function writeDevBoxState(state: DevBoxState): void {
   writeFunctionalStorage(devBoxStorageKey, JSON.stringify(state));
 }

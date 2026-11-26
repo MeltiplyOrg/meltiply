@@ -2,18 +2,11 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import { createLoadingPlane, DocsTocPlane } from "./docs-toc-plane";
 
 const useClientLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
-/**
- * Per-phase budgets keep the full navigation under ~700ms: the closing
- * collapse gates Astro's DOM swap (shorter, it only needs to read as a
- * retract), while the opening unfold and plane flights run post-swap where
- * the article's own entrance masks their tail.
- */
 const rowTimings = {
   opening: { row: 140, motion: 240 },
   closing: { row: 120, motion: 160 },
 } as const;
 const easing = "cubic-bezier(0.4, 0, 0.2, 1)";
-/** Bound on waiting for a scrolled guide to reach the top before committing. */
 const scrollBudgetMs = 250;
 
 interface ContentsTransition {
@@ -21,7 +14,6 @@ interface ContentsTransition {
   dispose: () => void;
 }
 
-/** One navigation owns its transient rail; completing the exit releases its animation before the route commits. */
 interface ContentsCycle {
   rail: HTMLElement;
   list: HTMLElement;
@@ -42,14 +34,6 @@ interface PlaneStart {
   rotation: string;
 }
 
-/**
- * Rows retract bottom-first or unfold top-first, without moving article layout.
- * The 80ms stagger budget keeps any heading count within the phase's row +
- * motion window (see rowTimings); native motion-path animation returns the
- * plane along the actual bent rail as it morphs into a ring. Incoming rows
- * pause before paint; the shell marker owns the plane's handoff. Cancellation
- * restores plane positioning so scroll tracking can resume.
- */
 function animateContents(
   list: HTMLElement,
   opening: boolean,
@@ -165,14 +149,6 @@ function animateContents(
     },
   };
 }
-/**
- * Native smooth scrolling returns the outgoing article to its top without a
- * custom scroll timeline. Navigation waits for arrival, user interruption, or
- * `maxMs`, after which the remaining distance snaps instantly so the swap is
- * never hostage to scroll depth. Abort stops the old scroll, and reduced
- * motion settles without delay. A stale scrollend from earlier scrolling
- * cannot release navigation before arrival.
- */
 function scrollGuideToTop(signal: AbortSignal, maxMs: number): Promise<void> {
   if (signal.aborted || (window.scrollY === 0 && window.scrollX === 0)) return Promise.resolve();
   if (document.hidden) {
@@ -230,8 +206,6 @@ function scrollGuideToTop(signal: AbortSignal, maxMs: number): Promise<void> {
   window.addEventListener("keydown", interrupt);
   window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
   frame = requestAnimationFrame(check);
-  // Past the budget the remaining distance snaps so deep scrolls cannot hold
-  // the swap open; short hops still arrive under native smooth scrolling.
   deadline = window.setTimeout(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
     finish();
@@ -239,24 +213,14 @@ function scrollGuideToTop(signal: AbortSignal, maxMs: number): Promise<void> {
   return promise;
 }
 
-/**
- * Fetches alongside bounded smooth scrolling, bottom-to-top retraction and
- * the plane's return flight. A shell-owned loading marker survives the guide
- * swap; its ring→plane morph starts the moment the fetch lands so incoming
- * rows only wait for two paint frames before unfolding. Stale or aborted
- * loaders cannot own another navigation.
- */
 function createContentsTransition(marker: HTMLElement): ContentsTransition {
   const loadingPlane = createLoadingPlane(marker);
   let pending: ContentsCycle | null = null;
   let entrance: TocMotion | null = null;
   let enteringList: HTMLElement | null = null;
   let entranceFrame = 0;
-  // Ring→plane return morph started during the loader so reveal only awaits
-  // the tail instead of the full 180ms after commit.
   let restoring: Promise<void> | null = null;
 
-  /** Clears only transient route state; heading links and document layout retain their identity. */
   const clear = (rail: HTMLElement, list: HTMLElement) => {
     rail.removeAttribute("data-toc-transition");
     rail.removeAttribute("aria-busy");
@@ -265,7 +229,6 @@ function createContentsTransition(marker: HTMLElement): ContentsTransition {
     list.inert = false;
   };
 
-  /** Cancels batches and playback; reveal alone preserves the shell-owned loading marker for its handoff. */
   const reset = (preserveMarker = false) => {
     cancelAnimationFrame(entranceFrame);
     entranceFrame = 0;
@@ -289,7 +252,6 @@ function createContentsTransition(marker: HTMLElement): ContentsTransition {
     }
   };
 
-  /** Fetches immediately; bounded scroll, row retraction and plane flight settle before the next guide commits. */
   const prepare = (event: DocumentEventMap["astro:before-preparation"]) => {
     if (event.from.pathname === event.to.pathname) return;
     const rail = document.getElementById("nd-toc");
@@ -333,7 +295,6 @@ function createContentsTransition(marker: HTMLElement): ContentsTransition {
         loaded = true;
       });
       let markerShown = false;
-      /** Starts the ring→plane morph once the marker exists and the fetch landed, whichever order those occur in. */
       const startRestore = () => {
         if (!markerShown || restoring || pending !== cycle || event.signal.aborted) return;
         restoring = loadingPlane.restore();
@@ -362,7 +323,6 @@ function createContentsTransition(marker: HTMLElement): ContentsTransition {
     };
   };
 
-  /** Pauses incoming rows before paint; keeps their plane hidden until the restored shell marker hands off at full opacity. */
   const reveal = () => {
     if (!pending) return;
     reset(true);
@@ -404,7 +364,6 @@ function createContentsTransition(marker: HTMLElement): ContentsTransition {
   document.addEventListener("astro:before-preparation", prepare);
   return {
     reveal,
-    /** Releases navigation listeners, queued frames and native animation layers on unmount. */
     dispose: () => {
       document.removeEventListener("astro:before-preparation", prepare);
       reset();
@@ -412,11 +371,6 @@ function createContentsTransition(marker: HTMLElement): ContentsTransition {
   };
 }
 
-/**
- * The persisted shell owns navigation and the loading plane across guide swaps.
- * Its layout effect stages incoming TOC motion before paint; playback follows
- * the marker handoff. Initial hydration is static; unmount releases all layers.
- */
 export function DocsTocTransition({ pathname }: { pathname: string }) {
   const controller = useRef<ContentsTransition | null>(null);
   const marker = useRef<HTMLSpanElement>(null);

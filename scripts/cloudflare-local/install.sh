@@ -1,15 +1,4 @@
 #!/usr/bin/env bash
-# Bootstrap the full local toolchain and dependency set for the Cloudflare-target
-# stack, then verify the result with doctor.sh.
-#
-# Layers:
-#   1. Toolchain   Node (check only, .node-version), Bun 1.4.2 (installed when
-#                  missing or mismatched), Docker + Compose (check only), curl
-#   2. Setup       delegates to setup.sh: workspace deps, OpenTofu, .env files,
-#                  compose image pull, PostgreSQL start + migrations
-#   3. Browser     Playwright Chromium runtime
-#   4. Verify      doctor.sh; a degraded live stack (exit 2) is expected because
-#                  `make install` does not start the dev servers
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -18,14 +7,10 @@ cd "$repo_root"
 required_node="$(cat .node-version)"
 required_bun=1.4.2
 
-# fail prints one actionable line and aborts; used for prerequisites this
-# script cannot safely install itself (Node, Docker).
 fail() {
   printf '[install] %s\n' "$1" >&2
   exit 1
 }
-
-# --- toolchain ----------------------------------------------------------------
 
 command -v curl >/dev/null 2>&1 ||
   fail "curl is required to install Bun and OpenTofu"
@@ -34,9 +19,6 @@ node_version="$(node --version 2>/dev/null || true)"
 [[ "$node_version" == "v$required_node" ]] ||
   fail "Node v$required_node is required (found: ${node_version:-none}); install it with your version manager, see .node-version"
 
-# Bun is installed rather than checked because the pinned release has a
-# canonical installer; ~/.bun/bin is prepended so a stale Bun earlier on PATH
-# cannot shadow the pinned one for the rest of this run.
 if [[ "$(bun --version 2>/dev/null || true)" != "$required_bun" ]]; then
   printf '[install] Installing Bun %s\n' "$required_bun"
   curl --proto '=https' --tlsv1.2 -fsSL https://bun.sh/install |
@@ -63,15 +45,9 @@ if ! container_emulation_ready; then
   printf '[install] %s\n' "$(container_emulation_hint)"
 fi
 
-# --- repository setup ---------------------------------------------------------
-
 CI=true ./scripts/cloudflare-local/setup.sh
 
-# --- e2e browser runtime ------------------------------------------------------
-
 (cd frontend/app && bun run --no-install playwright install chromium)
-
-# --- verify -------------------------------------------------------------------
 
 status=0
 ./scripts/cloudflare-local/doctor.sh || status=$?

@@ -1,12 +1,14 @@
+import { PLATFORM_IDS } from "@meltiply/domain";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { RateLimitBudget } from "../src/rate-limit";
 import { extractRateLimitBudget } from "../src/rate-limit";
 
-const metaPlatforms = ["facebook", "instagram", "threads"] as const;
-const allPlatforms = [...metaPlatforms, "tiktok", "youtube"] as const;
+const metaPlatforms = PLATFORM_IDS.filter(
+  (platform) => platform === "facebook" || platform === "instagram" || platform === "threads",
+);
+const allPlatforms = PLATFORM_IDS;
 
-/** Every unstated field of an extracted budget must be reported as unknown. */
 function budget(patch: Partial<RateLimitBudget>): RateLimitBudget {
   return {
     percentUsed: null,
@@ -96,16 +98,10 @@ describe("extractRateLimitBudget", () => {
   });
 
   it("ignores an oversized but otherwise valid Meta usage header", () => {
-    // The 8 KiB header bound is the only thing rejecting this one: the JSON is
-    // well formed and its `call_count` is a valid percentage, so a parser
-    // without the length guard would report 27 here. (An oversized number
-    // literal would instead fail the finiteness check and prove nothing.)
     const oversized = JSON.stringify({ call_count: 27, padding: "x".repeat(8_200) });
     expect(oversized.length).toBeGreaterThan(8_192);
     expect(extractRateLimitBudget("facebook", headers({ "x-app-usage": oversized }))).toBeNull();
 
-    // Same document just inside the bound is accepted, so the case above fails
-    // only because of size.
     const printable = JSON.stringify({ call_count: 27, padding: "x".repeat(8_000) });
     expect(printable.length).toBeLessThanOrEqual(8_192);
     expect(extractRateLimitBudget("facebook", headers({ "x-app-usage": printable }))).toEqual(
@@ -172,15 +168,12 @@ describe("extractRateLimitBudget", () => {
 
   it("ignores invalid, fractional, signed, and over-range header values", () => {
     for (const value of ["", "  ", "NaN", "12.5", "-4", "1e3", "many", "0x10"]) {
-      // Each header is exercised alone, so a parser that still accepted one of
-      // them could not hide behind the other header's rejection.
       expect(
         extractRateLimitBudget("tiktok", headers({ "x-ratelimit-remaining": value })),
       ).toBeNull();
       expect(extractRateLimitBudget("tiktok", headers({ "x-ratelimit-reset": value }))).toBeNull();
     }
 
-    // Each documented ceiling is checked on its own header, at and past the bound.
     expect(
       extractRateLimitBudget(
         "youtube",

@@ -11,16 +11,6 @@ const mutatingHttpMethods: Record<string, true> = {
   PUT: true,
 };
 
-/**
- * Relays pending outbox events on the request's background continuation after a mutating transaction commits.
- *
- * The Outbox pattern decouples database transaction commits from asynchronous Cloudflare Queue sends.
- * For successful mutating HTTP methods (`POST`, `PUT`, `PATCH`, `DELETE`), triggers an eager outbox relay
- * via `c.executionCtx.waitUntil` without delaying the HTTP response. If eager delivery fails, messages
- * remain safe in the outbox table for recovery by the scheduled automation poller.
- *
- * @param c - Hono context containing HTTP request/response state and Worker environment bindings.
- */
 export function scheduleEagerOutboxRelay(c: Context<ApiWorkerEnvironment>): void {
   if (!mutatingHttpMethods[c.req.method]) return;
   if (c.res.status >= 400) return;

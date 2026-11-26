@@ -33,8 +33,6 @@ const server = setupServer(
 async function expectNoAutomatedViolations(container: HTMLElement) {
   const result = await axe.run(container, {
     rules: {
-      // JSDOM cannot calculate rendered color contrast. Browser acceptance
-      // remains the authority for this rule.
       "color-contrast": { enabled: false },
     },
   });

@@ -2,10 +2,6 @@ import { describe, expect, it } from "vite-plus/test";
 import type { PostRow } from "./types";
 import { groupPostRows } from "./post-groups";
 
-/**
- * Builds one status-only row, so grouping is exercised over the canonical
- * publication status rather than any view-specific content.
- */
 function row(id: string, status: string, brandProfileId = "profile-a"): PostRow {
   return {
     id,

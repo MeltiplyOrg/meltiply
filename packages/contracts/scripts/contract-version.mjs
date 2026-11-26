@@ -5,7 +5,6 @@ import YAML from "yaml";
 
 const root = new URL("../", import.meta.url);
 
-/** Regenerates the runtime version from the canonical OpenAPI document; rejects missing versions. */
 export async function generateContractVersion() {
   const document = YAML.parse(await readFile(new URL("openapi.yaml", root), "utf8"));
   const version = document?.info?.version;

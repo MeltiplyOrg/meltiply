@@ -20,11 +20,6 @@ services:
       - ./scripts/cloudflare-local/postgres:/local:ro
       - ./scripts/cloudflare-local/postgres/docker-entrypoint.sh:/docker-entrypoint-initdb.d/000-meltiply.sh:ro
 
-  # Local-dev observability: Grafana UI + Tempo traces + Loki logs.
-  # Opt in with `./scripts/cloudflare-local/compose.sh --profile observability up -d`; normal Compose/DB
-  # commands should not start or pull the telemetry services.
-  # Workers export OTLP/HTTP spans to Tempo on host port 4318 when
-  # ENVIRONMENT is local/test. Staging/production leave export as a no-op.
   tempo:
     profiles: [observability]
     image: grafana/tempo:3.0.3
@@ -70,7 +65,6 @@ services:
       prometheus:
         condition: service_started
     environment:
-      # Dashboards remain immediately viewable locally; sign-in is available for admin actions.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_AUTH_DISABLE_LOGIN_FORM: "false"
@@ -83,7 +77,6 @@ services:
       - ./scripts/cloudflare-local/observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - meltiply-cloudflare-grafana:/var/lib/grafana
     ports:
-      # 3001 avoids the local frontend Vite port (3000).
       - "127.0.0.1:3001:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null 2>&1 || exit 1"]
@@ -92,7 +85,6 @@ services:
       retries: 30
       start_period: 15s
 
-  # Receives the completed Playwright frontend health snapshot before Prometheus scrapes it.
   pushgateway:
     profiles: [observability]
     image: prom/pushgateway:v1.11.3
@@ -105,7 +97,6 @@ services:
       retries: 30
       start_period: 5s
 
-  # Receives k6 experimental-prometheus-rw metrics for the local load dashboard.
   prometheus:
     profiles: [observability]
     image: prom/prometheus:v3.14.0

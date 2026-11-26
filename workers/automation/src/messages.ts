@@ -32,33 +32,14 @@ export interface ProviderSyncMessage {
   workload: ProviderSyncWorkload;
 }
 
-/**
- * Type guard verifying if a value is a non-null, non-array object record.
- *
- * @param value - Candidate value to test.
- * @returns True if value is an object record.
- */
 function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-/**
- * Type guard verifying whether a value conforms to a standard canonical UUID string (versions 1 through 5).
- *
- * @param value - Candidate value to test.
- * @returns True if value is a valid UUID string.
- */
 function uuid(value: unknown): value is string {
   return typeof value === "string" && uuidPattern.test(value);
 }
 
-/**
- * Type guard validating that an untrusted queue message body matches the OutboxMessage contract.
- * Ensures the message has `type: "outbox.event"`, version 1, valid string IDs, topic, and an object payload.
- *
- * @param value - Incoming queue message body.
- * @returns True if value conforms to OutboxMessage.
- */
 export function isOutboxMessage(value: unknown): value is OutboxMessage {
   if (!record(value) || !record(value.payload)) return false;
   return (
@@ -71,13 +52,6 @@ export function isOutboxMessage(value: unknown): value is OutboxMessage {
   );
 }
 
-/**
- * Type guard validating that a Cloudflare Workflow payload matches the ReplyWorkflowPayload contract.
- * Checks for `type: "reply.workflow"`, version 1, comment_id, event_id, organization_id, and optional request_id.
- *
- * @param value - Untrusted workflow event payload.
- * @returns True if value is a valid ReplyWorkflowPayload.
- */
 export function isReplyWorkflowPayload(value: unknown): value is ReplyWorkflowPayload {
   if (!record(value)) return false;
   return (
@@ -92,13 +66,6 @@ export function isReplyWorkflowPayload(value: unknown): value is ReplyWorkflowPa
   );
 }
 
-/**
- * Type guard validating that a queue message matches the ProviderSyncMessage contract.
- * Confirms `type: "provider.sync"`, version 1, supported workload enum, valid UUIDs, and bounded request_id.
- *
- * @param value - Untrusted queue message body.
- * @returns True if value matches ProviderSyncMessage.
- */
 export function isProviderSyncMessage(value: unknown): value is ProviderSyncMessage {
   if (!record(value)) return false;
   return (
@@ -113,13 +80,21 @@ export function isProviderSyncMessage(value: unknown): value is ProviderSyncMess
   );
 }
 
-/**
- * Transforms an Outbox reply message into a serialized ReplyWorkflowPayload.
- * Extracts comment and event identifiers to initialize a durable Cloudflare Workflow instance.
- *
- * @param message - Source Outbox message with topic "comment.reply.requested".
- * @returns Serialized workflow payload.
- */
+export function providerSyncMessage(
+  workload: ProviderSyncWorkload,
+  targetId: string,
+  eventId: string,
+): ProviderSyncMessage {
+  return {
+    event_id: eventId,
+    request_id: eventId,
+    target_id: targetId,
+    type: "provider.sync",
+    version: 1,
+    workload,
+  };
+}
+
 export function replyWorkflowPayload(message: OutboxMessage): ReplyWorkflowPayload {
   return {
     comment_id: message.aggregate_id,
@@ -131,13 +106,6 @@ export function replyWorkflowPayload(message: OutboxMessage): ReplyWorkflowPaylo
   };
 }
 
-/**
- * Reconstructs an OutboxMessage from a ReplyWorkflowPayload.
- * Used inside Workflow steps to invoke the shared reply processor (`processReplyMessage`).
- *
- * @param payload - Durable workflow execution payload.
- * @returns Synthesized OutboxMessage matching topic "comment.reply.requested".
- */
 export function replyWorkflowMessage(payload: ReplyWorkflowPayload): OutboxMessage {
   return {
     aggregate_id: payload.comment_id,

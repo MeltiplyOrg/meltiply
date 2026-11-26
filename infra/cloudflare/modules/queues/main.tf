@@ -8,18 +8,8 @@ locals {
     workload => "meltiply-${workload}-${var.environment}-dlq"
   }
 }
-# The Automation Worker's provider attempt lease
-# (workers/automation/src/due-work.ts, providerAttemptLeaseSeconds) is
-# derived from the 120-second visibility timeout shared by the analytics,
-# comments, and token-refresh workloads and must stay shorter than every queue
-# visibility timeout that carries provider sync messages, so a redelivered
-# message always arrives after its claim's lease has lapsed and fails the
-# Worker's event-key guard instead of reprocessing the work.
 locals {
-  # Expressed in milliseconds because that is the unit of the consumer's
-  # visibility_timeout_ms setting the precondition below compares it against;
-  # comparing against seconds would make the precondition vacuously true and
-  # silently stop enforcing the inequality.
+  # Milliseconds, the unit of the consumer's visibility_timeout_ms.
   provider_attempt_lease_ms = 60 * 1000
 }
 

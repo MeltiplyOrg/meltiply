@@ -1,12 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { parseQueueArguments, runQueueCommand } from "./queue-ops.mjs";
 
-/**
- * Reads unsampled Queue metrics and delivers unhealthy state or monitor failure
- * to an operator-owned JSON webhook. No message bodies, tokens, or webhook URLs
- * enter the report. A rejected/missing notification fails closed so a scheduler
- * can alert on the monitor itself; it never replays or acknowledges Queue work.
- */
 export async function alertQueue(options, { environment = process.env, fetchImpl = fetch } = {}) {
   if (options.command !== "metrics") throw new TypeError("Queue alerting accepts metrics only");
   let webhook;
@@ -39,24 +33,19 @@ export async function alertQueue(options, { environment = process.env, fetchImpl
     };
   }
   if (result.healthy) return { ...result, notification: "not_needed" };
-  let delivered = false;
-  try {
-    const response = await fetchImpl(webhook.href, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        service: "meltiply",
-        occurred_at: new Date().toISOString(),
-        ...result,
-      }),
-      redirect: "error",
-      signal: AbortSignal.timeout(10_000),
-    });
-    delivered = response.ok;
-    await response.body?.cancel();
-  } catch {
-    /* Notification failure is surfaced below without leaking a webhook secret. */
-  }
+  const response = await fetchImpl(webhook.href, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      service: "meltiply",
+      occurred_at: new Date().toISOString(),
+      ...result,
+    }),
+    redirect: "error",
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => null);
+  const delivered = response?.ok === true;
+  await Promise.resolve(response?.body?.cancel?.()).catch(() => {});
   if (!delivered)
     throw new Error("Queue alert delivery failed; unsampled monitoring requires attention");
   if (unavailable) throw new Error("Queue metrics unavailable; monitor-failure alert delivered");

@@ -1,6 +1,5 @@
 const apiPathPattern = /^\/api(?:\/|$)/;
 
-/** Serves only preview assets, rejecting every API/telemetry request even when browser mocking fails. No upstream binding or fetch exists. */
 async function fetchPreview(
   request: Request,
   env: Pick<CloudflareEnv, "ASSETS">,

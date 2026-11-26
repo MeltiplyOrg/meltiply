@@ -25,15 +25,6 @@ interface BroadcastRow extends Record<string, unknown> {
   role: string;
 }
 
-/**
- * Reads encoder credentials or ends one existing broadcast for a content writer.
- * RLS scopes the Distribution and Channel; a database-derived role check also
- * protects the secret GET from Viewers. Secrets are decrypted only after access
- * checks, never persisted or returned by general Post/Distribution reads.
- * Ending reserves a durable per-Distribution key before the remote write, so
- * concurrent clients cannot bypass it by choosing different HTTP keys. Unknown
- * outcomes stay fenced until inspected; completed requests replay after ending.
- */
 export function broadcastControlEffect(
   env: ApiWorkerEnv,
   session: SessionClaims,

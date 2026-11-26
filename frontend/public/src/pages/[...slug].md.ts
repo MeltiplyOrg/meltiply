@@ -7,11 +7,6 @@ interface Props {
   page: CollectionEntry<"docs">;
 }
 
-/**
- * Enumerates every public guide on each build, including `/docs/index.md`.
- * Paths share the index/HTML naming convention; no copied files or separate
- * guide list need maintenance.
- */
 export function getStaticPaths() {
   return source.getPages().map((page) => ({
     params: { slug: getMarkdownPath(page.url).slice(1, -3) },
@@ -19,12 +14,6 @@ export function getStaticPaths() {
   }));
 }
 
-/**
- * Prerenders a guide's title, description and complete Markdown body without
- * frontmatter or navigation chrome. The public collection contains plain
- * Markdown in MDX files; preserve its prose, tables, links and code verbatim.
- * Missing retained source fails the build rather than emitting a partial guide.
- */
 export const GET: APIRoute<Props> = ({ props: { page } }) => {
   if (page.body === undefined) {
     throw new Error(`Missing Markdown body for public guide: ${page.id}`);

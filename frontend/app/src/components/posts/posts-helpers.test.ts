@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   filterAndSortPosts,
+  formatPostDate,
   normalizePostStatus,
   prunePostSelection,
   resolveChannelMedia,
@@ -20,10 +21,6 @@ const published = baseDistribution.publication!;
 const liveAttachment = basePost.attachments[0]!;
 const detachedAssetId = "00000000-0000-4000-8000-000000000555";
 
-/**
- * Builds a PostAttachment whose Asset reuses the getPost fixture shape under a
- * different id/position, so tests can model Posts carrying more than one asset.
- */
 function attachmentOf(assetId: string, position: number): PostAttachment {
   return {
     asset_id: assetId,
@@ -32,20 +29,18 @@ function attachmentOf(assetId: string, position: number): PostAttachment {
   };
 }
 
-/** Minimal claimed-channel entry: only `distribution` and its media matter here. */
 function channelItem(overrides: Partial<PostDetailItem>): PostDetailItem {
   return {
     id: baseDistribution.id,
     postId: basePost.id,
     publishDate: baseDistribution.created_at,
     status: "published",
-    content: [],
+    caption: "",
     attachments: [],
     ...overrides,
   };
 }
 
-/** Minimal row over the getPost fixture; callers override channels/post. */
 function postRow(overrides: Partial<PostRow>): PostRow {
   return {
     id: basePost.id,
@@ -176,10 +171,52 @@ describe("filterAndSortPosts multi-select", () => {
   });
 });
 
+describe("filterAndSortPosts search and platform", () => {
+  const criteria: FilterCriteria = {
+    statusFilter: [],
+    platformFilter: [],
+    profileFilter: [],
+    searchQuery: "",
+    dateFilter: "all",
+    sortKey: "date-desc",
+  };
+
+  it("ignores whitespace around the search query", () => {
+    const row = postRow({
+      id: "launch",
+      channels: [channelItem({ caption: "Launch" })],
+    });
+    expect(
+      filterAndSortPosts([row], { ...criteria, searchQuery: "launch  " }).map((item) => item.id),
+    ).toEqual(["launch"]);
+  });
+
+  it("matches the platform of a Distribution whose Channel is disconnected", () => {
+    const row = postRow({
+      id: "orphaned",
+      channels: [channelItem({ distribution: { ...baseDistribution, platform: "instagram" } })],
+    });
+    expect(
+      filterAndSortPosts([row], { ...criteria, platformFilter: ["instagram"] }).map(
+        (item) => item.id,
+      ),
+    ).toEqual(["orphaned"]);
+  });
+});
+
+describe("formatPostDate", () => {
+  it("formats in the active language and publishing timezone", () => {
+    expect(formatPostDate("2026-10-23T12:00:00Z", "UTC", "de")).toContain("Okt");
+  });
+
+  it("returns null for absent or invalid values", () => {
+    expect(formatPostDate(null, "UTC", "en")).toBeNull();
+    expect(formatPostDate("not-a-date", "UTC", "en")).toBeNull();
+  });
+});
+
 describe("resolveChannelMedia", () => {
   it("keeps the frozen publication order of a claimed Channel after Post edits", () => {
-    // Claim froze [detached@0, live@1]; the edited Post still holds only the
-    // live asset at position 0, so live order would rank it first.
     const distribution: Distribution = {
       ...baseDistribution,
       publication: {
@@ -249,7 +286,6 @@ describe("resolveChannelMedia", () => {
     const second = attachmentOf("00000000-0000-4000-8000-000000000222", 1);
     const post: Post = { ...basePost, attachments: [liveAttachment, second] };
 
-    // Inherit: no target, and a claimed-less outcome resolves live too.
     const inherited = resolveChannelMedia(post, undefined, {
       ...baseDistribution,
       publication: null,
@@ -260,7 +296,6 @@ describe("resolveChannelMedia", () => {
     ]);
     expect(inherited.every((item) => item.attachment)).toBe(true);
 
-    // Narrow + reorder: the target's attachment_ids define membership and order.
     const narrowed = resolveChannelMedia(
       post,
       { attachment_ids: [second.asset_id, liveAttachment.asset_id] },
@@ -306,7 +341,7 @@ describe("resolveRowCaption", () => {
       channels: [
         channelItem({
           distribution: baseDistribution,
-          content: [{ content: "Stale pending copy" }],
+          caption: "Stale pending copy",
         }),
       ],
     });
@@ -322,7 +357,7 @@ describe("resolveRowCaption", () => {
             ...baseDistribution,
             publication: { ...published, title: "", text: "" },
           },
-          content: [{ content: "Edited caption" }],
+          caption: "Edited caption",
         }),
       ],
     });
@@ -355,7 +390,6 @@ describe("prunePostSelection", () => {
 
   it("retains failures and pending entries while queries are mid-flight", () => {
     const selection = new Map([["post-1", entry("post-1")]]);
-    // An empty `known` list simulates a refetch snapshot: nothing may be pruned off it.
     const pruned = prunePostSelection(selection, [], {
       dataSettled: false,
       draftFilter: false,

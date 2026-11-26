@@ -52,9 +52,6 @@ vi.mock("../src/database", () => ({
   withTenantTransactionEffect: database.withTenantTransactionEffect,
 }));
 
-// The cipher replacement stays deterministic inside workerd: it removes the
-// only variable-latency step between the persisted account read and the shared
-// Provider seam, so scenarios await real progress instead of wall-clock timers.
 vi.mock("../src/token-credentials", () => ({
   tokenCipherFor: () => ({ decrypt: cipher.decrypt, encrypt: cipher.encrypt }),
 }));
@@ -62,14 +59,14 @@ vi.mock("../src/token-credentials", () => ({
 import type { ResolvedActor } from "../src/actor-resolution";
 import { createApiApp } from "../src/app";
 import type { ApiWorkerEnv } from "../src/env";
+import { fakeEnv, fakeTransactionClient } from "../test-support/fakes";
 
-const env = {
+const env = fakeEnv({
   ALLOWED_ORIGINS: "http://localhost:3000",
-  ENVIRONMENT: "test",
   APP_URL: "https://api.meltiply.test",
   TOKEN_ENCRYPTION_KEY: "0".repeat(32),
   VERSION: "runtime-test",
-} as unknown as ApiWorkerEnv;
+});
 
 const actor: ResolvedActor = {
   authUserId: "user-runtime-alpha",
@@ -115,7 +112,6 @@ interface RuntimeAccountRow {
   updated_at: string;
 }
 
-/** Builds one RLS-visible account row; scenarios replace fields between requests. */
 function accountRow(overrides: Partial<RuntimeAccountRow> = {}): RuntimeAccountRow {
   return {
     access_token: "encrypted:runtime-access-token",
@@ -129,15 +125,6 @@ function accountRow(overrides: Partial<RuntimeAccountRow> = {}): RuntimeAccountR
   };
 }
 
-/**
- * Serves the current mutable account row through the tenant transaction seam.
- *
- * The route's RLS query is the only database work this smoke needs; returning
- * the row from the mock transaction keeps the production route, middleware,
- * Effect runtime, and Provider seam intact.
- *
- * @param row - Row the next authenticated requirements request observes.
- */
 function mockAccountRead(row: RuntimeAccountRow) {
   database.withTenantTransactionEffect.mockImplementation(
     (
@@ -145,15 +132,12 @@ function mockAccountRead(row: RuntimeAccountRow) {
       _session: unknown,
       operation: (client: EffectTransactionClient) => Effect.Effect<unknown, unknown>,
     ) =>
-      operation({
-        query: vi.fn(() => Effect.succeed({ rowCount: 1, rows: [row] })),
-      } as unknown as EffectTransactionClient),
+      operation(fakeTransactionClient(vi.fn(() => Effect.succeed({ rowCount: 1, rows: [row] })))),
   );
 }
 
 type RequirementRead = NonNullable<ProviderAdapter["getPublicationRequirements"]>;
 
-/** Builds one publish-capable TikTok adapter whose requirement read is controlled by the scenario. */
 function requirementAdapter(read: RequirementRead): ProviderAdapter {
   return {
     capability: {
@@ -179,7 +163,6 @@ function requirementAdapter(read: RequirementRead): ProviderAdapter {
   };
 }
 
-/** Creates the production app with one injected registry and authenticated actor. */
 function runtimeApp(read: RequirementRead) {
   const registry = new ProviderRegistry();
   registry.register("tiktok", requirementAdapter(read));
@@ -193,7 +176,6 @@ function runtimeApp(read: RequirementRead) {
   });
 }
 
-/** Builds an authenticated requirements GET preserving the optional client abort signal. */
 function requirementsRequest(requestId: string, signal?: AbortSignal) {
   return new Request(
     `https://api.meltiply.test/api/v1/platforms/${accountId}/publishing-requirements`,
@@ -207,13 +189,6 @@ function requirementsRequest(requestId: string, signal?: AbortSignal) {
   );
 }
 
-/**
- * Waits until the given caller has passed credential decryption.
- *
- * The mocked decrypt Effects resume synchronously into the next coalescing
- * step, so this is the observable signal that a request joined pending work or
- * reached the Provider seam.
- */
 async function waitForDecryption(count: number) {
   await cipher.waitForCount(count);
   const decryption = cipher.decryptions[count - 1];
@@ -221,14 +196,12 @@ async function waitForDecryption(count: number) {
   await decryption;
 }
 
-/** Test-controlled Provider read settlement used to hold coalescing pending. */
 interface RequirementGate {
   readonly promise: Promise<ProviderPublicationRequirements>;
   reject(cause: unknown): void;
   resolve(value: ProviderPublicationRequirements): void;
 }
 
-/** Creates a settlement gate; ES2023 has no `Promise.withResolvers`. */
 function pendingGate(): RequirementGate {
   let resolve!: RequirementGate["resolve"];
   let reject!: RequirementGate["reject"];
@@ -331,9 +304,7 @@ describe("publishing-requirement coalescing in the workerd runtime", () => {
         _session: unknown,
         operation: (client: EffectTransactionClient) => Effect.Effect<unknown, unknown>,
       ) =>
-        operation({
-          query: vi.fn(() => Effect.succeed({ rowCount: 1, rows: [row] })),
-        } as unknown as EffectTransactionClient),
+        operation(fakeTransactionClient(vi.fn(() => Effect.succeed({ rowCount: 1, rows: [row] })))),
     );
     const gate = pendingGate();
     const read = vi.fn(() => gate.promise);
@@ -361,9 +332,7 @@ describe("publishing-requirement coalescing in the workerd runtime", () => {
         _session: unknown,
         operation: (client: EffectTransactionClient) => Effect.Effect<unknown, unknown>,
       ) =>
-        operation({
-          query: vi.fn(() => Effect.succeed({ rowCount: 1, rows: [row] })),
-        } as unknown as EffectTransactionClient),
+        operation(fakeTransactionClient(vi.fn(() => Effect.succeed({ rowCount: 1, rows: [row] })))),
     );
     const gates: RequirementGate[] = [];
     const read = vi.fn(() => {

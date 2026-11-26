@@ -1,6 +1,6 @@
 import type { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
-import type { DatabaseError, DomainError } from "@meltiply/domain";
+import type { DatabaseError, ActiveOrganizationRequiredError } from "@meltiply/domain";
 import type { components } from "@meltiply/contracts/schema";
 
 import type { ApiWorkerEnv } from "./env";
@@ -17,33 +17,22 @@ type PlatformAccount = Schemas["PlatformAccount"];
 type PlatformCapability = Schemas["PlatformCapability"];
 type ReplyStatus = Schemas["ReplyStatus"];
 
-/**
- * Domain-specific error thrown by HTTP route handlers, validation guards, and core services.
- *
- * Encapsulates HTTP status codes, structured error codes, optional retry delays, and per-field
- * validation details rendered into the canonical API error envelope.
- */
 export class CoreApiError extends Error {
-  /**
-   * Creates an instance of CoreApiError.
-   *
-   * @param status - HTTP response status code (e.g. 400, 401, 403, 404, 409, 413, 422, 500, 503).
-   * @param code - Machine-readable error code string (e.g. "invalid_request", "quota_exceeded").
-   * @param message - User-facing or client-diagnostic error description.
-   * @param retryAfterSeconds - Optional delay in seconds for `Retry-After` response header on rate-limits.
-   * @param details - Optional list of detailed constraint violations rendered in `error.details`.
-   */
   constructor(
     readonly status: number,
     readonly code: string,
     message: string,
     readonly retryAfterSeconds?: number,
-    /** Per-field causes rendered in the error envelope's `details` array. */
     readonly details: readonly Schemas["ErrorDetail"][] = [],
   ) {
     super(message);
     this.name = "CoreApiError";
   }
+}
+
+export function toCoreApiErrorOrRethrow(cause: unknown): CoreApiError {
+  if (cause instanceof CoreApiError) return cause;
+  throw cause;
 }
 
 interface InboxFilters {
@@ -82,13 +71,9 @@ export interface IdempotentResult<T> {
   value: T;
 }
 
-export type CoreServiceError = CoreApiError | DomainError | DatabaseError;
+export type CoreServiceError = CoreApiError | ActiveOrganizationRequiredError | DatabaseError;
 
 export interface CoreApiService {
-  /**
-   * Organization the caller's session is active in, confirmed by the database
-   * inside an authenticated transaction rather than trusted from the token.
-   */
   activeOrganization(
     env: ApiWorkerEnv,
     session: SessionClaims,

@@ -1,12 +1,8 @@
-/**
- * Provider failure with enough classification for retry, fallback, and
- * actionable terminal errors. Messages never include the prompt or credentials.
- */
+import { isRetryableStatus } from "./retry.mjs";
+
+export const DEFAULT_TIMEOUT_MS = 120_000;
+
 export class ProviderError extends Error {
-  /**
-   * @param {string} message Safe, actionable description.
-   * @param {{status?: number, kind?: "auth" | "transient" | "malformed" | "provider", retryable?: boolean, cause?: unknown}} [options]
-   */
   constructor(message, { status, kind = "provider", retryable = false, cause } = {}) {
     super(message, { cause });
     this.name = "ProviderError";
@@ -16,17 +12,34 @@ export class ProviderError extends Error {
   }
 }
 
-/**
- * Accepts only the bare JSON array a translation provider was asked for.
- * Reasoning text, markdown fences, prose, or non-string entries are malformed
- * output: the fallback model gets a chance instead of a partial catalog. When
- * the prompt carries Shipi18n's string array, the returned length must match it
- * too, so a truncated batch cannot escape the fallback path.
- *
- * @param {string} text Raw model text.
- * @param {number | undefined} expectedCount Number of strings in the batch.
- * @throws {ProviderError} When the output is not a correctly sized string array.
- */
+export function createStatusError(providerName, status, body, overrides = {}) {
+  const detail = body.trim().slice(0, 500);
+  const suffix = detail ? `: ${detail}` : "";
+  const specific = overrides[status];
+  if (specific) {
+    return new ProviderError(`${specific.message}${suffix}`, {
+      status,
+      kind: specific.kind ?? "provider",
+      retryable: specific.retryable ?? false,
+    });
+  }
+  if (isRetryableStatus(status)) {
+    return new ProviderError(
+      `${providerName} is temporarily unavailable (HTTP ${status}).${suffix}`,
+      {
+        status,
+        kind: "transient",
+        retryable: true,
+      },
+    );
+  }
+  return new ProviderError(`${providerName} request failed (HTTP ${status}).${suffix}`, {
+    status,
+    kind: "provider",
+    retryable: false,
+  });
+}
+
 export function assertTranslationArray(text, expectedCount) {
   let parsed;
   try {
@@ -51,14 +64,6 @@ export function assertTranslationArray(text, expectedCount) {
   }
 }
 
-/**
- * Reads the batch size from Shipi18n's user prompt. When the marker is absent
- * or the array cannot be parsed, length validation is skipped rather than
- * failing a request the adapter does not fully understand.
- *
- * @param {string} prompt Shipi18n batch prompt.
- * @returns {number | undefined} Number of strings the model must return.
- */
 export function expectedTranslationCount(prompt) {
   const marker = "STRINGS TO TRANSLATE (JSON array):";
   const markerIndex = prompt.indexOf(marker);

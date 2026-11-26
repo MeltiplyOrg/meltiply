@@ -9,11 +9,6 @@ const messageSchema = z.object({
 });
 const batchSchema = z.array(messageSchema).min(1).max(100);
 
-/**
- * Single-process durable broker. WAL/FULL commits precede send acknowledgments;
- * leased jobs survive crashes and may be redelivered (never exactly once).
- * The database is infrastructure state, separate from application migrations.
- */
 export class JobStore {
   constructor(path, queues, now = Date.now) {
     this.now = now;
@@ -33,7 +28,6 @@ export class JobStore {
     `);
   }
 
-  /** Commits a validated batch atomically; unknown queues and oversized messages fail before writes. */
   enqueue(queue, input) {
     if (!this.queues[queue]) throw new TypeError("Unknown queue");
     const messages = batchSchema.parse(input);
@@ -70,7 +64,6 @@ export class JobStore {
     }
   }
 
-  /** Records one current schedule slot and its job in the same transaction; downtime coalesces missed slots. */
   schedule(name, period, cron) {
     const slot = Math.floor(this.now() / period);
     this.db.exec("BEGIN IMMEDIATE");
@@ -101,7 +94,6 @@ export class JobStore {
     }
   }
 
-  /** Leases a bounded batch for fifteen minutes; expired leases are recoverable after process death. */
   claim(queue) {
     const config = this.queues[queue];
     if (!config || config.deadLetter) return [];
@@ -128,7 +120,6 @@ export class JobStore {
     }
   }
 
-  /** Applies explicit acknowledgments before retries; exhaustion moves rather than copies the job into its DLQ. */
   settle(queue, rows, result) {
     const config = this.queues[queue];
     const acks = new Set(result.explicitAcks ?? []);
@@ -165,14 +156,12 @@ export class JobStore {
     }
   }
 
-  /** Returns aggregate counts without exposing message bodies or credentials. */
   counts() {
     return this.db
       .prepare("SELECT queue, count(*) AS count FROM jobs GROUP BY queue ORDER BY queue")
       .all();
   }
 
-  /** Supplies queue-handler metadata from committed backlog, including leased messages and delayed work. */
   metrics(queue) {
     const row = this.db
       .prepare(
@@ -186,7 +175,6 @@ export class JobStore {
     };
   }
 
-  /** Requeues a bounded operator-selected DLQ batch, resetting its retry budget atomically. */
   replay(queue, limit = 100) {
     const config = this.queues[queue];
     if (!config?.deadLetter || !Number.isInteger(limit) || limit < 1 || limit > 1000) {
@@ -199,7 +187,6 @@ export class JobStore {
       .run(config.source, this.now(), queue, limit).changes;
   }
 
-  /** Checkpoints and closes state after the dispatch loop has stopped. */
   close() {
     this.db.close();
   }

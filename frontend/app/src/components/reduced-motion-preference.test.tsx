@@ -8,33 +8,33 @@ import { useReducedMotionPreference } from "@meltiply/ui/use-reduced-motion";
 
 type Listener = (event: MediaQueryListEvent) => void;
 
-/**
- * Installs one controllable reduced-motion media query. The shared hook reads it
- * on every snapshot and subscribes to its change event, mirroring a browser.
- */
 function installReducedMotionPreference(initial: boolean) {
   const listeners = new Set<Listener>();
   let matches = initial;
-  const media = {
+  const media: MediaQueryList = {
     get matches() {
       return matches;
     },
     media: "(prefers-reduced-motion: reduce)",
     onchange: null,
-    addEventListener: (_type: string, listener: Listener) => {
-      listeners.add(listener);
+    addEventListener: (_type: string, listener: EventListenerOrEventListenerObject | null) => {
+      if (typeof listener === "function") listeners.add(listener as Listener);
     },
-    removeEventListener: (_type: string, listener: Listener) => {
-      listeners.delete(listener);
+    removeEventListener: (_type: string, listener: EventListenerOrEventListenerObject | null) => {
+      if (typeof listener === "function") listeners.delete(listener as Listener);
     },
-    addListener: (listener: Listener) => {
-      listeners.add(listener);
+    addListener: (
+      listener: ((this: MediaQueryList, ev: MediaQueryListEvent) => unknown) | null,
+    ) => {
+      if (listener) listeners.add(listener as Listener);
     },
-    removeListener: (listener: Listener) => {
-      listeners.delete(listener);
+    removeListener: (
+      listener: ((this: MediaQueryList, ev: MediaQueryListEvent) => unknown) | null,
+    ) => {
+      if (listener) listeners.delete(listener as Listener);
     },
     dispatchEvent: () => true,
-  } as unknown as MediaQueryList;
+  };
   const original = window.matchMedia;
   window.matchMedia = ((query: string) => {
     if (query !== "(prefers-reduced-motion: reduce)") {
@@ -55,7 +55,6 @@ function installReducedMotionPreference(initial: boolean) {
   };
 }
 
-/** Minimal consumer so the test observes re-renders, not an internal value. */
 function PreferenceProbe(): ReactElement {
   return <span data-testid="preference">{String(useReducedMotionPreference())}</span>;
 }

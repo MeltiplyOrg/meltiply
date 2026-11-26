@@ -12,6 +12,7 @@ import {
   ReplyWorkflowDispatcher,
 } from "../src/effect/services";
 import { replyWorkflowPayload, type OutboxMessage } from "../src/messages";
+import { fakeReplyWorkflow } from "./test-doubles";
 
 const message: OutboxMessage = {
   aggregate_id: "00000000-0000-4000-8000-000000000001",
@@ -24,8 +25,6 @@ const message: OutboxMessage = {
   version: 1,
 };
 
-// Resolves the dispatcher service from the provided layer and runs one
-// enqueue, so each test asserts on the same program a handler would run.
 function enqueueProgram(body: OutboxMessage) {
   return Effect.gen(function* () {
     const dispatcher = yield* ReplyWorkflowDispatcher;
@@ -34,8 +33,6 @@ function enqueueProgram(body: OutboxMessage) {
 }
 
 describe("createReplyWorkflowDispatcherTest", () => {
-  // An unconfigured test layer must not silently accept undispatched replies;
-  // the default enqueue fails so tests surface the missing override.
   it("fails explicitly when enqueue is not configured", async () => {
     const error = await Effect.runPromise(
       Effect.flip(Effect.provide(enqueueProgram(message), createReplyWorkflowDispatcherTest())),
@@ -57,11 +54,11 @@ describe("createReplyWorkflowDispatcherTest", () => {
 describe("createReplyWorkflowDispatcherLive", () => {
   it("enqueues one workflow batch derived from the outbox message", async () => {
     const createBatch = vi.fn(async () => []);
-    const automationEnv = {
+    const automationEnv: AutomationEnv = {
       ENVIRONMENT: "test",
-      REPLY_WORKFLOW: { createBatch },
+      REPLY_WORKFLOW: fakeReplyWorkflow(createBatch),
       VERSION: "1",
-    } as unknown as AutomationEnv;
+    };
 
     const result = await Effect.runPromise(
       Effect.provide(enqueueProgram(message), createReplyWorkflowDispatcherLive(automationEnv)),
@@ -98,8 +95,6 @@ describe("createReplyWorkflowDispatcherLive", () => {
 });
 
 describe("jobScope runtime layer", () => {
-  // The scope layer must satisfy the service tags automation programs yield:
-  // publisher delivery, platform queue routing, and reply dispatch.
   it("provides QueuePublisher, PublishQueueResolver, and ReplyWorkflowDispatcher", async () => {
     const threadsQueue = {
       metrics: vi.fn(),
@@ -111,12 +106,12 @@ describe("jobScope runtime layer", () => {
       })),
     } satisfies Queue<unknown>;
     const createBatch = vi.fn(async () => []);
-    const scopeEnv = {
+    const scopeEnv: AutomationEnv = {
       ENVIRONMENT: "test",
-      REPLY_WORKFLOW: { createBatch },
+      REPLY_WORKFLOW: fakeReplyWorkflow(createBatch),
       THREADS_PUBLISH_QUEUE: threadsQueue,
       VERSION: "1",
-    } as unknown as AutomationEnv;
+    };
 
     const scope = jobScope(
       scopeEnv,

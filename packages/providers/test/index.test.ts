@@ -86,6 +86,16 @@ describe("ProviderRegistry", () => {
     expect(invalidated.get("threads")).toBeUndefined();
   });
 
+  it("returns deeply frozen capability descriptors without cloning per call", () => {
+    const registry = new ProviderRegistry();
+    const first = registry.capabilities();
+    const second = registry.capabilities();
+    expect(first[0]).toBe(second[0]);
+    expect(Object.isFrozen(first[0])).toBe(true);
+    expect(Object.isFrozen(first[0]!.accepted_mime_types)).toBe(true);
+    expect(Object.isFrozen(first[0]!.notes)).toBe(true);
+  });
+
   it("fails closed for every unconfigured provider", () => {
     const capabilities = new ProviderRegistry().capabilities();
     expect(capabilities).toHaveLength(5);
@@ -663,8 +673,6 @@ describe("ProviderRegistry", () => {
         transferModes: ["remote_ingest"],
       }),
     ).toThrow("requires a retry policy");
-    // Each bound is violated alone, so a guard that checks only one of the three
-    // cannot hide behind the others. Inclusive legal values are asserted below.
     const acceptedRetryPolicy = {
       baseDelaySeconds: 15,
       maxAttempts: 5,
@@ -765,9 +773,6 @@ describe("ProviderRegistry", () => {
   });
 
   it("accepts retry policies at the inclusive bounds", () => {
-    // `register` allows maxAttempts 1-10, baseDelaySeconds 1-3600, and
-    // maxDelaySeconds up to 86400 (providers/src/index.ts). Rejecting exactly
-    // these values would be an off-by-one that only a boundary control catches.
     const registerWith = (retryPolicy: {
       baseDelaySeconds: number;
       maxAttempts: number;

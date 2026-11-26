@@ -9,7 +9,7 @@ import { runCommand } from "./command-runner.mjs";
 import {
   preflightRelease,
   redactError,
-  releaseInternals,
+  queueBindings,
   renderWranglerConfigs,
   validateIacOutputs,
   validateDatabaseEnvironment,
@@ -55,10 +55,7 @@ function releaseInput(overrides = {}) {
 
 function queueNames() {
   return Object.fromEntries(
-    Object.keys(releaseInternals.queueBindings).map((workload) => [
-      workload,
-      `meltiply-${workload}-staging`,
-    ]),
+    Object.keys(queueBindings).map((workload) => [workload, `meltiply-${workload}-staging`]),
   );
 }
 
@@ -111,7 +108,6 @@ function iacOutput(overrides = {}) {
   };
 }
 
-// Return the clean checkout and installed Wrangler version used by preflight scenarios.
 function successfulPreflightCommand(command, args) {
   if (command === "git" && args[0] === "rev-parse") {
     return Promise.resolve({ code: 0, stderr: "", stdout: `${gitSha}\n` });
@@ -129,9 +125,6 @@ test("command runner does not open stdin for read-only commands", async () => {
   const result = await runCommand("git", ["rev-parse", "HEAD"]);
   assert.match(result.stdout, /^[0-9a-f]{40}\n$/);
 
-  // The observable contract is the child's stdin descriptor. A command that
-  // reports whether fd 0 is a pipe distinguishes `ignore` from `pipe`; asking
-  // `git rev-parse` cannot, because it never reads stdin either way.
   const stdinKind = await runCommand(process.execPath, [
     "-e",
     'const fs = require("node:fs"); process.stdout.write(fs.fstatSync(0).isFIFO() ? "pipe" : "ignored");',
@@ -215,9 +208,6 @@ test("release input is canonicalized and rejects secret-bearing fields", () => {
   );
 });
 
-// Release validation must reject sender identities that would fail closed in the Worker:
-// bare dot-atom addresses forbid empty local-part atoms and are limited to 254
-// characters with valid DNS labels; display names are limited to 200.
 test("release sender requires a bare address and safe optional display name", () => {
   const runtime = releaseInput().runtime;
   const runtimeWithoutName = { ...runtime };
@@ -304,7 +294,6 @@ test("provider acceptance requires its public client configuration", () => {
   );
 });
 
-/** Both installations derive release, resource, and rendered identity from their selected environment. */
 test("production validation and rendering keep all workload bindings environment-scoped", () => {
   const spec = validateReleaseSpec(
     releaseInput({
@@ -434,9 +423,6 @@ test("optional improvement reporting renders only a complete destination", () =>
   assert.equal(configured.runtime.reporting_posthog_host, "https://us.i.posthog.com");
   assert.equal(configured.runtime.reporting_posthog_project_token, "phc_maintainer000000000000");
 
-  // A destination is never half-configured: the token authorizes ingestion for
-  // the matching origin, so shipping one without the other would silently
-  // disable reporting while looking configured.
   assert.throws(
     () =>
       validateReleaseSpec({
@@ -618,8 +604,6 @@ test("rendered files are deterministic and private", async (context) => {
     first.config_digest,
     "frontend identity participates in the review digest",
   );
-  // Both mail-sending Workers must deploy with one sender-restricted binding
-  // and the matching identity, rather than inheriting template placeholders.
   for (const worker of ["api", "automation"]) {
     const config = JSON.parse(await readFile(first.paths[worker], "utf8"));
     assert.equal(config.vars.MAIL_FROM_ADDRESS, "auth@staging.meltiply.com");
@@ -661,7 +645,6 @@ test("connected preflight requires matching Cloudflare and TLS database credenti
   );
 });
 
-/** Supplies both protected role credentials for connected preflight fixtures. */
 function databaseEnvironment() {
   return {
     MELTIPLY_SYSTEM_DATABASE_URL:
@@ -671,7 +654,6 @@ function databaseEnvironment() {
   };
 }
 
-/** Models each protected connection's catalog view and effective login identity. */
 function roleClientFactory({
   missing,
   systemBypass = true,
@@ -830,8 +812,6 @@ test("release error redaction includes the Neon API key", () => {
   );
 });
 
-// Dirty checkout and outdated Wrangler must reject preflight; message wording
-// and the particular currently pinned version are not the consumer contract.
 test("preflight fails closed on checkout and toolchain drift", async () => {
   const spec = validateReleaseSpec(releaseInput());
   await assert.rejects(
@@ -868,8 +848,6 @@ test("preflight fails closed on checkout and toolchain drift", async () => {
     }),
     /release requires Wrangler 4\.148\.0/,
   );
-  // A checkout at a different commit must be rejected for that reason, not by
-  // an incidental failure elsewhere in preflight.
   await assert.rejects(
     preflightRelease({
       environment: {},
@@ -883,9 +861,8 @@ test("preflight fails closed on checkout and toolchain drift", async () => {
       },
       spec,
     }),
-    /release git_sha does not match the checked-out commit/,
+    /checked-out commit does not match the release git_sha/,
   );
-  // The clean, matching checkout is the control: it must resolve to "ready".
   assert.equal(
     (
       await preflightRelease({
@@ -912,7 +889,6 @@ test("release CLI rejects ambiguous or command-inappropriate options", async () 
   );
 });
 
-/** The operator CLI preserves a production input through offline preflight and real-file rendering. */
 test("production CLI preflight and rendering retain the selected installation", async (context) => {
   const outDir = await mkdtemp(path.join(tmpdir(), "meltiply-production-cli-"));
   context.after(() => rm(outDir, { force: true, recursive: true }));

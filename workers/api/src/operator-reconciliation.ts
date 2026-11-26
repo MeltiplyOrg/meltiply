@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
-import type { DatabaseError } from "@meltiply/domain";
-import { isPlatform, recordPublicationUsage, reportingConfiguration } from "@meltiply/reporting";
+import { isPlatform, type DatabaseError } from "@meltiply/domain";
+import { recordPublicationUsage, reportingConfiguration } from "@meltiply/reporting";
 
 import { CoreApiError } from "./core-types";
 import { withSystemTransactionEffect } from "./database";
@@ -36,12 +36,6 @@ interface DistributionResolutionState extends Record<string, unknown> {
   status: string;
 }
 
-/**
- * Extracts a normalized before/after audit snapshot from a `DistributionResolutionState` row.
- *
- * @param row - Distribution resolution database row.
- * @returns Serialized audit representation of distribution state.
- */
 function auditState(row: DistributionResolutionState) {
   return {
     failure_code: row.failure_code,
@@ -55,13 +49,6 @@ function auditState(row: DistributionResolutionState) {
   };
 }
 
-/**
- * Serializes distribution resolution parameters into a canonical JSON string for idempotency hashing.
- *
- * @param distributionId - Target distribution UUID.
- * @param input - Operator resolution input parameters.
- * @returns Serialized JSON string.
- */
 function distributionRequestHashValue(
   distributionId: string,
   input: OperatorResolutionInput,
@@ -69,21 +56,6 @@ function distributionRequestHashValue(
   return JSON.stringify({ distributionId, ...input });
 }
 
-/**
- * Locks an operator action idempotency key and checks for a completed replay in `operator_actions`.
- *
- * Uses `operator_action_locks` to prevent concurrent dual execution by the same actor. If a prior
- * action was already recorded, verifies request hash consistency and returns the replay record.
- * Runs inside the caller's Effect transaction so the lock and replay check share one commit scope.
- *
- * @param client - Active Effect transaction client.
- * @param actorSubject - Authenticated operator subject.
- * @param idempotencyKey - Client-supplied idempotency key.
- * @param requestHash - SHA-256 digest of the canonical request parameters.
- * @param action - The operator action type being executed.
- * @returns Effect resolving to the prior `OperatorAuditReplay` record if already completed, or `null` if newly locked.
- * Fails with {CoreApiError} 409 `idempotency_conflict` if the idempotency key was used with different parameters or action.
- */
 function lockAndFindReplay(
   client: EffectTransactionClient,
   actorSubject: string,
@@ -126,33 +98,8 @@ function lockAndFindReplay(
   });
 }
 
-/**
- * Factory creating the default `OperatorReconciliationService` implementation.
- *
- * Reconciles ambiguous distributions with strict idempotency, row locking,
- * and immutable audit evidence.
- *
- * @returns An initialized `OperatorReconciliationService` instance.
- */
 export function createOperatorReconciliationService(): OperatorReconciliationService {
   return {
-    /**
-     * Resolves an ambiguous or failed distribution requiring manual operator reconciliation.
-     *
-     * Locks the distribution row with `FOR UPDATE`, validates it is in `awaiting_provider` or
-     * `needs_reconciliation`, updates its status to `published`, `delivered`, `failed`, or `cancelled` with verified
-     * external evidence, and logs the action and before/after diff in `operator_actions`.
-     *
-     * @param env - Worker environment bindings.
-     * @param actor - Authenticated operator access claims.
-     * @param distributionId - UUID of the target distribution.
-     * @param input - Validated terminal resolution with externally verified evidence and a reason.
-     * @param idempotencyKey - Operator client idempotency key.
-     * @param requestId - HTTP request trace identifier.
-     * @returns Resolution summary with audit ID, status, and replay flag.
-     * @throws {CoreApiError} 404 `distribution_not_found` if distribution does not exist.
-     * @throws {CoreApiError} 409 `distribution_not_reconcilable` if not awaiting provider or in reconciliation.
-     */
     resolveDistribution(env, actor, distributionId, input, idempotencyKey, requestId) {
       return Effect.gen(function* () {
         const requestHash = yield* hashIdempotencyRequestEffect(
@@ -245,12 +192,6 @@ export function createOperatorReconciliationService(): OperatorReconciliationSer
               ],
             );
             const updatedRow = updated.rows[0]!;
-            // An operator-confirmed success is a real publication: the
-            // automation worker's own measurement never sees it because the
-            // resolving queue message finds the row already published. Measuring
-            // it inside this transaction keeps the counter and the audit atomic,
-            // and the call is savepoint-scoped, so a reporting failure cannot
-            // roll back the resolution.
             if (updatedRow.status === "published" && isPlatform(updatedRow.platform)) {
               yield* recordPublicationUsage(
                 client,

@@ -40,7 +40,6 @@ describe("matchesHotkey", () => {
     expect(
       matchesHotkey(new KeyboardEvent("keydown", { key: "k", metaKey: true }), hotkeys.commandMenu),
     ).toBe(true);
-    // Ctrl+K stays available to macOS text editing.
     expect(
       matchesHotkey(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }), hotkeys.commandMenu),
     ).toBe(false);

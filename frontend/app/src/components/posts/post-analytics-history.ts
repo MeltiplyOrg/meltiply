@@ -2,7 +2,6 @@ import type { components } from "@meltiply/contracts/schema";
 
 type Snapshot = components["schemas"]["AnalyticsSnapshot"];
 
-/** Cumulative reported counters at one actual provider measurement time. */
 export interface PostAnalyticsPoint {
   timestamp: number;
   likes: number;
@@ -13,13 +12,6 @@ export interface PostAnalyticsPoint {
   impressions: number;
 }
 
-/**
- * Merges chronological Channel histories into Post totals at observed timestamps.
- * Each Channel contributes only its most recent snapshot, never the sum of its
- * history. Simultaneous measurements form one point; later provider corrections
- * may decrease a counter. Before a Channel's first measurement it contributes
- * nothing, not an invented zero snapshot. Input arrays are not mutated.
- */
 export function postAnalyticsHistory(snapshots: readonly Snapshot[]): PostAnalyticsPoint[] {
   const latest = new Map<string, Snapshot>();
   const points: PostAnalyticsPoint[] = [];

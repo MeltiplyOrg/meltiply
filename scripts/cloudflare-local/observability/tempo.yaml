@@ -1,5 +1,3 @@
-# Local-dev Tempo 3.x: OTLP ingest + Grafana query path.
-# Monolithic mode keeps state under /var/tempo and does not require Kafka.
 stream_over_http_enabled: true
 
 server:

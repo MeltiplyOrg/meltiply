@@ -17,13 +17,6 @@ const ThemeContext = createContext<ThemeContextValue>({
   toggleTheme: () => undefined,
 });
 
-/**
- * Thin application adapter over the shared theme controller. Current-page
- * choices work without optional storage; consent withdrawal drops persisted
- * intent, and transferred pre-hydration intent survives first paint. System
- * intent stays distinct from its resolved palette and follows live OS changes.
- * Repeated toggles resolve against the committed palette immediately.
- */
 export function ThemeProvider({ children }: { children: React.ReactNode }): React.ReactElement {
   const { controller, state } = useThemeController();
   const value = useMemo<ThemeContextValue>(
@@ -39,7 +32,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }): Reac
   return <ThemeContext value={value}>{children}</ThemeContext>;
 }
 
-/** Reads the single application theme owner for controls and appearance cards. */
 export function useTheme(): ThemeContextValue {
   return useContext(ThemeContext);
 }

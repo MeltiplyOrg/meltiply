@@ -6,15 +6,6 @@ import type { APIRequestContext, Locator, Page, Response } from "@playwright/tes
 import { expect } from "@playwright/test";
 import { Schema } from "effect";
 
-/**
- * One durable publication the controlled external Provider holds for a Channel.
- *
- * Mirrors `ControlledPublication` in
- * `workers/automation/test-support/controlled-provider.ts`, which is the module
- * that actually writes these records. The acceptance run reads them back through
- * the fixture API so a published assertion is evidence about the platform side of
- * the boundary, never about what the application remembers about itself.
- */
 export interface ControlledPublication {
   accountId: string;
   caption: string;
@@ -33,22 +24,14 @@ export interface ControlledPublication {
   state: "cancelled" | "published";
 }
 
-/** Platforms the controlled Provider serves. */
 export type ControlledPlatform = "facebook" | "instagram" | "threads" | "tiktok" | "youtube";
 
-/** A Channel the acceptance run asks the fixture to provision. */
 export interface ControlledChannelSpec {
   displayName: string;
   platform: ControlledPlatform;
-  /**
-   * Provider-side account identity. `platform_accounts` is unique on
-   * `(platform, platform_user_id)`, so every run must mint its own value; use
-   * {@link controlledProviderAccountId} rather than a literal.
-   */
   providerUserId: string;
 }
 
-/** Validates the acceptance entry's wire names before ownership drives fault injection. */
 const provisionedChannelsSchema = Schema.Struct({
   brand_profile_id: Schema.String,
   channels: Schema.Array(
@@ -62,92 +45,35 @@ const provisionedChannelsSchema = Schema.Struct({
   organization_id: Schema.String,
 });
 
-/** Identity and real account records returned by controlled Channel provisioning. */
 export type ProvisionedChannelsResult = typeof provisionedChannelsSchema.Type;
 
-/** Stored attachment bytes as the controlled Provider returned them. */
 export interface ControlledMediaBytes {
-  /** Raw bytes the Provider served for that attachment position. */
   bytes: Buffer;
-  /** SHA-256 computed by the acceptance run over the retrieved bytes. */
   computedChecksum: string;
-  /** Declared content type the Provider stored with the object. */
   contentType: string;
-  /** SHA-256 the Provider recorded when it stored the object. */
   recordedChecksum: string;
 }
 
-/** Namespace served only by the controlled acceptance Worker entry. */
 const controlledProviderRoutePrefix = "/controlled-provider/v1";
 
-/**
- * Resolves the local API origin the controlled acceptance entry is served from.
- *
- * Deliberately read from the same environment variable `playwright.config.ts`
- * uses for the local API base URL, so an acceptance run against a non-default
- * port keeps talking to the same Worker as the frontend does.
- *
- * @returns Absolute origin of the local API Worker, without a trailing slash.
- */
 function controlledProviderOrigin(): string {
   return process.env.MELTIPLY_E2E_API_BASE_URL?.trim() || "http://127.0.0.1:8787";
 }
 
-/**
- * Builds an absolute URL for one controlled-Provider fixture endpoint.
- *
- * @param path - Endpoint path beginning with a slash.
- * @returns Absolute URL on the local API origin.
- */
 function fixtureUrl(path: string): string {
   return `${controlledProviderOrigin()}${controlledProviderRoutePrefix}${path}`;
 }
 
-/**
- * Builds an absolute URL for an acceptance-only route served by the API Worker
- * itself, outside the browser-visible `/api/v1` namespace.
- *
- * The page reaches the API through the frontend dev proxy, which forwards only
- * application paths, so fixture-only endpoints must be requested from the API
- * origin directly.
- *
- * @param path - Endpoint path beginning with a slash.
- * @returns Absolute URL on the local API origin.
- */
 export function acceptanceApiUrl(path: string): string {
   return `${controlledProviderOrigin()}${path}`;
 }
 
-/**
- * Mints a unique provider-side account identity for one fixture Channel.
- *
- * The controlled Provider keys every durable publication record by this value,
- * so it doubles as the handle an acceptance run asserts live copies against.
- *
- * @param platform - Platform the account belongs to.
- * @returns A provider-side account identity unique to this process run.
- */
 export function controlledProviderAccountId(platform: ControlledPlatform): string {
   return `controlled-${platform}-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
 }
 
-/** Retains each browser page's fixture scope across full application reloads. */
 const fixtureBrandProfileNames = new WeakMap<Page, string>();
 
-/**
- * Selects a named fixture Brand Profile, or restores this page's previous selection.
- *
- * Never falls back to the first seeded profile: the shared Workspace contains
- * unrelated seeded Channels and other tests' profiles. A new page must provide
- * its fixture name explicitly. Supports the canonical multi-profile menu on
- * Posts and single-profile Select on Analytics. The disclosure closes after
- * selection so later page actions are not obscured by its floating panel.
- *
- * @param page - Playwright page bound to a signed-in collection with a Brand Profile filter.
- * @param profileName - Fixture name; defaults to the last name selected on this page.
- * @returns The active Brand Profile's display name.
- * @throws {Error} When no fixture name is known or the named profile is unavailable.
- */
 export async function activeBrandProfileName(page: Page, profileName?: string): Promise<string> {
   const name = profileName ?? fixtureBrandProfileNames.get(page);
   if (!name) throw new Error("A new browser page must select its named fixture Brand Profile.");
@@ -162,7 +88,6 @@ export async function activeBrandProfileName(page: Page, profileName?: string): 
     .locator("..")
     .locator('button[aria-haspopup="menu"], button[role="combobox"]');
   await expect(trigger).toBeVisible({ timeout: 30_000 });
-  // Modal menus hide the trigger's ancestor from role queries once opened.
   const popupRole = await trigger.getAttribute("aria-haspopup");
   await trigger.click();
   if (popupRole === "menu") {
@@ -182,7 +107,6 @@ export async function activeBrandProfileName(page: Page, profileName?: string): 
   return name;
 }
 
-/** Opens a stored Post's editor through table row inspection; Table has no inline action column. */
 export async function editPostFromRow(page: Page, row: Locator): Promise<void> {
   await row.getByTitle("View details").click();
   await page
@@ -191,34 +115,12 @@ export async function editPostFromRow(page: Page, row: Locator): Promise<void> {
     .click();
 }
 
-/**
- * Closes the composer drawer so the collection behind it is interactive again.
- * Composing replaces inspection inside the same drawer instead of navigating to a
- * composer page, so specs return to the collection through this dismissed state.
- *
- * @param page - Playwright page bound to the app under test.
- */
 export async function closeComposer(page: Page): Promise<void> {
   const composer = page.getByRole("dialog", { name: /^(?:new post|edit post)$/i });
   await composer.getByRole("button", { name: "Close", exact: true }).click();
   await expect(composer).toBeHidden();
 }
 
-/**
- * Attaches controlled-Provider Channels to an existing Brand Profile.
- *
- * The real OAuth connect boundary is unreachable in a plain-HTTP local stack
- * because the API refuses any authorization URL that is not HTTPS, so acceptance
- * runs provision the same `platform_accounts` rows the OAuth callback would have
- * written — encrypted fixture token, connected status, publish scope, no social
- * credentials anywhere. The profile must already exist; this never creates one.
- *
- * @param request - Playwright request context.
- * @param profileName - Display name of the already-created Brand Profile.
- * @param channels - Channels to attach to that profile.
- * @returns The resolved profile identity plus the created Channels.
- * @throws {Error} When the fixture rejects the request or returns an invalid result.
- */
 export async function provisionControlledChannels(
   request: APIRequestContext,
   profileName: string,
@@ -242,15 +144,6 @@ export async function provisionControlledChannels(
   return Schema.decodeUnknownSync(provisionedChannelsSchema)(await response.json());
 }
 
-/**
- * Lists the live copies the controlled Provider holds for one Channel.
- *
- * @param request - Playwright request context.
- * @param accountId - Provider-side account identity to enumerate.
- * @returns Every durable publication record for that Channel, live copies only
- *   unless the caller inspects `state` itself.
- * @throws {Error} When the fixture rejects the request.
- */
 export async function readControlledPublications(
   request: APIRequestContext,
   accountId: string,
@@ -263,17 +156,6 @@ export async function readControlledPublications(
   return body.publications;
 }
 
-/**
- * Selects the live copies the controlled Provider holds for one Channel.
- *
- * A cancelled copy is still a record the Provider kept; only `state: "published"`
- * means the Platform is actually serving that copy, so acceptance assertions that
- * speak about live copies must go through this filter.
- *
- * @param request - Playwright request context.
- * @param accountId - Provider-side account identity to enumerate.
- * @returns Only the publication records whose copy is still live.
- */
 export async function readLiveControlledCopies(
   request: APIRequestContext,
   accountId: string,
@@ -282,15 +164,6 @@ export async function readLiveControlledCopies(
   return publications.filter((publication) => publication.state === "published");
 }
 
-/**
- * Retrieves the exact bytes the controlled Provider stored for one attachment.
- *
- * @param request - Playwright request context.
- * @param input - Channel, publication, and attachment position to read.
- * @returns The served bytes plus both the Provider's recorded SHA-256 and the
- *   one the acceptance run computed over the retrieved bytes.
- * @throws {Error} When the Provider holds no copy or attachment at that address.
- */
 export async function readControlledMedia(
   request: APIRequestContext,
   input: {
@@ -316,19 +189,6 @@ export async function readControlledMedia(
   };
 }
 
-/**
- * Arms or disarms one Channel's scripted provider behaviour.
- *
- * `failNextPublishes: 1` makes the next publish for that Channel answer with a
- * retryable failure, which is how the acceptance run reaches a real
- * `failed`-but-retryable Distribution and then drives the creator-visible Retry.
- * The counter is consumed by the publish it affects.
- *
- * @param request - Playwright request context.
- * @param accountId - Provider-side account identity to script.
- * @param failNextPublishes - Remaining publishes to reject; `0` disarms.
- * @throws {Error} When the fixture rejects the request.
- */
 export async function scriptControlledFailures(
   request: APIRequestContext,
   accountId: string,
@@ -343,12 +203,6 @@ export async function scriptControlledFailures(
   ).toBe(200);
 }
 
-/**
- * Creates a real UTC weekly Queue through its editor from future minute-aligned
- * instants. Exercises searchable timezone selection and every supplied slot;
- * returns the committed API response so callers can inspect ownership/reservations
- * using the same authenticated request, not a database or allocation shortcut.
- */
 export async function configurePublishingQueue(
   page: Page,
   profileName: string,
@@ -363,7 +217,6 @@ export async function configurePublishingQueue(
   await editor.getByLabel("Queue name", { exact: true }).fill(queueName);
   await editor.getByRole("button", { name: /^Queue timezone:/ }).click();
   const timezoneSearch = editor.getByRole("textbox", { name: "Search timezones…", exact: true });
-  // Choose a different zone first: selecting the UTC default proves no change.
   await timezoneSearch.fill("reykjavik");
   await page.getByRole("option", { name: "Atlantic/Reykjavik", exact: true }).click();
   await expect(editor.getByRole("button", { name: /^Queue timezone:/ })).toHaveAttribute(

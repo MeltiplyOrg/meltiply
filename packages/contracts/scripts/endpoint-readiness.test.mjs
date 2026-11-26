@@ -158,8 +158,6 @@ test("promotion evidence rejects mutable or ambiguous artifact references", asyn
 test("valid immutable staging and acceptance evidence passes", async () => {
   const { catalog, openApi } = await loadCanonicalInputs();
   const candidate = structuredClone(catalog);
-  // Staging-ready must NOT require the acceptance artifact: if the ladder ever
-  // collapsed staging-ready into accepted, this fixture would be rejected.
   const stagingEvidence = promotionEvidence();
   delete stagingEvidence.acceptance;
   candidate.operations.getHealth = {
@@ -220,7 +218,6 @@ test("promotion verification only sends the authorization header to the configur
   await verifyPromotionEvidence(openApi, candidate, {
     environment: {
       MELTIPLY_READINESS_EVIDENCE_AUTHORIZATION: "Bearer test-token",
-      // A different origin than the artifact URLs: the credential must be withheld.
       MELTIPLY_READINESS_EVIDENCE_AUTH_ORIGIN: "https://other.example.test",
     },
     fetchImplementation: async (url, init) => {
@@ -229,8 +226,6 @@ test("promotion verification only sends the authorization header to the configur
     },
   });
 
-  // `staging-ready` requires release, conformance, smoke, and telemetry, so four
-  // distinct artifacts are fetched; `acceptance` is not resolved at this state.
   assert.equal(sent.length, 4);
   for (const headers of sent) {
     assert.equal(headers, undefined);
@@ -279,8 +274,6 @@ test("promotion verification rejects oversized evidence before reading it", asyn
 
   await assert.rejects(
     verifyPromotionEvidence(openApi, candidate, {
-      // A body that cannot be read at all: if the implementation streamed before
-      // consulting Content-Length, this getter's error would surface instead.
       fetchImplementation: async () => ({
         body: Object.defineProperty({}, "getReader", {
           get() {
@@ -351,8 +344,6 @@ test("check mode fails when a promoted artifact cannot be fetched", async () => 
     ]);
     await assert.rejects(
       run(["--check", "--metadata", metadata, "--openapi", openApiPath, "--output", output], {
-        // An explicit empty environment keeps a developer's real evidence
-        // credential from changing which error this asserts.
         environment: {},
         fetchImplementation: async () => {
           throw new Error("artifact unavailable");
@@ -374,9 +365,6 @@ test("generator output is deterministic and check mode rejects drift", async () 
 
   const directory = await mkdtemp(join(tmpdir(), "meltiply-readiness-"));
   const output = join(directory, "endpoint-readiness.md");
-  // The checked-in catalog promotes getHealth, so check mode resolves its
-  // evidence. A fully `specified` catalog is what proves that states needing no
-  // artifacts fetch none: `fetchImplementation` fails loudly if one is resolved.
   const specified = structuredClone(catalog);
   for (const readiness of Object.values(specified.operations)) {
     readiness.state = "specified";
@@ -390,8 +378,6 @@ test("generator output is deterministic and check mode rejects drift", async () 
       run(
         ["--check", "--metadata", specifiedMetadata, "--openapi", openApiPath, "--output", output],
         {
-          // Every operation is `specified`, so check mode resolves no artifacts;
-          // an empty environment proves that no real credential is consulted.
           environment: {},
           fetchImplementation: async () => {
             throw new Error("check mode must not fetch evidence for specified operations");

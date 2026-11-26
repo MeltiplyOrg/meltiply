@@ -34,11 +34,6 @@ const failureSchema = z.object({
   error: z.object({ code: z.string(), message: z.string(), retryable: z.boolean() }),
 });
 
-/**
- * Sends a validated job to the private native engine on port 8082. Validates
- * responses before normalizing HTTP into RPC outcomes; transport or malformed
- * responses remain retryable engine failures. The token is never logged.
- */
 export async function processNativeJob(
   job: NativeProcessorJob,
   token: string,

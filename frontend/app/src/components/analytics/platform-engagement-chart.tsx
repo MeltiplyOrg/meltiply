@@ -9,7 +9,6 @@ import { analyticsMetricLabel } from "./analytics-toolbar";
 import { formatAnalyticsInteger } from "./analytics-helpers";
 import type { PlatformMetrics } from "@/types";
 
-/** The three comparable engagement counters, stacked into one part-to-whole bar. */
 const ENGAGEMENT_METRICS = ["likes", "comments", "shares"] as const;
 
 type EngagementMetric = (typeof ENGAGEMENT_METRICS)[number];
@@ -36,15 +35,11 @@ interface PlatformTooltipItem {
 }
 
 interface PlatformEngagementChartProps {
-  /** Per-platform sums for the current cohort. */
   rows: readonly PlatformMetrics[];
-  /** Human-readable range label used in the chart's accessible summary. */
   rangeLabel: string;
-  /** Platforms in scope that cannot report analytics; they never become bars. */
   unsupportedPlatforms: readonly PlatformMetrics["platform"][];
 }
 
-/** Supported platforms with at least one stored snapshot in this cohort. */
 export function comparablePlatformRows(
   rows: readonly PlatformMetrics[],
   unsupportedPlatforms: readonly PlatformMetrics["platform"][],
@@ -54,12 +49,6 @@ export function comparablePlatformRows(
   );
 }
 
-/**
- * One tooltip for the whole stack: the platform, each engagement counter, the
- * total, and the context (published destinations and views) that the stacked
- * length cannot carry. Keeping the extra values here is what lets one chart
- * replace four per-metric panels without hiding the comparison.
- */
 function PlatformEngagementTooltip({
   active,
   payload,
@@ -97,18 +86,6 @@ function PlatformEngagementTooltip({
   );
 }
 
-/**
- * EvilCharts Recharts stacked comparison of likes, comments, and shares.
- *
- * One bar per supported platform holds all three engagement counters, so the
- * chart answers both "who gets the most engagement" and "what kind" in a single
- * plot. Views and published destinations stay in the tooltip and the hidden
- * table because their magnitude would flatten the engagement segments. Only
- * supported platforms with at least one snapshot become bars; unsupported
- * platforms and destinations awaiting their first sync are named in text rather
- * than plotted as zero. The OS reduced-motion preference disables the intro
- * animation.
- */
 export function PlatformEngagementChart({
   rows,
   rangeLabel,
@@ -196,8 +173,6 @@ export function PlatformEngagementChart({
           ))}
         </EvilBarChart>
       </div>
-      {/* The hidden table needs a block wrapper: table layout ignores sr-only's
-          1px sizing, leaving its caption visually exposed in some browsers. */}
       <div className="sr-only">
         <table>
           <caption>{t("Engagement by platform")}</caption>

@@ -15,23 +15,12 @@ afterEach(() => {
   }
 });
 
-/**
- * Creates a scratch directory that the afterEach hook removes.
- *
- * @returns {string} Absolute path to a fresh temporary directory.
- */
 function scratchDirectory() {
   const directory = mkdtempSync(join(tmpdir(), "quick-tunnel-url-"));
   temporaryDirectories.push(directory);
   return directory;
 }
 
-/**
- * Runs quick-tunnel-url.mjs and captures its outcome.
- *
- * @param {string[]} args Arguments passed to the script.
- * @returns {{status: number, stdout: string, stderr: string}} Process result.
- */
 function runScript(args) {
   try {
     const stdout = execFileSync(process.execPath, [scriptPath, ...args], {
@@ -48,14 +37,6 @@ function runScript(args) {
   }
 }
 
-/**
- * Runs quick-tunnel-url.mjs asynchronously, for cases that must observe it
- * waiting on a log that is still being written.
- *
- * @param {string[]} args Arguments passed to the script.
- * @param {string[]} nodeArgs Optional Node preload flags, before the CLI entry.
- * @returns {Promise<{stdout: string}>} Resolves with the captured origin.
- */
 function execFileAsync(args, nodeArgs = []) {
   return new Promise((resolve, reject) => {
     execFile(
@@ -105,9 +86,6 @@ describe("quick-tunnel-url", () => {
     const directory = scratchDirectory();
     const log = join(directory, "cloudflared.log");
     writeFileSync(log, "INF Requesting new quick Tunnel on trycloudflare.com...\n");
-    // Publish only after the helper's first real read has returned URL-free
-    // contents. A startup timer could fire before a slow child even reads once,
-    // allowing a broken read-once implementation to pass.
     const preload = join(directory, "publish-after-read.mjs");
     writeFileSync(
       preload,
@@ -140,9 +118,8 @@ syncBuiltinESMExports();
     const log = join(directory, "cloudflared.log");
     writeFileSync(log, "ERR failed to request quick Tunnel: connection refused\n");
 
-    // Reap a real process so the liveness probe observes a genuine ESRCH.
-    // PID 0 cannot stand in: signalling process group 0 targets the caller's
-    // own group and always succeeds.
+    // PID 0 cannot stand in: signalling process group 0 targets the caller's own
+    // group and always succeeds.
     const deadPid = spawnSync(process.execPath, ["-e", ""]).pid;
 
     const result = runScript(["--log", log, "--pid", String(deadPid), "--timeout", "30"]);

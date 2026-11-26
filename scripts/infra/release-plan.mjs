@@ -42,24 +42,10 @@ const variableNames = Object.freeze({
 const workloadQueueAddress = /^module\.queues\.cloudflare_queue\.workload\["[^"]+"\]$/;
 const workloadConsumerAddress = /^module\.queues\.cloudflare_queue_consumer\.workload\["[^"]+"\]$/;
 
-/**
- * Determines whether a plan change targets a workload Queue resource.
- * Matches `module.queues.cloudflare_queue.workload["<name>"]`.
- *
- * @param {object} change - OpenTofu resource change object
- * @returns {boolean} True if the resource change is a workload queue
- */
 function isWorkloadQueue(change) {
   return change.type === "cloudflare_queue" && workloadQueueAddress.test(change.address ?? "");
 }
 
-/**
- * Determines whether a plan change targets a workload Queue consumer resource.
- * Matches `module.queues.cloudflare_queue_consumer.workload["<name>"]`.
- *
- * @param {object} change - OpenTofu resource change object
- * @returns {boolean} True if the resource change is a workload consumer
- */
 function isWorkloadConsumer(change) {
   return (
     change.type === "cloudflare_queue_consumer" &&
@@ -67,14 +53,6 @@ function isWorkloadConsumer(change) {
   );
 }
 
-/**
- * Retrieves the resolved value of a planned variable from an OpenTofu execution plan.
- *
- * @param {object} plan - Parsed OpenTofu JSON execution plan
- * @param {string} name - Variable name
- * @returns {any} Resolved variable value
- * @throws {Error} If the variable is not defined or resolved in the plan
- */
 function plannedVariable(plan, name) {
   const variable = plan.variables?.[name];
   if (!variable || !("value" in variable)) {
@@ -83,28 +61,12 @@ function plannedVariable(plan, name) {
   return variable.value;
 }
 
-/**
- * Filters plan resource changes to those containing active modifications,
- * excluding no-op and read-only data source actions.
- *
- * @param {object} plan - Parsed OpenTofu JSON execution plan
- * @returns {Array<object>} Array of actionable resource change objects
- */
 function actionableChanges(plan) {
   return (plan.resource_changes ?? []).filter((change) =>
     change.change?.actions?.some((action) => action !== "no-op" && action !== "read"),
   );
 }
 
-/**
- * Enforces that an OpenTofu execution plan contains zero destructive deletion actions.
- * Protects persistent infrastructure from accidental teardown during phased releases.
- *
- * @param {object} plan - Parsed OpenTofu JSON execution plan
- * @param {string} phase - Release phase name for error reporting
- * @returns {void}
- * @throws {Error} If any resource change involves a 'delete' action
- */
 function assertNoDestructiveChanges(plan, phase) {
   const destructive = (plan.resource_changes ?? []).filter((change) =>
     change.change?.actions?.includes("delete"),
@@ -119,20 +81,6 @@ function assertNoDestructiveChanges(plan, phase) {
   }
 }
 
-/**
- * Asserts that planned resource changes stay strictly within the reviewed scope for a release phase.
- * Guarantees that:
- * - 'foundation' phase touches no Worker-dependent resources (custom domains or queue consumers).
- * - 'paused-consumers' phase modifies only workload queue consumers.
- * - 'domain' phase modifies only Worker custom domains.
- * - 'pause' and 'unpause' phases touch exactly the 11 workload queues with in-place delivery_paused toggles.
- *
- * @param {object} plan - Parsed OpenTofu JSON execution plan
- * @param {string} phase - Release phase identifier
- * @param {object} expected - Expected phase variable configuration
- * @returns {void}
- * @throws {Error} If changes fall outside the expected phase boundary or violate delivery state invariants
- */
 function assertPhaseResourceScope(plan, phase, expected) {
   const changes = actionableChanges(plan);
 
@@ -200,17 +148,6 @@ function assertPhaseResourceScope(plan, phase, expected) {
   }
 }
 
-/**
- * Validates that an OpenTofu execution plan conforms to the invariants and variable bindings
- * of a specific release phase ('foundation', 'paused-consumers', 'domain', 'pause', 'unpause').
- * Enforces the shared environment allow-list and input flags (custom domains, queue consumers, queue pause state),
- * and confirms that planned resource changes are strictly non-destructive and scoped to the phase.
- *
- * @param {object} plan - Parsed OpenTofu JSON execution plan
- * @param {string} phase - Target release phase identifier
- * @returns {Readonly<object>} Frozen transition specification describing the verified phase state
- * @throws {Error} If phase or environment is unrecognized, variables mismatch, or resource scope is breached
- */
 export function verifyReleasePlan(plan, phase) {
   const expected = transitionByPhase[phase];
   if (!expected) {
@@ -245,15 +182,6 @@ export function verifyReleasePlan(plan, phase) {
   return Object.freeze(transition);
 }
 
-/**
- * Validates an OpenTofu plan and constructs a redacted summary object suitable for artifact emission.
- * Strips sensitive state while retaining phase metadata, OpenTofu version, transition variables,
- * and sorted resource change actions.
- *
- * @param {object} plan - Parsed OpenTofu JSON execution plan
- * @param {string} phase - Target release phase identifier
- * @returns {{ phase: string, resourceChanges: Array<object>, schemaVersion: number, terraformVersion: string | null, transition: object }} Redacted plan summary
- */
 export function summarizeReleasePlan(plan, phase) {
   const transition = verifyReleasePlan(plan, phase);
   const resourceChanges = (plan.resource_changes ?? [])
@@ -273,14 +201,6 @@ export function summarizeReleasePlan(plan, phase) {
   };
 }
 
-/**
- * CLI execution entrypoint for validating and summarizing OpenTofu release plans.
- * Reads the plan JSON, verifies it against the specified phase, and atomically writes
- * the redacted summary JSON with restricted permissions (0o600).
- *
- * @returns {Promise<void>}
- * @throws {Error} If CLI arguments are invalid or plan verification fails
- */
 async function main() {
   const [phase, planPath, summaryPath, inputPath, ...extra] = process.argv.slice(2);
   if (!phase || !planPath || !summaryPath || !inputPath || extra.length > 0) {

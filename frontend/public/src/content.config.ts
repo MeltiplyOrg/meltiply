@@ -1,19 +1,19 @@
 import { glob } from "astro/loaders";
 import { defineCollection } from "astro:content";
 import { z } from "astro/zod";
+import catalog from "./lib/docs-catalog.json";
 
-/**
- * Public documentation pages. Content authors own every file under
- * content/docs; the frontmatter contract below is enforced at build time and
- * by scripts/check-content.mjs. `section` drives the sidebar grouping and
- * `order` sorts pages within a section (see src/lib/source.ts).
- */
+const [firstSection, ...otherSections] = catalog.sections;
+if (!firstSection) {
+  throw new Error("docs-catalog.json must declare at least one section");
+}
+
 const docs = defineCollection({
   loader: glob({ pattern: "**/*.mdx", base: "./content/docs" }),
   schema: z.object({
     title: z.string(),
     description: z.string(),
-    section: z.enum(["Getting started", "Publishing", "Workspace", "Help", "Legal"]),
+    section: z.enum([firstSection, ...otherSections]),
     order: z.number().int().min(0),
   }),
 });

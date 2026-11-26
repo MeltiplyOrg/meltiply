@@ -21,42 +21,19 @@ import { systemPoolFor } from "../src/database";
 import { applicationOrigin, type ApiWorkerEnv } from "../src/env";
 import { logRecords } from "./log-records";
 
-/**
- * Drives the complete melti-cli device-authorization lifecycle through the real
- * production composition: the Hono API app, `betterAuthFor` →
- * `createBetterAuth` → installed Better Auth device-authorization, bearer, JWT,
- * and two-factor plugins, the database-backed auth rate limiter, and the
- * tenant API authorization pipeline.
- *
- * The auth endpoints use the public migrated Better Auth tables so the seeded
- * Workspace members can sign in with their real credentials; the tenant API
- * assertions use the RLS-authenticated role from `MELTIPLY_DATABASE_TEST_URL`.
- * No plugin internals, private calls, or source text are asserted — every
- * expectation is an HTTP result or a subsequently allowed/denied HTTP request.
- *
- * Fixture isolation: device codes and auth rate-limit rows are cleared around
- * each case, sessions created by a case are deleted afterwards, and the two
- * dedicated accounts are removed in `afterAll`. The seeded Workspace members
- * and their content are never mutated.
- */
-
 const authenticatedConnectionString = process.env.MELTIPLY_DATABASE_TEST_URL;
 if (!authenticatedConnectionString) {
   throw new Error("MELTIPLY_DATABASE_TEST_URL is required for PostgreSQL integration suites");
 }
 
-/** Privileged local role retained for Better Auth tables and fixture setup. */
 const systemConnectionString = integrationDatabaseUrl(
   process.env.MELTIPLY_DATABASE_TEST_URL,
   "system",
 );
 
-/** Canonical installation origin used for auth requests and verification links. */
 const authOrigin = "https://auth.test";
-/** Trusted browser origin used for credentialed sign-in and consent requests. */
 const appOrigin = "https://app.test";
 const seedPassword = "MeltiplyLocal1!";
-/** Same scrypt hash the local seed uses for every fixture member. */
 const seedPasswordHash =
   "0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d:51ebb76380734dbeaa0619246752b97221ef1ebff0304296c848df2b68974f91a7c07a7d5f2abd36638784a22f8161967d2b7d089c2b5e1b4fe65d72f9977914";
 const authSecret = "meltiply-local-auth-secret-32-chars-long";
@@ -66,13 +43,6 @@ const gammaEmail = "gamma@meltiply.local";
 const deltaAuthUserId = "auth_user_local_delta";
 const deltaEmail = "delta@meltiply.local";
 
-/**
- * Dedicated auth fixtures for lifecycle cases that must not mutate seeded
- * members. All use the seeded password hash, so the real sign-in endpoint
- * issues the browser session rather than a synthetic cookie, and each joins the
- * shared Workspace so token eligibility is decided by the policy under test
- * rather than by missing membership.
- */
 const suspendedAuthUserId = "auth_user_device_suspended";
 const suspendedEmail = "device-suspended@meltiply.local";
 const suspendedInternalUserId = "10000000-0000-4000-8000-00000000d001";
@@ -89,9 +59,7 @@ const securityAuthUserId = "auth_user_device_security";
 const securityEmail = "device-security@meltiply.local";
 const securityInternalUserId = "10000000-0000-4000-8000-00000000d005";
 
-/** The single shared Workspace, resolved by `deviceSessionEligibility`. */
 const sharedOrganizationId = "20000000-0000-4000-8000-000000000005";
-/** Seeded member password reused by every dedicated fixture. */
 const dedicatedPassword = seedPassword;
 
 const dedicatedAccounts = [
@@ -131,12 +99,6 @@ const env = {
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
 
-/**
- * Deployed-policy composition over the same database: HTTPS installation
- * origin, required mailbox verification, and a recording mail binding. Only
- * requests that need the stricter policy use this environment; lifecycle cases
- * reuse the local test composition above.
- */
 const verifiedMailBinding: SendEmail = {
   send: async () => ({ messageId: "device-verification-test" }),
 };
@@ -153,15 +115,8 @@ const verificationEnv = {
 } satisfies ApiWorkerEnv;
 const verificationApp = createApiApp();
 
-/** Lazily resolves the installed signing key once, mirroring the API verifier. */
 let localJwtVerifier: ((token: string) => Promise<JwtIdentity>) | undefined;
 
-/**
- * Builds a JWT verifier from the live `/jwks` response instead of the network,
- * so the API request assertions exercise real signature/issuer/audience checks.
- *
- * @returns Verifier bound to the installation origin.
- */
 async function jwtVerifier(): Promise<(token: string) => Promise<JwtIdentity>> {
   if (localJwtVerifier) return localJwtVerifier;
   const auth = await betterAuthFor(env);
@@ -187,12 +142,6 @@ async function jwtVerifier(): Promise<(token: string) => Promise<JwtIdentity>> {
 }
 
 const app = createApiApp({
-  // The production default verifier maps signature/issuer/audience failures to
-  // the authenticated 401 envelope; this seam supplies the same key source
-  // without a network round-trip and must preserve that normalization so a
-  // malformed bearer (including a raw CLI session credential) cannot surface as
-  // an unhandled 500. `activeIdentity` still performs the live-session and
-  // membership checks after signature verification.
   verifyJwtToken: async (requestEnv, token) => {
     let identity: JwtIdentity;
     try {
@@ -204,12 +153,6 @@ const app = createApiApp({
   },
 });
 
-/**
- * Narrows untrusted JSON to a plain record without unchecked `any` access.
- *
- * @param value - Parsed JSON value.
- * @returns A record view of the object.
- */
 function recordOf(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`expected JSON object, received ${typeof value}`);
@@ -217,26 +160,12 @@ function recordOf(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-/**
- * Reads a required string field from an untrusted JSON object.
- *
- * @param value - Record to inspect.
- * @param key - Field name.
- * @returns The string value.
- */
 function stringField(value: Record<string, unknown>, key: string): string {
   const field = value[key];
   if (typeof field !== "string") throw new Error(`expected string ${key}`);
   return field;
 }
 
-/**
- * Reads a required numeric field from an untrusted JSON object.
- *
- * @param value - Record to inspect.
- * @param key - Field name.
- * @returns The number value.
- */
 function numberField(value: Record<string, unknown>, key: string): number {
   const field = value[key];
   if (typeof field !== "number" || !Number.isFinite(field))
@@ -244,25 +173,12 @@ function numberField(value: Record<string, unknown>, key: string): number {
   return field;
 }
 
-/**
- * Extracts the session cookie pair from a response's separate Set-Cookie headers.
- *
- * @param response - Sign-in response.
- * @returns `name=value` cookie pair for the session token.
- */
 function sessionCookiePair(response: Response): string {
   const header = response.headers.getSetCookie().find((entry) => entry.includes("session_token="));
   if (!header) throw new Error("response must set the session cookie");
   return header.split(";")[0]!;
 }
 
-/**
- * Joins every cookie pair a response sets, preserving an in-progress two-factor
- * challenge as well as any session cookie.
- *
- * @param response - Auth response that may set challenge or session cookies.
- * @returns Cookie header value, or an empty string when none were set.
- */
 function cookieHeaderFor(response: Response): string {
   return response.headers
     .getSetCookie()
@@ -271,26 +187,10 @@ function cookieHeaderFor(response: Response): string {
     .join("; ");
 }
 
-/**
- * Sends a request through the production app with an installation-origin URL.
- *
- * @param path - Path under the auth surface.
- * @param init - Fetch initializer.
- * @param host - Absolute origin to exercise forwarded-origin behavior.
- * @returns HTTP response.
- */
 function authRequest(path: string, init: RequestInit = {}, host = authOrigin): Promise<Response> {
   return Promise.resolve(app.request(`${host}${path}`, init, env));
 }
 
-/**
- * Posts JSON to an auth endpoint as a browser would.
- *
- * @param path - Auth path.
- * @param body - JSON body.
- * @param options - Cookie, origin, and client IP overrides.
- * @returns HTTP response.
- */
 function authPostJson(
   path: string,
   body: Record<string, unknown>,
@@ -305,25 +205,10 @@ function authPostJson(
   return authRequest(path, { body: JSON.stringify(body), headers, method: "POST" });
 }
 
-/**
- * Returns a unique client IP so per-IP auth budgets from earlier cases never
- * bleed into the next one.
- *
- * @returns IPv6 documentation-range address.
- */
 function randomIp(): string {
   return `2001:db8:${crypto.randomUUID().slice(0, 4)}::${Math.floor(Math.random() * 0xffff)}`;
 }
 
-/**
- * Posts JSON through the deployed-policy composition, used only where required
- * mailbox verification changes the outcome.
- *
- * @param path - Auth path.
- * @param body - JSON body.
- * @param options - Optional cookie and client IP.
- * @returns HTTP response.
- */
 function verificationPostJson(
   path: string,
   body: Record<string, unknown>,
@@ -344,13 +229,6 @@ function verificationPostJson(
   );
 }
 
-/**
- * Generates the current six-digit authenticator code for an enrollment URI
- * without logging or retaining the shared secret.
- *
- * @param uri - `otpauth://` enrollment URI returned by the two-factor plugin.
- * @returns Six-digit TOTP for the current thirty-second window.
- */
 function totpCode(uri: string): string {
   const secret = new URL(uri).searchParams.get("secret");
   if (!secret) throw new Error("Expected an authenticator enrollment secret");
@@ -367,13 +245,6 @@ function totpCode(uri: string): string {
   return String((digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0");
 }
 
-/**
- * Signs a seeded or dedicated credential account in through the real endpoint.
- *
- * @param email - Account email.
- * @param ip - Optional client IP override.
- * @returns Browser cookie and decoded user identity.
- */
 async function signIn(
   email: string,
   ip = randomIp(),
@@ -393,12 +264,6 @@ async function signIn(
   };
 }
 
-/**
- * Requests a device code through the public HTTP contract.
- *
- * @param options - Optional client id, body overrides, client IP, and host.
- * @returns Issued device-code payload and status.
- */
 async function issueDeviceCode(
   options: {
     body?: Record<string, unknown>;
@@ -422,29 +287,12 @@ async function issueDeviceCode(
   return { body: response.ok ? recordOf(await response.json()) : {}, response };
 }
 
-/**
- * Verifies/claims a user code with the browser session.
- *
- * @param cookie - Browser session cookie.
- * @param userCode - User-facing code.
- * @param ip - Optional client IP override.
- * @returns HTTP response.
- */
 function verifyDeviceCode(cookie: string | undefined, userCode: string, ip = randomIp()) {
   const headers: Record<string, string> = { "CF-Connecting-IP": ip };
   if (cookie) headers.Cookie = cookie;
   return authRequest(`/api/auth/device?user_code=${encodeURIComponent(userCode)}`, { headers });
 }
 
-/**
- * Approves or denies a device request with the browser session.
- *
- * @param cookie - Browser session cookie.
- * @param decision - Approval or denial.
- * @param userCode - User-facing code.
- * @param ip - Optional client IP override.
- * @returns HTTP response.
- */
 function decideDeviceCode(
   cookie: string | undefined,
   decision: "approve" | "deny",
@@ -458,13 +306,6 @@ function decideDeviceCode(
   );
 }
 
-/**
- * Redeems a device code for the raw CLI session credential.
- *
- * @param deviceCode - Secret device code.
- * @param options - Optional client id and client IP.
- * @returns HTTP response.
- */
 function redeemDeviceCode(
   deviceCode: string,
   options: { clientId?: string; ip?: string } = {},
@@ -480,12 +321,6 @@ function redeemDeviceCode(
   );
 }
 
-/**
- * Reads the RFC-style `error` and `error_description` fields.
- *
- * @param response - Token or verification error response.
- * @returns Decoded error fields.
- */
 async function deviceError(response: Response): Promise<{ error: string; description: string }> {
   const body = recordOf(await response.json());
   return {
@@ -494,38 +329,18 @@ async function deviceError(response: Response): Promise<{ error: string; descrip
   };
 }
 
-/**
- * Calls get-session with the CLI session credential as a bearer token.
- *
- * @param token - Raw or signed CLI session credential.
- * @param ip - Optional client IP override.
- * @returns HTTP response.
- */
 function getSessionWithBearer(token: string, ip = randomIp()): Promise<Response> {
   return authRequest("/api/auth/get-session", {
     headers: { Authorization: `Bearer ${token}`, "CF-Connecting-IP": ip },
   });
 }
 
-/**
- * Calls get-session with the browser cookie.
- *
- * @param cookie - Browser session cookie.
- * @returns HTTP response.
- */
 function getSessionWithCookie(cookie: string): Promise<Response> {
   return authRequest("/api/auth/get-session", {
     headers: { Cookie: cookie, "CF-Connecting-IP": randomIp() },
   });
 }
 
-/**
- * Signs the CLI session out through the bearer transport.
- *
- * @param token - CLI session credential.
- * @param ip - Optional client IP override.
- * @returns HTTP response.
- */
 function signOutWithBearer(token: string, ip = randomIp()): Promise<Response> {
   return Promise.resolve(
     app.request(
@@ -543,14 +358,6 @@ function signOutWithBearer(token: string, ip = randomIp()): Promise<Response> {
   );
 }
 
-/**
- * Issues a request to the tenant API with the supplied Authorization header.
- *
- * @param path - `/api/v1` path.
- * @param authorization - Raw Authorization header value.
- * @param init - Optional method/body/headers.
- * @returns HTTP response.
- */
 function tenantRequest(
   path: string,
   authorization: string,
@@ -575,14 +382,6 @@ function tenantRequest(
   );
 }
 
-/**
- * Inserts one dedicated credential account, its internal member row, and its
- * shared-Workspace membership using the same password hash as the local seed.
- * Re-running resets mutable policy state so a retried suite starts clean.
- *
- * @param input - Auth subject, internal id, email, mailbox verification, and role.
- * @returns Nothing.
- */
 async function createDedicatedAccount(input: {
   authUserId: string;
   email: string;
@@ -628,25 +427,14 @@ async function createDedicatedAccount(input: {
   await pool.query(`DELETE FROM "twoFactor" WHERE "userId" = $1`, [input.authUserId]);
 }
 
-/**
- * Removes a dedicated fixture account and everything cascading from it.
- *
- * @param authUserId - Auth subject id.
- */
 async function deleteDedicatedAccount(authUserId: string): Promise<void> {
   const pool = systemPoolFor(env);
   await pool.query(`DELETE FROM users WHERE auth_user_id = $1`, [authUserId]);
   await pool.query(`DELETE FROM "user" WHERE id = $1`, [authUserId]);
 }
 
-/** Records session ids that pre-date a case so only the case's sessions are removed. */
 let priorSessionIds: string[] = [];
 
-/**
- * Reads all session ids for the tracked auth users.
- *
- * @returns Session ids.
- */
 async function trackedSessionIds(): Promise<string[]> {
   const result = await systemPoolFor(env).query<{ id: string }>(
     `SELECT id FROM "session" WHERE "userId" = ANY($1::text[])`,
@@ -655,12 +443,6 @@ async function trackedSessionIds(): Promise<string[]> {
   return result.rows.map((row) => row.id);
 }
 
-/**
- * Advances past the distributed five-second token-polling window without
- * sleeping, so the next HTTP request observes the plugin's own polling state
- * rather than the Worker-level budget denial. Production behavior is unchanged;
- * this is the test equivalent of waiting for the advertised interval.
- */
 async function advanceTokenPollingWindow(): Promise<void> {
   await systemPoolFor(env).query(`DELETE FROM auth_rate_limits WHERE action = 'device-token'`);
 }
@@ -694,8 +476,6 @@ beforeEach(async () => {
       ],
     ],
   );
-  // Reset mutable auth policy state a prior case may have exercised, then drop
-  // every session it created so each case starts from the seeded baseline.
   await pool.query(
     `UPDATE "user" SET "emailVerified" = TRUE, "twoFactorEnabled" = FALSE
      WHERE id = ANY($1::text[])`,
@@ -817,9 +597,6 @@ describe("browser verification and consent ownership", () => {
       user_code: userCode,
     });
 
-    // A second browser session for the same member cannot consent for the
-    // session that verified the code, even though Better Auth binds ownership
-    // to the member.
     const sameMemberOtherSession = await decideDeviceCode(second.cookie, "approve", userCode);
     expect(sameMemberOtherSession.status).toBe(403);
     expect(await deviceError(sameMemberOtherSession)).toMatchObject({ error: "access_denied" });
@@ -975,8 +752,6 @@ describe("browser verification and consent ownership", () => {
     expect(first.status).toBe(400);
     expect(await deviceError(first)).toMatchObject({ error: "authorization_pending" });
 
-    // Clear only the Worker-level window so this request exercises Better
-    // Auth's own lastPolledAt interval check for a too-frequent poll.
     await advanceTokenPollingWindow();
     const tooFast = await redeemDeviceCode(deviceCode, { ip });
     expect(tooFast.status).toBe(400);
@@ -1012,9 +787,6 @@ describe("browser verification and consent ownership", () => {
     expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
     const rejection = responses.find((response) => response.status !== 200)!;
     expect(rejection.status).toBe(400);
-    // The distributed per-device poll budget may reject the concurrent retry
-    // before the plugin's atomic consume; either way the first redemption owns
-    // the code and no second session may be minted.
     const rejectionError = await deviceError(rejection);
     expect(["invalid_grant", "slow_down"]).toContain(rejectionError.error);
 
@@ -1032,9 +804,6 @@ describe("browser verification and consent ownership", () => {
     const deviceCode = stringField(body, "device_code");
     expect((await verifyDeviceCode(browser.cookie, userCode)).status).toBe(200);
 
-    // The poll below genuinely runs while the grant is still pending: the
-    // production token wrapper reads the row, finds no approved grant, and the
-    // plugin answers authorization_pending. No session may be minted here.
     const sessionsBefore = await systemPoolFor(env).query<{ count: string }>(
       `SELECT count(*)::text AS count FROM "session" WHERE "userId" = $1`,
       [gammaAuthUserId],
@@ -1048,12 +817,8 @@ describe("browser verification and consent ownership", () => {
     );
     expect(afterPending.rows[0]?.count).toBe(sessionsBefore.rows[0]?.count);
 
-    // Approval lands after that poll observed the pending state. The next poll
-    // must redeem the same grant exactly once.
     expect((await decideDeviceCode(browser.cookie, "approve", userCode)).status).toBe(200);
     await advanceTokenPollingWindow();
-    // Clear the plugin's separate per-grant polling gate too. This case proves
-    // approval/session transitions; the preceding slow_down case tests timing.
     await systemPoolFor(env).query(
       `UPDATE "deviceCode" SET "lastPolledAt" = NULL WHERE "deviceCode" = $1`,
       [deviceCode],
@@ -1134,8 +899,6 @@ describe("native session transport and revocation", () => {
       );
     }
 
-    // Renewal preserves provenance; pre-migration/directly inserted sessions
-    // remain unknown rather than being guessed from the caller's headers.
     await systemPoolFor(env).query(
       `UPDATE "session" SET "expiresAt" = now() + interval '1 hour' WHERE id = $1`,
       [cliId],
@@ -1256,9 +1019,6 @@ describe("native session transport and revocation", () => {
     expect(payload.email).toBe(gammaEmail);
     expect(typeof jwtClaims(payload).sessionId).toBe("string");
 
-    // Force the renewal branch: the session is inside its update window, so
-    // get-session extends it and the bearer plugin exposes the replacement
-    // credential without rotating the member.
     const sessionId = stringField(sessionUser, "id");
     await systemPoolFor(env).query(
       `UPDATE "session" SET "expiresAt" = now() + interval '1 hour' WHERE id = $1`,
@@ -1274,8 +1034,6 @@ describe("native session transport and revocation", () => {
     const replacementSession = await getSessionWithBearer(replacement!);
     expect(replacementSession.status).toBe(200);
 
-    // The JWT authorizes an ordinary tenant request; the raw session
-    // credential and browser cookies do not.
     const authorized = await tenantRequest("/api/v1/posts", `Bearer ${jwt}`);
     expect(authorized.status).toBe(200);
     const rawCredential = await tenantRequest("/api/v1/posts", `Bearer ${accessToken}`);
@@ -1321,9 +1079,6 @@ describe("native session transport and revocation", () => {
     const jwt = sessionResponse.headers.get("set-auth-jwt");
     expect(jwt).toBeTruthy();
 
-    // Redemption won the ordering race, so the browser signing out afterwards
-    // removes only the browser session; the independently issued CLI session
-    // remains usable.
     const browserSignOut = await authPostJson("/api/auth/sign-out", {}, { cookie: browser.cookie });
     expect(browserSignOut.status).toBe(200);
     expect(await (await getSessionWithCookie(browser.cookie)).json()).toBeNull();
@@ -1349,8 +1104,6 @@ describe("native session transport and revocation", () => {
     expect(jwt).toBeTruthy();
     const sessionId = stringField(recordOf(recordOf(await sessionResponse.json()).session), "id");
 
-    // Expiry is a session-store fact; the HTTP surface must report it as no
-    // usable grant rather than a successful session.
     await systemPoolFor(env).query(
       `UPDATE "session" SET "expiresAt" = now() - interval '1 second' WHERE id = $1`,
       [sessionId],
@@ -1359,8 +1112,6 @@ describe("native session transport and revocation", () => {
     expect(expiredSession.status).toBe(200);
     expect(await expiredSession.json()).toBeNull();
     expect((await tenantRequest("/api/v1/posts", `Bearer ${jwt}`)).status).toBe(401);
-    // The CLI credential expiring must not end the browser session that
-    // approved it: they are separate sessions with separate lifecycles.
     const browserStillLive = await getSessionWithCookie(browser.cookie);
     expect(browserStillLive.status).toBe(200);
     expect(stringField(recordOf(recordOf(await browserStillLive.json()).user), "email")).toBe(
@@ -1370,8 +1121,6 @@ describe("native session transport and revocation", () => {
 
   it("keeps Viewer read-only and Editor write access for CLI sessions", async () => {
     const delta = await signIn(deltaEmail);
-    // A request-supplied scope is not an authority grant: the viewer completes
-    // the flow with an "admin write" request but retains only their real role.
     const viewerCode = await issueDeviceCode({ body: { scope: "admin write" } });
     expect(
       (await verifyDeviceCode(delta.cookie, stringField(viewerCode.body, "user_code"))).status,
@@ -1431,8 +1180,6 @@ describe("native session transport and revocation", () => {
 
   it("does not issue a CLI session after the approving member is suspended", async () => {
     const suspended = await signIn(suspendedEmail);
-    // The fixture is an eligible shared-Workspace member before suspension, so
-    // the later denial is attributable to suspension rather than missing access.
     const activeCode = await issueDeviceCode();
     expect(
       (await verifyDeviceCode(suspended.cookie, stringField(activeCode.body, "user_code"))).status,
@@ -1497,8 +1244,6 @@ describe("existing credential policy", () => {
     );
     expect(confirmedEnrollment.status, "two-factor confirmation").toBe(200);
 
-    // Enabling the factor revoked the enrollment session, so a fresh password
-    // sign-in must challenge before any session exists to consent with.
     const challenge = await authPostJson("/api/auth/sign-in/email", {
       email: twoFactorEmail,
       password: dedicatedPassword,
@@ -1511,11 +1256,8 @@ describe("existing credential policy", () => {
 
     const { body } = await issueDeviceCode();
     const userCode = stringField(body, "user_code");
-    // A password-only challenge cannot claim or approve the pending request.
     expect((await decideDeviceCode(undefined, "approve", userCode)).status).toBe(401);
 
-    // A wrong factor does not mint a session; a fresh challenge with the right
-    // code does, and only then can the device request be approved.
     const wrongChallenge = await authPostJson("/api/auth/sign-in/email", {
       email: twoFactorEmail,
       password: dedicatedPassword,
@@ -1579,17 +1321,12 @@ describe("existing credential policy", () => {
   });
 
   it("enforces required mailbox verification before releasing a CLI session", async () => {
-    // Seed the unverified mailbox before sign-in. Changing emailVerified after
-    // approval would trip the security-session revocation trigger and deny the
-    // grant before this case could exercise the eligibility check.
     await createDedicatedAccount({
       authUserId: unverifiedAuthUserId,
       email: unverifiedEmail,
       emailVerified: false,
       internalId: unverifiedInternalUserId,
     });
-    // Local test composition allows the unverified fixture to sign in; the
-    // deployed policy composition below is the authority that rejects it.
     const browser = await signIn(unverifiedEmail);
     const { body } = await issueDeviceCode();
     const userCode = stringField(body, "user_code");
@@ -1669,9 +1406,6 @@ describe("distributed device abuse controls", () => {
     expect(retryAfter).toBeGreaterThan(0);
     expect(retryAfter).toBeLessThanOrEqual(600);
 
-    // Token polling uses its own distributed per-device budget: the first
-    // request is admitted and reports pending, while the immediate retry backs
-    // off with the RFC-style slow_down error and a Retry-After hint.
     const deviceIp = randomIp();
     const firstCode = await issueDeviceCode({ ip: deviceIp });
     const firstPoll = await redeemDeviceCode(stringField(firstCode.body, "device_code"), {
@@ -1686,8 +1420,6 @@ describe("distributed device abuse controls", () => {
     expect(await deviceError(tooFast)).toMatchObject({ error: "slow_down" });
     expect(Number(tooFast.headers.get("retry-after"))).toBeGreaterThan(0);
 
-    // A different device request from the same caller is not blocked by the
-    // first request's per-device budget.
     const secondCode = await issueDeviceCode({ ip: deviceIp });
     const otherDevice = await redeemDeviceCode(stringField(secondCode.body, "device_code"), {
       ip: deviceIp,

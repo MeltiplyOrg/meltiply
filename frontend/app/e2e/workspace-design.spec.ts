@@ -9,10 +9,6 @@ import {
   provisionControlledChannels,
 } from "./publication-fixtures";
 
-/**
- * Computed chrome of one shared menu surface, so the account menu, filter
- * panels, and select lists can be compared as rendered.
- */
 const menuSurfaceChrome = (element: Element) => {
   const style = getComputedStyle(element);
   return {
@@ -23,7 +19,6 @@ const menuSurfaceChrome = (element: Element) => {
   };
 };
 
-/** Computed chrome of one shared menu row; every menu family must render the same one. */
 const menuItemChrome = (element: Element) => {
   const style = getComputedStyle(element);
   return {
@@ -36,11 +31,6 @@ const menuItemChrome = (element: Element) => {
   };
 };
 
-/**
- * Exercises real owner-authenticated Posts, directory, Settings, keyboard search,
- * and mobile navigation. Screenshots cover the three toolbar-selected views:
- * Table, Grid, and Calendar, plus Brand Profiles and theme surfaces.
- */
 test("keeps publishing work reachable through the redesigned workspace", async ({
   page,
   request,
@@ -82,8 +72,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(railGlide).toHaveCSS("opacity", "0");
   await postsRow.hover();
   await expect(railGlide).toHaveCSS("opacity", "1");
-  // The highlight must read against the rail canvas in one visible step; a tone
-  // within the rail's own warmth (the old `--hover`) renders as no highlight.
   const railHighlightDelta = await page.evaluate(() => {
     const pill = document.querySelector<HTMLElement>("aside [data-glide-highlight]");
     const rail = document.querySelector<HTMLElement>("aside");
@@ -108,9 +96,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     path: testInfo.outputPath("sidebar-hover-highlight-desktop.png"),
     clip: { x: 0, y: 0, width: 260, height: 320 },
   });
-  // The pill fades out over its own duration instead of snapping away. Sampling
-  // starts inside the page on the container's pointer leave: a round trip would
-  // miss the first frames of a 200ms fade.
   await page.evaluate(() => {
     const rail = document.querySelector("aside");
     const samples: number[] = [];
@@ -260,7 +245,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(
     inspector.getByText("Studio update — ready for the next publishing window.", { exact: true }),
   ).toBeVisible();
-  // The header identifies the record by its full Post id, not a fragment.
   await expect(inspector.locator("header code").first()).toHaveText(
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
   );
@@ -273,9 +257,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     path: testInfo.outputPath("post-drawer-desktop.png"),
     fullPage: true,
   });
-  // The edge inspector is non-modal: another record is inspectable in place, so
-  // the click must reach the row instead of being swallowed by a scrim. Aim left
-  // of the panel, which overlaps the right of the row.
   const inspectAnotherPost = async (caption: string) => {
     await page
       .getByRole("row")
@@ -286,8 +267,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await inspectAnotherPost("Second draft — selection review.");
   await expect(inspector).toBeVisible();
   await inspectAnotherPost("Studio update — ready for the next publishing window.");
-  // Background scrolling while inspecting must survive dismissal, even when
-  // restoring focus to the original row would normally scroll it into view.
   await page.setViewportSize({ width: 1440, height: 360 });
   const collectionViewport = page
     .getByRole("table", { name: "Posts table", exact: true })
@@ -310,7 +289,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   );
   await closeComposer(page);
 
-  // Inspecting another Post must retain the live, unsaved composition.
   await editPostFromRow(page, page.getByRole("row").filter({ hasText: "Studio update" }));
   const liveCaption = page.getByPlaceholder(/what do you want to publish/i);
   const unsavedCaption = "Studio update — an unsaved edit survives inspection.";
@@ -329,7 +307,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(liveCaption).toHaveValue(unsavedCaption);
   await closeComposer(page);
 
-  // The inspector keeps creation reachable even while it covers the page action.
   await inspectTrigger.click();
   const drawerCreate = inspector.getByRole("button", { name: "New Post", exact: true });
   await expect(drawerCreate).toBeVisible();
@@ -404,14 +381,11 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     name: "All platforms",
     exact: true,
   });
-  // The modal menu hides its trigger from the accessibility tree while open.
   const platformTriggerBox = await platformFilterTrigger.boundingBox();
   await platformFilterTrigger.click();
   const platformMenuSurface = page.locator(
     "[data-radix-popper-content-wrapper] [data-menu-surface]",
   );
-  // The list must span the full-width filter control that opened it instead of
-  // collapsing to the shared surface floor.
   await expect
     .poll(async () => (await platformMenuSurface.boundingBox())?.width ?? 0)
     .toBeGreaterThanOrEqual((platformTriggerBox?.width ?? 0) - 1);
@@ -564,8 +538,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     fullPage: true,
   });
 
-  // One menu vocabulary: the filter panel, its select list, and the platform menu
-  // must render the same surface and rows as the account menu above.
   await page
     .locator("summary")
     .filter({ hasText: /^Filter/ })
@@ -597,7 +569,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     fullPage: true,
   });
 
-  // Dismissing the nested list or choosing a status keeps the builder available.
   await page.keyboard.press("Escape");
   await postsFilterPanel.getByRole("heading", { name: "Filter by", exact: true }).click();
   await expect(postsFilterPanel).toBeVisible();
@@ -638,7 +609,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   ).toHaveCount(0);
   const viewSelector = page.getByRole("radiogroup", { name: "Post view", exact: true });
   await expect(viewSelector.getByRole("radio")).toHaveText(["Table", "Calendar", "Grid"]);
-  // Directory filter reset returned to aggregate scope; scheduling needs one real owner.
   await activeBrandProfileName(page);
   for (const view of ["Grid", "Calendar", "Table"] as const) {
     const viewButton = viewSelector.getByRole("radio", { name: view, exact: true });
@@ -688,7 +658,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
       await calendar
         .getByRole("button", { name: `Schedule post on ${dateLabel}`, exact: true })
         .click();
-      // The calendar entry seeds the selected local date in the portalled picker.
       const picker = page.getByRole("group", { name: "Date & time", exact: true });
       await picker.getByRole("button", { name: /^Date / }).click();
       await expect(
@@ -720,9 +689,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   const mobileMenu = page.getByRole("button", { name: "Open navigation menu", exact: true });
   await expect(mobileMenu).toBeVisible();
 
-  // The phone page chrome is two compact rows: title/action with the count
-  // beneath, then search/view with filter/sort/group/columns beneath. Keep the
-  // collection reachable instead of spending the first third on stacked bars.
   const postsSearch = page.getByRole("textbox", { name: "Search posts...", exact: true });
   const mobileViewMenu = page.getByRole("button", { name: /^Post view: / });
   const postsFilterSummary = page
@@ -827,8 +793,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     path: testInfo.outputPath("channels-mobile.png"),
     fullPage: true,
   });
-  // Native reduced motion owns the low-motion contract: the shared drawer CSS
-  // shortens the panel animation without any application motion preference.
   await page.emulateMedia({ reducedMotion: "reduce" });
   await mobileMenu.click();
   const reducedMotionNavigation = page.getByRole("dialog", {
@@ -918,11 +882,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   }
 });
 
-/**
- * Uses real owner/profile/Channel state and controlled selection metadata to check
- * reconnect eligibility and modal keyboard containment, including the portalled menu.
- * Both palettes and desktop/phone assignment layouts use the production app surface.
- */
 test("keeps navigation focus and reconnect assignment correct in both palettes", async ({
   page,
   request,
@@ -1018,12 +977,6 @@ test("keeps navigation focus and reconnect assignment correct in both palettes",
   }
 });
 
-/**
- * Completes the real browser return: the callback ticket is controlled, while
- * the assignment surface, navigation, and outcome consumption are production
- * code. The confirm response stands in for provider persistence, which the API
- * suites exercise against real state and PostgreSQL.
- */
 test("returns to Channels with connected feedback after assignment", async ({ page }) => {
   test.setTimeout(120_000);
   const workspace = await openIsolatedOwnerWorkspace(page);
@@ -1062,10 +1015,6 @@ test("returns to Channels with connected feedback after assignment", async ({ pa
   await expect(page.locator("[data-sileo-title]")).toContainText("Threads connected successfully.");
 });
 
-/**
- * Representative failures return to Channels with an accuracy-preserving
- * banner; unknown OAuth outcomes never masquerade as a successful connection.
- */
 test("returns OAuth failures to Channels as actionable feedback", async ({ page }) => {
   test.setTimeout(120_000);
   await openIsolatedOwnerWorkspace(page);
@@ -1084,11 +1033,6 @@ test("returns OAuth failures to Channels as actionable feedback", async ({ page 
   ).toHaveCount(0);
 });
 
-/**
- * Keeps username presence from changing directory density and copies the actual
- * identity text through the browser clipboard, without selecting its Channel.
- * Only username metadata is controlled; auth, ownership, and Channels use real fixtures.
- */
 test("keeps Channel identity rows compact and copies their text directly", async ({
   page,
   context,
@@ -1165,12 +1109,6 @@ test("keeps Channel identity rows compact and copies their text directly", async
   }
 });
 
-/**
- * Real-stack proof of the disconnect workflow: channel settings hand off to a
- * single destructive confirmation, a rejected request keeps the account in the
- * directory with an actionable error, and a successful retry removes it for
- * good, including after reload.
- */
 test("disconnects a controlled Channel with retryable failure recovery", async ({
   page,
   request,

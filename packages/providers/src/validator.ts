@@ -1,19 +1,17 @@
 import type { PlatformCapability, ValidationIssue } from "@meltiply/contracts";
 
-import { resolveInstagramOptions } from "./instagram-options";
-import { resolveFacebookPostType } from "./facebook-options";
-import { parseThreadsOptions, threadsOptionsIssue } from "./threads-options";
+import { resolveFacebookPostType } from "./facebook/options";
+import { resolveInstagramOptions } from "./instagram/options";
+import { PROVIDER_LIMITS } from "./limits";
+import { parseThreadsOptions, threadsOptionsIssue } from "./threads/options";
 import type { PublishInput } from "./types";
+import { codePointLength, mediaKind, normalizeContentType } from "./values";
 
 export type { ValidationIssue } from "@meltiply/contracts";
 
-/**
- * Counts Unicode codepoints in a post caption using character iteration.
- * Accurately measures multi-byte UTF-16 surrogate pairs and emoji sequences to enforce provider limits.
- * Returns the non-negative integer count of Unicode codepoints in text.
- */
+/** Counts Unicode codepoints in a post caption without allocating an intermediate array. */
 export function captionLength(text: string): number {
-  return [...text].length;
+  return codePointLength(text);
 }
 
 /**
@@ -31,13 +29,8 @@ export interface CaptionSource {
 }
 
 /**
- * Composes the normalized caption sent to a provider from Post title/body, the
- * target's overrides, the resolved signature snapshot, and hashtags.
- * Deduplicates title and body when identical, appends the signature as its own
- * paragraph, and appends space-separated hashtags. Pure function reused across
- * pre-flight validation and publishing to guarantee character count parity.
- * @param source - Post title/default text, optional target overrides, signature, and hashtags.
- * @returns The formatted multi-line caption string, empty when nothing is set.
+ * Composes the normalized caption sent to a provider from Post title/body,
+ * target overrides, signature snapshot, and hashtags.
  */
 export function composeCaption(source: CaptionSource): string {
   const title = (source.titleOverride ?? source.title).trim();
@@ -50,43 +43,18 @@ export function composeCaption(source: CaptionSource): string {
   return [content, tags].filter(Boolean).join("\n\n");
 }
 
-/**
- * Maps a normalized MIME type to the attachable media kind it belongs to.
- * The top-level `image/` and `video/` prefixes are the whole mapping: an
- * unrecognized prefix yields null so the caller reports an unsupported media
- * type instead of guessing a kind.
- */
-function mediaKind(contentType: string): "image" | "video" | null {
-  if (contentType.startsWith("image/")) return "image";
-  if (contentType.startsWith("video/")) return "video";
-  return null;
-}
-
-/**
- * Evaluates one ordered attachment against the platform capability.
- * Validates the MIME type, that its kind is attachable, the file size bound,
- * and — for video — the duration ceiling; an unknown video duration is an
- * issue because it cannot be shown to fit.
- * @param capability - Target platform capability authority.
- * @param input - Publish input owning the ordered attachment array.
- * @param index - Attachment position, used for actionable field names.
- * @returns Issues for this attachment only; empty when it is fully acceptable.
- */
 function attachmentIssues(
   capability: PlatformCapability,
-  input: PublishInput,
+  acceptedMimeTypes: ReadonlySet<string>,
+  media: PublishInput["media"][number],
   index: number,
 ): ValidationIssue[] {
-  const media = input.media[index]!;
   const field = `media[${index}]`;
-  const contentType = media.contentType.split(";", 1)[0]!.trim().toLowerCase();
+  const contentType = normalizeContentType(media.contentType);
   const kind = mediaKind(contentType);
   const issues: ValidationIssue[] = [];
 
-  if (
-    !contentType ||
-    !capability.accepted_mime_types.map((value) => value.toLowerCase()).includes(contentType)
-  ) {
+  if (!contentType || !acceptedMimeTypes.has(contentType)) {
     issues.push({
       constraint: "unsupported_media_type",
       field: `${field}.contentType`,
@@ -121,8 +89,6 @@ function attachmentIssues(
   const durationLimit = capability.max_video_duration_sec;
   if (kind === "video" && durationLimit !== null) {
     const duration = media.metadata?.durationSeconds;
-    // An unknown duration cannot be shown to fit, so it fails the duration
-    // constraint rather than passing unchecked.
     if (duration === undefined) {
       issues.push({
         constraint: "provider_video_duration_limit",
@@ -144,24 +110,12 @@ function attachmentIssues(
   return issues;
 }
 
-/**
- * Evaluates the ordered attachment set against the capability's attachment
- * count and combination rules.
- * Enforces the platform minimum (so a media-required platform rejects a
- * text-only attempt), the maximum, and that every attachment of a
- * multi-attachment publication is a kind the platform combines.
- * @param capability - Target platform capability authority.
- * @param input - Publish input owning the ordered attachment array.
- * @returns Count and combination issues; empty when the set shape is accepted.
- */
 function attachmentSetIssues(
   capability: PlatformCapability,
   input: PublishInput,
 ): ValidationIssue[] {
   const count = input.media.length;
   const issues: ValidationIssue[] = [];
-  // null means the capability carries no usable bound, which only happens for
-  // unconfigured adapters that cannot publish at all.
   const minimum =
     capability.platform === "youtube" && input.providerOptions?.youtube?.postType === "live"
       ? 0
@@ -185,13 +139,11 @@ function attachmentSetIssues(
     });
   }
   if (count > 1) {
-    // null and [] both mean the platform publishes no multi-attachment
-    // composition, so either way a set of two or more is rejected here.
     const combined = capability.multi_asset_types ?? [];
     const unsupported =
       combined.length === 0 ||
       input.media.some((media) => {
-        const kind = mediaKind(media.contentType.split(";", 1)[0]!.trim().toLowerCase());
+        const kind = mediaKind(normalizeContentType(media.contentType));
         return kind === null || !combined.includes(kind);
       });
     if (unsupported) {
@@ -215,18 +167,19 @@ function attachmentSetIssues(
  * Validates the ordered attachment set (count bounds, combination rules, per-attachment
  * MIME type, kind, file size, and video duration), codepoint caption length, hashtag
  * count, an empty-publication guard, and provider-option platform compatibility.
- * @param capability - Target platform capability authority.
- * @param input - Composed caption plus the Post's ordered attachments.
- * @returns Issues in field order: attachments, then text, then provider options.
- * Empty when the payload is publishable for this target.
  */
 export function validatePublishInput(
   capability: PlatformCapability,
   input: PublishInput,
 ): ValidationIssue[] {
+  const acceptedMimeTypes = new Set(
+    capability.accepted_mime_types.map((value) => value.toLowerCase()),
+  );
   const issues: ValidationIssue[] = [
     ...attachmentSetIssues(capability, input),
-    ...input.media.flatMap((_, index) => attachmentIssues(capability, input, index)),
+    ...input.media.flatMap((media, index) =>
+      attachmentIssues(capability, acceptedMimeTypes, media, index),
+    ),
   ];
 
   const story =
@@ -269,7 +222,10 @@ export function validatePublishInput(
     capability.platform === "tiktok" &&
     input.providerOptions?.tiktok?.postMode !== "inbox" &&
     input.media.some((media) => mediaKind(media.contentType) === "video")
-      ? Math.min(capability.max_caption_length ?? 2_200, 2_200)
+      ? Math.min(
+          capability.max_caption_length ?? PROVIDER_LIMITS.tiktok.maxVideoCaptionCodePoints,
+          PROVIDER_LIMITS.tiktok.maxVideoCaptionCodePoints,
+        )
       : capability.max_caption_length;
   if (maximumCaption !== null) {
     const length = captionLength(input.caption);
@@ -345,25 +301,30 @@ export function validatePublishInput(
         message: "The selected Facebook method does not apply to this content.",
       });
     }
-    for (let index = 0; index < input.media.length; index += 1) {
-      const media = input.media[index]!;
+    const {
+      maxImageBytes,
+      maxReelDurationSeconds,
+      maxStoryDurationSeconds,
+      minReelStoryDurationSeconds,
+    } = PROVIDER_LIMITS.facebook;
+    for (const [index, media] of input.media.entries()) {
       const kind = mediaKind(media.contentType);
-      if (kind === "image" && media.fileSize > 10_000_000) {
+      if (kind === "image" && media.fileSize > maxImageBytes) {
         issues.push({
           constraint: "provider_file_size_limit",
           field: `media[${index}].fileSize`,
           actual: media.fileSize,
-          limit: 10_000_000,
+          limit: maxImageBytes,
           message: "Facebook photos cannot exceed 10 MB.",
         });
       }
       if (kind === "video" && (method === "reel" || method === "story")) {
         const duration = media.metadata?.durationSeconds;
-        const maximum = method === "story" ? 60 : 90;
+        const maximum = method === "story" ? maxStoryDurationSeconds : maxReelDurationSeconds;
         if (
           duration === undefined ||
           !Number.isFinite(duration) ||
-          duration < 3 ||
+          duration < minReelStoryDurationSeconds ||
           duration > maximum
         ) {
           issues.push({
@@ -371,7 +332,7 @@ export function validatePublishInput(
             field: "providerOptions.facebook.postType",
             ...(duration !== undefined ? { actual: duration } : {}),
             limit: maximum,
-            message: `Facebook ${method} videos require a duration from 3 to ${maximum} seconds.`,
+            message: `Facebook ${method} videos require a duration from ${minReelStoryDurationSeconds} to ${maximum} seconds.`,
           });
         }
       }
@@ -394,21 +355,29 @@ export function validatePublishInput(
       });
   }
   if (capability.platform === "instagram") {
+    const [firstMedia] = input.media;
     const method =
       input.providerOptions?.instagram?.postType ??
-      (input.media.length === 1 && mediaKind(input.media[0]!.contentType) === "video"
+      (input.media.length === 1 && firstMedia && mediaKind(firstMedia.contentType) === "video"
         ? "reel"
         : "feed");
-    for (let index = 0; index < input.media.length; index += 1) {
-      const item = input.media[index]!;
+    const {
+      maxImageBytes,
+      maxReelBytes,
+      maxReelDurationSeconds,
+      maxStoryBytes,
+      maxStoryDurationSeconds,
+      minReelStoryDurationSeconds,
+    } = PROVIDER_LIMITS.instagram;
+    for (const item of input.media) {
       const kind = mediaKind(item.contentType);
       const maximum =
         kind === "image"
-          ? 8 * 1024 * 1024
+          ? maxImageBytes
           : method === "story"
-            ? 100_000_000
+            ? maxStoryBytes
             : method === "reel"
-              ? 300_000_000
+              ? maxReelBytes
               : null;
       if (maximum !== null && item.fileSize > maximum) {
         issues.push({
@@ -421,10 +390,10 @@ export function validatePublishInput(
       }
       if (kind === "video" && (method === "story" || method === "reel")) {
         const duration = item.metadata?.durationSeconds;
-        const limit = method === "story" ? 60 : 900;
+        const limit = method === "story" ? maxStoryDurationSeconds : maxReelDurationSeconds;
         if (
           duration === undefined ||
-          duration < 3 ||
+          duration < minReelStoryDurationSeconds ||
           duration > limit ||
           !Number.isFinite(duration)
         ) {
@@ -433,16 +402,14 @@ export function validatePublishInput(
             field: "providerOptions.instagram.postType",
             ...(duration !== undefined ? { actual: duration } : {}),
             limit,
-            message: `Instagram ${method} requires video from 3 to ${limit} seconds.`,
+            message: `Instagram ${method} requires video from ${minReelStoryDurationSeconds} to ${limit} seconds.`,
           });
         }
       }
     }
     const options = input.providerOptions?.instagram;
     if (options) {
-      const kinds = input.media.map((media) =>
-        mediaKind(media.contentType.split(";", 1)[0]!.trim().toLowerCase()),
-      );
+      const kinds = input.media.map((media) => mediaKind(normalizeContentType(media.contentType)));
       if (!resolveInstagramOptions(options, kinds)) {
         issues.push({
           constraint: "instagram_post_options_invalid",

@@ -33,6 +33,7 @@ import { Skeleton } from "@meltiply/ui/skeleton";
 import { platformDisplayName } from "@/lib/platforms";
 import { isCancellablePublicationStatus } from "@/lib/publication-status";
 import {
+  formatPostDate,
   resolveCancellableDistributionIds,
   resolvePostAnalytics,
   resolveRowCaption,
@@ -41,56 +42,16 @@ import {
 import type { PostDestructiveRequest, PostDetailItem, PostRow } from "./types";
 import type { PostDrawerSurface } from "./posts-drawer";
 
-// The history charts load only when the inspector needs published analytics.
 const PostAnalyticsSection = lazy(() =>
   import("./post-analytics-section").then((module) => ({ default: module.PostAnalyticsSection })),
 );
 
-/**
- * Formats an ISO timestamp into the source views' `en-US` display form
- * (e.g. 'Sep 14, 2026, 02:30 PM'). Returns null for missing/invalid input so
- * callers can omit the row entirely.
- */
-function formatPostDate(value: string | null | undefined, timeZone: string): string | null {
-  if (!value) return null;
-  const date = new Date(value);
-  if (isNaN(date.getTime())) return null;
-  return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-    timeZone,
-  });
-}
-
-/**
- * Converts an ISO timestamp into the wall-clock `YYYY-MM-DDTHH:mm` shape required
- * by `datetime-local` inputs in the owner's publishing timezone.
- */
 function toLocalInputValue(value: string | null | undefined, timeZone: string): string {
-  // A stored schedule keeps its exact wall clock, including local midnight;
-  // only a fresh slot gets the composer's 10:00 calendar suggestion.
   return value
     ? instantToWallClock(value, timeZone, false)
     : instantToWallClock(new Date(Date.now() + 60 * 60 * 1000), timeZone);
 }
 
-/**
- * Per-channel detail row: platform icon, localized status pill, schedule/publish
- * timestamps, provider failure/partial-success messages, outbound post link, and the contract-real
- * actions (retry, reschedule, cancel) gated by distribution lifecycle state.
- *
- * A saved target with no outcome yet renders as a pending destination with its
- * own caption/media override notes, because adding or removing a pending Channel
- * is a target edit and never touches another Channel's published result.
- *
- * Retry and reschedule mutations live here because they need no confirmation;
- * destructive cancel/delete requests bubble to the view-level CenterAlertDialog via
- * `onRequestDelete`.
- */
 function ChannelOutcomeRow({
   item,
   postAttachments,
@@ -99,15 +60,12 @@ function ChannelOutcomeRow({
   onRequestDelete,
 }: {
   item: PostDetailItem;
-  /** Ordered attachments of the owning Post, for pending-override comparison. */
   postAttachments: number;
-  /** False in the aggregate view: retry/reschedule/cancel stay hidden. */
   canMutate: boolean;
-  /** A recurring Queue owns this Post's shared instant; per-Channel rescheduling is unavailable until removal. */
   queueOwned: boolean;
   onRequestDelete: (distributionIds: string[]) => void;
 }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const timeZone = usePublishingTimeZone();
   const scope = useSessionScope();
   const { canWriteContent } = useWorkspace();
@@ -121,13 +79,10 @@ function ChannelOutcomeRow({
   const channelName =
     item.integration?.name ?? (distribution ? platformDisplayName(distribution.platform) : null);
   const provider = item.integration?.providerIdentifier ?? distribution?.platform ?? "";
-  const scheduledLabel = formatPostDate(distribution?.scheduled_at, timeZone);
-  const publishedLabel = formatPostDate(distribution?.published_at, timeZone);
+  const scheduledLabel = formatPostDate(distribution?.scheduled_at, timeZone, language);
+  const publishedLabel = formatPostDate(distribution?.published_at, timeZone, language);
   const cancellable = distribution ? isCancellablePublicationStatus(status) : false;
   const attachmentSelection = item.target?.attachment_ids ?? null;
-  // Only a pending target narrows against the current Post; a claimed
-  // Channel's frozen media count is not comparable to the edited Post's, and
-  // its overrides likewise describe pending intent, not delivered content.
   const narrowsMedia =
     !distribution?.publication &&
     attachmentSelection !== null &&
@@ -136,10 +91,6 @@ function ChannelOutcomeRow({
     !distribution?.publication &&
     Boolean(item.target?.title_override ?? item.target?.description_override ?? null);
 
-  /**
-   * Applies the picked datetime-local value through `useUpdateScheduledDistribution`.
-   * No-op when the input is empty or unparsable so the mutation never receives garbage.
-   */
   const applyReschedule = () => {
     if (!distribution || !rescheduleValue) return;
     const next = wallClockToInstant(rescheduleValue, timeZone);
@@ -151,7 +102,7 @@ function ChannelOutcomeRow({
         toast(t("Post rescheduled"), {
           description: t("{channel} scheduled for {date}", {
             channel: channelName ?? platformDisplayName(provider),
-            date: formatPostDate(next, timeZone) ?? next,
+            date: formatPostDate(next, timeZone, language) ?? next,
           }),
           variant: "success",
         });
@@ -164,10 +115,6 @@ function ChannelOutcomeRow({
       });
   };
 
-  /**
-   * Retries a failed distribution through `useRetryDistribution`, surfacing the
-   * outcome as a toast since the list refreshes via query invalidation.
-   */
   const applyRetry = () => {
     if (!distribution) return;
     retry
@@ -381,73 +328,16 @@ function ChannelOutcomeRow({
   );
 }
 
-/**
- * Post detail dialog: inspects one durable Post in the shared right-side panel,
- * supplying its localized Close label directly; displays its full shared
- * caption, ordered attachment strip, and one row per Channel
- * carrying that Channel's independent status, failure message, timestamps,
- * outbound platform link, and the contract-real retry/reschedule/cancel actions.
- * Every action keeps the Post identity, so editing or retrying one Channel never
- * rewrites another's result.
- *
- * The shared Gr8r drawer owns scroll, expansion, dismissal, and opener focus.
- * Compact breadcrumb/action chrome frames flat property rows, the full caption,
- * ordered attachments, and real per-channel outcomes. No task-only properties
- * or editable publication status are copied from the reference.
- *
- * Destructive affordances state their Platform consequence: cancelling a pending
- * Channel and deleting a Post both leave anything already published live on its
- * platform. `post === null` closes the panel; the last post stays rendered
- * through dismissal so content never blanks during the shared fade.
- */
 export interface PostDetailSurfaceProps {
-  /** Post row to inspect; `null` closes the surface. */
   post: PostRow | null;
-  /**
-   * Whether scope-owned mutations are allowed; `false` in the aggregate
-   * "All Brand Profiles" view. Post deletion no longer consumes this flag —
-   * the Post's own `brand_profile_id` authorizes it — so only edit, retry,
-   * reschedule, and channel cancels stay gated. Live controls instead use the
-   * writer capability and the Distribution's own tenant-scoped identity.
-   */
   canMutate: boolean;
-  /** Whether this Post may be deleted by the current role. */
   canDelete: boolean;
   onClose: () => void;
-  /**
-   * Opens the composer for a Post that still has an editable surface. Pages
-   * that inspect without mutating (the Queue calendar) omit it, and the edit
-   * action is not rendered.
-   */
   onEdit?: (postId: string) => void;
-  /** Routes a destructive cancel/delete request to the view-level CenterAlertDialog; omitted by read-only inspectors. */
   onRequestDelete?: (request: PostDestructiveRequest) => void;
-  /**
-   * Plan-owned actions appended after the Post's own actions, such as removing
-   * the Post from its Queue. The owning view supplies them; the Post inspector
-   * stays the single presentation of Post content.
-   */
   extraActions?: React.ReactNode;
 }
 
-/**
- * Describes the Post inspector as the shared Posts panel presents it. Inspecting
- * and composing are alternatives in one panel rather than two drawers, so this
- * returns chrome and body for whichever panel presents it. The last Post stays
- * described through dismissal, so a closing panel keeps its content instead of
- * emptying first.
- *
- * Every action keeps the Post identity, so editing or retrying one Channel never
- * rewrites another's result. Compact breadcrumb/action chrome frames flat
- * property rows, the full caption, ordered attachments, and real per-channel
- * outcomes; no task-only properties or editable publication status are copied
- * from the reference. Every property row carries a leading icon in one fixed
- * column so labels and values share an axis, and queue instants use the same
- * minute-precision date format as the publish date.
- *
- * @param props - Inspected row, mutation scope, and the view's edit/delete routing.
- * @returns The inspector surface, or null before any row has been inspected.
- */
 export function usePostDetailSurface({
   post: livePost,
   canMutate,
@@ -457,7 +347,7 @@ export function usePostDetailSurface({
   onRequestDelete,
   extraActions,
 }: PostDetailSurfaceProps): PostDrawerSurface | null {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const timeZone = usePublishingTimeZone();
   const post = useLatchedValue(livePost);
 
@@ -465,8 +355,12 @@ export function usePostDetailSurface({
     if (!post) return null;
 
     const caption = resolveRowCaption(post);
-    const dateLabel = formatPostDate(post.date, timeZone);
-    const assignedLabel = formatPostDate(post.post?.queue_membership?.assigned_at, timeZone);
+    const dateLabel = formatPostDate(post.date, timeZone, language);
+    const assignedLabel = formatPostDate(
+      post.post?.queue_membership?.assigned_at,
+      timeZone,
+      language,
+    );
     const attachments = post.post?.attachments ?? [];
     const isDraft = post.post?.status === "draft";
     const cancellableIds = resolveCancellableDistributionIds(post);
@@ -483,8 +377,6 @@ export function usePostDetailSurface({
         <span className="flex min-w-0 items-center gap-2">
           <span>{t("Posts")}</span>
           <span className="text-ink-3">/</span>
-          {/* The record identity, not a truncated fragment: the full Post id is
-              what the API, fixtures, and support reproduce. */}
           <code className="truncate text-(length:--font-size-micro) text-ink-3" title={post.id}>
             {post.id}
           </code>
@@ -524,9 +416,6 @@ export function usePostDetailSurface({
               {t("Cancel all pending")}
             </Button>
           )}
-          {/* Delete is the only remaining action, so it is its own control: a menu
-              holding one item would only add a step to a destructive intent. The
-              confirmation still owns the consequence. */}
           {canDelete && onRequestDelete && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -688,6 +577,7 @@ export function usePostDetailSurface({
     onEdit,
     onRequestDelete,
     extraActions,
+    language,
     t,
     timeZone,
   ]);

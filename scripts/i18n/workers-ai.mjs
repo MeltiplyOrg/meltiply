@@ -1,52 +1,25 @@
-import { assertTranslationArray, expectedTranslationCount, ProviderError } from "./provider.mjs";
-import { isRetryableStatus } from "./retry.mjs";
+import {
+  assertTranslationArray,
+  createStatusError,
+  DEFAULT_TIMEOUT_MS,
+  expectedTranslationCount,
+  ProviderError,
+} from "./provider.mjs";
 
 const WORKERS_AI_ENDPOINT = "https://api.cloudflare.com/client/v4/accounts";
 
-/** Default request timeout for one Workers AI completion. */
-const DEFAULT_TIMEOUT_MS = 120_000;
-
-/**
- * Maps an HTTP failure to an actionable provider error. Credential failures are
- * terminal, retryable statuses carry the transient flag, and everything else
- * surfaces the bounded response detail without including the prompt or token.
- *
- * @param {number} status HTTP status code.
- * @param {string} body Response body used for a bounded error suffix.
- * @returns {ProviderError} Classified error.
- */
 function statusError(status, body) {
-  const detail = body.trim().slice(0, 500);
-  const suffix = detail ? `: ${detail}` : "";
-  if (status === 401 || status === 403) {
-    return new ProviderError(
-      `Workers AI rejected the credentials (HTTP ${status}). Check WORKERS_AI_API_TOKEN and its Workers AI permission.${suffix}`,
-      { status, kind: "auth", retryable: false },
-    );
-  }
-  if (isRetryableStatus(status)) {
-    return new ProviderError(`Workers AI is temporarily unavailable (HTTP ${status}).${suffix}`, {
-      status,
-      kind: "transient",
-      retryable: true,
-    });
-  }
-  return new ProviderError(`Workers AI request failed (HTTP ${status}).${suffix}`, {
-    status,
-    kind: "provider",
+  const authFailure = {
+    message: `Workers AI rejected the credentials (HTTP ${status}). Check WORKERS_AI_API_TOKEN and its Workers AI permission.`,
+    kind: "auth",
     retryable: false,
+  };
+  return createStatusError("Workers AI", status, body, {
+    401: authFailure,
+    403: authFailure,
   });
 }
 
-/**
- * Extracts model text from either Workers AI response shape: the legacy
- * `result.response` string or the OpenAI-compatible
- * `result.choices[0].message.content`. A reasoning-only response is malformed:
- * the analysis text is not a translation.
- *
- * @param {any} payload Parsed Workers AI envelope.
- * @returns {string | undefined} Trimmed model text when present.
- */
 function modelText(payload) {
   const result = payload?.result;
   const content = result?.choices?.[0]?.message?.content;
@@ -56,25 +29,6 @@ function modelText(payload) {
   return undefined;
 }
 
-/**
- * Creates a `TranslationProvider` backed by the direct Workers AI run endpoint.
- *
- * The request fixes `temperature: 0` and the supplied seed, bounded
- * `max_tokens`, and a request timeout. `requestOptions` supplies
- * model-specific flags such as disabling reasoning. `complete` makes one model
- * call and classifies failures; retry and model fallback compose around it.
- *
- * @param {object} options
- * @param {string} options.accountId Cloudflare account identifier.
- * @param {string} options.apiToken Workers AI-scoped API token.
- * @param {string} options.model Workers AI model id, e.g. `@cf/zai-org/glm-4.7-flash`.
- * @param {string} [options.systemPrompt] Product context, style, and glossary.
- * @param {number} [options.seed] Sampling seed; the same input and model aim for repeatable drafts.
- * @param {number} [options.timeoutMs] Per-request timeout.
- * @param {Record<string, unknown>} [options.requestOptions] Model-specific body flags, merged before the fixed request fields.
- * @param {typeof fetch} [options.fetchImpl] Injectable fetch for tests.
- * @returns {{name: string, complete: (prompt: string, options?: {maxTokens?: number}) => Promise<string>}}
- */
 export function createWorkersAiProvider({
   accountId,
   apiToken,
@@ -157,15 +111,6 @@ export function createWorkersAiProvider({
   };
 }
 
-/**
- * Falls back to a second model when the primary is unavailable or returns
- * malformed output. Authentication failures never fall back: the same token
- * would fail identically, so the error surfaces immediately.
- *
- * @param {{complete: (...args: any[]) => Promise<string>}} primary Preferred provider.
- * @param {{name?: string, complete: (...args: any[]) => Promise<string>}} fallback Secondary provider.
- * @returns {{name: string, complete: (prompt: string, options?: {maxTokens?: number}) => Promise<string>}}
- */
 export function withFallback(primary, fallback) {
   return {
     name: `${primary.name ?? "primary"} → ${fallback.name ?? "fallback"}`,

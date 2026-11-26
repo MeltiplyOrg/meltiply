@@ -31,7 +31,6 @@ import ChannelConnectRoute from "./channel-connect-route";
 
 afterEach(cleanup);
 
-/** Reports the router location so navigation assertions observe the settled URL. */
 function LocationProbe(): React.ReactElement {
   const location = useLocation();
   return <div data-testid="location">{`${location.pathname}${location.search}`}</div>;

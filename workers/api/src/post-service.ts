@@ -1,10 +1,9 @@
 import { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
-import { isoDateTime, type DatabaseError } from "@meltiply/domain";
+import { codePointLength, isoDateTime, type DatabaseError } from "@meltiply/domain";
 import {
   composeCaption,
-  facebookOptionsToWire,
   parseThreadsOptions,
   ProviderRegistry,
   validatePublishInput,
@@ -17,24 +16,20 @@ import {
   activeBrandProfilePredicate,
   requireActiveBrandProfileEffect,
 } from "./brand-profile-guard";
-import { CoreApiError } from "./core-types";
-import {
-  activeOrganizationIdEffect,
-  withTenantTransactionEffect,
-  type EffectTransactionClient,
-} from "./database";
+import { CoreApiError, toCoreApiErrorOrRethrow } from "./core-types";
+import { withTenantTransactionEffect, type EffectTransactionClient } from "./database";
 import type { ApiWorkerEnv } from "./env";
-import {
-  completeIdempotencyEffect,
-  hashIdempotencyRequestEffect,
-  reserveIdempotencyEffect,
-} from "./idempotency";
+import { hashIdempotencyRequestEffect } from "./idempotency";
+import { withTenantIdempotentMutation } from "./idempotent-mutation";
 import { lockOrganizationEffect } from "./organization-lock";
 import {
   distributionColumns,
   insertOutboxBatchEffect,
+  isPendingDistribution,
   mapDistribution,
+  providerReachedDistributionStatuses,
   publicationSnapshotColumn,
+  toWirePostProviderOptions,
   usageGuardEffect,
   validateTargetOverrides,
 } from "./distribution-service";
@@ -67,11 +62,6 @@ const postColumns = `
   id, org_id, brand_profile_id, title, default_text, status, revision,
   created_at, updated_at, ${postQueueMembershipColumn}`;
 
-/**
- * Columns selected for every attachment projection. `r2_key` no longer lives on
- * `assets`; object addresses belong to the `asset_objects` inventory and are
- * only reachable through the scoped per-Asset preview/download endpoints.
- */
 const assetColumns = `
   asset.id, asset.org_id, asset.brand_profile_id, asset.uploaded_by,
   asset.asset_type, asset.title, asset.duration_sec, asset.file_size,
@@ -97,14 +87,6 @@ type PostMutationRow = Pick<
   "id" | "org_id" | "brand_profile_id" | "title" | "default_text" | "queue_membership"
 >;
 
-/**
- * One saved target row.
- *
- * The stored `provider_options` column holds the provider-domain camelCase
- * shape the publishing worker reads back; `mapTarget` converts it to the
- * contract's snake_case wire shape on the way out. `post_id` is only present on
- * the grouped collection read; the single-Post schedule read omits it.
- */
 interface TargetRow extends Record<string, unknown> {
   attachment_ids: string[] | null;
   description_override: string | null;
@@ -125,20 +107,12 @@ interface AccountRow extends Record<string, unknown> {
   token_expires_at: Date | string | null;
 }
 
-/**
- * One `post_attachments` row joined to its Asset: the ordered attachment
- * position plus the full Asset projection the response embeds.
- */
 interface AttachmentRow extends Record<string, unknown> {
   asset_id: string;
   position: number | string;
   post_id: string;
 }
 
-/**
- * A verified ready object an attachment may publish from: a processed rendition
- * or, when optimization produced no benefit, the verified original.
- */
 interface CandidateRow extends Record<string, unknown> {
   asset_id: string;
   bytes: number | string;
@@ -148,11 +122,6 @@ interface CandidateRow extends Record<string, unknown> {
   width: number | string | null;
 }
 
-/**
- * One existing Distribution of a Post as the schedule decision reads it: the
- * Channel it serves, the outcome it currently holds, and whether any provider
- * attempt already owns that outcome.
- */
 interface DistributionSummaryRow extends Record<string, unknown> {
   id: string;
   platform_account_id: string | null;
@@ -160,26 +129,12 @@ interface DistributionSummaryRow extends Record<string, unknown> {
   status: Schemas["DistributionStatus"];
 }
 
-/**
- * One validated target paired with the Platform its account resolves to.
- *
- * Validation already proved the account exists and belongs to the Post's Brand
- * Profile, so the write path no longer needs the account row — only the
- * resolved platform literal plus the settings that were validated against it.
- */
 interface ResolvedTargetRow {
   platform: Platform;
   platformAccountId: string;
   target: Omit<PostTargetInput, "providerOptions"> & { providerOptions?: ProviderPublishOptions };
 }
 
-/**
- * One validated target whose Distribution row already exists.
- *
- * Scheduling addresses the pending rows by the id its locked read observed
- * rather than by re-deriving them from the Channel, so the statement cannot
- * apply one intent to a different row than the one the decision was made for.
- */
 interface PendingTargetRow extends ResolvedTargetRow {
   distributionId: string;
 }
@@ -192,7 +147,6 @@ interface PostCollections {
   targets: Map<string, Schemas["PostTarget"][]>;
 }
 
-/** One published Distribution's latest measured counters; PostgreSQL bigint columns return text. */
 interface PostAnalyticsRow extends Record<string, unknown> {
   post_id: string;
   distribution_id: string;
@@ -205,94 +159,6 @@ interface PostAnalyticsRow extends Record<string, unknown> {
   reach: number | string;
 }
 
-/**
- * Keeps expected validation errors typed without asserting unknown exceptions
- * are client failures. Rethrowing unexpected errors lets Effect record defects
- * for the existing dies-first API boundary rather than misclassifying them.
- */
-function validationError(cause: unknown): CoreApiError {
-  if (cause instanceof CoreApiError) return cause;
-  throw cause;
-}
-
-/** Distribution statuses a creator may still create, edit, or cancel. */
-const EDITABLE_DISTRIBUTION_STATUSES: ReadonlySet<Schemas["DistributionStatus"]> = new Set([
-  "scheduled",
-  "queued",
-]);
-
-/**
- * Projects saved Post choices without filling unanswered audience/privacy fields.
- * Unlike Distribution publication options, drafts retain the disclosure gate
- * independently of completed subtypes. Empty stored maps still project to null.
- */
-function toWirePostProviderOptions(
-  options: PostProviderOptions | null,
-): Schemas["PostProviderOptions"] | null {
-  const tiktok = options?.tiktok;
-  const youtube = options?.youtube;
-  const instagram = options?.instagram;
-  const facebook = options?.facebook;
-  const threads = options?.threads;
-  if (!tiktok && !youtube && !instagram && !facebook && !threads) return null;
-  return {
-    ...(threads ? { threads } : {}),
-    ...(facebook ? { facebook: facebookOptionsToWire(facebook) } : {}),
-    ...(instagram
-      ? {
-          instagram: {
-            ...(instagram.content ? { content: instagram.content } : {}),
-            ...(instagram.mediaOptions ? { media_options: instagram.mediaOptions } : {}),
-            ...(instagram.postType !== undefined ? { post_type: instagram.postType } : {}),
-            ...(instagram.trialReel !== undefined ? { trial_reel: instagram.trialReel } : {}),
-            ...(instagram.trialGraduation !== undefined
-              ? { trial_graduation: instagram.trialGraduation }
-              : {}),
-          },
-        }
-      : {}),
-    ...(tiktok
-      ? {
-          tiktok: {
-            ...(tiktok.postMode !== undefined ? { post_mode: tiktok.postMode } : {}),
-            allow_comment: tiktok.allowComment,
-            allow_duet: tiktok.allowDuet,
-            allow_stitch: tiktok.allowStitch,
-            brand_content: tiktok.brandContent,
-            brand_organic: tiktok.brandOrganic,
-            ...(tiktok.discloseCommercialContent !== undefined
-              ? { disclose_commercial_content: tiktok.discloseCommercialContent }
-              : {}),
-            is_ai_generated: tiktok.isAiGenerated,
-            music_usage_confirmed: tiktok.musicUsageConfirmed,
-            ...(tiktok.autoAddMusic !== undefined ? { auto_add_music: tiktok.autoAddMusic } : {}),
-            ...(tiktok.privacyLevel !== undefined ? { privacy_level: tiktok.privacyLevel } : {}),
-          },
-        }
-      : {}),
-    ...(youtube
-      ? {
-          youtube: {
-            ...(youtube.postType ? { post_type: youtube.postType } : {}),
-            ...(youtube.madeForKids !== undefined ? { made_for_kids: youtube.madeForKids } : {}),
-            ...(youtube.privacyStatus ? { privacy_status: youtube.privacyStatus } : {}),
-          },
-        }
-      : {}),
-  };
-}
-
-/**
- * Maps a saved target row onto the public `PostTarget` read model.
- *
- * Provider options are stored as JSON `{}` when a Channel has no explicit
- * choices, which reads back as `null` so clients can tell "nothing saved" from
- * an intentionally empty selection. `attachment_ids` stays `null` when the
- * target inherits the Post's attachments and `[]` when it is text-only.
- *
- * @param row - Database row from `post_targets`.
- * @returns Contract `PostTarget` representation.
- */
 function mapTarget(row: TargetRow): Schemas["PostTarget"] {
   return {
     attachment_ids: row.attachment_ids ?? null,
@@ -305,38 +171,12 @@ function mapTarget(row: TargetRow): Schemas["PostTarget"] {
   };
 }
 
-/**
- * Collections a caller already holds from the current transaction.
- *
- * A mutation path reads the authoritative rows it is about to write or return —
- * a Post's saved targets, its ordered attachment ids — and re-reading the same
- * collection to build the response would be a second identical statement inside
- * one transaction. Passing those rows through lets the projection reuse them.
- * `attachments` additionally carries the joined Asset facts, which the ordered
- * id list alone cannot supply, so it is only reusable once the caller has them.
- */
 interface PostCollectionPreloads {
   attachments?: Map<string, Schemas["PostAttachment"][]>;
   distributions?: Map<string, Schemas["Distribution"][]>;
   targets?: Map<string, Schemas["PostTarget"][]>;
 }
 
-/**
- * Loads ordered attachments, saved targets, publication outcomes, and measured
- * analytics for requested Posts and groups them per Post id.
- *
- * One query per collection prevents join fan-out. Analytics uses one bounded
- * latest-snapshot lookup per published Distribution inside a single statement,
- * then sums per Post; older snapshots and unpublished Channels never contribute.
- * No snapshot means no analytics object, not zero. Draft-only batches skip that
- * statement. Caller-supplied collection preloads are not read again, including
- * the known-empty distributions of a newly inserted Post.
- *
- * @param client - Active tenant transaction client.
- * @param postIds - Post identifiers already read and authorized by the caller.
- * @param preloads - Collections already loaded in this transaction, keyed by Post id.
- * @returns Effect resolving to the collections and latest measured Post analytics.
- */
 function loadPostCollectionsEffect(
   client: EffectTransactionClient,
   postIds: readonly string[],
@@ -380,8 +220,6 @@ function loadPostCollectionsEffect(
         [postIds],
       );
       for (const row of targetRows.rows) {
-        // The grouped read always selects post_id; the optional marker exists
-        // only because the single-Post schedule read omits it.
         const postId = row.post_id!;
         const bucket = collections.targets.get(postId) ?? [];
         bucket.push(mapTarget(row));
@@ -411,9 +249,6 @@ function loadPostCollectionsEffect(
       }
     }
     if (hasPublishedDistribution) {
-      // One latest-snapshot probe per published Distribution, then the Post
-      // totals are summed in memory. Keeping the per-Distribution rows lets
-      // the inspector compare Channels without a second query or endpoint.
       const analyticsRows = yield* client.query<PostAnalyticsRow>(
         `SELECT d.post_id, d.id AS distribution_id, d.platform,
                 snapshot.likes, snapshot.comments, snapshot.shares,
@@ -466,17 +301,6 @@ function loadPostCollectionsEffect(
   });
 }
 
-/**
- * Assembles one Post read model from its row and its loaded collections.
- *
- * `status` is a lifecycle marker derived from whether the Post has any target
- * yet, never a global publication outcome: per-Channel success and failure
- * stay readable from `distributions`.
- *
- * @param row - Stored Post row.
- * @param collections - Per-Post attachments, targets, and distributions.
- * @returns Contract `Post` representation.
- */
 function assemblePost(row: PostRow, collections: PostCollections): Post {
   return {
     analytics: collections.analytics.get(row.id) ?? null,
@@ -503,14 +327,6 @@ function assemblePost(row: PostRow, collections: PostCollections): Post {
   };
 }
 
-/**
- * Assembles the response for one or more already-authorized Post rows.
- *
- * @param client - Active tenant transaction client.
- * @param rows - Post rows to project.
- * @param preloads - Collections already loaded in this transaction, keyed by Post id.
- * @returns Effect resolving to the assembled Post read models.
- */
 export function assemblePostsEffect(
   client: EffectTransactionClient,
   rows: readonly PostRow[],
@@ -523,19 +339,6 @@ export function assemblePostsEffect(
   ).pipe(Effect.map((collections) => rows.map((row) => assemblePost(row, collections))));
 }
 
-/**
- * Assembles the response for exactly one already-authorized Post row.
- *
- * Every mutation reads and returns a single Post, so projecting one row through
- * the shared collection loader keeps the projection identical to the list and
- * read paths while making the "exactly one Post" contract explicit at the type
- * level instead of destructuring an array that could be empty.
- *
- * @param client - Active tenant transaction client.
- * @param row - Post row to project.
- * @param preloads - Collections already loaded in this transaction, keyed by Post id.
- * @returns Effect resolving to the assembled Post read model.
- */
 export function assembleSinglePostEffect(
   client: EffectTransactionClient,
   row: PostRow,
@@ -546,20 +349,6 @@ export function assembleSinglePostEffect(
   );
 }
 
-/**
- * Locks one retained Post for mutation.
- *
- * The row lock serializes concurrent saves, schedules, and deletes of the same
- * Post, so an attachment replacement, target diff, and publication writes always
- * observe one consistent revision. A soft-deleted Post is indistinguishable
- * from a missing one so a retired identity never reappears through any read.
- *
- * @param client - Active tenant transaction client.
- * @param postId - Post UUID being mutated.
- * @param readModel - Select the response fields as well; defaults to mutation inputs only.
- * @returns The locked mutation inputs, or the complete response row when requested.
- * @throws {CoreApiError} 404 `post_not_found` when the Post is missing, owned by another workspace, or deleted.
- */
 export function lockPostEffect(
   client: EffectTransactionClient,
   postId: string,
@@ -575,14 +364,17 @@ export function lockPostEffect(
   postId: string,
   readModel = false,
 ): Effect.Effect<PostMutationRow, CoreApiError | DatabaseError> {
-  return Effect.gen(function* () {
-    const result = yield* client.query<PostMutationRow>(
-      `SELECT ${readModel ? postColumns : `id, org_id, brand_profile_id, title, default_text, ${postQueueMembershipColumn}`}
+  const selectSql = readModel
+    ? `SELECT ${postColumns}
          FROM posts
         WHERE id = $1 AND org_id = public.auth_active_org_id() AND deleted_at IS NULL
-        FOR UPDATE`,
-      [postId],
-    );
+        FOR UPDATE`
+    : `SELECT id, org_id, brand_profile_id, title, default_text, ${postQueueMembershipColumn}
+         FROM posts
+        WHERE id = $1 AND org_id = public.auth_active_org_id() AND deleted_at IS NULL
+        FOR UPDATE`;
+  return Effect.gen(function* () {
+    const result = yield* client.query<PostMutationRow>(selectSql, [postId]);
     const row = result.rows[0];
     if (!row) {
       return yield* Effect.fail(new CoreApiError(404, "post_not_found", "The post was not found."));
@@ -591,18 +383,6 @@ export function lockPostEffect(
   });
 }
 
-/**
- * Locks every Asset currently attached to a Post in ascending Asset id order.
- *
- * The detach trigger locks each Asset as the attachment row is removed, so a
- * deletion transaction must acquire those locks first and in the same global
- * order a composition write uses. Otherwise two concurrent deletions of Posts
- * that share media could each hold one Asset and wait for the other.
- *
- * @param client - Active tenant transaction client.
- * @param postId - Post whose attached Assets are about to be detached.
- * @returns Effect resolving once every attached Asset row is locked.
- */
 function lockPostAttachmentAssetsEffect(
   client: EffectTransactionClient,
   postId: string,
@@ -620,17 +400,6 @@ function lockPostAttachmentAssetsEffect(
     .pipe(Effect.asVoid);
 }
 
-/**
- * Rejects a mutation that targets a different Brand Profile than the Post's.
- *
- * Composer mutations are scoped to one Brand Profile so content cannot move
- * between publishing identities; a mismatch is a client mistake rather than a
- * missing resource, because the Post itself is visible.
- *
- * @param post - Locked Post row.
- * @param brandProfileId - Brand Profile the request asserted.
- * @throws {CoreApiError} 422 `brand_profile_mismatch` when the profiles differ.
- */
 function requireMatchingBrandProfile(
   post: Pick<PostRow, "brand_profile_id">,
   brandProfileId: string,
@@ -644,31 +413,6 @@ function requireMatchingBrandProfile(
   }
 }
 
-/**
- * Locks every Asset a composition write will touch and validates the ones being
- * attached.
- *
- * An attachment is what retains stored media, so attaching proves the Asset
- * belongs to the same Brand Profile, is not already claimed for deletion, and —
- * for an upload still in flight — belongs to a session that has not expired.
- *
- * All assets, including ones being detached, are locked in ascending Asset id
- * order. The attachment triggers lock each Asset while detaching or inserting,
- * so a transaction that reaches a trigger holding a lock this one acquires
- * first would otherwise deadlock. One global order across create, update, and
- * delete removes those cycles without serializing unrelated Posts.
- *
- * @param client - Active tenant transaction client.
- * @param brandProfileId - Brand Profile that will own the attachments.
- * @param attachmentIds - Ordered, de-duplicated Asset identifiers being attached.
- * @param alsoLockIds - Additional Assets the same transaction will detach; they
- *   are locked but not revalidated because their ownership was proven when attached.
- * @returns Effect resolving once the selected assets are locked and validated.
- * @throws {CoreApiError} 422 `validation_error` when the selection repeats an Asset.
- * @throws {CoreApiError} 404 `asset_not_found` when an Asset is missing or owned by another workspace.
- * @throws {CoreApiError} 422 `brand_profile_mismatch` when an Asset belongs to another Brand Profile.
- * @throws {CoreApiError} 409 `asset_not_attachable` when an Asset is being deleted or its upload session expired.
- */
 function lockAttachmentAssetsEffect(
   client: EffectTransactionClient,
   brandProfileId: string,
@@ -746,23 +490,6 @@ function lockAttachmentAssetsEffect(
   });
 }
 
-/**
- * Replaces the complete ordered attachment set of one Post.
- *
- * A save is authoritative over the whole selection: omitted Assets are detached
- * — which restarts their orphan grace period through the database trigger — and
- * supplied Assets are attached in the given order. Replacing rather than
- * merging is what makes reorder, remove, and replace one atomic edit that never
- * disturbs the caption or the saved channel settings. An unchanged selection is
- * a no-op so a text-only save never churns attachment retention.
- *
- * @param client - Active tenant transaction client.
- * @param post - Locked Post row owning the Brand Profile.
- * @param assetIds - Complete ordered attachment selection.
- * @param previousIds - Current ordered attachment ids when the caller already
- *   read them; omitted means the current set is not known yet.
- * @returns Effect resolving once the attachment set matches `assetIds`.
- */
 function replaceAttachmentsEffect(
   client: EffectTransactionClient,
   post: PostMutationRow,
@@ -784,9 +511,6 @@ function replaceAttachmentsEffect(
     ) {
       return;
     }
-    // Detaching first lets the trigger restart the orphan clock only for Assets
-    // that truly lose their last retained reference, so an Asset that is
-    // re-attached by the same save never enters the orphan sweep.
     yield* client.query("DELETE FROM post_attachments WHERE post_id = $1", [post.id]);
     if (assetIds.length === 0) return;
     yield* client.query(
@@ -801,20 +525,6 @@ function replaceAttachmentsEffect(
   });
 }
 
-/**
- * Replaces the complete saved target set of one Post.
- *
- * Per-Channel settings persist independently of publication so a creator can
- * record captions, hashtags, and attachment selections before scheduling
- * anything. Replacement is all-or-nothing: a save that omits a Channel drops
- * it, and one that names it updates it in place.
- *
- * @param client - Active tenant transaction client.
- * @param post - Locked Post row.
- * @param targets - Complete saved target selection.
- * @returns Effect resolving once the saved target set matches `targets`.
- * @throws {CoreApiError} 422 `validation_error` when the same Channel appears twice.
- */
 function replaceTargetsEffect(
   client: EffectTransactionClient,
   post: PostMutationRow,
@@ -866,19 +576,6 @@ function replaceTargetsEffect(
   });
 }
 
-/**
- * Loads the saved target rows of one Post as schedule-time target inputs,
- * together with the same rows in stored shape.
- *
- * Scheduling both validates these settings and returns them in the response,
- * so the raw rows travel with the parsed inputs: the response projection then
- * reuses the authoritative rows this statement already read instead of issuing
- * a second identical `post_targets` query inside the same transaction.
- *
- * @param client - Active tenant transaction client.
- * @param postId - Post whose saved targets are requested.
- * @returns Effect resolving to the parsed targets and their stored rows.
- */
 function loadSavedTargetsEffect(
   client: EffectTransactionClient,
   postId: string,
@@ -908,17 +605,6 @@ function loadSavedTargetsEffect(
     );
 }
 
-/**
- * Rejects a per-target attachment selection that is not part of the Post.
- *
- * Channel-specific media narrows a publication to a subset of the Post's own
- * ordered attachments; referencing foreign media would invent a second
- * composition identity outside this Post.
- *
- * @param targets - Targets whose selection is validated.
- * @param attachmentIds - The Post's effective ordered attachment selection.
- * @throws {CoreApiError} 422 `validation_error` when a target selects an Asset the Post does not attach.
- */
 function requireTargetAttachmentScope(
   targets: readonly PostTargetInput[],
   attachmentIds: readonly string[],
@@ -937,21 +623,6 @@ function requireTargetAttachmentScope(
   }
 }
 
-/**
- * Rejects saved targets that name Channels the Brand Profile does not own.
- *
- * Draft saves record channel settings before anything is published, so the
- * ownership check still applies: settings must never stage a publication toward
- * another profile's Channel.
- *
- * @param client - Active tenant transaction client.
- * @param organizationId - Active workspace UUID.
- * @param brandProfileId - Brand Profile that owns the Post and its targets.
- * @param targets - Targets to verify.
- * @returns Effect resolving once every target names an owned Channel.
- * @throws {CoreApiError} 404 `platform_account_not_found` when a Channel is missing or foreign.
- * @throws {CoreApiError} 422 `brand_profile_mismatch` when a Channel belongs to another Brand Profile.
- */
 function validateTargetScopesEffect(
   client: EffectTransactionClient,
   organizationId: string,
@@ -994,17 +665,6 @@ function validateTargetScopesEffect(
   });
 }
 
-/**
- * Loads the platform account facts every schedule-time target check needs.
- *
- * A missing Channel simply yields no row, so the caller reports "not found"
- * instead of silently dropping a requested target.
- *
- * @param client - Active tenant transaction client.
- * @param organizationId - Active workspace UUID.
- * @param accountIds - Requested Platform account identifiers.
- * @returns Effect resolving to account rows keyed by account id.
- */
 function loadAccountsEffect(
   client: EffectTransactionClient,
   organizationId: string,
@@ -1028,21 +688,6 @@ function loadAccountsEffect(
     .pipe(Effect.map((result) => new Map(result.rows.map((row) => [row.id, row]))));
 }
 
-/**
- * Loads decoder-approved rendition objects, grouped by attachment and size.
- * An original is eligible only through a ready rendition reference created by
- * the native processor's verified no-benefit outcome; its protected inventory
- * row alone proves storage, not profile or codec compatibility. The owning
- * Asset must itself still be `ready` and not soft-deleted: a rendition that
- * outlived a failed, reprocessing, or reclaiming Asset proves nothing about the
- * bytes the publication would publish, so the reference is skipped rather than
- * scheduled. Multiple profiles referencing the same object are deduplicated.
- * @param client - Active tenant transaction client.
- * @param assetIds - Attachment identifiers selected across every target this
- *   schedule will create or edit; a settled target publishes nothing and is
- *   therefore never asked about its media.
- * @returns Ready candidates ordered by bytes, with object keys breaking ties.
- */
 function loadRenditionCandidatesEffect(
   client: EffectTransactionClient,
   assetIds: readonly string[],
@@ -1084,13 +729,6 @@ function loadRenditionCandidatesEffect(
   });
 }
 
-/**
- * Requires complete saved answers before creating Distribution options.
- * The resolved YouTube Platform requires explicit audience and visibility even
- * without an options subtree. Other absent subtrees retain their existing semantics;
- * supplied unanswered choices or unfinished disclosure fail with 422.
- * The draft-only disclosure gate never enters the Provider publication payload.
- */
 function publicationProviderOptions(
   options: PostProviderOptions | undefined,
   platform: Platform,
@@ -1174,20 +812,6 @@ function publicationProviderOptions(
   return result;
 }
 
-/**
- * Enforces the provider-option rules that depend on the resolved media mix.
- *
- * TikTok requires explicit creator choices on every publish, and its Duet and
- * Stitch switches only exist for video. A media-only target must still carry
- * the options, while a TikTok photo target must not claim Duet or Stitch — the
- * same rules the provider adapters enforce at publish time.
- *
- * @param providerOptions - Candidate provider options for the target.
- * @param platform - Target platform.
- * @param selection - Ordered attachment ids the target publishes.
- * @param candidates - Ready objects grouped by asset id.
- * @throws {CoreApiError} 422 `validation_error` when the options cannot apply.
- */
 function validateProviderOptions(
   providerOptions: ProviderPublishOptions | undefined,
   platform: Platform,
@@ -1276,26 +900,6 @@ function validateProviderOptions(
   }
 }
 
-/**
- * Validates one Channel target's resolved publication against its platform.
- *
- * The check mirrors what the publishing worker will actually attempt: the
- * caption composed from the Post and the target's overrides, and the ordered
- * media built from the smallest verified ready object per selected attachment.
- * A target whose media is still processing, whose upload failed, or whose media
- * cannot satisfy the platform fails here rather than after a provider call, and
- * the failure names the offending field so the creator can adjust only that
- * target without disturbing the shared Post.
- *
- * @param post - Locked Post row supplying title and default text.
- * @param target - Effective target settings for one Channel.
- * @param selection - Ordered attachment ids this Channel publishes.
- * @param account - Platform account facts for the target.
- * @param capability - Capability descriptor for the account's platform.
- * @param candidates - Ready objects grouped by asset id, smallest first.
- * @param now - Reference instant for connection-expiry checks.
- * @returns Effect resolving to the platform and complete publication target, or an actionable failure.
- */
 function validateTargetScheduleEffect(
   post: PostMutationRow,
   target: PostTargetInput,
@@ -1373,8 +977,6 @@ function validateTargetScheduleEffect(
           ...(candidate.width !== null ? { width: Number(candidate.width) } : {}),
         },
         mode: "remote_ingest",
-        // Capability checks read the declared facts only; this URL is never
-        // fetched during validation, so the check stays pure and offline.
         url: "https://validation.invalid/media",
       });
     }
@@ -1418,28 +1020,32 @@ function validateTargetScheduleEffect(
   });
 }
 
-/**
- * Enforces the Post title and body length limits at the service boundary.
- *
- * @param title - Effective Post title.
- * @param defaultText - Effective Post default text.
- * @throws {CoreApiError} 422 `validation_error` when a field exceeds its contract limit.
- */
 function validatePostText(title: string, defaultText: string): void {
   if (title.length > 200) {
     throw new CoreApiError(422, "validation_error", "title is too long.");
   }
-  if ([...defaultText].length > 10_000) {
+  if (codePointLength(defaultText) > 10_000) {
     throw new CoreApiError(422, "validation_error", "default_text is too long.");
   }
 }
 
-/**
- * Rejects empty editor scaffolding while retaining real provider-hosted content:
- * link/source identities, configured native text attachments, or a selected
- * Live/experiment workflow. Those methods need no invented caption or Asset.
- * Method completeness and Channel compatibility are enforced when scheduling.
- */
+function validateCompositionEffect(
+  title: string,
+  defaultText: string,
+  attachmentIds: readonly string[],
+  effectiveTargets: readonly PostTargetInput[],
+  changedTargets: readonly PostTargetInput[] = effectiveTargets,
+): Effect.Effect<void, CoreApiError> {
+  return Effect.try({
+    try: () => {
+      validatePostText(title, defaultText);
+      requireNonEmptyPost(defaultText, attachmentIds, effectiveTargets);
+      requireTargetAttachmentScope(changedTargets, attachmentIds);
+    },
+    catch: toCoreApiErrorOrRethrow,
+  });
+}
+
 function requireNonEmptyPost(
   defaultText: string,
   attachmentIds: readonly string[],
@@ -1466,18 +1072,6 @@ function requireNonEmptyPost(
   );
 }
 
-/**
- * Applies an edited Post field set and bumps its revision in one statement.
- *
- * The revision counter is what lets a client detect that its copy of a draft is
- * stale without comparing whole bodies, so every accepted mutation advances it
- * exactly once regardless of how many rows it touched.
- *
- * @param client - Active tenant transaction client.
- * @param postId - Post UUID being updated.
- * @param patch - Field flags and values; `activate` marks the Post as having targets.
- * @returns Effect resolving to the updated Post row.
- */
 function updatePostRowEffect(
   client: EffectTransactionClient,
   postId: string,
@@ -1509,13 +1103,6 @@ function updatePostRowEffect(
     .pipe(Effect.map((result) => result.rows[0]!));
 }
 
-/**
- * Reads the ordered attachment ids currently stored for one Post.
- *
- * @param client - Active tenant transaction client.
- * @param postId - Post whose attachment order is requested.
- * @returns Effect resolving to the ordered attachment ids.
- */
 function loadPostAttachmentIdsEffect(
   client: EffectTransactionClient,
   postId: string,
@@ -1527,29 +1114,6 @@ function loadPostAttachmentIdsEffect(
     .pipe(Effect.map((result) => result.rows.map((row) => row.asset_id)));
 }
 
-/**
- * Applies a new delivery intent to every still-editable pending Distribution of
- * one Post in a single statement.
- *
- * Scheduling resolves the whole target set at once, so editing rows one
- * statement at a time would make the write path scale with the Channel count.
- * The resolved settings travel as one JSON payload expanded with
- * `jsonb_to_recordset`, the same set-based shape the insert and saved-target
- * writers use: declaring `hashtags` and `attachment_ids` as arrays keeps each
- * Channel's ordered selection intact, where parallel arrays through `unnest`
- * would have to flatten two nesting levels and pair them position by position.
- * Each payload row names the Distribution id its locked read observed, so a
- * target is applied at most once and only to the row the decision was made
- * against, and the status filter still skips a published, claimed, or
- * reconciliation-bound outcome instead of rewriting it.
- *
- * @param client - Active tenant transaction client.
- * @param postId - Post whose pending targets are being rescheduled.
- * @param rows - Resolved per-target settings paired with their existing row ids.
- * @param status - Status every edited row adopts (`scheduled` or `queued`).
- * @param scheduledAt - Delivery instant, or null for immediate publication.
- * @returns Effect resolving to the ids of the rows the statement actually edited.
- */
 function reschedulePendingDistributionsEffect(
   client: EffectTransactionClient,
   postId: string,
@@ -1606,27 +1170,6 @@ function reschedulePendingDistributionsEffect(
     .pipe(Effect.map((result) => result.rows.map((row) => row.id)));
 }
 
-/**
- * Materializes the pending Distribution rows for every target of a Post that
- * does not have one yet, in a single statement.
- *
- * New targets are expanded from one JSON payload with `jsonb_to_recordset`, the
- * same set-based shape the Post target and attachment writers already use, so
- * a twenty-Channel schedule costs one statement rather than twenty. The unique
- * constraint on `(post_id, platform_account_id)` is the database-level
- * guarantee that repeating a scheduling intent cannot produce a duplicate row;
- * conflicting rows are skipped rather than mutated, which preserves any outcome
- * a provider already owns.
- *
- * @param client - Active tenant transaction client.
- * @param organizationId - Active workspace UUID.
- * @param post - Locked Post row supplying ownership.
- * @param postId - Post the Distributions belong to.
- * @param rows - Validated targets with their resolved platform, newest first excluded.
- * @param status - Status the new rows adopt (`scheduled` or `queued`).
- * @param scheduledAt - Delivery instant, or null for immediate publication.
- * @returns Effect resolving to the ids of the created Distribution rows.
- */
 function insertPendingDistributionsEffect(
   client: EffectTransactionClient,
   organizationId: string,
@@ -1683,61 +1226,34 @@ function insertPendingDistributionsEffect(
     .pipe(Effect.map((result) => result.rows.map((row) => row.id)));
 }
 
-/**
- * Cancels the pending publications of a Post and drops their unleased commands.
- *
- * Only work that has not been claimed is cancelled. Rows a provider attempt or
- * Reconciliation already owns keep their own lifecycle so in-flight media
- * stays protected, and published rows remain as immutable history: local
- * deletion never unpublishes a live Platform copy.
- *
- * Cancellation and command cleanup commit as one statement: the data-modifying
- * CTEs remove the extra round trip a Post with pending work would otherwise
- * pay inside the deletion transaction.
- *
- * @param client - Active tenant transaction client.
- * @param postId - Post whose pending publications are cancelled.
- * @returns Effect resolving once cancellations and outbox cleanup commit.
- */
 function cancelPendingDistributionsEffect(
   client: EffectTransactionClient,
   postId: string,
 ): Effect.Effect<void, DatabaseError> {
   return client
-    .query<{ cancelled_count: number }>(
+    .query(
       `WITH cancelled AS (
          UPDATE distributions
             SET status = 'cancelled', updated_at = now()
           WHERE post_id = $1
             AND status IN ('scheduled', 'queued')
           RETURNING id
-       ), dropped AS (
-         DELETE FROM outbox_events
-          WHERE aggregate_id IN (SELECT id FROM cancelled)
-            AND topic = 'distribution.publish.requested'
-            AND state IN ('pending', 'failed')
-          RETURNING 1
+       ), disarmed AS (
+         UPDATE distributions
+            SET next_attempt_at = NULL, updated_at = now()
+          WHERE post_id = $1
+            AND status = 'failed'
+            AND next_attempt_at IS NOT NULL
        )
-       SELECT (SELECT COUNT(*)::integer FROM cancelled) AS cancelled_count,
-              (SELECT COUNT(*)::integer FROM dropped) AS dropped_count`,
+       DELETE FROM outbox_events
+        WHERE aggregate_id IN (SELECT id FROM cancelled)
+          AND topic = 'distribution.publish.requested'
+          AND state IN ('pending', 'failed')`,
       [postId],
     )
     .pipe(Effect.asVoid);
 }
 
-/**
- * Factory creating the Post composition service.
- *
- * One Post identity owns default content, ordered attachments, and saved
- * per-Channel settings, and publishing to Channels creates pending Distributions
- * that track outcomes independently. The service owns the draft-save, schedule,
- * and deletion seams that decide retention, while independent per-Distribution
- * reschedule, cancel, retry, and Reconciliation stay in the distribution
- * service.
- *
- * @param configuredCapabilities - Platform capability list (defaults to `ProviderRegistry`).
- * @returns `PostApiService` implementation backed by tenant transactions.
- */
 export function createPostApiService(
   configuredCapabilities = new ProviderRegistry().capabilities(),
 ): PostApiService {
@@ -1745,41 +1261,31 @@ export function createPostApiService(
     configuredCapabilities.map((capability) => [capability.platform, structuredClone(capability)]),
   );
   return {
-    /**
-     * Creates an idempotent draft under the active Brand Profile, retaining
-     * Workspace and Asset locks. A new Post has no distributions or analytics;
-     * its response reuses those known-empty collections without reading them.
-     */
     createPost(
       env: ApiWorkerEnv,
       session: SessionClaims,
       input: CreatePostInput,
       idempotencyKey: string,
     ) {
-      return Effect.gen(function* () {
-        const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify(input));
-        return yield* withTenantTransactionEffect(env, session, (client) =>
+      return withTenantIdempotentMutation<Post, PostServiceError>(
+        env,
+        session,
+        "create-post",
+        idempotencyKey,
+        JSON.stringify(input),
+        201,
+        (client, organizationId) =>
           Effect.gen(function* () {
-            const organizationId = yield* activeOrganizationIdEffect(client);
-            const replay = yield* reserveIdempotencyEffect(
-              client,
-              organizationId,
-              "create-post",
-              idempotencyKey,
-              requestHash,
-            );
-            if (replay) {
-              return {
-                replayed: true,
-                value: replay.response_body as Post,
-              };
-            }
             yield* lockOrganizationEffect(client, organizationId);
             yield* requireActiveBrandProfileEffect(client, organizationId, input.brandProfileId);
             const attachmentIds = input.attachmentIds ?? [];
             const targets = input.targets ?? [];
-            requireNonEmptyPost(input.defaultText ?? "", attachmentIds, targets);
-            requireTargetAttachmentScope(targets, attachmentIds);
+            yield* validateCompositionEffect(
+              input.title ?? "",
+              input.defaultText ?? "",
+              attachmentIds,
+              targets,
+            );
             yield* lockAttachmentAssetsEffect(client, input.brandProfileId, attachmentIds);
             yield* validateTargetScopesEffect(
               client,
@@ -1794,12 +1300,10 @@ export function createPostApiService(
               [organizationId, input.brandProfileId, input.title ?? "", input.defaultText ?? ""],
             );
             const post = inserted.rows[0]!;
-            // A new Post owns no attachment or target rows yet, so an empty
-            // selection has nothing to replace and no collection to re-read.
             if (attachmentIds.length > 0)
               yield* replaceAttachmentsEffect(client, post, attachmentIds, []);
             if (targets.length > 0) yield* replaceTargetsEffect(client, post, targets);
-            const value = yield* assembleSinglePostEffect(client, post, {
+            return yield* assembleSinglePostEffect(client, post, {
               distributions: new Map<string, Schemas["Distribution"][]>([[post.id, []]]),
               ...(attachmentIds.length === 0
                 ? { attachments: new Map<string, Schemas["PostAttachment"][]>([[post.id, []]]) }
@@ -1808,21 +1312,10 @@ export function createPostApiService(
                 ? { targets: new Map<string, Schemas["PostTarget"][]>([[post.id, []]]) }
                 : {}),
             });
-            yield* completeIdempotencyEffect(
-              client,
-              organizationId,
-              "create-post",
-              idempotencyKey,
-              201,
-              value,
-            );
-            return { replayed: false, value };
           }),
-        );
-      });
+      );
     },
 
-    /** Lists retained tenant-visible Posts in stable order; an optional paired Queue window filters immutable active membership instants before pagination and batched projection. */
     listPosts(env: ApiWorkerEnv, session: SessionClaims, filters: PostFilters) {
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.gen(function* () {
@@ -1901,31 +1394,20 @@ export function createPostApiService(
       input: UpdatePostInput,
       idempotencyKey: string,
     ) {
-      return Effect.gen(function* () {
-        const requestHash = yield* hashIdempotencyRequestEffect(
-          JSON.stringify({ postId, ...input }),
-        );
-        return yield* withTenantTransactionEffect(env, session, (client) =>
+      return withTenantIdempotentMutation<Post, PostServiceError>(
+        env,
+        session,
+        "update-post",
+        idempotencyKey,
+        JSON.stringify({ postId, ...input }),
+        200,
+        (client, organizationId) =>
           Effect.gen(function* () {
-            const organizationId = yield* activeOrganizationIdEffect(client);
-            const replay = yield* reserveIdempotencyEffect(
-              client,
-              organizationId,
-              "update-post",
-              idempotencyKey,
-              requestHash,
-            );
-            if (replay) {
-              return {
-                replayed: true,
-                value: replay.response_body as Post,
-              };
-            }
             yield* lockOrganizationEffect(client, organizationId);
             const post = yield* lockPostEffect(client, postId);
             yield* Effect.try({
               try: () => requireMatchingBrandProfile(post, input.brandProfileId),
-              catch: validationError,
+              catch: toCoreApiErrorOrRethrow,
             });
             yield* requireActiveBrandProfileEffect(client, organizationId, post.brand_profile_id);
             const currentAttachmentIds = yield* loadPostAttachmentIdsEffect(client, postId);
@@ -1937,20 +1419,14 @@ export function createPostApiService(
               (!(input.defaultText ?? post.default_text).trim() && attachmentIds.length === 0
                 ? (yield* loadSavedTargetsEffect(client, postId)).inputs
                 : []);
-            yield* Effect.try({
-              try: () => {
-                const title = input.title ?? post.title;
-                const defaultText = input.defaultText ?? post.default_text;
-                validatePostText(title, defaultText);
-                requireNonEmptyPost(defaultText, attachmentIds, effectiveTargets);
-                if (targets) requireTargetAttachmentScope(targets, attachmentIds);
-              },
-              catch: validationError,
-            });
+            yield* validateCompositionEffect(
+              input.title ?? post.title,
+              input.defaultText ?? post.default_text,
+              attachmentIds,
+              effectiveTargets,
+              targets ?? [],
+            );
             if (attachmentChange) {
-              // Lock the union of the current and requested sets in ascending
-              // Asset order so the detach and insert triggers cannot form a
-              // lock cycle with a concurrent composition write.
               yield* lockAttachmentAssetsEffect(
                 client,
                 post.brand_profile_id,
@@ -1974,27 +1450,11 @@ export function createPostApiService(
               ...(input.title !== undefined ? { title: input.title } : {}),
               ...(input.defaultText !== undefined ? { defaultText: input.defaultText } : {}),
             });
-            const value = yield* assembleSinglePostEffect(client, updated);
-            yield* completeIdempotencyEffect(
-              client,
-              organizationId,
-              "update-post",
-              idempotencyKey,
-              200,
-              value,
-            );
-            return { replayed: false, value };
+            return yield* assembleSinglePostEffect(client, updated);
           }),
-        );
-      });
+      );
     },
 
-    /**
-     * Schedules the explicit or saved Channel targets idempotently with quota
-     * enforcement. Existing provider-owned outcomes remain unchanged; dropping
-     * editable targets cancels their rows and removes only pending/failed
-     * publish commands in one statement, preserving consumer-owned leases.
-     */
     schedulePost(
       env: ApiWorkerEnv,
       session: SessionClaims,
@@ -2002,39 +1462,26 @@ export function createPostApiService(
       input: SchedulePostInput,
       idempotencyKey: string,
     ) {
-      return Effect.gen(function* () {
-        const requestHash = yield* hashIdempotencyRequestEffect(
-          JSON.stringify({
-            postId,
-            ...input,
-            scheduledAt: input.scheduledAt?.toISOString() ?? null,
-          }),
-        );
-        return yield* withTenantTransactionEffect(env, session, (client) =>
+      return withTenantIdempotentMutation<Post, PostServiceError>(
+        env,
+        session,
+        "schedule-post",
+        idempotencyKey,
+        JSON.stringify({
+          postId,
+          ...input,
+          scheduledAt: input.scheduledAt?.toISOString() ?? null,
+        }),
+        200,
+        (client, organizationId) =>
           Effect.gen(function* () {
-            const organizationId = yield* activeOrganizationIdEffect(client);
-            const replay = yield* reserveIdempotencyEffect(
-              client,
-              organizationId,
-              "schedule-post",
-              idempotencyKey,
-              requestHash,
-            );
-            if (replay) {
-              return {
-                replayed: true,
-                value: replay.response_body as Post,
-              };
-            }
             yield* lockOrganizationEffect(client, organizationId);
             const post = yield* lockPostEffect(client, postId);
             yield* Effect.try({
               try: () => requireMatchingBrandProfile(post, input.brandProfileId),
-              catch: validationError,
+              catch: toCoreApiErrorOrRethrow,
             });
             yield* requireActiveBrandProfileEffect(client, organizationId, post.brand_profile_id);
-            // The locked Post projection already carries membership, avoiding a
-            // second read on every independent manual Schedule/Publish Now.
             if (!input.queueId && post.queue_membership !== null) {
               return yield* Effect.fail(
                 new CoreApiError(
@@ -2046,9 +1493,6 @@ export function createPostApiService(
             }
             const saved = input.targets ? undefined : yield* loadSavedTargetsEffect(client, postId);
             const targets = input.targets ?? saved!.inputs;
-            // Scheduling the saved set returns exactly the rows already read, and
-            // a text-only Post has no attachments to project, so both collections
-            // are handed to the response projection instead of being read again.
             const preloadTargets =
               saved === undefined
                 ? undefined
@@ -2072,27 +1516,12 @@ export function createPostApiService(
               );
             }
             const attachmentIds = yield* loadPostAttachmentIdsEffect(client, postId);
-            // Only a Post that is provably attachment-free can be projected
-            // without re-reading: the attachment response embeds each full
-            // Asset, which the ordered id list cannot supply, so a Post with any
-            // attachment still takes the normal join.
             const preloadAttachments =
               attachmentIds.length === 0
                 ? new Map<string, Schemas["PostAttachment"][]>([[postId, []]])
                 : undefined;
-            yield* Effect.try({
-              try: () => {
-                requireNonEmptyPost(post.default_text, attachmentIds, targets);
-                requireTargetAttachmentScope(targets, attachmentIds);
-              },
-              catch: validationError,
-            });
+            yield* validateCompositionEffect(post.title, post.default_text, attachmentIds, targets);
             const now = new Date();
-            // The locked read comes before target validation because it
-            // decides which targets this call may still act on: a row whose
-            // outcome a provider attempt, a lease, or Reconciliation owns is
-            // left alone, so its Channel's lapsed credential or changed media
-            // cannot block rescheduling the pending ones.
             const existing = yield* client.query<DistributionSummaryRow>(
               `SELECT distribution.id, distribution.platform_account_id,
                       distribution.status,
@@ -2123,13 +1552,6 @@ export function createPostApiService(
                 )
                 .map((row) => [row.platform_account_id, row]),
             );
-            // Split targets by what their existing row permits: pending rows
-            // are edited in place, absent rows created, and settled rows left
-            // untouched and unvalidated. A locally cancelled row revives only
-            // while no provider attempt, ledger entry, published copy, or
-            // requested cancellation owns it, because `(post_id,
-            // platform_account_id)` is unique and the intent must not succeed
-            // while publishing nothing.
             const actionable: {
               distributionId: string | null;
               selection: readonly string[];
@@ -2139,7 +1561,7 @@ export function createPostApiService(
               const current = byAccount.get(target.platformAccountId);
               if (
                 current !== undefined &&
-                !EDITABLE_DISTRIBUTION_STATUSES.has(current.status) &&
+                !isPendingDistribution(current.status) &&
                 (current.status !== "cancelled" || current.provider_owned)
               ) {
                 continue;
@@ -2150,8 +1572,6 @@ export function createPostApiService(
                 target,
               });
             }
-            // Only actionable targets contribute work, so only their Channels
-            // and selected media are read.
             const accounts = yield* loadAccountsEffect(
               client,
               organizationId,
@@ -2191,8 +1611,6 @@ export function createPostApiService(
                 ),
               );
             }
-            // Allocate against the current clock only after target/quota checks
-            // and locks, rather than reserving a slot that elapsed while waiting.
             const deliveryAt = input.queueId
               ? yield* reserveQueueSlotEffect(
                   client,
@@ -2231,8 +1649,6 @@ export function createPostApiService(
             };
             yield* insertOutboxBatchEffect(client, organizationId, createdIds, command);
             if (rescheduledIds.length > 0) {
-              // A reschedule replaces the previous delivery intent: stale
-              // commands would otherwise publish at the abandoned instant.
               yield* client.query(
                 `DELETE FROM outbox_events
                   WHERE aggregate_id = ANY($1::uuid[])
@@ -2240,21 +1656,24 @@ export function createPostApiService(
                     AND state IN ('pending', 'failed')`,
                 [rescheduledIds],
               );
-              yield* insertOutboxBatchEffect(client, organizationId, rescheduledIds, command);
+              yield* insertOutboxBatchEffect(
+                client,
+                organizationId,
+                rescheduledIds,
+                scheduled
+                  ? command
+                  : { ...command, retryToken: yield* hashIdempotencyRequestEffect(idempotencyKey) },
+              );
             }
             const requested = new Set(targets.map((target) => target.platformAccountId));
             const dropped = existing.rows.filter(
               (row) =>
                 row.platform_account_id !== null &&
                 !requested.has(row.platform_account_id) &&
-                EDITABLE_DISTRIBUTION_STATUSES.has(row.status),
+                isPendingDistribution(row.status),
             );
             if (dropped.length > 0) {
               const droppedIds = dropped.map((row) => row.id);
-              // Both writes use the same already-locked eligible ids. Keep the
-              // direct aggregate predicate so RLS uses the partial aggregate
-              // index instead of scanning pending work through a CTE subquery.
-              // The data-modifying CTE runs even without a RETURNING consumer.
               yield* client.query(
                 `WITH cancelled AS (
                    UPDATE distributions
@@ -2268,32 +1687,18 @@ export function createPostApiService(
                 [droppedIds],
               );
             }
-            // Saving the effective targets again is only meaningful when the
-            // request supplied them; scheduling the already-saved set leaves the
-            // stored settings untouched, so the rewrite is skipped rather than
-            // issuing two statements that reproduce identical rows.
             if (input.targets) {
               yield* replaceTargetsEffect(client, post, targets);
             }
             const updated = yield* updatePostRowEffect(client, postId, {
               activate: true,
             });
-            const value = yield* assembleSinglePostEffect(client, updated, {
+            return yield* assembleSinglePostEffect(client, updated, {
               ...(preloadAttachments ? { attachments: preloadAttachments } : {}),
               ...(preloadTargets ? { targets: preloadTargets } : {}),
             });
-            yield* completeIdempotencyEffect(
-              client,
-              organizationId,
-              "schedule-post",
-              idempotencyKey,
-              200,
-              value,
-            );
-            return { replayed: false, value };
           }),
-        );
-      });
+      );
     },
 
     deletePost(
@@ -2303,30 +1708,15 @@ export function createPostApiService(
       input: DeletePostInput,
       idempotencyKey: string,
     ) {
-      return Effect.gen(function* () {
-        const requestHash = yield* hashIdempotencyRequestEffect(
-          JSON.stringify({ brandProfileId: input.brandProfileId, postId }),
-        );
-        return yield* withTenantTransactionEffect(env, session, (client) =>
+      return withTenantIdempotentMutation<Post, PostServiceError>(
+        env,
+        session,
+        "delete-post",
+        idempotencyKey,
+        JSON.stringify({ brandProfileId: input.brandProfileId, postId }),
+        200,
+        (client, organizationId) =>
           Effect.gen(function* () {
-            const organizationId = yield* activeOrganizationIdEffect(client);
-            const replay = yield* reserveIdempotencyEffect(
-              client,
-              organizationId,
-              "delete-post",
-              idempotencyKey,
-              requestHash,
-            );
-            if (replay) {
-              return {
-                replayed: true,
-                value: replay.response_body as Post,
-              };
-            }
-            // Deletion only releases retention and cancels pending work; it
-            // never charges quota. Locking the Workspace here would serialize
-            // every deletion in one tenant behind a single lock row without
-            // protecting anything deletion writes.
             const current = yield* client.query<
               Pick<PostRow, "brand_profile_id" | "queue_membership">
             >(
@@ -2342,28 +1732,18 @@ export function createPostApiService(
                 new CoreApiError(404, "post_not_found", "The post was not found."),
               );
             }
-            // Deleting is scoped like every other Post mutation: the request must
-            // name the Brand Profile that owns the Post, so an aggregate-view
-            // caller with no identity selected cannot destroy one.
             yield* Effect.try({
               try: () => requireMatchingBrandProfile(post, input.brandProfileId),
-              catch: validationError,
+              catch: toCoreApiErrorOrRethrow,
             });
             yield* requireActiveBrandProfileEffect(client, organizationId, post.brand_profile_id);
-            // Published history is administratively owned: Editors may delete
-            // drafts and scheduled Posts (their pending work is cancelled), but
-            // removing a Post that reached or is attempting a Platform is an
-            // Admin action.
             if (session.organizationRole !== "admin") {
               const published = yield* client.query<{ exists: boolean }>(
                 `SELECT EXISTS (
                    SELECT 1 FROM distributions
-                   WHERE post_id = $1
-                     AND status IN (
-                       'processing', 'awaiting_provider', 'delivered', 'published', 'needs_reconciliation'
-                     )
+                   WHERE post_id = $1 AND status = ANY($2::text[])
                  ) AS exists`,
-                [postId],
+                [postId, providerReachedDistributionStatuses],
               );
               if (published.rows[0]?.exists === true) {
                 return yield* Effect.fail(
@@ -2387,25 +1767,12 @@ export function createPostApiService(
                 RETURNING ${postColumns}`,
               [postId],
             );
-            // Both collection statements above ran in this transaction, so
-            // their authoritative result is empty. Re-reading them in the
-            // response projection would repeat work the delete already did.
-            const value = yield* assembleSinglePostEffect(client, deleted.rows[0]!, {
+            return yield* assembleSinglePostEffect(client, deleted.rows[0]!, {
               attachments: new Map<string, Schemas["PostAttachment"][]>([[postId, []]]),
               targets: new Map<string, Schemas["PostTarget"][]>([[postId, []]]),
             });
-            yield* completeIdempotencyEffect(
-              client,
-              organizationId,
-              "delete-post",
-              idempotencyKey,
-              200,
-              value,
-            );
-            return { replayed: false, value };
           }),
-        );
-      });
+      );
     },
   };
 }

@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { useState } from "react";
 import { Alert } from "@meltiply/ui/alert";
 import { Button } from "@meltiply/ui/button";
@@ -9,29 +10,12 @@ import { useReportingPolicy, useUpdateReportingPreferences } from "@/lib/queries
 
 import { ReportingDisclosure } from "./reporting-disclosure";
 
-/**
- * Installation improvement-reporting controls inside Settings.
- *
- * Every active member can read the disclosure and the effective state; only the
- * current Installation Owner can save a change, so authority follows ownership
- * transfer rather than the account that completed setup. A member sees the same
- * requested-versus-effective explanation with the switches disabled and the
- * Owner-only boundary stated, instead of a control that silently fails.
- *
- * Saving replaces both choices together, which is the contract's operation; an
- * unchanged decision never becomes a new consent interval.
- *
- * @returns React element rendering the reporting section.
- */
 export function ReportingSettings(): React.ReactElement {
   const { t } = useI18n();
   const { isInstallationOwner } = useWorkspace();
   const scope = useSessionScope();
   const policy = useReportingPolicy(scope);
   const save = useUpdateReportingPreferences(scope);
-  // The controls render the persisted choice until the Owner edits one. An
-  // explicit local override keeps the first paint honest and means a policy read
-  // can never be rendered as a choice that has not been saved.
   const [choiceOverride, setChoiceOverride] = useState<{
     diagnostics: boolean;
     usage: boolean;
@@ -54,12 +38,9 @@ export function ReportingSettings(): React.ReactElement {
     setError(null);
     try {
       await save.mutateAsync({ diagnostics, usage });
-      // Hand the controls back to the persisted policy once the write lands.
       setChoiceOverride(null);
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : t("Your choices could not be saved. Try again."),
-      );
+      setError(errorMessage(cause, t("Your choices could not be saved. Try again.")));
     }
   };
 

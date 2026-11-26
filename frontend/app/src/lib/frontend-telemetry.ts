@@ -1,3 +1,5 @@
+import { errorMessage } from "@meltiply/domain";
+
 import { applyAuthJwt } from "./auth-token";
 
 const unsafeFieldCharactersPattern = /[^a-zA-Z0-9_.-]/g;
@@ -18,28 +20,14 @@ export interface FrontendTelemetryDetail {
   kind: FrontendTelemetryKind;
   requestId?: string | null;
   retryable?: boolean;
-  /** Application stack frames only; see `frameLines`. */
   stack?: string;
   status?: number;
   valueHash?: string;
   valueType?: string;
 }
 
-/** Longest frame text retained before the receiving server's own allowlist runs. */
 const maximumStackCharacters = 1_500;
 
-/**
- * Extracts the frame lines of a stack, dropping everything else.
- *
- * The first line of a V8 stack is the runtime message, which can contain a Post
- * title, an email address or a Provider error body. Only lines shaped like a
- * frame survive, so no message text ever leaves the browser — the server keeps
- * solely the application frames it can prove safe, and the message never becomes
- * an exception group name.
- *
- * @param stack Raw stack text from an `Error`.
- * @returns Frame lines joined with newlines, bounded, or `undefined` when empty.
- */
 function frameLines(stack: string | undefined): string | undefined {
   if (!stack) return undefined;
   const frames = stack.split("\n").filter((line) => /^\s*at\s/.test(line));
@@ -47,46 +35,20 @@ function frameLines(stack: string | undefined): string | undefined {
   return frames.join("\n").slice(0, maximumStackCharacters);
 }
 
-/**
- * Sanitizes a field or identifier name for safe telemetry transport,
- * replacing non-alphanumeric characters with underscores and capping at 64 chars.
- *
- * @param field Field name string.
- * @returns Sanitized field string.
- */
 function safeField(field: string): string {
   return field.replace(unsafeFieldCharactersPattern, "_").slice(0, 64);
 }
 
-/**
- * Validates and limits an uppercase environment or configuration variable key (e.g. `APP_URL`).
- *
- * @param key Candidate configuration key string.
- * @returns Valid uppercase key string, or `undefined` if malformed.
- */
 function safeConfigurationKey(key: string): string | undefined {
   return configurationKeyPattern.test(key) ? key : undefined;
 }
 
-/**
- * Returns a simplified, safe string description of a value's runtime type (null, array, or typeof).
- *
- * @param value Value to inspect.
- * @returns Type descriptor string (e.g. "string", "null", "array", "number").
- */
 function valueType(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   return typeof value;
 }
 
-/**
- * Computes a 32-bit FNV-1a hex hash of an arbitrary input string (truncated to 128 chars).
- * Allows logging diagnostic fingerprints of unknown values or errors without exposing raw PII.
- *
- * @param value String value to hash.
- * @returns 8-character lowercase hex hash string, or `undefined` if input is empty or non-string.
- */
 function valueHash(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length === 0) return undefined;
 
@@ -98,37 +60,18 @@ function valueHash(value: unknown): string | undefined {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-/**
- * Validates that an HTTP status is an integer within the standard 100-599 range.
- *
- * @param status Candidate HTTP status.
- * @returns Bounded status number or `undefined`.
- */
 function boundedStatus(status: number | undefined): number | undefined {
   return status !== undefined && Number.isInteger(status) && status >= 100 && status <= 599
     ? status
     : undefined;
 }
 
-/**
- * Validates a hex hash string, verifying length between 8 and 64 hex characters.
- *
- * @param hash Candidate hash string.
- * @returns Lowercase sanitized hash or `undefined`.
- */
 function boundedHash(hash: string | undefined): string | undefined {
   return hash && hashPattern.test(hash) ? hash.slice(0, 64).toLowerCase() : undefined;
 }
 
-/**
- * Reports an unhandled client exception or UI error as a telemetry event.
- * Hashes the error message to protect user data while categorizing by error constructor name.
- *
- * @param error Thrown exception or error reason.
- * @param context Context tag identifying where the error occurred (e.g. "window-error", "auth-refresh").
- */
 export function reportFrontendError(error: unknown, context: string): void {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error, String(error));
   const name = error instanceof Error ? error.name : "UnknownError";
   const stack = error instanceof Error ? frameLines(error.stack) : undefined;
 
@@ -143,11 +86,6 @@ export function reportFrontendError(error: unknown, context: string): void {
 
 let globalLoggingInstalled = false;
 
-/**
- * Attaches global window error and unhandled promise rejection listeners.
- * Ensures uncaught browser runtime errors are captured and dispatched through
- * frontend telemetry exactly once per session.
- */
 export function installFrontendErrorLogging(): void {
   if (globalLoggingInstalled || typeof window === "undefined") return;
   globalLoggingInstalled = true;
@@ -159,13 +97,6 @@ export function installFrontendErrorLogging(): void {
   });
 }
 
-/**
- * Sanitizes and dispatches a telemetry payload both locally via window CustomEvent
- * and remotely to the Worker endpoint `POST /__frontend-telemetry`.
- * Strips sensitive data, enforces strict field length limits, and uses keepalive fetch.
- *
- * @param detail Telemetry event detail containing bounded fields, codes, or hashes.
- */
 export function reportFrontendTelemetry(detail: FrontendTelemetryDetail): void {
   if (typeof window === "undefined") return;
 
@@ -182,8 +113,6 @@ export function reportFrontendTelemetry(detail: FrontendTelemetryDetail): void {
   if (detail.field) redacted.field = safeField(detail.field);
   if (detail.requestId) redacted.requestId = detail.requestId.slice(0, 128);
   if (detail.retryable !== undefined) redacted.retryable = detail.retryable === true;
-  // Already reduced to frame lines by the producer; the ceiling here is a second
-  // bound for a caller that supplies `stack` itself.
   if (detail.stack) redacted.stack = detail.stack.slice(0, maximumStackCharacters);
   const status = boundedStatus(detail.status);
   if (status !== undefined) redacted.status = status;
@@ -200,9 +129,6 @@ export function reportFrontendTelemetry(detail: FrontendTelemetryDetail): void {
   const wireDetail = { ...redacted };
   delete wireDetail.requestId;
   try {
-    // The receiving Worker forwards only authenticated client failures to the
-    // API's consent-gated diagnostics route, so the same in-memory bearer the API
-    // client uses is stamped here. It stays same-origin and never reaches storage.
     const headers = new Headers({ "Content-Type": "application/json" });
     applyAuthJwt(headers);
     void globalThis
@@ -215,15 +141,10 @@ export function reportFrontendTelemetry(detail: FrontendTelemetryDetail): void {
       })
       .catch(() => undefined);
   } catch {
-    // Telemetry is best-effort and must never affect the caller.
+    return;
   }
 }
 
-/**
- * Convenience helper to report an HTTP API failure with structured status and request IDs.
- *
- * @param input Object containing error code, request ID, retryability flag, and HTTP status code.
- */
 export function reportFrontendApiError(input: {
   code: string;
   requestId: string | null;
@@ -233,13 +154,6 @@ export function reportFrontendApiError(input: {
   reportFrontendTelemetry({ kind: "api-error", ...input });
 }
 
-/**
- * Reports unrecognized enum variants or response fields that diverge from the OpenAPI contract.
- * Hashes the unexpected value and records its type to diagnose schema drift.
- *
- * @param field Name of the contract field containing the unrecognized variant.
- * @param value The actual received value.
- */
 export function reportUnknownContractValue(field: string, value: unknown): void {
   reportFrontendTelemetry({
     field,

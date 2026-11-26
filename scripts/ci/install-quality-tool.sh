@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Installs one pinned Linux quality tool for GitHub-hosted runners.
-# Release digests are pinned here, not fetched alongside an unverified archive.
 set -euo pipefail
 
 case "${1:-}:$(uname -m)" in

@@ -32,7 +32,6 @@ const operation = {
   },
 };
 
-/** Writes a standalone OpenAPI fixture for observable CLI compatibility outcomes. */
 function document(paths) {
   return JSON.stringify({
     info: { title: "Compatibility probe", version: "1.0.0" },
@@ -41,7 +40,6 @@ function document(paths) {
   });
 }
 
-/** Executes the real compatibility CLI and comparator, including its policy input files. */
 function run() {
   return spawnSync(
     process.execPath,
@@ -60,12 +58,6 @@ function run() {
   );
 }
 
-/**
- * Fails when the diff could not execute the comparison at all. A missing
- * `go`/`oasdiff`, or a parser error the wrapper reports as `oasdiff failed`,
- * also exits non-zero, which would otherwise satisfy the breaking-change
- * assertion for the wrong reason.
- */
 function assertDiffRan(result, label) {
   const output = `${result.stdout}${result.stderr}`;
   if (result.error || /unable to run |oasdiff failed/u.test(output)) {
@@ -144,17 +136,14 @@ try {
   writeFileSync(current, "invalid: [");
   assert.notEqual(run().status, 0, "invalid contracts must fail closed");
 
-  // Diverging branch histories distinguish a PR merge base from the base branch's tip.
   const repository = join(directory, "repository");
   const contracts = join(repository, "packages/contracts");
   mkdirSync(contracts, { recursive: true });
-  /** Executes fixture Git operations in an isolated repository and returns their output. */
   const fixtureGit = (...args) => {
     const result = spawnSync("git", args, { cwd: repository, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
     return result.stdout.trim();
   };
-  /** Commits the fixture contract without relying on global Git author configuration. */
   const commit = () => {
     fixtureGit("add", ".");
     fixtureGit(
@@ -184,7 +173,6 @@ try {
     eventPath,
     JSON.stringify({ pull_request: { base: { sha: baseTip }, head: { sha: head } } }),
   );
-  /** Invokes CI baseline selection through event metadata, with no mocked comparator or Git calls. */
   const ci = (name, ref = "refs/heads/feature") =>
     spawnSync(process.execPath, [script, "--ci"], {
       cwd: repository,
@@ -211,7 +199,6 @@ try {
   assert.match(`${tagBreak.stdout}${tagBreak.stderr}`, /\/probe/);
   fixtureGit("tag", "-d", "contract-v1.1.0");
 
-  // A PR based on unreleased changes needs both scopes in one breaking entry.
   fixtureGit("checkout", "--detach", "--force", baseTip);
   writeFileSync(source, document({}));
   const breakingHead = commit();
@@ -221,7 +208,6 @@ try {
       pull_request: { base: { sha: baseTip }, head: { sha: breakingHead } },
     }),
   );
-  /** Obtains the exact-change review token from the real CLI's rejection diagnostics. */
   const reviewToken = (ref) => {
     const result = spawnSync(process.execPath, [script, "--base", ref], {
       cwd: repository,
@@ -264,7 +250,6 @@ try {
   const cumulativePush = ci("push", "refs/heads/master");
   assert.equal(cumulativePush.status, 0, `${cumulativePush.stdout}${cumulativePush.stderr}`);
 
-  // An additive PR after an acknowledged but unreleased break must also cover the release span.
   fixtureGit("checkout", "--detach", "--force", common);
   writeFileSync(source, document({}));
   writeFileSync(notes, "## Unreleased\n");

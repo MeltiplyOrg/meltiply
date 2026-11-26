@@ -1,7 +1,4 @@
 import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
-// Response.json() is `unknown` under the pool's types but `any` in eslint's
-// project, so the necessary body assertions look unnecessary to the rule
-// (AUD-055); the assertions are required for tsc.
 /* oxlint-disable @typescript-eslint/no-unnecessary-type-assertion */
 import type { JwtIdentity } from "@meltiply/auth";
 import { Effect } from "effect";
@@ -28,10 +25,6 @@ const env = {
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
 
-// Better Auth subjects plus the internal Workspace memberships the server
-// resolved from org_members, mirroring the confirmed actor claims contract:
-// subject = Better Auth user id, userId = internal users.id UUID,
-// organizationId = resolved workspace UUID, organizationRole = member role.
 const alpha: ResolvedActor = {
   authUserId: "auth_user_local_alpha",
   claims: {
@@ -75,12 +68,6 @@ const beta: ResolvedActor = {
 const requestIds: string[] = [];
 let sequence = 0;
 
-/**
- * Builds the API app with the JWT verifier and actor resolver stubbed to the
- * given actor: `verifyJwtToken` returns the verified identity for the actor's
- * auth subject and `resolveActor` returns the actor unchanged, so protected
- * routes run without a real Better Auth round-trip.
- */
 function appFor(actor: ResolvedActor) {
   const jwtIdentity: JwtIdentity = {
     email: `${actor.authUserId}@example.test`,
@@ -97,19 +84,10 @@ function appFor(actor: ResolvedActor) {
   });
 }
 
-/**
- * Returns the fixed JWT bearer Authorization header every protected request
- * carries; the stubbed `verifyJwtToken` accepts the token value as-is.
- */
 function authorization() {
   return { Authorization: "Bearer test-only.jwt" };
 }
 
-/**
- * Every /api/v1 request (including the flow routes themselves) records a run
- * through the middleware, so each test request carries its own tracked
- * X-Request-ID for deterministic lookups and cleanup.
- */
 async function tracedRequest(
   instance: ReturnType<typeof createApiApp>,
   path: string,
@@ -203,7 +181,6 @@ describeIntegration("flow observability integration", () => {
     const coreStep = stepsBody.steps.find((step) => step.node_key === "core");
     expect(coreStep?.operation).toBe("GET /api/v1/platforms/capabilities");
     expect(coreStep?.status).toBe("succeeded");
-    // Sanitized ledger: only whitelisted metadata keys, never tenant payloads.
     for (const step of stepsBody.steps) {
       expect(Object.keys(step.metadata)).toEqual([]);
     }
@@ -224,7 +201,6 @@ describeIntegration("flow observability integration", () => {
     const alphaRun = alphaRuns.runs.find((row) => row.request_id === requestId);
     expect(alphaRun).toBeDefined();
 
-    // Beta must not see alpha's run in the list, the detail, or its steps.
     const { response: betaRunsResponse } = await tracedRequest(
       betaApp,
       "/api/v1/flows/runs?limit=200",
@@ -248,7 +224,6 @@ describeIntegration("flow observability integration", () => {
     const betaStepsBody = (await betaSteps.json()) as { steps: unknown[] };
     expect(betaStepsBody.steps).toEqual([]);
 
-    // Alpha's own run remains visible with its steps.
     const { response: alphaSteps } = await tracedRequest(
       alphaApp,
       `/api/v1/flows/runs/${alphaRun?.id}/steps`,

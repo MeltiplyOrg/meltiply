@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { ArrowRight, MailCheck, ShieldCheck } from "lucide-react";
@@ -9,23 +10,14 @@ import { useSessionScope } from "@/hooks/use-session-scope";
 import { useInvitationPreview } from "@/lib/queries";
 import { useAcceptWorkspaceInvitation } from "@/lib/queries";
 import { authClient } from "@/lib/auth-client";
+import { workspaceRoleLabel } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
+import { apiErrorCode, userFacingErrorMessage } from "@/lib/frontend-errors";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
 import { Alert } from "@meltiply/ui/alert";
 import { BrandMark } from "@meltiply/ui/brand-mark";
 
-/**
- * Renders the invitation acceptance journey for a new or existing account.
- *
- * A new account signs up with the invited email locked and the token header
- * supplied to Better Auth; deployment policy requires email verification, and
- * membership activates automatically after verification. A signed-in visitor
- * accepts the token directly. The preview resolves before sign-in because token
- * possession is the credential for reading the invitation.
- *
- * @returns React element rendering the acceptance surface.
- */
 export default function InvitationAcceptRoute(): React.ReactElement {
   return (
     <AuthBoundary>
@@ -36,13 +28,8 @@ export default function InvitationAcceptRoute(): React.ReactElement {
   );
 }
 
-/**
- * Inner acceptance surface with access to the resolved session.
- *
- * @returns React element rendering preview, sign-up, or success states.
- */
 function InvitationAcceptance(): React.ReactElement {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const token = params.get("token");
@@ -68,12 +55,10 @@ function InvitationAcceptance(): React.ReactElement {
     acceptInvitation(token, {
       onError: (cause) => {
         acceptStarted.current = false;
-        const message =
-          cause instanceof Error ? cause.message : t("The invitation could not be accepted.");
-        if (message.toLowerCase().includes("verify")) {
+        if (apiErrorCode(cause) === "email_verification_required") {
           setNotice(t("Verify your email address, then return to this page to join."));
         } else {
-          setError(message);
+          setError(userFacingErrorMessage(cause, language));
         }
       },
       onSuccess: async () => {
@@ -81,7 +66,7 @@ function InvitationAcceptance(): React.ReactElement {
         await refreshSession();
       },
     });
-  }, [acceptInvitation, isSignedIn, pending, refreshSession, t, token]);
+  }, [acceptInvitation, isSignedIn, language, pending, refreshSession, t, token]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -108,7 +93,7 @@ function InvitationAcceptance(): React.ReactElement {
         );
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("The account could not be created."));
+      setError(errorMessage(cause, t("The account could not be created.")));
     } finally {
       setBusy(false);
     }
@@ -149,16 +134,12 @@ function InvitationAcceptance(): React.ReactElement {
               <p className="text-sm leading-relaxed text-ink-2">
                 {t("You were invited as {role} for {email}.", {
                   email: preview.data.email,
-                  role: roleLabel(t, preview.data.role),
+                  role: workspaceRoleLabel(t, preview.data.role),
                 })}
               </p>
             </div>
 
-            {!pending ? (
-              <Alert variant="destructive">
-                {t("This invitation is no longer pending. Ask an administrator to resend it.")}
-              </Alert>
-            ) : accepted ? (
+            {accepted ? (
               <div className="space-y-4">
                 <p role="status" className="text-sm text-ink-2">
                   {t("You joined the workspace.")}
@@ -172,6 +153,10 @@ function InvitationAcceptance(): React.ReactElement {
                   <ArrowRight className="size-4" aria-hidden="true" />
                 </Button>
               </div>
+            ) : !pending ? (
+              <Alert variant="destructive">
+                {t("This invitation is no longer pending. Ask an administrator to resend it.")}
+              </Alert>
             ) : isSignedIn ? (
               <div className="space-y-4">
                 <p role="status" className="text-sm text-ink-2">
@@ -264,15 +249,4 @@ function InvitationAcceptance(): React.ReactElement {
       </section>
     </main>
   );
-}
-
-/**
- * Maps an invitation role to its translated label.
- *
- * @param t - Translation function from the active i18n context.
- * @param role - Invited Workspace role.
- * @returns Human-readable role label.
- */
-function roleLabel(t: (message: string) => string, role: "admin" | "editor" | "viewer"): string {
-  return role === "admin" ? t("Admin") : role === "editor" ? t("Editor") : t("Viewer");
 }

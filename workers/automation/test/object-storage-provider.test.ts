@@ -41,13 +41,6 @@ describe("processor job capabilities", () => {
     );
   });
 
-  /**
-   * Media processing runs in a container that only ever receives object-scoped
-   * URLs, never bucket credentials. Switching to an S3-compatible origin must
-   * therefore keep working: the same two capabilities are minted, against the
-   * configured origin, with the output grant still create-only and still
-   * bounded by the persisted write hold.
-   */
   it("mints the same capabilities against an S3-compatible origin", async () => {
     const urls = await Effect.runPromise(processorJobUrlsEffect(s3Env, request));
 
@@ -60,11 +53,7 @@ describe("processor job capabilities", () => {
     expect(output.pathname).toBe(
       "/meltiply-assets/staging/org-1/asset-1/session-1/processing-image_auto_4096_long_edge",
     );
-    // The output grant stays create-only, so a retry cannot overwrite bytes an
-    // earlier attempt already committed.
     expect(output.searchParams.get("X-Amz-SignedHeaders")).toBe("host;if-none-match");
-    // The persisted write hold is the binding constraint: the grant must be
-    // clamped to the ~120s remaining on it, not stretched to the 900s default.
     const outputExpiry = Number(output.searchParams.get("X-Amz-Expires"));
     expect(outputExpiry).toBeGreaterThan(100);
     expect(outputExpiry).toBeLessThanOrEqual(120);

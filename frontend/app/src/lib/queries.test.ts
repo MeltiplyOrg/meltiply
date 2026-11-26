@@ -1,20 +1,11 @@
 import { QueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { describe, expect, it } from "vite-plus/test";
+import { ApiError } from "./api";
 import { invalidateQueryKeys, mutationInvalidations, queryKeys, runBulkDelete } from "./queries";
-import { WorkspaceService, type ApiClientError } from "./effect";
+import { WorkspaceService } from "./effect";
 
-/**
- * Real QueryClient state must refresh affected Post/profile/detail resources
- * while leaving static platform capabilities cached. Load helpers through
- * Vitest's module graph before tests, rather than timing cold imports as queries.
- */
 describe("React Query helpers", () => {
-  /**
-   * One Post mutation can change the Post itself, its attachment Asset rows,
-   * the independent per-Channel outcomes, and their calendar projection, so
-   * every Post write must refresh all four prefixes.
-   */
   it("refreshes Post, outcome, calendar, and attachment caches on every Post write", async () => {
     const queryClient = new QueryClient();
 
@@ -55,6 +46,27 @@ describe("React Query helpers", () => {
     );
   });
 
+  it("refreshes the audit trail after every audited write", async () => {
+    for (const keys of [
+      mutationInvalidations.workspaceSettings(),
+      mutationInvalidations.createBrandProfile(),
+      mutationInvalidations.updateBrandProfile(),
+      mutationInvalidations.deleteBrandProfile(),
+      mutationInvalidations.disconnectPlatform("platform-1"),
+      mutationInvalidations.confirmOAuthSelection(),
+      mutationInvalidations.reportingPreferences(),
+      mutationInvalidations.reportingFeedback(),
+    ]) {
+      const queryClient = new QueryClient();
+      const auditKey = queryKeys.workspaceAudit({ limit: 25, offset: 0 });
+      queryClient.setQueryData(auditKey, { entries: [] });
+
+      await invalidateQueryKeys(queryClient, keys);
+
+      expect(queryClient.getQueryState(auditKey)?.isInvalidated).toBe(true);
+    }
+  });
+
   it("does not refetch static platform data after an account disconnect", async () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(queryKeys.platforms(), [{ id: "platform-1" }]);
@@ -75,11 +87,6 @@ describe("React Query helpers", () => {
 });
 
 describe("bulk Post deletion", () => {
-  /**
-   * Six targets prove the bound rather than a coincidental two; the fake
-   * operation fails one typed request and dies on another so transport defects
-   * cannot abort the batch or hide committed successes.
-   */
   it("bounds concurrency, isolates failures, and keys each request by position", async () => {
     const targets = ["a", "b", "c", "d", "e", "f"].map((id) => ({
       brandProfileId: `profile-${id}`,
@@ -97,9 +104,17 @@ describe("bulk Post deletion", () => {
         yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 5)));
         inFlight -= 1;
         if (target.id === "b") {
-          return yield* Effect.fail({
-            message: "Post b was rejected",
-          } as unknown as ApiClientError);
+          return yield* Effect.fail(
+            new ApiError(new Response(null, { status: 400 }), {
+              error: {
+                code: "bad_request",
+                details: [],
+                message: "Post b was rejected",
+                request_id: "req-test",
+                retryable: false,
+              },
+            }),
+          );
         }
         if (target.id === "c") {
           return yield* Effect.die(new Error("network down"));

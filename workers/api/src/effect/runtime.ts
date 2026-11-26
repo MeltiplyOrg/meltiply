@@ -1,12 +1,6 @@
 import type { Context } from "hono";
 import { Cause, Effect, Exit, Layer, Option, Result } from "effect";
-import {
-  DomainError,
-  RequestContext,
-  makeRequestContext,
-  type DomainErrorCode,
-  type RequestContextData,
-} from "@meltiply/domain";
+import { RequestContext, type RequestContextData } from "@meltiply/domain";
 import {
   errorDiagnostic,
   effectLoggerLayer,
@@ -29,36 +23,13 @@ export interface RunWorkerEffectOptions {
   readonly status?: number;
 }
 
-interface IssueLike {
-  readonly actual?: unknown;
-  readonly code?: string;
-  readonly constraint?: string;
-  readonly field?: string | null;
-  readonly limit?: number | string;
-  readonly message: string;
-}
-
 interface TaggedErrorShape {
   readonly _tag?: string;
   readonly cause?: unknown;
   readonly code?: string;
-  readonly details?: readonly IssueLike[];
-  readonly issues?: readonly IssueLike[];
   readonly message?: string;
-  readonly retryAfterSeconds?: number;
   readonly status?: number;
 }
-
-/**
- * HTTP status mapping for transport-agnostic domain failures.
- *
- * Maps Effect-typed DomainError failures to their canonical status envelope
- * (`active_organization_required` → 403, `service_unavailable` → 503).
- */
-const DOMAIN_ERROR_STATUS: Readonly<Record<DomainErrorCode, number>> = {
-  active_organization_required: 403,
-  service_unavailable: 503,
-};
 
 interface ResolvedFailure {
   readonly code: string;
@@ -68,22 +39,6 @@ interface ResolvedFailure {
   readonly status: number;
 }
 
-/**
- * Resolves one typed Effect failure into canonical HTTP status, error code, and client-safe message.
- *
- * Implements the API Worker error sanitization contract:
- * 1. `CoreApiError` failures always preserve explicit client-facing messages and status codes.
- * 2. `DomainError` instances map status via `DOMAIN_ERROR_STATUS` and preserve their message.
- * 3. `ProviderAdapterError` rate limits surface 429 with retry-after and provider messages, while 5xx
- *    upstream provider failures are sanitized to "An unexpected error occurred." under 502 status.
- * 4. Tagged domain Effect errors (`Data.TaggedError` shapes) sanitize all 5xx messages (status >= 500,
- *    such as `DatabaseError` 500 or `StorageUnavailableError` 503) to prevent sensitive internal detail leakage,
- *    while preserving client-actionable 4xx messages (< 500).
- * 5. Unknown or unshaped values fall back to 500 internal_error with the generic sanitization message.
- *
- * @param error - Typed failure value extracted from the Effect exit cause.
- * @returns Resolved canonical failure envelope with status, error code, client message, details, and optional Retry-After.
- */
 function resolveFailure(error: unknown): ResolvedFailure {
   if (error instanceof CoreApiError) {
     return {
@@ -92,15 +47,6 @@ function resolveFailure(error: unknown): ResolvedFailure {
       message: error.message,
       retryAfterSeconds: error.retryAfterSeconds,
       status: error.status,
-    };
-  }
-  if (error instanceof DomainError) {
-    return {
-      code: error.code,
-      details: [],
-      message: error.message,
-      retryAfterSeconds: undefined,
-      status: DOMAIN_ERROR_STATUS[error.code] ?? 500,
     };
   }
   if (error instanceof ProviderAdapterError) {
@@ -131,9 +77,9 @@ function resolveFailure(error: unknown): ResolvedFailure {
         : (shaped.message ?? "An unexpected error occurred.");
     return {
       code: shaped.code ?? "internal_error",
-      details: normalizeErrorDetails(shaped),
+      details: [],
       message,
-      retryAfterSeconds: shaped.retryAfterSeconds,
+      retryAfterSeconds: undefined,
       status,
     };
   }
@@ -146,58 +92,6 @@ function resolveFailure(error: unknown): ResolvedFailure {
   };
 }
 
-/**
- * Converts one loose validation descriptor into a canonical OpenAPI ErrorDetail record.
- *
- * Domain ValidationError entries (ValidationIssue) carry no mandatory `code` and allow
- * string `limit` / arbitrary `actual` values, while the OpenAPI ErrorDetail schema
- * requires `code` and numeric bounds. Missing codes fall back to the constraint name,
- * then to "invalid"; non-numeric bounds are dropped rather than forwarded verbatim.
- *
- * @param issue - Single validation descriptor from `details` or `issues`.
- * @returns Canonical ErrorDetail record, e.g. `{code: "invalid", ...}` for `{message: "Required"}`.
- */
-function toCanonicalDetail(issue: IssueLike): Schemas["ErrorDetail"] {
-  return {
-    actual: typeof issue.actual === "number" ? issue.actual : undefined,
-    code: issue.code ?? issue.constraint ?? "invalid",
-    constraint: issue.constraint,
-    field: issue.field ?? null,
-    limit: typeof issue.limit === "number" ? issue.limit : undefined,
-    message: issue.message,
-  };
-}
-
-/**
- * Normalizes validation issues or detailed error descriptors into canonical OpenAPI ErrorDetail records.
- *
- * Translates domain ValidationError entries from either `details` or `issues` (both
- * ValidationIssue-shaped) into the standard details schema expected by errorResponse.
- * Both sources are mapped through the same conversion so contract-required fields
- * (`code`, numeric bounds) are always present regardless of which field is populated.
- *
- * @param error - The tagged error shape extracted from the Effect exit cause.
- * @returns An array of normalized error detail items.
- */
-function normalizeErrorDetails(error: TaggedErrorShape): readonly Schemas["ErrorDetail"][] {
-  if (error.details && error.details.length > 0) {
-    return error.details.map(toCanonicalDetail);
-  }
-  if (error.issues && error.issues.length > 0) {
-    return error.issues.map(toCanonicalDetail);
-  }
-  return [];
-}
-
-/**
- * Safely extracts the Cloudflare ExecutionContext from a Hono context without throwing if absent.
- *
- * Hono's `c.executionCtx` getter throws an error when no execution context is bound
- * (such as in unit tests or synthetic requests). This helper safely returns undefined instead.
- *
- * @param c - Hono context instance.
- * @returns ExecutionContext with waitUntil if present on the context, otherwise undefined.
- */
 function getExecutionCtx(c: Context<ApiWorkerEnvironment>):
   | {
       waitUntil?: (promise: Promise<unknown>) => void;
@@ -210,9 +104,6 @@ function getExecutionCtx(c: Context<ApiWorkerEnvironment>):
   }
 }
 
-/**
- * Per-request execution scope built fresh for every HTTP request.
- */
 interface RequestScope {
   readonly executionCtx: { waitUntil?: (promise: Promise<unknown>) => void } | undefined;
   readonly logContext: LogContext;
@@ -222,17 +113,6 @@ interface RequestScope {
   readonly spanPromises: Promise<void>[];
 }
 
-/**
- * Builds an isolated per-request scope from the Hono context.
- *
- * Derives fresh correlation IDs, tenant-bound RequestContext data, the client AbortSignal,
- * and logger/tracer layers on every call so auth claims and trace state never leak across
- * requests, even when the Worker isolate is reused. Span exports register with
- * executionCtx.waitUntil to avoid delaying the client response.
- *
- * @param c - Active Hono context for the current HTTP request.
- * @returns Isolated request scope with layers and logging context.
- */
 function requestScope(c: Context<ApiWorkerEnvironment>): RequestScope {
   const requestId =
     (c.get?.("requestId") as string | undefined) ??
@@ -243,12 +123,12 @@ function requestScope(c: Context<ApiWorkerEnvironment>): RequestScope {
   const actor = c.get?.("actor") as ResolvedActor | undefined;
   const tenantId = actor?.workspace.id;
 
-  const requestContextData: RequestContextData = makeRequestContext({
+  const requestContextData: RequestContextData = {
     requestId,
-    session: actor?.claims as unknown as Record<string, unknown> | undefined,
+    session: actor?.claims ?? null,
     tenantId,
     traceId,
-  });
+  };
 
   const workerEnv = c.env as { ENVIRONMENT?: string; VERSION?: string } | undefined;
   const logContext: LogContext = {
@@ -268,7 +148,7 @@ function requestScope(c: Context<ApiWorkerEnvironment>): RequestScope {
     try {
       executionCtx?.waitUntil?.(promise);
     } catch {
-      // In environments where executionCtx is unavailable or read-only
+      return;
     }
   };
 
@@ -288,16 +168,6 @@ function requestScope(c: Context<ApiWorkerEnvironment>): RequestScope {
   };
 }
 
-/**
- * Provides request layers, refuses already-aborted client requests before any
- * synchronous program work, passes active client cancellation to Effect, drains
- * tracer span exports when waitUntil is unavailable (test harnesses), and returns
- * the raw Exit for response mapping.
- *
- * @param scope - Isolated per-request scope from requestScope().
- * @param effect - Effect program statically constrained to require at most RequestContext.
- * @returns Raw Effect Exit distinguishing success, typed failure, and defect.
- */
 async function runRequestExit<A, E>(
   scope: RequestScope,
   effect: Effect.Effect<A, E, RequestContext>,
@@ -308,31 +178,12 @@ async function runRequestExit<A, E>(
   const exit = await Effect.runPromiseExit(Effect.provide(effect, scope.runtimeLayer), {
     signal: scope.signal,
   });
-  // In runtimes lacking executionCtx.waitUntil (e.g. test harnesses), await pending span exports
   if (!scope.executionCtx?.waitUntil && scope.spanPromises.length > 0) {
     await Promise.allSettled(scope.spanPromises);
   }
   return exit;
 }
 
-/**
- * Maps a failed Effect Exit cause into the canonical OpenAPI error envelope.
- *
- * Inspects for defects first so unhandled crashes/finalizers always take the 500
- * internal_error path; typed recoverable failures resolve through resolveFailure()
- * (CoreApiError/DomainError/ProviderAdapterError/validation shapes) preserving
- * status codes, error codes, details, and Retry-After headers. Pure request
- * interruption is recorded distinctly and returns 499/503 only after typed errors
- * and defects have been ruled out. 5xx outcomes are logged with diagnostics; 4xx
- * outcomes stay quiet for client errors.
- *
- * @param cause - Failure cause from the Effect exit.
- * @param requestId - Correlation ID for the error envelope.
- * @param logContext - Structured logging context for the request.
- * @param baseHeaders - Optional base headers (e.g. route success headers) to preserve.
- * @param signal - Incoming request signal used to distinguish client from server interruption.
- * @returns Fetch API Response for the resolved failure.
- */
 function failureToResponse(
   cause: Cause.Cause<unknown>,
   requestId: string,
@@ -340,7 +191,6 @@ function failureToResponse(
   baseHeaders?: HeadersInit,
   signal?: AbortSignal,
 ): Response {
-  // 1. Inspect for unexpected defects first. Any cause containing a defect must take the 500 internal error path.
   if (Cause.hasDies(cause)) {
     const dieResult = Cause.findDie(cause);
     const defect = Result.isSuccess(dieResult) ? dieResult.success.defect : Cause.squash(cause);
@@ -363,7 +213,6 @@ function failureToResponse(
     );
   }
 
-  // 2. Handle typed recoverable domain errors
   const maybeError = Cause.findErrorOption(cause);
   if (Option.isSome(maybeError)) {
     const resolved = resolveFailure(maybeError.value);
@@ -395,8 +244,6 @@ function failureToResponse(
     );
   }
 
-  // 3. Pure cancellation is neither a typed domain failure nor a defect. A request
-  // signal identifies client disconnects; other interruption sources are unavailable.
   if (Cause.hasInterruptsOnly(cause)) {
     const clientAborted = signal?.aborted ?? false;
     const status = clientAborted ? 499 : 503;
@@ -419,8 +266,6 @@ function failureToResponse(
     );
   }
 
-  // 4. A non-empty cause without typed errors, defects, or a pure interruption
-  // is an unclassified runtime failure.
   const defect = Cause.squash(cause);
   log("error", logContext, {
     error_code: "internal_error",
@@ -440,20 +285,6 @@ function failureToResponse(
   );
 }
 
-/**
- * Approved execution boundary adapter that runs an Effect program within a Cloudflare/Hono handler.
- *
- * Extracts request correlation and authentication context from the incoming Hono context,
- * provides isolated request-scoped dependencies (RequestContext, logger, and tracer),
- * registers background span export promises with Cloudflare's executionCtx.waitUntil,
- * inspects for defects first to ensure unhandled crashes/finalizers take the 500 error path,
- * and deterministically translates Effect Exit outcomes into OpenAPI-compliant JSON or ErrorEnvelope responses.
- *
- * @param c - Active Hono context for the current HTTP request.
- * @param effect - Effect program to execute, statically constrained to require at most RequestContext.
- * @param options - Optional custom HTTP status code and response headers.
- * @returns Promise resolving to a Fetch API Response conforming to OpenAPI contracts.
- */
 export async function runWorkerEffect<A, E>(
   c: Context<ApiWorkerEnvironment>,
   effect: Effect.Effect<A, E, RequestContext>,
@@ -473,24 +304,10 @@ export async function runWorkerEffect<A, E>(
     options?.headers,
     scope.signal,
   );
-  // The response is already fixed: this only decides whether the already-logged
-  // unexpected failure also becomes an opt-in diagnostic report.
   scheduleInvocationFailureDiagnostic(c, exit.cause, response.status);
   return response;
 }
 
-/**
- * Approved execution boundary for route handlers that shape their own Response.
- *
- * Shares the isolated request scope, span handling, and centralized typed-failure
- * mapping of runWorkerEffect, but passes through the program's Response verbatim
- * on success. Lets migrated routes keep exact status codes and headers (201/202/204,
- * ETag, Idempotency-Replayed, redirects) while moving failure mapping into one place.
- *
- * @param c - Active Hono context for the current HTTP request.
- * @param effect - Effect program resolving to a shaped Fetch Response.
- * @returns Program Response on success, canonical error envelope on failure.
- */
 export async function runRouteEffect<E>(
   c: Context<ApiWorkerEnvironment>,
   effect: Effect.Effect<Response, E, RequestContext>,

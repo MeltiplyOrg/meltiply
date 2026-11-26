@@ -8,6 +8,7 @@ import type { AutomationEnv } from "../src/env";
 import type { OutboxMessage } from "../src/messages";
 import { processNotificationMessage } from "../src/notifications";
 import { runSystemTransaction } from "./system-transaction";
+import { fakeSendEmail } from "./integration-doubles";
 
 const describeIntegration = describe;
 const organizationId = "20000000-0000-4000-8000-000000000005";
@@ -32,7 +33,7 @@ const env = {
     connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   ENVIRONMENT: "test",
-  MAIL: { send: sendMail } as unknown as SendEmail,
+  MAIL: fakeSendEmail((mail) => sendMail(mail as SentMail)),
   MAIL_FROM_ADDRESS: sender,
   MAIL_FROM_NAME: "Meltiply",
   VERSION: "1.0.0-target.0",
@@ -40,7 +41,6 @@ const env = {
 
 const deliveryKeys = new Set<string>();
 
-/** Builds one durable outbox message carrying the notification payload. */
 function message(
   key: string,
   kind: "publication_failed" | "channel_disconnected",
@@ -65,7 +65,6 @@ function message(
   };
 }
 
-/** Writes the notification preferences used by one scenario. */
 async function setPreferences(
   events: { channel_disconnected: boolean; publication_failed: boolean },
   email: boolean,
@@ -451,8 +450,6 @@ describeIntegration("notification delivery", () => {
       );
       expect(await alertCount()).toBe(1);
 
-      // An explicit disconnect or Brand Profile teardown deletes the account;
-      // there is no Channel left to reconnect, so it must not enqueue another alert.
       await runSystemTransaction(env, (client) =>
         client.query("DELETE FROM platform_accounts WHERE id = $1", [accountId]),
       );

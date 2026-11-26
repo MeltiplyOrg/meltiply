@@ -1,3 +1,4 @@
+import { errorMessage } from "@meltiply/domain";
 import React, { useEffect, useState } from "react";
 import { useBeforeUnload, useBlocker } from "react-router";
 import { Button } from "@meltiply/ui/button";
@@ -7,13 +8,6 @@ import { useMeltiplyAuth } from "./auth-provider";
 import { authClient } from "@/lib/auth-client";
 import { useI18n } from "@/lib/i18n";
 
-/**
- * Inline account-security controls, always password-reauthenticated.
- * Secrets remain local and clear on an allowed departure. Requests and unconfirmed
- * enrollment block section/route/history changes; document departures warn before
- * unloading. TOTP must be confirmed or explicitly cancelled on the server.
- * Security changes require a fresh sign-in; new backup codes replace the old set.
- */
 export function AccountSecurity(): React.ReactElement {
   const { user, signOut } = useMeltiplyAuth();
   const { t } = useI18n();
@@ -69,7 +63,7 @@ export function AccountSecurity(): React.ReactElement {
         } else setEnrollment(result);
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("Could not update account security."));
+      setError(errorMessage(cause, t("Could not update account security.")));
     } finally {
       setBusy(false);
     }

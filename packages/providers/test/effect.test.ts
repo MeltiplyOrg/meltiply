@@ -27,7 +27,6 @@ const input = {
   media: [],
 };
 
-/** Builds a raw adapter boundary fake; operations supplied by each scenario own behavior. */
 function adapter(overrides: Partial<ProviderAdapter> = {}): ProviderAdapter {
   return {
     capability: unavailableCapabilities()[0]!,
@@ -36,7 +35,6 @@ function adapter(overrides: Partial<ProviderAdapter> = {}): ProviderAdapter {
   };
 }
 
-/** Creates a bounded real HTTP client with only its network transport replaced. */
 function client(fetcher: typeof fetch): ProviderHttpClient {
   return new ProviderHttpClient({
     allowedOrigins: ["https://provider.example"],
@@ -44,7 +42,6 @@ function client(fetcher: typeof fetch): ProviderHttpClient {
   });
 }
 
-/** Extracts typed failures without converting Effect causes into telemetry. */
 function failure<A>(effect: Effect.Effect<A, ProviderAdapterError>) {
   return Effect.runPromise(
     Effect.match(effect, {
@@ -66,7 +63,7 @@ describe("Effect provider safety", () => {
         : Response.json({ value: "recovered" });
     });
     const read = withReadRetry(
-      http.requestEffect<{ value: string }>(context, {
+      http.requestEffect(context, {
         method: "GET",
         url: "https://provider.example/read",
       }),
@@ -103,11 +100,6 @@ describe("Effect provider safety", () => {
   });
 
   it("dispatches writes once despite random keys, 5xx, timeout, or malformed responses", async () => {
-    // Each cause has exactly one correct class: a defined 5xx is a transient
-    // server fault, while a timeout, a malformed body, or a transport error
-    // after dispatch leaves the remote write unconfirmed and must be
-    // `ambiguous` — never a retry-eligible class, which would let a blind
-    // retry duplicate the post.
     const cases: Array<[string, () => Promise<Response>, string, boolean]> = [
       ["5xx", async () => Response.json({}, { status: 503 }), "transient", true],
       [
@@ -313,7 +305,6 @@ describe("Effect provider safety", () => {
         notify = resolve;
       });
       let calls = 0;
-      // Every raw boundary blocks until aborted; no success values can hide a missed signal.
       const pending = (ctx: ProviderRequestContext): Promise<never> => {
         calls += 1;
         return new Promise((_resolve, reject) => {

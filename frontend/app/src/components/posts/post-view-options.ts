@@ -1,7 +1,6 @@
 import { CalendarDays, LayoutGrid, Table2 } from "lucide-react";
 import type { Post } from "@/types";
 
-/** Supported Posts collection views; Composer is a workflow, not a collection view. */
 export const POST_COLLECTION_MODES = ["table", "calendar", "grid"] as const;
 export type PostCollectionMode = (typeof POST_COLLECTION_MODES)[number];
 export const POST_VIEW_OPTIONS = {
@@ -10,18 +9,23 @@ export const POST_VIEW_OPTIONS = {
   grid: { label: "Grid", icon: LayoutGrid },
 } as const;
 
-/** One measured counter's contract key, short header, and full accessible/menu name. */
+export function postViewLabel(mode: PostCollectionMode, t: (message: string) => string): string {
+  if (mode === "table") return t("Table");
+  if (mode === "calendar") return t("Calendar");
+  return t("Grid");
+}
+
 export interface PostAnalyticsColumn {
   id: keyof NonNullable<Post["analytics"]>;
   label: string;
   name: string;
 }
 
-/**
- * Returns the fixed analytics order with localized short headers and full menu/
- * accessible names. Literal translation calls keep every metric catalog-checked;
- * callers may memoize the descriptors by translator.
- */
+const analyticsLabelMapCache = new WeakMap<
+  (message: string) => string,
+  ReadonlyMap<PostAnalyticsColumn["id"], string>
+>();
+
 export function postAnalyticsColumns(
   t: (message: string) => string,
 ): readonly PostAnalyticsColumn[] {
@@ -35,4 +39,15 @@ export function postAnalyticsColumns(
     { id: "impressions", label: t("Impr."), name: t("Impressions") },
     { id: "reach", label: t("Reach"), name: t("Reach") },
   ];
+}
+
+export function postAnalyticsLabelMap(
+  t: (message: string) => string,
+): ReadonlyMap<PostAnalyticsColumn["id"], string> {
+  let cached = analyticsLabelMapCache.get(t);
+  if (!cached) {
+    cached = new Map(postAnalyticsColumns(t).map((column) => [column.id, column.name]));
+    analyticsLabelMapCache.set(t, cached);
+  }
+  return cached;
 }

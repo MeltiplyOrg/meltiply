@@ -12,15 +12,8 @@ COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git && rm -rf /var/lib/apt/lists/*
 WORKDIR /source
 ENV WRANGLER_SEND_METRICS=false CI=true
-# Maintainer improvement-reporting destination baked into the released runtime.
-# Both values are publishable deployment configuration, not secrets: the project
-# token authorizes event ingestion only. Supplied by the release workflow from
-# the maintainer's project; empty means the image ships no destination and both
-# reporting categories stay off instead of failing deployment.
 ARG REPORTING_POSTHOG_PROJECT_TOKEN=""
 ARG REPORTING_POSTHOG_HOST=""
-# Preserve isolated workspace links while caching installs independently of source.
-# Keep this manifest list aligned with the root workspace globs.
 COPY package.json bun.lock bunfig.toml ./
 COPY patches ./patches
 COPY frontend/app/package.json ./frontend/app/
@@ -39,7 +32,6 @@ COPY workers/api/package.json ./workers/api/
 COPY workers/automation/package.json ./workers/automation/
 COPY workers/state/package.json ./workers/state/
 RUN bun install --frozen-lockfile
-# Typecheck smoke scripts with their dev dependencies without adding them to runtime.
 COPY scripts/selfhost/package.json scripts/selfhost/package-lock.json ./scripts/selfhost/
 RUN npm ci --prefix scripts/selfhost --include=dev
 COPY . .
@@ -58,6 +50,6 @@ CMD ["node", "scripts/selfhost/server.mjs"]
 
 FROM postgres:18.6-alpine AS database
 COPY packages/database/migrations /migrations
-COPY scripts/cloudflare-local/postgres/migrate.sh /local/migrate.sh
+COPY scripts/cloudflare-local/postgres/migrate.sh scripts/cloudflare-local/postgres/local-roles.sql scripts/cloudflare-local/postgres/grants.sql /local/
 COPY scripts/selfhost/database.sh /local/selfhost.sh
 ENTRYPOINT ["sh", "/local/selfhost.sh"]

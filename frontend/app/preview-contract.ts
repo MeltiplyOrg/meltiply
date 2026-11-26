@@ -59,7 +59,6 @@ const pathAttributeSchema = Schema.Struct({
   value: Schema.Struct({ type: Schema.Literal("Literal"), value: Schema.String }),
 });
 
-/** Reads literal Route paths from the actual TSX router, not a second hand-maintained navigation inventory. Wildcard fallbacks are excluded. */
 function frontendRoutes(): string[] {
   const ast = parseSync(routerPath, readFileSync(routerPath, "utf8"), {
     lang: "tsx",
@@ -68,7 +67,6 @@ function frontendRoutes(): string[] {
   if (ast.errors.length)
     throw new Error(`Cannot compile preview routes: ${ast.errors[0]?.message}`);
   const routes = new Set<string>();
-  /** Walks parser-owned objects; only schema-validated Route/path nodes contribute browser destinations. */
   function visit(value: unknown): void {
     if (Array.isArray(value)) {
       value.forEach(visit);
@@ -87,7 +85,6 @@ function frontendRoutes(): string[] {
   return [...routes];
 }
 
-/** Compiles documented transport outcomes, then overlays tenant-scoped public data from the disposable SQL seed compiler. Catalog mismatches, invalid JSON, or seed-process failures abort the build; filesystem and database work never enters the browser graph. */
 async function compileContract(): Promise<PreviewContract> {
   const source = Schema.decodeUnknownSync(previewObjectSchema)(
     YAML.parse(readFileSync(specificationPath, "utf8"), { merge: true }),
@@ -200,7 +197,6 @@ async function compileContract(): Promise<PreviewContract> {
   return { operations, fixtures, seedFixtures: seed.fixtures, routes: frontendRoutes() };
 }
 
-/** Supplies a browser-safe, transport-header-free manifest only to preview/test builds; parser and filesystem dependencies never enter the frontend bundle. */
 export function previewContractPlugin(): Plugin {
   let compiled: Promise<PreviewContract> | undefined;
   return {

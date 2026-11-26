@@ -2,7 +2,6 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-session";
 
-/** Whether the focused element matches the browser's keyboard-only focus ring. */
 async function focusedElementIsFocusVisible(page: Page): Promise<boolean> {
   return page.evaluate(() => {
     const active = document.activeElement;
@@ -10,32 +9,23 @@ async function focusedElementIsFocusVisible(page: Page): Promise<boolean> {
   });
 }
 
-/** Asserts the page itself has no horizontal document overflow. */
 async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
 }
 
-/** Asserts a segmented radio has focus through keyboard modality, not a pointer click. */
 async function expectKeyboardFocus(page: Page, radio: Locator): Promise<void> {
   await expect(radio).toBeFocused();
   expect(await focusedElementIsFocusVisible(page)).toBe(true);
 }
 
-/** One rendered frame of the segmented highlight's translate/scale. */
 interface HighlightSample {
   checked: string | null;
   scaleX: number;
   translateX: number;
 }
 
-/**
- * Samples the travelling highlight around one click and reports the frames after
- * the checked value changed. The rendered transform — not a transition property —
- * proves whether the pill travelled, so reduced motion is measured rather than
- * inferred from CSS.
- */
 async function sampleHighlightTravel(
   page: Page,
   group: Locator,
@@ -109,10 +99,6 @@ async function sampleHighlightTravel(
   });
 }
 
-/**
- * Rendered height of one segmented track and every segment inside it, so the
- * coarse-pointer growth contract is measured on real layout instead of classes.
- */
 async function segmentedGeometry(
   track: Locator,
 ): Promise<{ trackHeight: number; itemHeights: number[] }> {
@@ -127,12 +113,6 @@ async function segmentedGeometry(
   });
 }
 
-/**
- * Real-stack proof that the shared segmented contract reaches the Posts views:
- * one checked radio per radiogroup, arrow/Home/End selection with focus moved
- * to the chosen option, the calendar period groups, reduced-motion selection,
- * and no phone-width document overflow.
- */
 test("keeps segmented selection keyboard-complete across Posts and Calendar", async ({
   page,
 }, testInfo) => {
@@ -148,13 +128,10 @@ test("keeps segmented selection keyboard-complete across Posts and Calendar", as
   await expect(postView).toBeVisible();
   await expect(postView.getByRole("radio", { checked: true })).toHaveCount(1);
 
-  // Fine pointers keep the canonical density: 24px items inside a 28px track.
   const fineGeometry = await segmentedGeometry(postView);
   expect(fineGeometry.trackHeight).toBeCloseTo(28, 0);
   for (const height of fineGeometry.itemHeights) expect(height).toBeCloseTo(24, 0);
 
-  // Grid is the last option: ArrowLeft reaches Calendar, ArrowRight returns,
-  // then Home/End jump to the first and last checked options.
   await gridRadio.click();
   await expect(gridRadio).toBeChecked();
   await page.keyboard.press("ArrowLeft");
@@ -174,14 +151,11 @@ test("keeps segmented selection keyboard-complete across Posts and Calendar", as
     path: testInfo.outputPath("shared-components-posts-radio-keyboard.png"),
   });
 
-  // Normal motion travels: the rendered pill is at a non-resting transform on
-  // at least one frame after the checked value changes.
   const travel = await sampleHighlightTravel(page, postView, tableRadio);
   expect(travel.changed).toBe(true);
   expect(travel.travelledFrames).toBeGreaterThan(0);
   await expect(tableRadio).toBeChecked();
 
-  // Calendar swaps the collection surface and owns its own periodic radiogroup.
   await calendarRadio.click();
   const calendar = page.getByRole("region", { name: "Publishing calendar", exact: true });
   await expect(calendar).toBeVisible();
@@ -207,8 +181,6 @@ test("keeps segmented selection keyboard-complete across Posts and Calendar", as
     path: testInfo.outputPath("shared-components-calendar-period-keyboard.png"),
   });
 
-  // Return to the grid for the phone capture; reduced-motion travel boots in its
-  // own session-level test so the preference exists before the highlight mounts.
   await gridRadio.click();
   await expect(gridRadio).toBeChecked();
   const gridSurface = page
@@ -228,12 +200,8 @@ test("keeps segmented selection keyboard-complete across Posts and Calendar", as
     fullPage: true,
   });
 
-  // Phones replace this segmented control with the compact view dropdown, so
-  // return to the desktop toolbar before exercising the same control again.
   await page.setViewportSize({ width: 1440, height: 1000 });
   await expect(postView).toBeVisible();
-  // A preference changed while the page is open re-renders the highlight store;
-  // the next selection commits without rendered travel.
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.evaluate(() => {
     const { promise, resolve } = Promise.withResolvers<void>();
@@ -248,11 +216,6 @@ test("keeps segmented selection keyboard-complete across Posts and Calendar", as
   await expect(tableRadio).toBeChecked();
 });
 
-/**
- * A session that starts with the OS reduced-motion preference proves the
- * travelling pill commits the checked state without rendered translation or
- * scale, while the selected view still switches.
- */
 test.describe("reduced motion segmented travel", () => {
   test.use({ reducedMotion: "reduce" });
 
@@ -285,12 +248,6 @@ test.describe("reduced motion segmented travel", () => {
   });
 });
 
-/**
- * Real-stack proof of the centered dialog contract: the ordinary editor
- * dismisses from outside/Escape with a localized Close and returns focus to its
- * Edit trigger, while the destructive confirmation blocks outside dismissal and
- * focuses Cancel until Escape cancels it back into the still-open editor.
- */
 test("keeps centered dialog dismissal and destructive focus distinct", async ({
   page,
 }, testInfo) => {
@@ -316,7 +273,6 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
   await expect(editor).toBeHidden();
   await expect(editTrigger).toBeFocused();
 
-  // The backdrop belongs to the ordinary dialog, so a real pointer sequence closes it.
   await editTrigger.click();
   await expect(editor).toBeVisible();
   await page
@@ -325,7 +281,6 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
   await expect(editor).toBeHidden();
   await expect(editTrigger).toBeFocused();
 
-  // The destructive confirmation cannot be dismissed by the same outside click.
   await editTrigger.click();
   await expect(editor).toBeVisible();
   const deleteTrigger = editor.getByRole("button", { name: "Delete profile", exact: true });
@@ -360,11 +315,9 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
   await expect(editor).toBeHidden();
   await expect(editTrigger).toBeFocused();
 
-  // The same editor keeps its fixed box inside a short phone viewport.
   await page.setViewportSize({ width: 320, height: 480 });
   await editTrigger.click();
   await expect(editor).toBeVisible();
-  // The bottom-up entrance starts below the viewport; measure the resting box.
   await expect
     .poll(() =>
       editor.evaluate((element) =>
@@ -384,18 +337,12 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
     path: testInfo.outputPath("shared-components-dialog-phone-320x480.png"),
   });
 
-  // The 51-swatch palette is taller than a phone dialog. The failure text and
-  // the action footer therefore share one opaque, pinned region: visible
-  // without scrolling, while the palette scrolls natively behind it and every
-  // swatch stays reachable at maximum scroll.
   await page.setViewportSize({ width: 320, height: 568 });
   const actionRegion = editor.locator("[data-brand-profile-dialog-actions]");
   const submitAction = editor.getByRole("button", { name: "Update profile", exact: true });
   await expect(actionRegion).toBeVisible();
   await expect(submitAction).toBeInViewport({ ratio: 1 });
   await expect(deleteTrigger).toBeInViewport({ ratio: 1 });
-  // The viewport changed while the dialog stayed mounted; wait for the measured
-  // reserve to follow the region before capturing the exact contract.
   await expect
     .poll(() =>
       editor.evaluate((element) => {
@@ -427,11 +374,8 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
   expect(pinnedContract.scrollTop).toBe(0);
   expect(pinnedContract.minSwatchLeft).toBeGreaterThanOrEqual(pinnedContract.contentLeft);
   expect(pinnedContract.maxSwatchRight).toBeLessThanOrEqual(pinnedContract.contentRight);
-  // Opaque surface: the scrolling palette must not read through the actions.
   expect(pinnedContract.backgroundColor).toMatch(/^rgb/);
   expect(pinnedContract.backgroundColor).not.toMatch(/rgba\([^)]*,\s*0(?:\.\d+)?\)$/);
-  // The focus reserve is exactly the pinned block's rendered height, not merely
-  // a pixel-shaped string.
   expect(pinnedContract.scrollPaddingBottom).toBe(`${pinnedContract.regionHeight}px`);
 
   await editor.evaluate((element) => {
@@ -453,7 +397,6 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
       regionTop: region?.getBoundingClientRect().top ?? Number.NEGATIVE_INFINITY,
     };
   });
-  // At maximum scroll the final swatch rests fully above the pinned region.
   expect(maxScrollContract.lastSwatchBottom).toBeLessThanOrEqual(maxScrollContract.regionTop + 1);
   await expect(editor.getByRole("radio").last()).toBeInViewport();
   await page.screenshot({
@@ -461,8 +404,6 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
     path: testInfo.outputPath("shared-components-dialog-pinned-320x568.png"),
   });
 
-  // From the top of the dialog, End jumps to the last swatch. Focus scrolling
-  // must leave that swatch above the pinned region rather than underneath it.
   await editor.evaluate((element) => {
     element.scrollTop = 0;
   });
@@ -484,8 +425,6 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
     )
     .toBe(true);
 
-  // The pinned region survives the wider phone and a software-keyboard-height
-  // viewport without moving the primary action out of reach.
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(submitAction).toBeInViewport({ ratio: 1 });
   await expect(deleteTrigger).toBeInViewport({ ratio: 1 });
@@ -502,8 +441,6 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
   await expect(editor).toBeHidden();
   await expect(editTrigger).toBeFocused();
 
-  // Both palettes keep the pinned surface opaque; the dark pass reloads with
-  // the shared theme cookie so the documented preference path applies.
   await page.evaluate(() => {
     localStorage.setItem("meltiply.theme", "dark");
     document.cookie = "meltiply-theme=dark; Path=/; Max-Age=31536000; SameSite=Lax";
@@ -533,16 +470,7 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
   });
 });
 
-/**
- * Real-stack proof of the coarse-pointer segmented contract: touch emulation
- * makes `(pointer: coarse)` match, so the shared atom, line tab strip, and
- * account-menu theme radios must render the documented 44px target inside a
- * track that grows instead of clipping them. A width-constrained Language track
- * must start at its first option and scroll to its last at 320px.
- */
 test.describe("coarse pointer segmented chrome", () => {
-  // `hasTouch` alone makes Chromium report `(pointer: coarse)`; the assertion in
-  // the test keeps this from silently running as a fine pointer.
   test.use({ hasTouch: true });
 
   test("keeps segmented targets coarse-sized and the scroll origin reachable", async ({
@@ -554,7 +482,6 @@ test.describe("coarse pointer segmented chrome", () => {
     await openIsolatedOwnerWorkspace(page);
     await waitForWorkspace(page);
 
-    // Posts atom: every view target is at least 44px tall and the track grew.
     const postView = page.getByRole("radiogroup", { name: "Post view", exact: true });
     await expect(postView.getByRole("radio")).toHaveCount(3);
     const postsGeometry = await segmentedGeometry(postView);
@@ -567,7 +494,6 @@ test.describe("coarse pointer segmented chrome", () => {
       path: testInfo.outputPath("shared-components-coarse-posts-1440.png"),
     });
 
-    // The account-menu theme segments are reachable on the desktop rail.
     const accountTrigger = page.getByRole("button", { name: "Account menu", exact: true });
     await accountTrigger.click();
     const themeGroup = page
@@ -576,9 +502,6 @@ test.describe("coarse pointer segmented chrome", () => {
     await expect(themeGroup.getByRole("menuitemradio")).toHaveCount(3);
     const themeGeometry = await segmentedGeometry(themeGroup);
     expect(themeGeometry.trackHeight).toBeGreaterThanOrEqual(43.5);
-    // The documented 44px floor renders at 43.35px on the hosted Chromium
-    // runner because subpixel layout rounds the min-height; keep a 1px
-    // measurement tolerance rather than a font-dependent fraction.
     for (const height of themeGeometry.itemHeights) {
       expect(height).toBeGreaterThanOrEqual(43);
     }
@@ -589,7 +512,6 @@ test.describe("coarse pointer segmented chrome", () => {
     await page.keyboard.press("Escape");
     await expect(accountTrigger).toBeFocused();
 
-    // The Channels line tabs grow the strip rather than clipping the trigger.
     await page.goto("/channels");
     const channelTabs = page.getByRole("tablist", {
       name: "Channel directory sections",
@@ -606,8 +528,6 @@ test.describe("coarse pointer segmented chrome", () => {
       path: testInfo.outputPath("shared-components-coarse-channels-tabs.png"),
     });
 
-    // Settings Language: the constrained track starts at its first option and
-    // the last option is reachable by scrolling at phone width.
     await page.goto("/settings?section=language");
     const languageTrack = page.getByRole("radiogroup", { name: "Language", exact: true });
     await expect(languageTrack).toBeVisible();
@@ -658,12 +578,6 @@ test.describe("coarse pointer segmented chrome", () => {
   });
 });
 
-/**
- * Real-stack proof of the implemented interface language preference: the
- * shared control changes the document language and visible chrome immediately,
- * functional consent persists it across reload, and selecting English restores
- * the source catalog without a second preference owner.
- */
 test("persists the implemented interface language across a reload", async ({ page }) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 1440, height: 1000 });

@@ -47,14 +47,14 @@ export function isPrivacyLevel(value: unknown): value is TikTokPrivacyLevel {
   return typeof value === "string" && privacyLevels.has(value);
 }
 
-export function patternIdentifier(value: unknown, pattern: RegExp): string | undefined {
+function patternIdentifier(value: unknown, pattern: RegExp): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim();
   return pattern.test(normalized) ? normalized : undefined;
 }
 
 export const tiktokIdentifier = (value: unknown) => patternIdentifier(value, identifierPattern);
-export const openId = (value: unknown) => patternIdentifier(value, openIdPattern);
+const openId = (value: unknown) => patternIdentifier(value, openIdPattern);
 
 export function accountId(credentials: ProviderCredentials): string {
   const value = openId(credentials.accountId);
@@ -62,7 +62,7 @@ export function accountId(credentials: ProviderCredentials): string {
   return value;
 }
 
-export function apiFailureStatus(code: string): number {
+function apiFailureStatus(code: string): number {
   if (authErrorCodes.includes(code)) return 401;
   if (code.includes("rate_limit")) return 429;
   if (
@@ -76,7 +76,7 @@ export function apiFailureStatus(code: string): number {
   return 400;
 }
 
-export function apiError(code: string): ProviderAdapterError {
+function apiError(code: string): ProviderAdapterError {
   const normalized = code.trim().toLowerCase();
   if (!errorCodePattern.test(normalized)) throw malformed();
   return rejected(`tiktok_${normalized}`, apiFailureStatus(normalized));
@@ -92,7 +92,7 @@ export function envelope(value: unknown, sideEffectPossible = false): Record<str
   return data;
 }
 
-export function scopeSet(value: unknown): string[] | undefined {
+function scopeSet(value: unknown): string[] | undefined {
   const scopes = boundedString(value, 4_096)
     ?.split(",")
     .map((scope) => scope.trim());
@@ -190,7 +190,7 @@ export function operationId(operation: TikTokOperation): string {
   return `${operation.inbox ? "inbox" : "publish"}:${operation.publishId}`;
 }
 
-export function parseOperationId(value: unknown): TikTokOperation | undefined {
+function parseOperationId(value: unknown): TikTokOperation | undefined {
   const match = tiktokIdentifier(value)?.match(operationPattern);
   const publishId = tiktokIdentifier(match?.[2]);
   return match && publishId ? { inbox: match[1] === "inbox", publishId } : undefined;
@@ -202,7 +202,7 @@ export function requiredOperation(value: unknown): TikTokOperation {
   return operation;
 }
 
-export function failedPublishCode(reason: string | undefined): { code: string; status: number } {
+function failedPublishCode(reason: string | undefined): { code: string; status: number } {
   return {
     code: reason && errorCodePattern.test(reason) ? `tiktok_${reason}` : "tiktok_publish_failed",
     status: retryableFailReasons.includes(reason ?? "")

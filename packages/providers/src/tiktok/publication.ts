@@ -57,7 +57,7 @@ export function pullMedia(media: ProviderMedia, mediaPrefix: URL): PullMedia {
   };
 }
 
-export function publishOptions(input: PublishInput): TikTokPublishOptions {
+function publishOptions(input: PublishInput): TikTokPublishOptions {
   const value = input.providerOptions?.tiktok;
   if (
     !value ||
@@ -80,15 +80,11 @@ export function publishOptions(input: PublishInput): TikTokPublishOptions {
   return value;
 }
 
-export function positiveInteger(
-  value: number | undefined,
-  minimum: number,
-  maximum: number,
-): boolean {
+function positiveInteger(value: number | undefined, minimum: number, maximum: number): boolean {
   return value !== undefined && Number.isInteger(value) && value >= minimum && value <= maximum;
 }
 
-export function videoInvalid(media: PullMedia, maxDuration: number): boolean {
+function videoInvalid(media: PullMedia, maxDuration: number): boolean {
   const { durationSeconds, height, width } = media.metadata ?? {};
   return (
     !videoTypes.includes(media.contentType) ||
@@ -102,7 +98,7 @@ export function videoInvalid(media: PullMedia, maxDuration: number): boolean {
   );
 }
 
-export function photoInvalid(media: PullMedia): boolean {
+function photoInvalid(media: PullMedia): boolean {
   const { height, width } = media.metadata ?? {};
   return (
     !imageTypes.includes(media.contentType) ||

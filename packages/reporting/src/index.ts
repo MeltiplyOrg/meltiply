@@ -62,6 +62,21 @@ export {
   type PreferencesRow,
 } from "./policy";
 export {
+  createFakeReportingRepository,
+  createPostgresPublicationUsageRepository,
+  createPostgresReportingRepository,
+  FakeReportingStore,
+  type FakeDeliveryReceipt,
+  type FakePendingReportRecord,
+  type PublicationUsageRepository,
+  type ReportingFeedbackRow,
+  type ReportingPendingInsert,
+  type ReportingPendingLeaseState,
+  type ReportingPendingRow,
+  type ReportingRepository,
+  type ReportingTransaction,
+} from "./repository";
+export {
   boundedCount,
   containsForbiddenValue,
   diagnosticProperties,

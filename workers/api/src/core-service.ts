@@ -16,7 +16,7 @@ import {
   activeBrandProfilePredicate,
   requireActiveBrandProfileEffect,
 } from "./brand-profile-guard";
-import { disconnectPlatformAccountEffect } from "./brand-profile-service";
+import { disconnectPlatformAccountEffect } from "./repositories/postgres-brand-profile-repository";
 import { CoreApiError, type CoreApiService, type CoreServiceError } from "./core-types";
 import {
   activeOrganizationIdEffect,

@@ -7,8 +7,10 @@ import type { CoreApiError, IdempotentResult } from "./core-types";
 import { activeOrganizationIdEffect, withTenantTransactionEffect } from "./database";
 import type { ApiWorkerEnv } from "./env";
 import {
+  clientIdempotencyLedger,
   completeIdempotencyEffect,
   hashIdempotencyRequestEffect,
+  idempotentMutation,
   reserveIdempotencyEffect,
 } from "./idempotency";
 
@@ -21,31 +23,15 @@ export function withIdempotentMutation<T, E = CoreApiError | DatabaseError>(
   status: number,
   run: (client: EffectTransactionClient) => Effect.Effect<T, E>,
 ): Effect.Effect<IdempotentResult<T>, E | CoreApiError | DatabaseError> {
-  return Effect.gen(function* () {
-    const prior = yield* reserveIdempotencyEffect(
-      client,
-      organizationId,
-      operation,
-      idempotencyKey,
-      requestHash,
-    );
-    if (prior) {
-      return {
-        replayed: true,
-        value: prior.response_body as T,
-      };
-    }
-    const value = yield* run(client);
-    yield* completeIdempotencyEffect(
-      client,
-      organizationId,
-      operation,
-      idempotencyKey,
-      status,
-      value,
-    );
-    return { replayed: false, value };
-  });
+  return idempotentMutation(
+    clientIdempotencyLedger(client),
+    organizationId,
+    operation,
+    idempotencyKey,
+    requestHash,
+    status,
+    () => run(client),
+  );
 }
 
 export function withTenantIdempotentMutation<T, E = CoreApiError | DatabaseError>(

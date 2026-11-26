@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import {
   ContractValidator,
@@ -85,21 +85,25 @@ function brandProfileQueryParameter(
 describe("brand profile contract", async () => {
   const document = await loadContractDocument();
   const validator = await ContractValidator.create();
+  const owned = brandOwnedMutations(document);
 
-  it("exposes the full brand profile management operation set", () => {
-    const expected: Array<["delete" | "get" | "patch" | "post", string, string]> = [
-      ["get", "/brand-profiles", "listBrandProfiles"],
-      ["post", "/brand-profiles", "createBrandProfile"],
-      ["get", "/brand-profiles/deleted", "listDeletedBrandProfiles"],
-      ["get", "/brand-profiles/{profile_id}", "getBrandProfile"],
-      ["patch", "/brand-profiles/{profile_id}", "updateBrandProfile"],
-      ["delete", "/brand-profiles/{profile_id}", "deleteBrandProfile"],
-      ["post", "/brand-profiles/{profile_id}/restore", "restoreBrandProfile"],
-    ];
-    for (const [method, path, operationId] of expected) {
-      const operation = document.paths[path]?.[method];
-      expect(operation?.operationId, `${method.toUpperCase()} ${path}`).toBe(operationId);
+  beforeAll(() => {
+    for (const operationId of [...owned, "createBrandProfile", "updateBrandProfile"]) {
+      validator.validateRequest(operationId, {});
     }
+    validator.validateResponse("listBrandProfiles", 200, {});
+  });
+
+  it.each([
+    ["get", "/brand-profiles", "listBrandProfiles"],
+    ["post", "/brand-profiles", "createBrandProfile"],
+    ["get", "/brand-profiles/deleted", "listDeletedBrandProfiles"],
+    ["get", "/brand-profiles/{profile_id}", "getBrandProfile"],
+    ["patch", "/brand-profiles/{profile_id}", "updateBrandProfile"],
+    ["delete", "/brand-profiles/{profile_id}", "deleteBrandProfile"],
+    ["post", "/brand-profiles/{profile_id}/restore", "restoreBrandProfile"],
+  ] as const)("exposes %s %s", (method, path, operationId) => {
+    expect(document.paths[path]?.[method]?.operationId).toBe(operationId);
   });
 
   it("defines the workspace-owned brand profile resource with lifecycle timestamps", () => {
@@ -168,26 +172,21 @@ describe("brand profile contract", async () => {
     expect(schemaOf(document, "UpdateBrandProfileRequest").properties?.color).toEqual(palette);
   });
 
-  it("filters aggregate reads by an optional brand_profile_id query parameter", () => {
-    const filtered: Array<["get", string]> = [
-      ["get", "/platforms"],
-      ["get", "/posts"],
-      ["get", "/distributions"],
-      ["get", "/calendar"],
-      ["get", "/analytics"],
-      ["get", "/analytics/posts"],
-      ["get", "/analytics/dashboard"],
-      ["get", "/inbox"],
-    ];
-    for (const [method, path] of filtered) {
-      const parameter = brandProfileQueryParameter(document, path, method);
-      expect(parameter, `GET ${path} brand_profile_id`).toBeDefined();
-      expect(parameter!.required ?? false, `GET ${path}`).toBe(false);
-      expect(parameter!.schema, `GET ${path}`).toMatchObject({
-        type: "string",
-        format: "uuid",
-      });
-    }
+  it.each([
+    "/platforms",
+    "/posts",
+    "/distributions",
+    "/calendar",
+    "/analytics",
+    "/analytics/posts",
+    "/analytics/dashboard",
+    "/inbox",
+  ])("filters GET %s by an optional brand_profile_id", (path) => {
+    const parameter = brandProfileQueryParameter(document, path, "get");
+
+    expect(parameter).toBeDefined();
+    expect(parameter!.required ?? false).toBe(false);
+    expect(parameter!.schema).toMatchObject({ type: "string", format: "uuid" });
   });
 
   it("requires a brand_profile_id query parameter to read queues", () => {
@@ -219,59 +218,64 @@ describe("brand profile contract", async () => {
     });
   });
 
-  it("accepts and rejects brand profile payloads at the validator seam", () => {
-    expect(
-      validator.validateRequest("createBrandProfile", {
-        name: "Alpha Brand",
-        description: "Editorial tools for independent publishers.",
-        color: paletteColor,
-      }),
-    ).toBeUndefined();
-    expect(
-      validator.validateRequest("createBrandProfile", {
-        name: "Alpha Brand",
-        color: "not-a-palette-color",
-      }),
-    ).toMatch(/^data\/color must be equal to one of the allowed values/);
-    expect(validator.validateRequest("createBrandProfile", { name: "Alpha Brand" })).toMatch(
+  const named = { name: "Alpha Brand", color: paletteColor };
+  const accepted: [string, string, unknown][] = [
+    ["a described profile", "createBrandProfile", { ...named, description: "Editorial tools." }],
+    ["a colour change", "updateBrandProfile", { color: paletteColor }],
+    ["a cleared description", "updateBrandProfile", { description: null }],
+    ["a description of 280 characters", "updateBrandProfile", { description: "x".repeat(280) }],
+  ];
+  const rejected: [string, string, unknown, RegExp][] = [
+    [
+      "a colour outside the palette",
+      "createBrandProfile",
+      { ...named, color: "not-a-palette-color" },
+      /^data\/color must be equal to one of the allowed values/,
+    ],
+    [
+      "a missing colour",
+      "createBrandProfile",
+      { name: "Alpha Brand" },
       /required property 'color'/,
-    );
-    expect(
-      validator.validateRequest("createBrandProfile", {
-        name: "Alpha Brand",
-        color: paletteColor,
-        description: "",
-      }),
-    ).toMatch(/data\/description must match pattern/);
-    expect(
-      validator.validateRequest("updateBrandProfile", { color: paletteColor }),
-    ).toBeUndefined();
-    expect(validator.validateRequest("updateBrandProfile", { description: null })).toBeUndefined();
-    expect(
-      validator.validateRequest("updateBrandProfile", { description: "x".repeat(280) }),
-    ).toBeUndefined();
-    expect(
-      validator.validateRequest("updateBrandProfile", {
-        description: "x".repeat(281),
-      }),
-    ).toMatch(/data\/description must NOT have more than 280 characters/);
-    expect(validator.validateRequest("updateBrandProfile", {})).toMatch(
-      /data must NOT have fewer than 1 properties/,
-    );
-    expect(
-      validator.validateResponse("listBrandProfiles", 200, {
-        profiles: [brandProfileFixture],
-      }),
-    ).toBeUndefined();
-    expect(
-      validator.validateResponse("listBrandProfiles", 200, {
-        profiles: [{ ...brandProfileFixture, color: "mauve" }],
-      }),
-    ).toMatch(/data\/profiles\/0\/color must be equal to one of the allowed values/);
+    ],
+    [
+      "an empty description",
+      "createBrandProfile",
+      { ...named, description: "" },
+      /data\/description must match pattern/,
+    ],
+    [
+      "a description of 281 characters",
+      "updateBrandProfile",
+      { description: "x".repeat(281) },
+      /data\/description must NOT have more than 280 characters/,
+    ],
+    ["an empty update", "updateBrandProfile", {}, /data must NOT have fewer than 1 properties/],
+  ];
+
+  it.each(accepted)("accepts %s", (_example, operationId, body) => {
+    expect(validator.validateRequest(operationId, body)).toBeUndefined();
   });
 
-  it("rejects brand-owned mutations that omit brand_profile_id", () => {
-    const owned = brandOwnedMutations(document);
+  it.each(rejected)("rejects %s", (_example, operationId, body, problem) => {
+    expect(validator.validateRequest(operationId, body)).toMatch(problem);
+  });
+
+  it("accepts a listed profile", () => {
+    expect(
+      validator.validateResponse("listBrandProfiles", 200, { profiles: [brandProfileFixture] }),
+    ).toBeUndefined();
+  });
+
+  it("rejects a listed profile with a colour outside the palette", () => {
+    const profiles = [{ ...brandProfileFixture, color: "mauve" }];
+
+    expect(validator.validateResponse("listBrandProfiles", 200, { profiles })).toMatch(
+      /data\/profiles\/0\/color must be equal to one of the allowed values/,
+    );
+  });
+
+  it("lists every brand-owned mutation", () => {
     expect(owned).toEqual(
       expect.arrayContaining([
         "confirmOAuthSelection",
@@ -287,25 +291,16 @@ describe("brand profile contract", async () => {
         "updateQueue",
       ]),
     );
+  });
 
-    for (const operationId of owned) {
-      expect(
-        validator.validateRequest(operationId, {}),
-        `${operationId} must require brand_profile_id`,
-      ).toMatch(/brand_profile_id/);
-    }
+  it.each(owned)("requires brand_profile_id on %s", (operationId) => {
+    expect(validator.validateRequest(operationId, {})).toMatch(/brand_profile_id/);
+  });
 
-    expect(
-      validator.validateRequest("createPost", {
-        brand_profile_id: brandProfileId,
-        default_text: "Hello world",
-      }),
-    ).toBeUndefined();
-    expect(
-      validator.validateRequest("replyToComment", {
-        brand_profile_id: brandProfileId,
-        text: "Thanks!",
-      }),
-    ).toBeUndefined();
+  it.each([
+    ["createPost", { brand_profile_id: brandProfileId, default_text: "Hello world" }],
+    ["replyToComment", { brand_profile_id: brandProfileId, text: "Thanks!" }],
+  ])("accepts %s with a brand profile", (operationId, body) => {
+    expect(validator.validateRequest(operationId, body)).toBeUndefined();
   });
 });

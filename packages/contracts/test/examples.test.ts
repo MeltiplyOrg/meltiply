@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 import YAML from "yaml";
 import Ajv2020 from "ajv/dist/2020";
 import addFormats from "ajv-formats";
@@ -45,6 +45,15 @@ describe("operation examples", async () => {
   const operations = operationsById(openApi);
   const validator = await ContractValidator.create();
 
+  beforeAll(() => {
+    for (const [operationId, example] of Object.entries(examples.operations)) {
+      validator.validateRequest(operationId, example.request);
+      for (const response of [example.success, ...example.errors]) {
+        validator.validateResponse(operationId, response.status, response.body);
+      }
+    }
+  });
+
   it("has exactly one catalog entry for every OpenAPI operation", () => {
     expect(Object.keys(examples.operations).sort()).toEqual([...operations.keys()].sort());
   });
@@ -70,11 +79,12 @@ describe("operation examples", async () => {
     }
   });
 
-  it("validates request and response bodies against the dereferenced OpenAPI schemas", () => {
-    for (const [operationId, example] of Object.entries(examples.operations)) {
+  it.each(Object.entries(examples.operations))(
+    "validates the %s bodies against the dereferenced OpenAPI schemas",
+    (operationId, example) => {
       const operation = operations.get(operationId);
       expect(operation, operationId).toBeDefined();
-      if (!operation) continue;
+      if (!operation) return;
 
       const jsonRequestSchema = operation.requestBody?.content?.["application/json"]?.schema;
       if (jsonRequestSchema) {
@@ -97,20 +107,26 @@ describe("operation examples", async () => {
           `${operationId} ${response.status}`,
         ).toBeUndefined();
       }
-    }
-  });
+    },
+  );
+
+  const publishSchema = openApi.components?.schemas?.ThreadsPublishOptions;
+  const draftSchema = openApi.components?.schemas?.ThreadsPostOptions;
+  const collaboratorSchema = openApi.components?.schemas?.InstagramContentOptions;
+  if (!publishSchema || !draftSchema || !collaboratorSchema) {
+    throw new Error("Provider option schemas are missing");
+  }
+  const ajv = new Ajv2020({ strict: false });
+  addFormats(ajv);
+  const publish = ajv.compile(publishSchema);
+  const draft = ajv.compile(draftSchema);
+  const instagram = ajv.compile(collaboratorSchema);
 
   it.each([
     { poll_attachment: { option_a: "First", option_b: "Second" } },
     { gif_attachment: { provider: "GIPHY", gif_id: "gif-123" } },
     { text_attachment: { plaintext: "Long text", link_attachment_url: "https://example.com" } },
   ])("keeps composed Threads publication schemas complete and closed: %j", (options) => {
-    const publishSchema = openApi.components?.schemas?.ThreadsPublishOptions;
-    const draftSchema = openApi.components?.schemas?.ThreadsPostOptions;
-    if (!publishSchema || !draftSchema) throw new Error("Threads option schemas are missing");
-    const ajv = new Ajv2020({ strict: false });
-    const publish = ajv.compile(publishSchema);
-    const draft = ajv.compile(draftSchema);
     expect(publish(options)).toBe(true);
     expect(publish({ ...options, unknown_option: true })).toBe(false);
     const [key, attachment] = Object.entries(options)[0]!;
@@ -121,13 +137,8 @@ describe("operation examples", async () => {
   });
 
   it("permits three Instagram collaborators but rejects a fourth at the public API boundary", () => {
-    const schema = openApi.components?.schemas?.InstagramContentOptions;
-    if (!schema) throw new Error("Instagram content options schema is missing");
-    const ajv = new Ajv2020({ strict: false });
-    addFormats(ajv);
-    const validate = ajv.compile(schema);
     const collaborators = ["first", "second", "third"];
-    expect(validate({ collaborators })).toBe(true);
-    expect(validate({ collaborators: [...collaborators, "fourth"] })).toBe(false);
+    expect(instagram({ collaborators })).toBe(true);
+    expect(instagram({ collaborators: [...collaborators, "fourth"] })).toBe(false);
   });
 });

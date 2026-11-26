@@ -1,4 +1,4 @@
-import { malformed, ProviderAdapterError, rejected } from "../failures";
+import { malformed, ProviderAdapterError } from "../failures";
 import { unknownResult } from "../results";
 import type {
   ProviderBroadcastInfo,
@@ -8,50 +8,22 @@ import type {
   ProviderRequestContext,
   PublishInput,
 } from "../types";
-import {
-  bearer,
-  boundedString,
-  firstNonEmptyLine,
-  jsonHeaders,
-  providerIdentifier,
-  record,
-  required,
-} from "../values";
+import { bearer, jsonHeaders, providerIdentifier, record } from "../values";
+import { youtubeBroadcastRecord, youtubeLivePlan, youtubeStreamIngest } from "./responses";
 import {
   broadcastOperationId,
   parseBroadcastOperationId,
   YOUTUBE_API_ORIGIN,
-  YOUTUBE_LIMITS,
   youtubeWatchUrl,
   type GoogleRequest,
 } from "./types";
 
-const lifecycleStatuses = new Set([
-  "created",
-  "ready",
-  "testing",
-  "live",
-  "complete",
-  "revoked",
-  "testStarting",
-  "liveStarting",
-]);
-const privacyStatuses = ["public", "private", "unlisted"];
-const maxIngestChars = 2048;
 const scheduledStartLeadMilliseconds = 60_000;
 
 function openBroadcastId(lookup: ProviderPublicationLookup): string {
   const operation = parseBroadcastOperationId(lookup.providerOperationId);
   if (operation?.phase !== "live") throw malformed();
   return operation.id;
-}
-
-function onlyResource(value: unknown, id: string): Record<string, unknown> {
-  const items = record(value)?.items;
-  if (!Array.isArray(items) || items.length !== 1) throw malformed();
-  const item = record(items[0]);
-  if (!item || item.id !== id) throw malformed();
-  return item;
 }
 
 function endedBroadcast(id: string): ProviderOperationResult {
@@ -80,11 +52,7 @@ export function createYouTubeLive(request: GoogleRequest, now: () => Date) {
       method: "GET",
       url: `${YOUTUBE_API_ORIGIN}/youtube/v3/liveBroadcasts?part=${parts}&id=${encodeURIComponent(id)}`,
     });
-    const broadcast = onlyResource(response.body, id);
-    if (record(broadcast.snippet)?.channelId !== credentials.accountId) throw malformed();
-    const lifecycle = record(broadcast.status)?.lifeCycleStatus;
-    if (typeof lifecycle !== "string" || !lifecycleStatuses.has(lifecycle)) throw malformed();
-    return { broadcast, lifecycle };
+    return youtubeBroadcastRecord(response.body, id, credentials.accountId);
   };
 
   return {
@@ -93,21 +61,7 @@ export function createYouTubeLive(request: GoogleRequest, now: () => Date) {
       credentials: ProviderCredentials,
       input: PublishInput,
     ): Promise<ProviderOperationResult> {
-      const options = input.providerOptions?.youtube;
-      if (
-        input.media.length ||
-        typeof options?.madeForKids !== "boolean" ||
-        !options.privacyStatus ||
-        !privacyStatuses.includes(options.privacyStatus)
-      ) {
-        throw rejected("youtube_live_options_invalid");
-      }
-      const description = input.caption.trim();
-      const title = required(
-        "title",
-        firstNonEmptyLine(description) ?? "",
-        YOUTUBE_LIMITS.maxTitleCodePoints,
-      );
+      const { description, madeForKids, privacyStatus, title } = youtubeLivePlan(input);
       const headers = jsonHeaders(credentials.accessToken);
       const created = await request(context, {
         body: JSON.stringify({
@@ -119,8 +73,8 @@ export function createYouTubeLive(request: GoogleRequest, now: () => Date) {
             ).toISOString(),
           },
           status: {
-            privacyStatus: options.privacyStatus,
-            selfDeclaredMadeForKids: options.madeForKids,
+            privacyStatus,
+            selfDeclaredMadeForKids: madeForKids,
           },
           contentDetails: {
             enableAutoStart: true,
@@ -201,17 +155,7 @@ export function createYouTubeLive(request: GoogleRequest, now: () => Date) {
         method: "GET",
         url: `${YOUTUBE_API_ORIGIN}/youtube/v3/liveStreams?part=cdn&id=${encodeURIComponent(streamId)}`,
       });
-      const ingest = record(record(onlyResource(streamResponse.body, streamId).cdn)?.ingestionInfo);
-      const ingestUrl = boundedString(ingest?.rtmpsIngestionAddress, maxIngestChars);
-      const streamKey = boundedString(ingest?.streamName, maxIngestChars);
-      if (
-        !ingestUrl ||
-        !URL.canParse(ingestUrl) ||
-        new URL(ingestUrl).protocol !== "rtmps:" ||
-        !streamKey
-      ) {
-        throw malformed();
-      }
+      const { ingestUrl, streamKey } = youtubeStreamIngest(streamResponse.body, streamId);
       const state = lifecycle === "live" ? "live" : lifecycle === "testing" ? "testing" : "ready";
       return {
         state,

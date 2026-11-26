@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { createProviderRegistryFromEnvironment } from "../src";
+import {
+  cachedProviderRegistryFromEnvironment,
+  createProviderRegistryFromEnvironment,
+} from "../src";
 import { overriddenUrl, providerOriginOverrides, redirectingFetch } from "../src/origin-overrides";
 
 const FAKE = "http://127.0.0.1:4010";
@@ -120,5 +123,16 @@ describe("createProviderRegistryFromEnvironment origin settings", () => {
     expect(await revokedAt({ PROVIDER_ORIGIN_TIKTOK_API: FAKE })).toEqual([
       `${FAKE}/v2/oauth/revoke/`,
     ]);
+  });
+});
+
+describe("cachedProviderRegistryFromEnvironment origin settings", () => {
+  it("a setting changed on the same environment", () => {
+    const environment: Record<string, string> = { APP_URL: "https://app.meltiply.com" };
+    const first = cachedProviderRegistryFromEnvironment(environment);
+
+    environment.PROVIDER_ORIGIN_TIKTOK_API = FAKE;
+
+    expect(cachedProviderRegistryFromEnvironment(environment)).not.toBe(first);
   });
 });

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { translate } from "./i18n";
+import { supportedLanguages, translate } from "./i18n";
+
+const languages = supportedLanguages.map(({ code }) => code);
 
 describe("translate", () => {
   it.each([
@@ -10,15 +12,12 @@ describe("translate", () => {
     expect(translate(language, "Settings")).toEqual(message);
   });
 
-  it.each(["es", "pt-BR", "fr", "de", "it", "zh", "vi"] as const)(
-    "a message translated for %s",
-    (language) => {
-      expect(translate(language, "Settings")).not.toEqual("Settings");
-    },
-  );
+  it.each(languages.filter((code) => code !== "en"))("a message translated for %s", (language) => {
+    expect(translate(language, "Settings")).not.toEqual("Settings");
+  });
 
-  it("a message outside the catalog", () => {
-    expect(translate("es", "Not a catalog key")).toEqual("Not a catalog key");
+  it.each(languages)("a message outside the %s catalog", (language) => {
+    expect(translate(language, "Not a catalog key")).toEqual("Not a catalog key");
   });
 
   it.each([

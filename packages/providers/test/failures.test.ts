@@ -201,3 +201,24 @@ describe("failureDiagnostic", () => {
     });
   });
 });
+
+describe("ProviderAdapterError", () => {
+  it("a failure carrying a forged message and code", () => {
+    const cause = new Error("root");
+    const forged = {
+      classification: "auth",
+      code: "Bearer secret",
+      message: "access_token=secret",
+      retryable: true,
+    } as const;
+
+    const error = new ProviderAdapterError(forged, { cause });
+
+    expect(error).toMatchObject({
+      cause,
+      failure: failure("auth", false),
+      message: "The provider authorization must be refreshed.",
+      name: "ProviderAdapterError",
+    });
+  });
+});

@@ -1,60 +1,106 @@
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { ApiError } from "@/lib/api";
-import { reportFrontendError } from "@/lib/frontend-telemetry";
+import { frontendTelemetryEvent } from "@/lib/frontend-telemetry";
+import { authRefreshRequestEvent, runtimeStatusEvent } from "@/lib/runtime-events";
 
 import { reportQueryError, transportStatus } from "./providers";
 
-vi.mock("@/lib/frontend-telemetry", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/frontend-telemetry")>()),
-  reportFrontendError: vi.fn(),
-}));
+const UNREACHABLE = {
+  kind: "recoverable",
+  message: "Meltiply could not reach the API. Check your connection and try again.",
+};
+const OFFLINE = { kind: "offline", message: "Changes are paused until your connection returns." };
+const UNREFRESHED = {
+  kind: "recoverable",
+  message: "We could not refresh this view. Try again in a moment.",
+};
 
-describe("reportQueryError", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.mocked(reportFrontendError).mockClear();
-  });
-
-  it("leaves an API failure to its own api-error record", () => {
-    vi.stubGlobal("window", new EventTarget());
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null)));
-
-    reportQueryError(new ApiError(new Response(null, { status: 404 }), null));
-
-    expect(reportFrontendError).not.toHaveBeenCalled();
-  });
-
-  it("reports a client failure as one query-cache exception", () => {
-    vi.stubGlobal("window", new EventTarget());
-    const failure = new RangeError("bad index");
-
-    reportQueryError(failure);
-
-    expect(reportFrontendError).toHaveBeenCalledTimes(1);
-    expect(reportFrontendError).toHaveBeenCalledWith(failure, "query-cache");
+describe("transportStatus", () => {
+  it.each([
+    ["an unreachable API while online", new TypeError("Failed to fetch"), true, UNREACHABLE],
+    ["no connection", new TypeError("Load failed"), false, OFFLINE],
+    ["another client failure", new RangeError("bad index"), true, UNREFRESHED],
+  ])("%s", (_example, error, online, status) => {
+    expect(transportStatus(error, online)).toEqual(status);
   });
 });
 
-describe("transportStatus", () => {
-  it("names an unreachable API when the browser is online", () => {
-    expect(transportStatus(new TypeError("Failed to fetch"), true)).toEqual({
-      kind: "recoverable",
-      message: "Meltiply could not reach the API. Check your connection and try again.",
-    });
+describe("reportQueryError", () => {
+  let seen: string[];
+  let statuses: unknown[];
+
+  beforeEach(() => {
+    seen = [];
+    statuses = [];
+    const page = new EventTarget();
+    for (const name of [authRefreshRequestEvent, frontendTelemetryEvent, runtimeStatusEvent]) {
+      page.addEventListener(name, (event) => {
+        seen.push(name);
+        if (name === runtimeStatusEvent) statuses.push((event as CustomEvent).detail);
+      });
+    }
+    vi.stubGlobal("window", page);
+    vi.stubGlobal("navigator", { onLine: true });
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response(null)));
   });
 
-  it("reports the offline state when the browser has no connection", () => {
-    expect(transportStatus(new TypeError("Load failed"), false)).toEqual({
-      kind: "offline",
-      message: "Changes are paused until your connection returns.",
-    });
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  it("keeps the generic notice for unexpected client failures", () => {
-    expect(transportStatus(new RangeError("bad index"), true)).toEqual({
-      kind: "recoverable",
-      message: "We could not refresh this view. Try again in a moment.",
+  function apiError(status: number, code: string, retryable: boolean) {
+    const error = new ApiError(new Response(null, { status }), {
+      error: { code, details: [], message: "never shown", request_id: "req", retryable },
     });
+    seen.length = 0;
+    return error;
+  }
+
+  it("an expired session", () => {
+    reportQueryError(apiError(401, "token_expired", false));
+
+    expect(seen).toEqual([authRefreshRequestEvent]);
+  });
+
+  it.each([
+    [
+      "no active workspace",
+      403,
+      "active_organization_required",
+      false,
+      { kind: "active-organization", message: "Choose an active workspace to continue." },
+    ],
+    [
+      "an unavailable service",
+      503,
+      "dependency_unavailable",
+      false,
+      { kind: "maintenance", message: "An error has occurred." },
+    ],
+    [
+      "a retryable failure",
+      429,
+      "rate_limited",
+      true,
+      { kind: "recoverable", message: "Too many requests. Wait a moment and try again." },
+    ],
+  ])("%s", (_example, status, code, retryable, shown) => {
+    reportQueryError(apiError(status, code, retryable));
+
+    expect(statuses).toEqual([shown]);
+  });
+
+  it("a final API failure", () => {
+    reportQueryError(apiError(404, "not_found", false));
+
+    expect(seen).toEqual([]);
+  });
+
+  it("a client failure", () => {
+    reportQueryError(new RangeError("bad index"));
+
+    expect(seen).toEqual([frontendTelemetryEvent, runtimeStatusEvent]);
+    expect(statuses).toEqual([UNREFRESHED]);
   });
 });

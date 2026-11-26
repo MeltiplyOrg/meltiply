@@ -3,102 +3,93 @@
 import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { formatHotkey, hotkeys, isApplePlatform, matchesHotkey, useHotkey } from "./hotkeys";
+import { formatHotkey, isApplePlatform, matchesHotkey, useHotkey } from "./hotkeys";
 
-function setPlatform(platform: string): void {
-  Object.defineProperty(window.navigator, "platform", {
-    configurable: true,
-    value: platform,
-  });
+const commandK = { key: "k", mod: true };
+
+function onPlatform(platform: string): void {
+  vi.stubGlobal("navigator", { platform, userAgent: "" });
 }
 
-afterEach(() => setPlatform(""));
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
-describe("hotkey platform detection", () => {
-  it("treats Apple platforms as Command and everything else as Control", () => {
-    setPlatform("MacIntel");
-    expect(isApplePlatform()).toBe(true);
-    expect(formatHotkey(hotkeys.commandMenu)).toBe("⌘K");
+describe("isApplePlatform", () => {
+  it.each([
+    [
+      "client hints naming macOS",
+      { userAgentData: { platform: "macOS" }, platform: "Win32" },
+      true,
+    ],
+    ["a Mac platform string", { platform: "MacIntel" }, true],
+    ["only an iPhone user agent", { platform: "", userAgent: "Mozilla/5.0 (iPhone)" }, true],
+    ["Windows", { platform: "Win32" }, false],
+    ["nothing to read", { platform: "", userAgent: "" }, false],
+    ["no navigator", undefined, false],
+  ])("%s", (_example, navigator, apple) => {
+    vi.stubGlobal("navigator", navigator);
 
-    setPlatform("Win32");
-    expect(isApplePlatform()).toBe(false);
-    expect(formatHotkey(hotkeys.commandMenu)).toBe("Ctrl K");
+    expect(isApplePlatform()).toEqual(apple);
   });
+});
 
-  it("formats additional modifiers per platform", () => {
-    setPlatform("MacIntel");
-    expect(formatHotkey({ key: "p", mod: true, shift: true })).toBe("⌘⇧P");
+describe("formatHotkey", () => {
+  it.each([
+    ["MacIntel", commandK, "⌘K"],
+    ["Win32", commandK, "Ctrl K"],
+    ["MacIntel", { key: "p", mod: true, shift: true }, "⌘⇧P"],
+    ["Linux x86_64", { key: "p", mod: true, shift: true }, "Ctrl Shift P"],
+    ["Win32", { key: "k" }, "K"],
+  ])("on %s: %j", (platform, hotkey, label) => {
+    onPlatform(platform);
 
-    setPlatform("Linux x86_64");
-    expect(formatHotkey({ key: "p", mod: true, shift: true })).toBe("Ctrl Shift P");
+    expect(formatHotkey(hotkey)).toEqual(label);
   });
 });
 
 describe("matchesHotkey", () => {
-  it("requires the platform modifier rather than accepting either one", () => {
-    setPlatform("MacIntel");
-    expect(
-      matchesHotkey(new KeyboardEvent("keydown", { key: "k", metaKey: true }), hotkeys.commandMenu),
-    ).toBe(true);
-    expect(
-      matchesHotkey(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }), hotkeys.commandMenu),
-    ).toBe(false);
+  const pressed = (init: KeyboardEventInit) => new KeyboardEvent("keydown", { key: "k", ...init });
 
-    setPlatform("Win32");
-    expect(
-      matchesHotkey(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }), hotkeys.commandMenu),
-    ).toBe(true);
-    expect(
-      matchesHotkey(new KeyboardEvent("keydown", { key: "k", metaKey: true }), hotkeys.commandMenu),
-    ).toBe(false);
-  });
+  it.each([
+    ["Command on a Mac", "MacIntel", { metaKey: true }, commandK, true],
+    ["Control on a Mac", "MacIntel", { ctrlKey: true }, commandK, false],
+    ["Control on Windows", "Win32", { ctrlKey: true }, commandK, true],
+    ["Command on Windows", "Win32", { metaKey: true }, commandK, false],
+    ["a capital key", "Win32", { key: "K", ctrlKey: true }, commandK, true],
+    ["another key", "Win32", { key: "j", ctrlKey: true }, commandK, false],
+    ["a missing modifier", "Win32", {}, commandK, false],
+    ["an unwanted shift", "Win32", { ctrlKey: true, shiftKey: true }, commandK, false],
+    [
+      "a required shift",
+      "Win32",
+      { ctrlKey: true, shiftKey: true },
+      { key: "k", mod: true, shift: true },
+      true,
+    ],
+  ])("%s", (_example, platform, init, hotkey, matches) => {
+    onPlatform(platform);
 
-  it("rejects a different key, a missing modifier, and an unwanted shift", () => {
-    setPlatform("Win32");
-    expect(
-      matchesHotkey(new KeyboardEvent("keydown", { key: "j", ctrlKey: true }), hotkeys.commandMenu),
-    ).toBe(false);
-    expect(matchesHotkey(new KeyboardEvent("keydown", { key: "k" }), hotkeys.commandMenu)).toBe(
-      false,
-    );
-    expect(
-      matchesHotkey(
-        new KeyboardEvent("keydown", { key: "k", ctrlKey: true, shiftKey: true }),
-        hotkeys.commandMenu,
-      ),
-    ).toBe(false);
-  });
-
-  it("matches the key case-insensitively", () => {
-    setPlatform("Win32");
-    expect(
-      matchesHotkey(new KeyboardEvent("keydown", { key: "K", ctrlKey: true }), hotkeys.commandMenu),
-    ).toBe(true);
+    expect(matchesHotkey(pressed(init), hotkey)).toEqual(matches);
   });
 });
 
 describe("useHotkey", () => {
-  it("runs the latest handler while mounted and stops after unmount", () => {
-    setPlatform("Win32");
-    const first = vi.fn();
-    const second = vi.fn();
-    const { rerender, unmount } = renderHook(
-      ({ handler }) => useHotkey(hotkeys.commandMenu, handler),
-      {
-        initialProps: { handler: first },
-      },
-    );
+  it("a replaced handler, then unmounting", () => {
+    onPlatform("Win32");
+    const ran: string[] = [];
+    const press = () =>
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    const { rerender, unmount } = renderHook(({ handler }) => useHotkey(commandK, handler), {
+      initialProps: { handler: () => ran.push("first") },
+    });
 
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
-    expect(first).toHaveBeenCalledOnce();
-
-    rerender({ handler: second });
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
-    expect(second).toHaveBeenCalledOnce();
-    expect(first).toHaveBeenCalledOnce();
-
+    press();
+    rerender({ handler: () => ran.push("second") });
+    press();
     unmount();
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
-    expect(second).toHaveBeenCalledOnce();
+    press();
+
+    expect(ran).toEqual(["first", "second"]);
   });
 });

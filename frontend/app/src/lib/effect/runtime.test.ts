@@ -6,15 +6,8 @@ import { ApiClientService, createApiClientServiceTest } from "./api-client";
 import { runQueryEffect } from "./runtime";
 import { WorkspaceService } from "./session-scope";
 
-type UserProfile = components["schemas"]["UserProfile"];
-
-const mockProfile: UserProfile = {
-  active_organization: {
-    id: "org_alpha",
-    name: "Alpha Corp",
-    role: "admin",
-    slug: "alpha-corp",
-  },
+const profile: components["schemas"]["UserProfile"] = {
+  active_organization: { id: "org_alpha", name: "Alpha Corp", role: "admin", slug: "alpha-corp" },
   avatar_url: null,
   created_at: "2026-09-12T12:00:00.000Z",
   display_name: "Ada Lovelace",
@@ -24,71 +17,68 @@ const mockProfile: UserProfile = {
   updated_at: "2026-09-12T12:00:00.000Z",
 };
 
-describe("runQueryEffect (React Query Effect adapter)", () => {
-  it("resolves the effect outcome on success", async () => {
-    const program = Effect.succeed({ test: "value" });
-    const result = await runQueryEffect(program);
-    expect(result).toEqual({ test: "value" });
+function pendingUntilAborted(finalized: string[]) {
+  return Effect.gen(function* () {
+    yield* Effect.addFinalizer(() => Effect.sync(() => finalized.push("finalized")));
+    return yield* Effect.never;
+  });
+}
+
+describe("runQueryEffect", () => {
+  it("a success", async () => {
+    expect(await runQueryEffect(Effect.succeed({ test: "value" }))).toEqual({ test: "value" });
   });
 
-  it("propagates typed failures as rejected promises", async () => {
-    const customError = new Error("Expected failure");
-    const program = Effect.fail(customError);
+  it("a typed failure", async () => {
+    const failure = new Error("Expected failure");
 
-    await expect(runQueryEffect(program)).rejects.toThrow("Expected failure");
+    await expect(runQueryEffect(Effect.fail(failure))).rejects.toBe(failure);
   });
 
-  it("interrupts fiber when AbortSignal triggers cancellation", async () => {
-    const controller = new AbortController();
-    let cleanedUp = false;
+  it("a defect", async () => {
+    const defect = new Error("bug");
 
+    await expect(runQueryEffect(Effect.die(defect))).rejects.toBe(defect);
+  });
+
+  it("a finalizer defect beside a typed failure", async () => {
+    const defect = new Error("Catastrophic finalizer crash");
     const program = Effect.gen(function* () {
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          cleanedUp = true;
-        }),
-      );
-      yield* Effect.sleep("500 millis");
-      return "done";
+      yield* Effect.addFinalizer(() => Effect.die(defect));
+      return yield* Effect.fail(new Error("Normal domain error"));
     });
 
-    const promise = runQueryEffect(program, { signal: controller.signal });
-    setTimeout(() => controller.abort(), 10);
-
-    await expect(promise).rejects.toThrow();
-    expect(cleanedUp).toBe(true);
+    await expect(runQueryEffect(program)).rejects.toBe(defect);
   });
 
-  it("does not execute effect body when signal is already aborted", async () => {
-    let executed = false;
+  it("an abort while running", async () => {
     const controller = new AbortController();
-    controller.abort();
+    const finalized: string[] = [];
+    const reason = new Error("left the page");
 
-    const program = Effect.sync(() => {
-      executed = true;
-      return "executed";
-    });
+    const running = runQueryEffect(pendingUntilAborted(finalized), { signal: controller.signal });
+    controller.abort(reason);
 
-    await expect(runQueryEffect(program, { signal: controller.signal })).rejects.toThrow();
-
-    expect(executed).toBe(false);
+    await expect(running).rejects.toBe(reason);
+    expect(finalized).toEqual(["finalized"]);
   });
 
-  it("surfaces defects when cause contains both a typed failure and a defect", async () => {
-    const defectError = new Error("Catastrophic finalizer crash");
-    const typedError = new Error("Normal domain error");
+  it("a signal aborted before the start", async () => {
+    const ran: string[] = [];
+    const reason = new Error("already gone");
 
-    const program = Effect.gen(function* () {
-      yield* Effect.addFinalizer(() => Effect.die(defectError));
-      return yield* Effect.fail(typedError);
-    });
+    const running = runQueryEffect(
+      Effect.sync(() => ran.push("ran")),
+      { signal: AbortSignal.abort(reason) },
+    );
 
-    await expect(runQueryEffect(program)).rejects.toThrow(defectError);
+    await expect(running).rejects.toBe(reason);
+    expect(ran).toEqual([]);
   });
 });
 
 describe("ApiClientService", () => {
-  it("allows test layer substitution without ad-hoc global mocking", async () => {
+  it("a substituted client reading the selected workspace", async () => {
     const program = Effect.gen(function* () {
       const client = yield* ApiClientService;
       return yield* client.getCurrentUser();
@@ -98,7 +88,7 @@ describe("ApiClientService", () => {
           getCurrentUser: () =>
             Effect.flatMap(WorkspaceService, (workspace) =>
               workspace.workspaceId === "workspace-1"
-                ? Effect.succeed(mockProfile)
+                ? Effect.succeed(profile)
                 : Effect.die(new Error("Workspace selection was not provided to the service")),
             ),
         }),
@@ -106,7 +96,6 @@ describe("ApiClientService", () => {
       Effect.provideService(WorkspaceService, { workspaceId: "workspace-1" }),
     );
 
-    const result = await runQueryEffect(program);
-    expect(result).toEqual(mockProfile);
+    expect(await runQueryEffect(program)).toEqual(profile);
   });
 });

@@ -1,182 +1,209 @@
 import { Effect } from "effect";
-import { afterEach, describe, expect, it, vi, type Mock } from "vite-plus/test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import * as api from "./api";
+import { captureAuthJwt, clearAuthJwt } from "./auth-token";
 
-function requestAt(fetchMock: Mock, index: number): Request {
-  const input = fetchMock.mock.calls[index]?.[0];
-  return input instanceof Request ? input : new Request(String(input));
+const envelope = {
+  code: "rate_limited",
+  details: [{ code: "quota", message: "Try later" }],
+  message: "Distribution quota exceeded",
+  request_id: "req_test_123",
+  retryable: true,
+};
+
+function summary(error: api.ApiError) {
+  return {
+    code: error.code,
+    details: error.details,
+    message: error.message,
+    requestId: error.requestId,
+    retryAfterSeconds: error.retryAfterSeconds,
+    retryable: error.retryable,
+    status: error.status,
+  };
 }
 
-function credentialsAt(fetchMock: Mock, index: number): RequestCredentials | undefined {
-  const [input, init] = fetchMock.mock.calls[index] ?? [];
-  return init?.credentials ?? (input instanceof Request ? input.credentials : undefined);
-}
+const fallback = (status: number, retryable: boolean) => ({
+  code: "unknown_error",
+  details: [],
+  message: `Request failed with status ${status}`,
+  requestId: null,
+  retryAfterSeconds: null,
+  retryable,
+  status,
+});
 
-function headerAt(fetchMock: Mock, index: number, name: string): string | null {
-  const [input, init] = fetchMock.mock.calls[index] ?? [];
-  const headers = new Headers(input instanceof Request ? input.headers : undefined);
-  new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
-  return headers.get(name);
-}
+describe("ApiError", () => {
+  it("the error envelope", () => {
+    const response = new Response(null, { headers: { "retry-after": "17" }, status: 429 });
 
-describe("generated API client adapters", () => {
-  afterEach(() => {
-    vi.doUnmock("@meltiply/contracts/client");
-    vi.resetModules();
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  it("preserves the normative error envelope, request ID, and retry delay", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          error: {
-            code: "rate_limited",
-            details: [{ code: "quota", message: "Try later" }],
-            message: "Distribution quota exceeded",
-            request_id: "req_test_123",
-            retryable: true,
-          },
-        }),
-        {
-          headers: {
-            "content-type": "application/json",
-            "retry-after": "17",
-          },
-          status: 429,
-        },
-      ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const error = await Effect.runPromise(api.listPosts(null)).catch((caught: unknown) => caught);
-
-    expect(error).toBeInstanceOf(api.ApiError);
-    expect(error).toMatchObject({
+    expect(summary(new api.ApiError(response, { error: envelope }))).toEqual({
       code: "rate_limited",
+      details: [{ code: "quota", message: "Try later" }],
       message: "Distribution quota exceeded",
       requestId: "req_test_123",
       retryAfterSeconds: 17,
       retryable: true,
       status: 429,
     });
-    const request = requestAt(fetchMock, 0);
-    expect(request.headers.get("Authorization")).toBeNull();
-    expect(request.headers.get("X-Workspace-ID")).toBeNull();
-    expect(credentialsAt(fetchMock, 0)).toBe("same-origin");
   });
 
-  it("uses a safe fallback for malformed or future error payloads", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ future_error: "new shape" }), {
-        headers: { "content-type": "application/json", "x-request-id": "req_header" },
-        status: 503,
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+  it("an unknown payload with a request ID header", () => {
+    const response = new Response(null, { headers: { "x-request-id": "req_header" }, status: 503 });
 
-    const error = await Effect.runPromise(api.getCurrentUser(null)).catch(
-      (caught: unknown) => caught,
-    );
-
-    expect(error).toMatchObject({
-      code: "unknown_error",
+    expect(summary(new api.ApiError(response, { future_error: "new shape" }))).toEqual({
+      ...fallback(503, true),
       requestId: "req_header",
-      retryable: true,
-      status: 503,
     });
   });
 
-  it("requests an OAuth URL as authenticated JSON", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        Response.json({ authorization_url: "https://provider.example/authorize" }),
-      );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(Effect.runPromise(api.startPlatformOAuth(null, "threads"))).resolves.toEqual({
-      authorization_url: "https://provider.example/authorize",
-    });
-    const request = requestAt(fetchMock, 0);
-    expect(request.url).toBe("http://localhost:8787/api/v1/platforms/threads/connect");
-    expect(request.headers.get("Accept")).toBe("application/json");
-    expect(request.headers.get("Authorization")).toBeNull();
-  });
-
-  it("sends X-Workspace-ID only when a workspace is selected", async () => {
-    const fetchMock = vi.fn().mockImplementation(() =>
-      Promise.resolve(
-        new Response(JSON.stringify({}), {
-          headers: { "content-type": "application/json" },
-          status: 200,
-        }),
-      ),
+  it.each([
+    ["no payload", undefined],
+    ["a null error", { error: null }],
+    ["no code", { error: { ...envelope, code: undefined } }],
+    ["no message", { error: { ...envelope, message: undefined } }],
+    ["no request ID", { error: { ...envelope, request_id: undefined } }],
+    ["no retry flag", { error: { ...envelope, retryable: undefined } }],
+    ["details that are not a list", { error: { ...envelope, details: "x" } }],
+  ])("%s", (_example, payload) => {
+    expect(summary(new api.ApiError(new Response(null, { status: 499 }), payload))).toEqual(
+      fallback(499, false),
     );
-    vi.stubGlobal("fetch", fetchMock);
+  });
 
-    await Effect.runPromise(api.listPosts("ws-123"));
-    await Effect.runPromise(api.listPosts(null));
+  it("the first retryable status", () => {
+    expect(new api.ApiError(new Response(null, { status: 500 }), null).retryable).toEqual(true);
+  });
+
+  it.each([
+    ["no delay", {}, null],
+    ["a delay of zero", { "retry-after": "0" }, 0],
+    ["a date already past", { "retry-after": "Wed, 21 Oct 2015 07:28:00 GMT" }, 0],
+    ["a negative delay", { "retry-after": "-5" }, 0],
+    ["text", { "retry-after": "soon" }, null],
+  ])("%s before retrying", (_example, headers, seconds) => {
+    const response = new Response(null, { headers, status: 429 });
+
+    expect(new api.ApiError(response, null).retryAfterSeconds).toEqual(seconds);
+  });
+});
+
+describe("API requests", () => {
+  let requests: Record<string, string | null>[];
+  let answer: (url: string) => Response;
+
+  beforeAll(async () => {
+    vi.stubGlobal("fetch", () => Promise.resolve(Response.json({})));
+    await Effect.runPromise(api.getCurrentUser(null));
+    vi.unstubAllGlobals();
+  });
+
+  beforeEach(() => {
+    requests = [];
+    answer = () => Response.json({ ok: true });
+    vi.stubGlobal("fetch", (input: Request | string, init?: RequestInit) => {
+      const request = new Request(input, init);
+      const headers = new Headers(init?.headers ?? request.headers);
+      requests.push({
+        method: request.method,
+        url: request.url,
+        authorization: headers.get("authorization"),
+        workspace: headers.get("x-workspace-id"),
+        idempotency: headers.get("idempotency-key"),
+        credentials: init?.credentials ?? request.credentials,
+      });
+      return Promise.resolve(answer(request.url));
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    clearAuthJwt();
+  });
+
+  const anonymous = {
+    method: "GET",
+    url: "http://localhost:8787/api/v1/posts",
+    authorization: null,
+    workspace: null,
+    idempotency: null,
+    credentials: "same-origin",
+  };
+
+  it("a successful read without a workspace", async () => {
+    const body = await Effect.runPromise(api.listPosts(null));
+
+    expect(body).toEqual({ ok: true });
+    expect(requests).toEqual([anonymous]);
+  });
+
+  it("a blank workspace", async () => {
     await Effect.runPromise(api.listPosts("   "));
 
-    expect(requestAt(fetchMock, 0).headers.get("X-Workspace-ID")).toBe("ws-123");
-    expect(requestAt(fetchMock, 1).headers.get("X-Workspace-ID")).toBeNull();
-    expect(requestAt(fetchMock, 2).headers.get("X-Workspace-ID")).toBeNull();
-    for (let index = 0; index < fetchMock.mock.calls.length; index += 1) {
-      expect(credentialsAt(fetchMock, index)).toBe("same-origin");
-      expect(headerAt(fetchMock, index, "Authorization")).toBeNull();
-    }
+    expect(requests).toEqual([anonymous]);
   });
 
-  it("keeps bearer credentials on API calls and excludes them from signed object reads", async () => {
-    const storageUrl = "https://objects.example/original.png";
-    const originalBytes = new Uint8Array([0, 127, 255]);
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            session: { expiresAt: "2099-07-18T16:00:00.000Z", id: "session-1", userId: "user-1" },
-            user: { email: "user@example.com", id: "user-1" },
-          }),
-          {
-            headers: { "content-type": "application/json", "set-auth-jwt": "session-jwt-1" },
-            status: 200,
-          },
-        ),
-      )
-      .mockImplementation((input: RequestInfo | URL) => {
-        const url = input instanceof Request ? input.url : String(input);
-        if (url.endsWith("/download-url"))
-          return Promise.resolve(Response.json({ url: storageUrl }));
-        if (url === storageUrl) return Promise.resolve(new Response(originalBytes));
-        return Promise.resolve(Response.json({}));
-      });
-    vi.stubGlobal("fetch", fetchMock);
+  it("a selected workspace after sign-in", async () => {
+    captureAuthJwt(new Response(null, { headers: { "set-auth-jwt": "jwt-1" } }));
 
-    vi.resetModules();
-    const { authClient } = await import("./auth-client");
-    const isolatedApi = await import("./api");
+    await Effect.runPromise(api.listPosts("ws-123"));
 
-    await authClient.getSession();
-    await Effect.runPromise(isolatedApi.getCurrentUser(null));
-    await Effect.runPromise(isolatedApi.listPosts("ws-123"));
-    const blob = await Effect.runPromise(isolatedApi.getAssetBlob("ws-123", "asset-1"));
-    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(originalBytes);
+    expect(requests).toEqual([
+      { ...anonymous, authorization: "Bearer jwt-1", workspace: "ws-123" },
+    ]);
+  });
 
-    expect(credentialsAt(fetchMock, 0)).toBe("include");
-    expect(headerAt(fetchMock, 1, "Authorization")).toBe("Bearer session-jwt-1");
-    expect(credentialsAt(fetchMock, 1)).toBe("same-origin");
-    expect(headerAt(fetchMock, 2, "Authorization")).toBe("Bearer session-jwt-1");
-    expect(headerAt(fetchMock, 2, "X-Workspace-ID")).toBe("ws-123");
-    expect(credentialsAt(fetchMock, 2)).toBe("same-origin");
-    expect(headerAt(fetchMock, 3, "Authorization")).toBe("Bearer session-jwt-1");
-    expect(headerAt(fetchMock, 3, "X-Workspace-ID")).toBe("ws-123");
-    expect(credentialsAt(fetchMock, 3)).toBe("same-origin");
-    expect(headerAt(fetchMock, 4, "Authorization")).toBeNull();
-    expect(headerAt(fetchMock, 4, "X-Workspace-ID")).toBeNull();
-    expect(credentialsAt(fetchMock, 4)).toBe("omit");
+  it("a refused request", async () => {
+    answer = () => Response.json({ error: envelope }, { status: 429 });
+
+    const error = await Effect.runPromise(Effect.flip(api.listPosts(null)));
+
+    expect(error.code).toEqual("rate_limited");
+  });
+
+  it("an OAuth start", async () => {
+    await Effect.runPromise(api.startPlatformOAuth(null, "threads"));
+
+    expect(requests.map(({ url }) => url)).toEqual([
+      "http://localhost:8787/api/v1/platforms/threads/connect",
+    ]);
+  });
+
+  it("a write with a supplied idempotency key", async () => {
+    await Effect.runPromise(
+      api.createPost(null, {} as Parameters<typeof api.createPost>[1], { idempotencyKey: "key-1" }),
+    );
+
+    expect(requests.map(({ idempotency }) => idempotency)).toEqual(["key-1"]);
+  });
+
+  it("a write without an idempotency key", async () => {
+    await Effect.runPromise(api.createPost(null, {} as Parameters<typeof api.createPost>[1]));
+
+    expect(requests.map(({ idempotency }) => idempotency)).toEqual([
+      expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/),
+    ]);
+  });
+
+  const signed = "https://objects.example/original.png";
+
+  it("an asset read through its signed URL", async () => {
+    captureAuthJwt(new Response(null, { headers: { "set-auth-jwt": "jwt-1" } }));
+    answer = (url) => (url === signed ? new Response("bytes") : Response.json({ url: signed }));
+
+    const blob = await Effect.runPromise(api.getAssetBlob("ws-123", "asset-1"));
+
+    expect(await blob.text()).toEqual("bytes");
+    expect(requests[1]).toEqual({ ...anonymous, url: signed, credentials: "omit" });
+  });
+
+  it("a signed read that is refused", async () => {
+    answer = (url) =>
+      url === signed ? new Response(null, { status: 403 }) : Response.json({ url: signed });
+
+    const error = await Effect.runPromise(Effect.flip(api.getAssetBlob(null, "asset-1")));
+
+    expect(error.status).toEqual(403);
   });
 });

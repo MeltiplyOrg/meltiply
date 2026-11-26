@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  boundedCount,
   containsForbiddenValue,
   diagnosticProperties,
   feedbackProperties,
@@ -10,560 +11,448 @@ import {
 } from "../src/sanitize";
 
 const context = { appVersion: "1.0.0-target.0", deploymentCategory: "selfhosted" } as const;
-
-const usageInput = {
-  channels: { threads: 2 },
-  engagement: {
-    threads: {
-      asOf: "2026-01-02T00:00:00.000Z",
-      comments: 4,
-      distributions: 1,
-      reactions: 7,
-      shares: null,
-      views: 120,
-    },
-  },
-  engagementAsOf: "2026-01-02T00:00:00.000Z",
-  engagementCoverage: { measured: 1, missing: 0, truncated: false, unsupportedMetrics: [] },
-  publications: { distributions: { threads: 1 }, posts: 1 },
+const enveloped = {
+  app_version: "1.0.0-target.0",
+  deployment_category: "selfhosted",
+  schema_version: 1,
+};
+const NOTHING_MEASURED = {
+  channels: {},
+  engagement: {},
+  engagementAsOf: null,
+  engagementCoverage: null,
+  publications: { distributions: {}, posts: 0 },
   reportDate: "2026-01-02",
 };
+const nothingReported = { ...enveloped, publications: { posts: 0 } };
 
-describe("usage payload", () => {
-  it("carries only documented aggregate properties", () => {
-    const properties = usageProperties(usageInput, context);
+const frame = (filename: string, lineno: number) => ({
+  filename,
+  function: "<anonymous>",
+  in_app: true,
+  lang: "javascript",
+  lineno,
+  platform: "custom",
+});
 
-    expect(properties).toEqual({
-      app_version: "1.0.0-target.0",
+describe("containsForbiddenValue", () => {
+  it.each([
+    ["an email address", "alpha@meltiply.local", true],
+    ["a URL", "https://api.threads.test/v1/posts", true],
+    ["a UUID", "00000000-0000-4000-8000-000000000001", true],
+    ["a bearer credential", "Bearer abc.def.ghi", true],
+    ["a password assignment", "password=hunter2", true],
+    ["an api key header", "api-key: abc", true],
+    ["a query string", "graph.facebook.com/posts?fields=abc", true],
+    ["a function name", "publishDistribution", false],
+    ["a source path", "workers/api/src/app.ts", false],
+    ["an empty string", "", false],
+  ])("%s", (_example, value, forbidden) => {
+    expect(containsForbiddenValue(value)).toEqual(forbidden);
+  });
+});
+
+describe("boundedCount", () => {
+  it.each([
+    ["zero", 0, 0],
+    ["a fraction", 2.9, 2],
+    ["the largest safe integer", Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+    ["past the safe integers", Number.MAX_SAFE_INTEGER + 1, null],
+    ["a negative number", -1, null],
+    ["an infinite number", Number.POSITIVE_INFINITY, null],
+    ["not a number", Number.NaN, null],
+    ["a numeric string", "3", null],
+    ["no value", undefined, null],
+  ])("%s", (_example, value, count) => {
+    expect(boundedCount(value)).toEqual(count);
+  });
+});
+
+describe("usageProperties", () => {
+  it("every measurement", () => {
+    const input = {
       channels: { threads: 2 },
-      deployment_category: "selfhosted",
+      engagement: {
+        threads: {
+          asOf: "2026-01-02T00:00:00Z",
+          comments: 4,
+          distributions: 1,
+          reactions: 7,
+          shares: 2,
+          views: 120,
+        },
+      },
+      engagementAsOf: "2026-01-02T00:00:00Z",
+      engagementCoverage: {
+        measured: 1,
+        missing: 4,
+        truncated: true,
+        unsupportedMetrics: ["reactions", "views"] as const,
+      },
+      expectedIntervalStartedAt: "2026-01-01T00:00:00Z",
+      publications: { distributions: { threads: 1 }, posts: 1 },
+      reportDate: "2026-01-02",
+    };
+
+    expect(usageProperties(input, context)).toEqual({
+      ...enveloped,
+      channels: { threads: 2 },
+      consent_interval_started_at: "2026-01-01T00:00:00.000Z",
       engagement: {
         threads: {
           as_of: "2026-01-02T00:00:00.000Z",
           comments: 4,
           distributions: 1,
           reactions: 7,
+          shares: 2,
           views: 120,
         },
       },
       engagement_as_of: "2026-01-02T00:00:00.000Z",
-      engagement_coverage: { measured: 1, missing: 0 },
+      engagement_coverage: {
+        measured: 1,
+        missing: 4,
+        truncated: true,
+        unsupported_metrics: ["views", "reactions"],
+      },
       publications: { distributions: { threads: 1 }, posts: 1 },
       report_date: "2026-01-02",
-      schema_version: 1,
     });
-    expect(payloadViolation(properties)).toBeUndefined();
   });
 
-  it("reports an unsupported metric as absent rather than an observed zero", () => {
-    const properties = usageProperties(
-      {
-        ...usageInput,
-        engagement: {
-          threads: {
-            asOf: null,
-            comments: null,
-            distributions: 1,
-            reactions: 0,
-            shares: null,
-            views: null,
-          },
-        },
-      },
-      context,
-    );
-
-    const gauge = (properties.engagement as Record<string, Record<string, number>>).threads!;
-    expect(gauge.reactions).toBe(0);
-    expect(gauge.views).toBeUndefined();
-    expect(gauge.shares).toBeUndefined();
-    expect(gauge.comments).toBeUndefined();
-  });
-
-  it("drops a malformed reporting period instead of forwarding it", () => {
-    const properties = usageProperties({ ...usageInput, reportDate: "02/01/2026" }, context);
-    expect(properties.report_date).toBeUndefined();
-  });
-
-  it("states cohort truncation and unsupported metrics in the coverage", () => {
-    const properties = usageProperties(
-      {
-        ...usageInput,
-        engagementCoverage: {
-          measured: 1,
-          missing: 4,
-          truncated: true,
-          unsupportedMetrics: ["reactions", "views"],
-        },
-      },
-      context,
-    );
-
-    expect(properties.engagement_coverage).toEqual({
-      measured: 1,
-      missing: 4,
-      truncated: true,
-      unsupported_metrics: ["views", "reactions"],
+  it("nothing measured", () => {
+    expect(usageProperties(NOTHING_MEASURED, context)).toEqual({
+      ...nothingReported,
+      report_date: "2026-01-02",
     });
-    expect(payloadViolation(properties)).toBeUndefined();
   });
 
-  it("drops metric names outside the engagement vocabulary", () => {
-    const properties = usageProperties(
-      {
-        ...usageInput,
-        engagementCoverage: {
-          measured: 1,
-          missing: 0,
-          truncated: false,
-          unsupportedMetrics: ["follower_count"] as never,
+  it.each([
+    ["a date in another format", "02/01/2026"],
+    ["a day that does not exist", "2026-02-30"],
+    ["a month that does not exist", "2026-13-01"],
+  ])("%s", (_example, reportDate) => {
+    const input = { ...NOTHING_MEASURED, reportDate };
+
+    expect(usageProperties(input, context)).toEqual(nothingReported);
+  });
+
+  it("a metric with no observation next to an observed zero", () => {
+    const input = {
+      ...NOTHING_MEASURED,
+      engagement: {
+        threads: {
+          asOf: null,
+          comments: null,
+          distributions: 1,
+          reactions: 0,
+          shares: null,
+          views: null,
         },
       },
-      context,
-    );
+    };
 
-    expect(properties.engagement_coverage).toEqual({ measured: 1, missing: 0 });
-    expect(payloadViolation(properties)).toBeUndefined();
+    expect(usageProperties(input, context)).toEqual({
+      ...nothingReported,
+      engagement: { threads: { distributions: 1, reactions: 0 } },
+      report_date: "2026-01-02",
+    });
   });
 
-  it("ignores identifiers smuggled into the per-Platform maps", () => {
-    const properties = usageProperties(
-      {
-        ...usageInput,
-        channels: { threads: 2, "account-id-9f8e": 5 } as never,
-      },
-      context,
-    );
+  it("identifiers smuggled into the per-Platform maps", () => {
+    const channels = { threads: 2, "account-id-9f8e": 5 };
+    const input = { ...NOTHING_MEASURED, channels };
 
-    expect(properties.channels).toEqual({ threads: 2 });
+    expect(usageProperties(input, context)).toEqual({
+      ...nothingReported,
+      channels: { threads: 2 },
+      report_date: "2026-01-02",
+    });
+  });
+
+  it("a metric outside the engagement vocabulary", () => {
+    const input = {
+      ...NOTHING_MEASURED,
+      engagementCoverage: {
+        measured: 1,
+        missing: 0,
+        truncated: false,
+        unsupportedMetrics: ["follower_count"] as never,
+      },
+    };
+
+    expect(usageProperties(input, context)).toEqual({
+      ...nothingReported,
+      engagement_coverage: { measured: 1, missing: 0 },
+      report_date: "2026-01-02",
+    });
+  });
+
+  it("unusable times and counts", () => {
+    const input = {
+      ...NOTHING_MEASURED,
+      engagementAsOf: "not-a-time",
+      engagementCoverage: { measured: -1, missing: -1, truncated: false, unsupportedMetrics: [] },
+      publications: { distributions: {}, posts: -1 },
+    };
+
+    expect(usageProperties(input, context)).toEqual({ ...enveloped, report_date: "2026-01-02" });
   });
 });
 
-describe("diagnostic payload", () => {
-  it("emits the documented exception shape with fixed category values", () => {
-    const properties = diagnosticProperties(
-      {
-        category: "unhandled_exception",
-        error: {
-          name: "TypeError",
-          stack: [
-            "TypeError: Cannot publish https://api.provider.test/v1/posts?access_token=secret-value",
-            "    at publishDistribution (workers/automation/src/distribution.ts:42:7)",
-            "    at Object.<anonymous> (node:internal/process/task_queues:95:5)",
-            "    at eval (eval at <anonymous> (src/worker.ts:1:1), <anonymous>:1:1)",
-          ].join("\n"),
-        },
-        handled: false,
-        occurredAt: "2026-01-02T03:04:05.000Z",
-        operation: "publish",
-        platform: "threads",
-      },
-      context,
-    );
+describe("sanitizedFrames", () => {
+  it.each([
+    [
+      "a named V8 frame",
+      "    at publish (workers/automation/src/distribution.ts:42:7)",
+      "workers/automation/source",
+      42,
+    ],
+    [
+      "an async V8 frame",
+      "    at async publish (workers/automation/src/distribution.ts:42:7)",
+      "workers/automation/source",
+      42,
+    ],
+    [
+      "an anonymous V8 frame",
+      "    at workers/automation/src/distribution.ts:42:7",
+      "workers/automation/source",
+      42,
+    ],
+    [
+      "a package source frame",
+      "    at safe (packages/reporting/src/service.ts:10:3)",
+      "packages/reporting/source",
+      10,
+    ],
+    ["an app source frame", "    at x (src/lib/api.ts:3:1)", "src/lib/source", 3],
+    [
+      "a hashed asset behind an origin",
+      "    at render (https://installation.example/assets/index-DiwrgTda.js:4:12)",
+      "assets/DiwrgTda.js",
+      4,
+    ],
+    [
+      "a hashed asset with a credential query",
+      "    at boot (https://app.example/assets/index-AbCdEf12.js?access_token=leak:1:1)",
+      "assets/AbCdEf12.js",
+      1,
+    ],
+    ["a release bundle", "    at run (/opt/meltiply/worker.js:9:1)", "worker.js", 9],
+  ])("%s", (_example, stack, filename, lineno) => {
+    expect(sanitizedFrames(stack)).toEqual([frame(filename, lineno)]);
+  });
 
-    expect(properties).toMatchObject({
-      app_version: "1.0.0-target.0",
-      deployment_category: "selfhosted",
-      diagnostic_category: "unhandled_exception",
-      diagnostic_handled: false,
-      operation_category: "publish",
-      platform: "threads",
-      schema_version: 1,
-    });
-    expect(properties.$exception_level).toBe("error");
-    const list = properties.$exception_list as Record<string, unknown>[];
-    expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({
-      mechanism: { exception_id: 0, handled: false, synthetic: false, type: "generic" },
-      type: "TypeError",
-      value: "unhandled_exception",
-    });
-    const stacktrace = list[0]!.stacktrace as { frames: Record<string, unknown>[]; type: string };
-    expect(stacktrace.type).toBe("raw");
-    expect(stacktrace.frames).toEqual([
+  it.each([
+    ["no stack", undefined],
+    ["an empty stack", ""],
+    ["a dependency bundle", "    at handler (https://cdn.provider.test/bundle.js:1:22)"],
+    ["an arbitrary absolute path", "    at run (/opt/meltiply/app.js:9:1)"],
+    ["an unhashed asset name", "    at x (https://app.example/assets/customer-name.js:1:1)"],
+    ["an unknown source area", "    at x (workers/billing/src/app.ts:1:1)"],
+    ["a source path with no code extension", "    at x (workers/api/notes.txt:1:1)"],
+    ["a location without a line", "    at publish (workers/automation/src/distribution.ts)"],
+    ["a location without a column", "    at publish (workers/automation/src/distribution.ts:4)"],
+    ["a frame without a location", "    at publishDistribution"],
+    ["a blank frame", "    at    "],
+    ["an eval frame", "    at eval (eval at <anonymous> (src/worker.ts:1:1), <anonymous>:1:1)"],
+    ["a promise combinator frame", "    at async Promise.all (index 0)"],
+    ["a message line", "TypeError: Cannot publish https://api.provider.test?access_token=x"],
+    ["a very long malformed line", `at ${" ".repeat(100_000)}x`],
+  ])("%s", (_example, stack) => {
+    expect(sanitizedFrames(stack)).toEqual([]);
+  });
+
+  it("a hostile function name before a source location", () => {
+    const stack = `at ${"private-customer-name ".repeat(100)}(workers/automation/src/a.ts:42:7)`;
+
+    expect(sanitizedFrames(stack)).toEqual([frame("workers/automation/source", 42)]);
+  });
+
+  it("a line number past the safe integers", () => {
+    const stack = "    at boot (workers/automation/src/a.ts:99999999999999999999:1)";
+
+    expect(sanitizedFrames(stack)).toEqual([
       {
         filename: "workers/automation/source",
         function: "<anonymous>",
         in_app: true,
         lang: "javascript",
-        lineno: 42,
         platform: "custom",
       },
     ]);
-    expect(payloadViolation(properties)).toBeUndefined();
   });
 
-  it("never carries the raw exception message, URL or credential", () => {
-    const properties = diagnosticProperties(
-      {
-        category: "request_failure",
-        error: {
-          name: "ProviderAdapterError",
-          stack: "    at syncComments (workers/automation/src/provider-sync.ts:88:11)",
-        },
-        handled: true,
-        occurredAt: "2026-01-02T03:04:05.000Z",
-        operation: "inbox",
-      },
-      context,
+  it("thirteen usable frames", () => {
+    const stack = Array.from({ length: 13 }, (_, i) => `at src/app/a.ts:${i + 1}:1`).join("\n");
+
+    expect(sanitizedFrames(stack)).toEqual(
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((line) => frame("src/app/source", line)),
     );
+  });
+});
 
-    const serialized = JSON.stringify(properties);
-    expect(serialized).not.toContain("access_token");
-    expect(serialized).not.toContain("provider.test");
-    expect(serialized).not.toContain("secret-value");
+describe("diagnosticProperties", () => {
+  const occurredAt = "2026-01-02T03:04:05.000Z";
+  const exception = (type: string, value: string, handled: boolean) => ({
+    mechanism: { exception_id: 0, handled, synthetic: false, type: "generic" },
+    type,
+    value,
   });
 
-  it("falls back to a safe type and category when the producer passes a raw value", () => {
-    const properties = diagnosticProperties(
-      {
-        category: "raw provider error" as never,
-        error: { name: "alpha@example.test" },
-        handled: true,
-        occurredAt: "2026-01-02T03:04:05.000Z",
-        operation: "publish https://leak.test" as never,
-      },
-      context,
-    );
-
-    const list = properties.$exception_list as Record<string, unknown>[];
-    expect(list[0]!.type).toBe("Error");
-    expect(list[0]!.value).toBe("unhandled_exception");
-    expect(properties.operation_category).toBe("other");
-    expect(payloadViolation(properties)).toBeUndefined();
-  });
-
-  it("drops frames whose location is not an application source path", () => {
-    expect(
-      sanitizedFrames(
-        [
-          "    at handler (https://cdn.provider.test/bundle.js:1:22)",
-          "    at run (/opt/meltiply/app.js:9:1)",
-          "    at safe (packages/reporting/src/service.ts:10:3)",
+  it("an exception with a stack and a platform", () => {
+    const input = {
+      category: "unhandled_exception",
+      error: {
+        name: "TypeError",
+        stack: [
+          "TypeError: Cannot publish https://api.provider.test/v1/posts?access_token=secret",
+          "    at publish (workers/automation/src/distribution.ts:42:7)",
         ].join("\n"),
-      ),
-    ).toEqual([
-      {
-        filename: "packages/reporting/source",
-        function: "<anonymous>",
-        in_app: true,
-        lang: "javascript",
-        lineno: 10,
-        platform: "custom",
       },
-    ]);
-  });
-});
+      handled: false,
+      occurredAt,
+      operation: "publish",
+      platform: "threads",
+    } as const;
 
-describe("feedback payload", () => {
-  it("attributes the fixed answer with schema and deployment context only", () => {
-    const properties = feedbackProperties("github", context);
-    expect(properties).toEqual({
-      app_version: "1.0.0-target.0",
-      deployment_category: "selfhosted",
-      discovery_source: "github",
-      schema_version: 1,
+    expect(diagnosticProperties(input, context)).toEqual({
+      ...enveloped,
+      $exception_level: "error",
+      $exception_list: [
+        {
+          ...exception("TypeError", "unhandled_exception", false),
+          stacktrace: { frames: [frame("workers/automation/source", 42)], type: "raw" },
+        },
+      ],
+      diagnostic_category: "unhandled_exception",
+      diagnostic_handled: false,
+      operation_category: "publish",
+      platform: "threads",
     });
-    expect(payloadViolation(properties)).toBeUndefined();
-  });
-});
-
-describe("payload validation", () => {
-  it("rejects an unexpected property", () => {
-    expect(payloadViolation({ workspace_name: "Acme" })).toBe("unexpected_property:workspace_name");
   });
 
-  it("rejects a nested key outside the documented exception shape", () => {
-    expect(
-      payloadViolation({ $exception_list: [{ type: "Error", body: "raw request body" }] }),
-    ).toBe("unexpected_nested_key:body");
-  });
+  it("a classified provider failure", () => {
+    const input = {
+      category: "provider_failure",
+      error: { name: "ProviderAdapterError" },
+      failureClass: "rate_limit",
+      handled: true,
+      occurredAt,
+      operation: "publish",
+    } as const;
 
-  it("rejects canary values anywhere in the payload", () => {
-    for (const canary of [
-      "alpha@meltiply.local",
-      "https://api.threads.test/v1/posts",
-      "00000000-0000-4000-8000-000000000001",
-      "Bearer abc.def.ghi",
-      "password=hunter2",
-      "graph.facebook.com/posts?access_token=abc",
-    ]) {
-      expect(containsForbiddenValue(canary), canary).toBe(true);
-      expect(payloadViolation({ platform: canary }), canary).toBe("forbidden_value");
-    }
-  });
-
-  it("accepts ordinary identifiers and enumerations", () => {
-    expect(containsForbiddenValue("publishDistribution")).toBe(false);
-    expect(containsForbiddenValue("workers/api/src/app.ts")).toBe(false);
-    expect(payloadViolation({ platform: "threads", schema_version: 1 })).toBeUndefined();
-  });
-});
-
-describe("provider failure payload", () => {
-  it("carries the canonical class as its own documented property", () => {
-    const properties = diagnosticProperties(
-      {
-        category: "provider_failure",
-        error: { name: "ProviderAdapterError" },
-        failureClass: "rate_limit",
-        handled: true,
-        occurredAt: "2026-01-02T03:04:05.000Z",
-        operation: "publish",
-        platform: "threads",
-      },
-      context,
-    );
-
-    expect(properties).toMatchObject({
+    expect(diagnosticProperties(input, context)).toEqual({
+      ...enveloped,
+      $exception_level: "error",
+      $exception_list: [exception("ProviderAdapterError", "provider_failure", true)],
       diagnostic_category: "provider_failure",
       diagnostic_handled: true,
+      operation_category: "publish",
       provider_failure_class: "rate_limit",
     });
-    const [exception] = properties.$exception_list as Record<string, unknown>[];
-    expect(exception).toMatchObject({ value: "provider_failure" });
-    expect(payloadViolation(properties)).toBeUndefined();
   });
 
-  it("drops an out-of-vocabulary class and a class outside the Provider category", () => {
-    const rawClass = diagnosticProperties(
-      {
-        category: "provider_failure",
-        error: { name: "ProviderAdapterError" },
-        failureClass: "provider said no" as never,
-        handled: true,
-        occurredAt: "2026-01-02T03:04:05.000Z",
-        operation: "publish",
-      },
-      context,
-    );
-    expect(rawClass).not.toHaveProperty("provider_failure_class");
+  it("raw values in every classified field", () => {
+    const input = {
+      category: "raw provider error",
+      error: { name: "SensitiveCustomerName" },
+      failureClass: "provider said no",
+      handled: true,
+      occurredAt,
+      operation: "publish https://leak.test",
+      platform: "alpha@example.test",
+    } as never;
 
-    const wrongCategory = diagnosticProperties(
-      {
-        category: "unhandled_exception",
-        error: { name: "TypeError" },
-        failureClass: "rate_limit",
-        handled: false,
-        occurredAt: "2026-01-02T03:04:05.000Z",
-        operation: "publish",
-      },
-      context,
-    );
-    expect(wrongCategory).not.toHaveProperty("provider_failure_class");
-    expect(payloadViolation(wrongCategory)).toBeUndefined();
-  });
-});
-
-describe("deployed release frames", () => {
-  it("keeps a hashed frontend asset frame and strips the origin and query", () => {
-    const [frame] = sanitizedFrames(
-      "    at render (https://installation.example/assets/index-DiwrgTda.js:4:12)",
-    );
-
-    expect(frame).toEqual({
-      filename: "assets/DiwrgTda.js",
-      function: "<anonymous>",
-      in_app: true,
-      lang: "javascript",
-      lineno: 4,
-      platform: "custom",
-    });
-    expect(JSON.stringify(frame)).not.toContain("installation.example");
-  });
-
-  it("strips a cache-busting or credential-bearing suffix from a release frame", () => {
-    const frames = sanitizedFrames(
-      [
-        "    at boot (https://app.example/assets/index-AbCdEf12.js?v=2:1:1)",
-        "    at boot (https://app.example/assets/index-AbCdEf12.js?access_token=leak:1:1)",
-      ].join("\n"),
-    );
-
-    expect(frames.map((frame) => frame.filename)).toEqual([
-      "assets/AbCdEf12.js",
-      "assets/AbCdEf12.js",
-    ]);
-    expect(JSON.stringify(frames)).not.toContain("access_token");
-  });
-
-  it("still rejects dependency bundles, arbitrary file names and absolute paths", () => {
-    expect(
-      sanitizedFrames(
-        [
-          "    at third (https://cdn.provider.test/bundle.js:1:22)",
-          "    at run (/opt/meltiply/app.js:9:1)",
-          "    at guess (https://app.example/assets/customer-name.js:1:1)",
-          "    at ours (assets/index-AbCdEf12.js:1:1)",
-        ].join("\n"),
-      ),
-    ).toEqual([
-      {
-        filename: "assets/AbCdEf12.js",
-        function: "<anonymous>",
-        in_app: true,
-        lang: "javascript",
-        lineno: 1,
-        platform: "custom",
-      },
-    ]);
-  });
-});
-
-describe("hostile stack frame boundaries", () => {
-  it("rejects a long malformed frame without losing a following valid location", () => {
-    const frames = sanitizedFrames(
-      [
-        "at " + " ".repeat(100_000) + "x",
-        "at " +
-          "private-customer-name ".repeat(10_000) +
-          "(workers/automation/src/distribution.ts:42:7)",
-      ].join("\n"),
-    );
-    expect(frames.map((frame) => frame.lineno)).toEqual([42]);
-    expect(frames[0]?.function).toBe("<anonymous>");
-    expect(JSON.stringify(frames)).not.toContain("private-customer-name");
-  });
-
-  it("accepts the V8 frame shapes the sanitizer supports", () => {
-    const frames = sanitizedFrames(
-      [
-        "    at publishDistribution (workers/automation/src/distribution.ts:42:7)",
-        "    at async publishDistribution (workers/automation/src/distribution.ts:42:7)",
-        "    at workers/automation/src/distribution.ts:42:7",
-      ].join("\n"),
-    );
-
-    expect(frames).toHaveLength(3);
-    for (const frame of frames) {
-      expect(frame.filename).toBe("workers/automation/source");
-      expect(frame.function).toBe("<anonymous>");
-      expect(frame.lineno).toBe(42);
-    }
-  });
-
-  it("fails closed on malformed frames instead of guessing a location", () => {
-    expect(
-      sanitizedFrames(
-        [
-          "    at publishDistribution (workers/automation/src/distribution.ts)",
-          "    at publishDistribution",
-          "    at    ",
-          "    at eval (eval at <anonymous> (src/worker.ts:1:1), <anonymous>:1:1)",
-          "    at async Promise.all (index 0)",
-        ].join("\n"),
-      ),
-    ).toEqual([]);
-  });
-
-  it("keeps an unusable line number off a frame whose location is valid", () => {
-    const [frame] = sanitizedFrames(
-      "    at boot (workers/automation/src/distribution.ts:99999999999999999999:1)",
-    );
-
-    expect(frame?.filename).toBe("workers/automation/source");
-    expect(frame).not.toHaveProperty("lineno");
-  });
-
-  it("never forwards a hostile location or a whitespace run from a stack", () => {
-    const frames = sanitizedFrames(
-      [
-        "    at " + "customer-name ".repeat(20) + "(workers/automation/src/distribution.ts:1:1)",
-        "    at leak (https://cdn.provider.test/bundle.js:1:1)",
-      ].join("\n"),
-    );
-
-    const serialized = JSON.stringify(frames);
-    expect(serialized).not.toContain("customer-name");
-    expect(serialized).not.toContain("cdn.provider.test");
-    expect(frames).toHaveLength(1);
-  });
-});
-
-describe("exception type and frame value allowlist", () => {
-  it("normalizes an identifier-shaped but unapproved error name to Error", () => {
-    const properties = diagnosticProperties(
-      {
-        category: "request_failure",
-        error: {
-          name: "SensitiveCustomerName",
-          stack: "    at guard (workers/api/src/app.ts:10:2)",
-        },
-        handled: true,
-        occurredAt: "2026-01-02T03:04:05.000Z",
-        operation: "publish",
-      },
-      context,
-    );
-
-    const list = properties.$exception_list as Record<string, unknown>[];
-    expect(list[0]!.type).toBe("Error");
-    expect(JSON.stringify(properties)).not.toContain("SensitiveCustomerName");
-    expect(payloadViolation(properties)).toBeUndefined();
-  });
-
-  it("keeps a reviewed application exception class as the group name", () => {
-    const properties = diagnosticProperties(
-      {
-        category: "request_failure",
-        error: { name: "ProviderAdapterError" },
-        handled: true,
-        occurredAt: "2026-01-02T03:04:05.000Z",
-        operation: "publish",
-      },
-      context,
-    );
-
-    const list = properties.$exception_list as Record<string, unknown>[];
-    expect(list[0]!.type).toBe("ProviderAdapterError");
-  });
-
-  it("refuses a stored row carrying an unapproved type or free-form frame symbol", () => {
-    const base = {
+    expect(diagnosticProperties(input, context)).toEqual({
+      ...enveloped,
       $exception_level: "error",
-      app_version: "1.0.0-target.0",
-      deployment_category: "selfhosted",
-      diagnostic_category: "request_failure",
+      $exception_list: [exception("Error", "unhandled_exception", true)],
+      diagnostic_category: "unhandled_exception",
+      diagnostic_handled: true,
+      operation_category: "other",
+    });
+  });
+
+  it.each([
+    ["an unknown class of a provider failure", "provider_failure", "provider said no"],
+    ["a class outside the provider category", "request_failure", "rate_limit"],
+  ])("%s", (_example, category, failureClass) => {
+    const input = {
+      category,
+      error: { name: "TypeError" },
+      failureClass,
+      handled: true,
+      occurredAt,
+      operation: "publish",
+    } as never;
+
+    expect(diagnosticProperties(input, context)).toEqual({
+      ...enveloped,
+      $exception_level: "error",
+      $exception_list: [exception("TypeError", category, true)],
+      diagnostic_category: category,
       diagnostic_handled: true,
       operation_category: "publish",
-      schema_version: 1,
-    };
+    });
+  });
+});
 
-    expect(
-      payloadViolation({
-        ...base,
-        $exception_list: [{ type: "CustomerName", value: "request_failure" }],
-      }),
-    ).toBe("unapproved_exception_type");
-    expect(
-      payloadViolation({
-        ...base,
-        $exception_list: [
-          {
-            stacktrace: {
-              frames: [{ filename: "assets/AbCdEf12.js", function: "customerName" }],
-              type: "raw",
-            },
-            type: "TypeError",
-            value: "request_failure",
-          },
-        ],
-      }),
-    ).toBe("unapproved_frame_symbol");
-    expect(
-      payloadViolation({
-        ...base,
-        $exception_list: [
-          {
-            stacktrace: {
-              frames: [{ filename: "packages/SensitiveCustomerName.ts", function: "<anonymous>" }],
-              type: "raw",
-            },
-            type: "TypeError",
-            value: "request_failure",
-          },
-        ],
-      }),
-    ).toBe("unapproved_frame_location");
+describe("feedbackProperties", () => {
+  it("a discovery source", () => {
+    expect(feedbackProperties("github", context)).toEqual({
+      ...enveloped,
+      discovery_source: "github",
+    });
+  });
+});
+
+describe("payloadViolation", () => {
+  const listOf = (...entries: unknown[]) => ({ $exception_list: entries });
+  const framed = (frames: unknown) =>
+    listOf({ stacktrace: { frames, type: "raw" }, type: "TypeError" });
+  const nested = (depth: number): unknown => (depth === 0 ? "x" : [nested(depth - 1)]);
+
+  it.each([
+    ["an empty payload", {}],
+    ["ordinary enumerations", { platform: "threads", schema_version: 1 }],
+    ["a value of 200 characters", { platform: "a".repeat(200) }],
+    ["an array of 64 items", { channels: Array.from({ length: 64 }, () => 1) }],
+    ["strings six levels deep", { channels: nested(5) }],
+    ["an exception without a stack", listOf({ type: "TypeError" })],
+    ["an approved frame", framed([{ filename: "assets/AbCdEf12.js", function: "<anonymous>" }])],
+  ])("%s", (_example, payload) => {
+    expect(payloadViolation(payload)).toEqual(undefined);
+  });
+
+  it.each([
+    ["an unexpected property", { workspace_name: "Acme" }, "unexpected_property:workspace_name"],
+    [
+      "an unexpected nested key",
+      listOf({ type: "Error", body: "raw request body" }),
+      "unexpected_nested_key:body",
+    ],
+    ["strings seven levels deep", { channels: nested(6) }, "payload_too_deep"],
+    ["an array of 65 items", { channels: Array.from({ length: 65 }, () => 1) }, "payload_too_wide"],
+    ["a value of 201 characters", { platform: "a".repeat(201) }, "oversized_value"],
+    ["a leaked value", { platform: "alpha@meltiply.local" }, "forbidden_value"],
+    ["an exception list that is not a list", { $exception_list: "x" }, "exception_list_not_list"],
+    ["an exception that is not an object", listOf("x"), "exception_entry_invalid"],
+    ["an unapproved exception type", listOf({ type: "CustomerName" }), "unapproved_exception_type"],
+    ["frames that are not a list", framed("x"), "frames_not_list"],
+    ["a frame that is not an object", framed(["x"]), "frame_invalid"],
+    [
+      "an unapproved frame location",
+      framed([{ filename: "packages/SensitiveCustomerName.ts" }]),
+      "unapproved_frame_location",
+    ],
+    [
+      "a free-form frame symbol",
+      framed([{ filename: "assets/AbCdEf12.js", function: "customerName" }]),
+      "unapproved_frame_symbol",
+    ],
+  ])("%s", (_example, payload, violation) => {
+    expect(payloadViolation(payload)).toEqual(violation);
   });
 });

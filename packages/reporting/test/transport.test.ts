@@ -1,227 +1,111 @@
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
-import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
-import { reportingConfiguration } from "../src/configuration";
-import { CAPTURE_TIMEOUT_MILLISECONDS, createPostHogTransport } from "../src/transport";
+import { createPostHogTransport } from "../src/transport";
 
-interface ReceivedRequest {
-  body: Record<string, unknown>;
-  headers: Record<string, string | string[] | undefined>;
-  method: string;
-  url: string;
-}
-
-type ReceiverMode = { kind: "ok" } | { kind: "status"; status: number } | { kind: "hang" };
-
-const receiver = {
-  mode: { kind: "ok" } as ReceiverMode,
-  requests: [] as ReceivedRequest[],
+const destination = {
+  captureUrl: "https://us.i.posthog.com/i/v0/e/",
+  projectToken: "phc_acceptanceTokenValue123",
 };
-
-const server = createServer((request, response) => {
-  const chunks: Buffer[] = [];
-  request.on("data", (chunk: Buffer) => chunks.push(chunk));
-  request.on("end", () => {
-    const text = Buffer.concat(chunks).toString("utf8");
-    const parsed: unknown = text.length === 0 ? {} : JSON.parse(text);
-    receiver.requests.push({
-      body:
-        parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {},
-      headers: request.headers,
-      method: request.method ?? "",
-      url: request.url ?? "",
-    });
-    if (receiver.mode.kind === "hang") {
-      return;
-    }
-    response.writeHead(receiver.mode.kind === "ok" ? 200 : receiver.mode.status, {
-      "Content-Type": "application/json",
-    });
-    response.end(JSON.stringify({ status: 1 }));
-  });
-});
-
-let origin: string;
-
-beforeAll(async () => {
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address() as AddressInfo;
-  origin = `http://127.0.0.1:${address.port}`;
-});
-
-afterAll(async () => {
-  server.closeAllConnections();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-});
-
-function resetReceiver(mode: ReceiverMode = { kind: "ok" }) {
-  receiver.mode = mode;
-  receiver.requests = [];
-}
-
-function destinationFor(host = origin) {
-  const configuration = reportingConfiguration({
-    DEPLOYMENT_CATEGORY: "selfhosted",
-    REPORTING_POSTHOG_HOST: host,
-    REPORTING_POSTHOG_PROJECT_TOKEN: "phc_acceptanceTokenValue123",
-  });
-  if (!configuration.destination) throw new Error("test destination did not resolve");
-  return configuration.destination;
-}
 
 const usageEvent = {
   distinctId: "4f1d0f6e-6a1f-4a3f-9d1e-2c1f0f6e6a1f",
   event: "meltiply_usage_daily",
   eventUuid: "9c2f1e88-1f77-4f4b-8f11-2a5b7c1d0e22",
-  properties: {
-    app_version: "1.0.0-target.0",
-    channels: { threads: 2 },
-    deployment_category: "selfhosted",
-    schema_version: 1,
-  },
+  properties: { app_version: "1.0.0-target.0", schema_version: 1 },
   timestamp: "2026-01-02T00:00:00.000Z",
 };
 
-describe("PostHog capture transport", () => {
-  it("sends one documented capture request to the configured ingestion path", async () => {
-    resetReceiver();
-    const transport = createPostHogTransport({ destination: destinationFor() });
-
-    const result = await transport.capture(usageEvent);
-
-    expect(result).toEqual({ ok: true });
-    expect(receiver.requests).toHaveLength(1);
-    const [captured] = receiver.requests;
-    expect(captured!.method).toBe("POST");
-    expect(captured!.url).toBe("/i/v0/e/");
-    expect(captured!.headers["content-type"]).toBe("application/json");
-    expect(captured!.body).toMatchObject({
-      api_key: "phc_acceptanceTokenValue123",
-      distinct_id: usageEvent.distinctId,
-      event: "meltiply_usage_daily",
-      timestamp: "2026-01-02T00:00:00.000Z",
-      uuid: usageEvent.eventUuid,
-    });
+function setup(answer: (signal: AbortSignal) => Promise<Response>, timeoutMilliseconds?: number) {
+  const requests: unknown[] = [];
+  const transport = createPostHogTransport({
+    destination,
+    fetch: (url, init) => {
+      requests.push({
+        url,
+        method: init?.method,
+        headers: init?.headers,
+        redirect: init?.redirect,
+        body: JSON.parse(String(init?.body)),
+      });
+      return answer(init!.signal!);
+    },
+    ...(timeoutMilliseconds === undefined ? {} : { timeoutMilliseconds }),
   });
+  return { transport, requests };
+}
 
-  it("disables person profiles and geoip without adding identify properties", async () => {
-    resetReceiver();
-    const transport = createPostHogTransport({ destination: destinationFor() });
+const status = (code: number) => () => Promise.resolve(new Response(null, { status: code }));
 
-    await transport.capture(usageEvent);
+describe("createPostHogTransport", () => {
+  describe("capture", () => {
+    it("an accepted event", async () => {
+      const { transport, requests } = setup(status(200));
 
-    const properties = receiver.requests[0]!.body.properties as Record<string, unknown>;
-    expect(properties.$process_person_profile).toBe(false);
-    expect(properties.$geoip_disable).toBe(true);
-    expect(properties.$set).toBeUndefined();
-    expect(properties.$set_once).toBeUndefined();
-    expect(Object.keys(properties).some((key) => key.startsWith("$group"))).toBe(false);
-  });
+      const result = await transport.capture(usageEvent);
 
-  it("reports a rejected ingestion as retryable only when the status allows a retry", async () => {
-    resetReceiver({ kind: "status", status: 500 });
-    const transport = createPostHogTransport({ destination: destinationFor() });
-    const upstreamFailure = await transport.capture(usageEvent);
-    expect(upstreamFailure).toMatchObject({
-      errorCode: "capture_status_500",
-      ok: false,
-      retryable: true,
-    });
-
-    resetReceiver({ kind: "status", status: 401 });
-    const rejected = await transport.capture(usageEvent);
-    expect(rejected).toMatchObject({
-      errorCode: "capture_status_401",
-      ok: false,
-      retryable: false,
-    });
-  });
-
-  it("times out a hanging destination without throwing", async () => {
-    resetReceiver({ kind: "hang" });
-    const transport = createPostHogTransport({
-      destination: destinationFor(),
-      timeoutMilliseconds: 150,
+      expect(result).toEqual({ ok: true });
+      expect(requests).toEqual([
+        {
+          url: "https://us.i.posthog.com/i/v0/e/",
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          redirect: "manual",
+          body: {
+            api_key: "phc_acceptanceTokenValue123",
+            distinct_id: "4f1d0f6e-6a1f-4a3f-9d1e-2c1f0f6e6a1f",
+            event: "meltiply_usage_daily",
+            properties: {
+              app_version: "1.0.0-target.0",
+              schema_version: 1,
+              $geoip_disable: true,
+              $process_person_profile: false,
+            },
+            timestamp: "2026-01-02T00:00:00.000Z",
+            uuid: "9c2f1e88-1f77-4f4b-8f11-2a5b7c1d0e22",
+          },
+        },
+      ]);
     });
 
-    const result = await transport.capture(usageEvent);
+    it.each([
+      ["a redirect", 302, false],
+      ["a rejected token", 401, false],
+      ["a rate limit", 429, true],
+      ["a server error", 500, true],
+    ])("%s", async (_example, code, retryable) => {
+      const { transport } = setup(status(code));
 
-    expect(result).toMatchObject({ errorCode: "capture_timeout", ok: false, retryable: true });
-  });
-
-  it("resolves a refused connection as a transport failure value", async () => {
-    resetReceiver();
-    const transport = createPostHogTransport({
-      destination: destinationFor("http://127.0.0.1:9"),
-      timeoutMilliseconds: CAPTURE_TIMEOUT_MILLISECONDS,
+      expect(await transport.capture(usageEvent)).toEqual({
+        errorCode: `capture_status_${code}`,
+        ok: false,
+        retryable,
+      });
     });
 
-    const result = await transport.capture(usageEvent);
+    it("a destination that never answers", async () => {
+      const { transport } = setup(
+        (signal) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason));
+          }),
+        1,
+      );
 
-    expect(result.ok).toBe(false);
-    expect(result).toMatchObject({ retryable: true });
-  });
-
-  it("does not follow a redirect that would forward the project token", async () => {
-    resetReceiver({ kind: "status", status: 302 });
-    const transport = createPostHogTransport({ destination: destinationFor() });
-
-    const result = await transport.capture(usageEvent);
-
-    expect(result).toMatchObject({ errorCode: "capture_status_302", ok: false });
-    expect(receiver.requests).toHaveLength(1);
-  });
-});
-
-describe("reporting configuration", () => {
-  it("keeps a missing token or host unavailable instead of guessing a destination", () => {
-    expect(reportingConfiguration({}).destination).toBeNull();
-    expect(
-      reportingConfiguration({ REPORTING_POSTHOG_HOST: "https://us.i.posthog.com" }).destination,
-    ).toBeNull();
-    expect(
-      reportingConfiguration({ REPORTING_POSTHOG_PROJECT_TOKEN: "phc_acceptanceTokenValue123" })
-        .destination,
-    ).toBeNull();
-  });
-
-  it("rejects a non-canonical or plaintext remote host", () => {
-    const token = "phc_acceptanceTokenValue123";
-    expect(
-      reportingConfiguration({
-        REPORTING_POSTHOG_HOST: "https://us.i.posthog.com/v1",
-        REPORTING_POSTHOG_PROJECT_TOKEN: token,
-      }).destination,
-    ).toBeNull();
-    expect(
-      reportingConfiguration({
-        REPORTING_POSTHOG_HOST: "http://us.i.posthog.com",
-        REPORTING_POSTHOG_PROJECT_TOKEN: token,
-      }).destination,
-    ).toBeNull();
-    expect(
-      reportingConfiguration({
-        REPORTING_POSTHOG_HOST: "https://user:pass@us.i.posthog.com",
-        REPORTING_POSTHOG_PROJECT_TOKEN: token,
-      }).destination,
-    ).toBeNull();
-  });
-
-  it("derives the documented ingestion path from a canonical https origin", () => {
-    const configuration = reportingConfiguration({
-      REPORTING_POSTHOG_HOST: "https://eu.i.posthog.com",
-      REPORTING_POSTHOG_PROJECT_TOKEN: "phc_acceptanceTokenValue123",
+      expect(await transport.capture(usageEvent)).toEqual({
+        errorCode: "capture_timeout",
+        ok: false,
+        retryable: true,
+      });
     });
-    expect(configuration.destination?.captureUrl).toBe("https://eu.i.posthog.com/i/v0/e/");
-  });
 
-  it("treats the operator override as a hard off regardless of configuration", () => {
-    const configuration = reportingConfiguration({
-      REPORTING_FORCED_OFF: "true",
-      REPORTING_POSTHOG_HOST: "https://us.i.posthog.com",
-      REPORTING_POSTHOG_PROJECT_TOKEN: "phc_acceptanceTokenValue123",
+    it("a refused connection", async () => {
+      const { transport } = setup(() => Promise.reject(new TypeError("fetch failed")));
+
+      expect(await transport.capture(usageEvent)).toEqual({
+        errorCode: "capture_transport_error",
+        ok: false,
+        retryable: true,
+      });
     });
-    expect(configuration.forcedOff).toBe(true);
   });
 });

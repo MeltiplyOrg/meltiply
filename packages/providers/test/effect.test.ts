@@ -24,6 +24,7 @@ import {
   type ProviderServiceShape,
 } from "../src/effect";
 import { classifyProviderFailure, failureDiagnostic, ProviderAdapterError } from "../src/failures";
+import { unknownResult } from "../src/results";
 import type { ProviderAdapter, ProviderRequestContext } from "../src/types";
 
 const newContext = (patch: Partial<ProviderRequestContext> = {}): ProviderRequestContext => ({
@@ -283,6 +284,15 @@ describe("provider operation effects", () => {
     const operation = operations.find((candidate) => candidate.name === name)!;
 
     expect(await codeOf(run(adapter()))).toEqual(`provider_unsupported_${operation.label}`);
+  });
+
+  it("an unknown publish outcome stays on the success channel", async () => {
+    const unknown = unknownResult("publish_unknown", "submitted:42");
+    const raw = adapter({ publish: () => Promise.resolve(unknown) });
+
+    const result = await Effect.runPromise(publishEffect(raw, newContext(), credentials, input));
+
+    expect(result).toEqual(unknown);
   });
 
   it("a failed write is not replayed", async () => {

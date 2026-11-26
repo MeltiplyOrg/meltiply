@@ -447,6 +447,15 @@ describe("ProviderHttpClient", () => {
       );
     });
 
+    it("a network failure during a write", async () => {
+      const { client } = setup(() => Promise.reject(new TypeError("socket")));
+      const write = get({ method: "POST", sideEffectPossible: true });
+
+      expect(await failureOf(client.request(newContext(), write))).toEqual(
+        failed("ambiguous", "provider_http_request_failed", false),
+      );
+    });
+
     it.each([
       ["a read", false, "timeout", true],
       ["a possible write", true, "ambiguous", false],

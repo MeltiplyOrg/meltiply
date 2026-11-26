@@ -26,36 +26,30 @@ import type {
   OAuthConnection,
   ProviderAdapter,
   ProviderCredentials,
-  ProviderMedia,
   ProviderTokenSet,
-  PublishInput,
 } from "../types";
 import {
   bearer,
   boundedString,
-  boundedText,
-  codePointLength,
   jsonHeaders,
-  mediaKind,
   metricValue,
-  normalizeContentType,
-  optionalSecureUrl,
   providerIdentifier,
   record,
   required,
   requiredIdentifier,
   requireIdempotencyKey,
-  secureUrl,
   validatePageInput,
   validateSnapshotPage,
-  validFileSize,
 } from "../values";
+import { applyInstagramContent } from "./options";
+import { instagramAccount, instagramGrantedPermissions, instagramLoginRecord } from "./login";
 import {
-  applyInstagramContent,
-  defaultInstagramPostType,
-  resolveInstagramOptions,
-  type ResolvedInstagramOptions,
-} from "./options";
+  carouselItemParameters,
+  instagramPublishPlan,
+  instagramPublishWarnings,
+  singleParameters,
+  videoTypes,
+} from "./publication";
 
 export const instagramGraphOrigin = "https://graph.instagram.com";
 export const instagramApiOrigin = "https://api.instagram.com";
@@ -63,9 +57,6 @@ const apiOrigin = instagramGraphOrigin;
 const exchangeOrigin = instagramApiOrigin;
 const graphUrl = (path: string) => new URL(`/${META_GRAPH_API_VERSION}/${path}`, apiOrigin);
 const limits = PROVIDER_LIMITS.instagram;
-const videoTypes = ["video/mp4", "video/quicktime"];
-const professionalAccountTypes = ["BUSINESS", "MEDIA_CREATOR"];
-const maxGrantedPermissions = 32;
 
 const publishingScopes = [
   "instagram_business_basic",
@@ -106,107 +97,9 @@ export interface InstagramAdapterOptions extends ProviderAdapterOptions {
   engagementEnabled?: boolean;
 }
 
-interface InstagramAttachment {
-  kind: "image" | "video";
-  url: string;
-}
-
 function accountId(credentials: ProviderCredentials): string {
   return requiredIdentifier(credentials.accountId, "instagram_professional_account_required");
 }
-
-function attachment(media: ProviderMedia, postType: string): InstagramAttachment {
-  if (media.mode !== "remote_ingest") throw rejected("instagram_remote_media_required");
-  const url = secureUrl(media.url)?.href;
-  const contentType = normalizeContentType(media.contentType);
-  const maximumVideoBytes =
-    postType === "story"
-      ? limits.maxStoryBytes
-      : postType === "reel"
-        ? limits.maxReelBytes
-        : limits.maxVideoBytes;
-  const kind = videoTypes.includes(contentType)
-    ? "video"
-    : contentType === "image/jpeg"
-      ? "image"
-      : undefined;
-  if (
-    !url ||
-    !kind ||
-    !validFileSize(media.fileSize, kind === "video" ? maximumVideoBytes : limits.maxImageBytes)
-  ) {
-    throw rejected("instagram_media_invalid");
-  }
-  return { kind, url };
-}
-
-function publishInput(input: PublishInput): {
-  attachments: InstagramAttachment[];
-  options: ResolvedInstagramOptions;
-  text: string;
-} {
-  if (input.media.length === 0) throw rejected("instagram_media_required");
-  if (input.media.length > limits.maxCarouselItems) throw rejected("instagram_carousel_too_large");
-  const requestedPostType =
-    input.providerOptions?.instagram?.postType ??
-    defaultInstagramPostType(input.media.map((media) => mediaKind(media.contentType)));
-  const attachments = input.media.map((media) => attachment(media, requestedPostType));
-  const text = input.caption.trim();
-  if (
-    codePointLength(text) > limits.maxCaptionCodePoints ||
-    input.hashtags.length > limits.maxHashtags
-  ) {
-    throw rejected("instagram_content_invalid");
-  }
-  const options = resolveInstagramOptions(
-    input.providerOptions?.instagram,
-    attachments.map((item) => item.kind),
-  );
-  if (!options) throw rejected("instagram_post_options_invalid");
-  if (options.postType === "story" && (text || input.hashtags.length)) {
-    throw rejected("instagram_story_caption_unsupported");
-  }
-  return { attachments, options, text };
-}
-
-function carouselItemParameters(item: InstagramAttachment): URLSearchParams {
-  return new URLSearchParams(
-    item.kind === "image"
-      ? { is_carousel_item: "true", image_url: item.url }
-      : { is_carousel_item: "true", media_type: "VIDEO", video_url: item.url },
-  );
-}
-
-function singleParameters(
-  item: InstagramAttachment,
-  text: string,
-  options: ResolvedInstagramOptions,
-): URLSearchParams {
-  const parameters = new URLSearchParams();
-  if (text && options.postType !== "story") parameters.set("caption", text);
-  parameters.set(item.kind === "image" ? "image_url" : "video_url", item.url);
-  if (options.postType === "story") {
-    parameters.set("media_type", "STORIES");
-  } else if (item.kind === "video" && options.postType === "feed") {
-    parameters.set("media_type", "VIDEO");
-  } else if (item.kind === "video") {
-    parameters.set("media_type", "REELS");
-    parameters.set("share_to_feed", "true");
-    if (options.trialReel) {
-      parameters.set(
-        "trial_params",
-        JSON.stringify({
-          graduation_strategy:
-            options.trialGraduation === "performance" ? "SS_PERFORMANCE" : "MANUAL",
-        }),
-      );
-    }
-  }
-  return parameters;
-}
-
-const partialConfigIssues = new Set(["CAPTION_NOT_ATTACHED", "USER_TAGGING_FAILURE"]);
-const partialAddOnStatuses = new Set(["POLL_CREATION_FAILURE", "PROMPT_CREATION_FAILURE"]);
 
 const containerProtocol: MetaContainerProtocol = {
   containerReadUrl(containerId) {
@@ -214,11 +107,7 @@ const containerProtocol: MetaContainerProtocol = {
     url.searchParams.set("fields", "id,status_code,status");
     return url.toString();
   },
-  extractWarnings: (body) =>
-    partialConfigIssues.has(String(body.config_issue)) ||
-    partialAddOnStatuses.has(String(body.caption_add_on_attachment_status))
-      ? ["instagram_publish_partial"]
-      : undefined,
+  extractWarnings: instagramPublishWarnings,
   failureDetailField: "status",
   provider: "instagram",
   publishUrl(credentials, containerId) {
@@ -229,27 +118,6 @@ const containerProtocol: MetaContainerProtocol = {
   publishedOperationPhase: "submitted",
   statusField: "status_code",
 };
-
-function loginRecord(value: unknown): Record<string, unknown> {
-  const body = record(value);
-  if (!body) throw malformed();
-  if (body.data === undefined) return body;
-  if (!Array.isArray(body.data) || body.data.length !== 1) throw malformed();
-  const account = record(body.data[0]);
-  if (!account) throw malformed();
-  return account;
-}
-
-function grantedPermissions(value: unknown): (string | undefined)[] | undefined {
-  if (Array.isArray(value)) {
-    return value.length <= maxGrantedPermissions
-      ? value.map((scope: unknown) => boundedString(scope, 128))
-      : undefined;
-  }
-  return boundedString(value, 4_096)
-    ?.split(",")
-    .map((scope) => scope.trim());
-}
 
 export function createInstagramAdapter(options: InstagramAdapterOptions): ProviderAdapter {
   const { clientId, clientSecret, http, now, redirectUri } = adapterRuntime(
@@ -348,7 +216,7 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
 
     async exchangeAuthorizationCode(context, input): Promise<OAuthConnection> {
       assertConfiguredRedirectUri(input.redirectUri, redirectUri);
-      const shortBody = loginRecord(
+      const shortBody = instagramLoginRecord(
         await exchangeAuthorizationCodeForm(http, context, {
           clientId,
           clientSecret,
@@ -360,7 +228,7 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
       const shortToken = boundedString(shortBody.access_token, limits.tokenMaxChars);
       if (!shortToken || !providerIdentifier(String(shortBody.user_id ?? ""))) throw malformed();
       if (shortBody.permissions !== undefined) {
-        const permissions = grantedPermissions(shortBody.permissions);
+        const permissions = instagramGrantedPermissions(shortBody.permissions);
         if (
           !permissions ||
           permissions.some((scope) => !scope) ||
@@ -385,29 +253,10 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
         method: "GET",
         url: profileUrl.toString(),
       });
-      const profile = loginRecord(profileResponse.body);
-      const profileAccountId = providerIdentifier(profile.user_id);
-      const username = boundedString(profile.username, 255);
-      const displayName = boundedText(profile.name, 500) ?? username;
-      const avatar = optionalSecureUrl(profile.profile_picture_url);
-      if (
-        !providerIdentifier(profile.id) ||
-        !profileAccountId ||
-        !username ||
-        !displayName ||
-        !professionalAccountTypes.includes(String(profile.account_type).toUpperCase()) ||
-        !avatar.valid
-      ) {
-        throw malformed();
-      }
+      const account = instagramAccount(instagramLoginRecord(profileResponse.body));
       return {
         accessToken,
-        account: {
-          ...(avatar.href ? { avatarUrl: avatar.href } : {}),
-          displayName,
-          id: profileAccountId,
-          username,
-        },
+        account,
         expiresAt,
         refreshToken: accessToken,
         scopes: [...configuredScopes],
@@ -422,7 +271,7 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
         method: "GET",
         url: url.toString(),
       });
-      const body = loginRecord(response.body);
+      const body = instagramLoginRecord(response.body);
       const followers = metricValue(body.followers_count);
       const following = metricValue(body.follows_count);
       const posts = metricValue(body.media_count);
@@ -458,7 +307,7 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
 
     async publish(context, credentials, input) {
       requireIdempotencyKey(input.idempotencyKey);
-      const { attachments, options: resolved, text } = publishInput(input);
+      const { attachments, options: resolved, text } = instagramPublishPlan(input);
       const metadata = input.providerOptions?.instagram;
       const mediaUrl = graphUrl(`${encodeURIComponent(accountId(credentials))}/media`);
       const createContainer = (parameters: URLSearchParams) =>

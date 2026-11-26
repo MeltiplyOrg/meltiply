@@ -1,936 +1,713 @@
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
+import { createInstagramAdapter, type InstagramAdapterOptions } from "../src/instagram/adapter";
+import type { PublishInput } from "../src/types";
 import {
-  createInstagramAdapter,
-  ProviderAdapterError,
-  type ProviderRequestContext,
-  type PublishInput,
-} from "../src";
+  failureOf,
+  malformedAnswer,
+  refused,
+  unavailable,
+  unconfirmed,
+  providerFailure,
+} from "./support";
 
-const context: ProviderRequestContext = {
-  operationId: "operation-1",
-  requestId: "request-1",
-};
-const credentials = {
-  accessToken: "access-secret",
-  accountId: "account-1",
-};
+const context = { operationId: "operation-1", requestId: "request-1" };
+const credentials = { accessToken: "access", accountId: "account-1" };
 const redirectUri = "https://api.example.com/api/v1/platforms/instagram/callback";
+const NOW = new Date("2026-07-19T00:00:00.000Z");
+const EXPIRES = "2026-09-17T00:00:00.000Z";
+const allScopes = [
+  "instagram_business_basic",
+  "instagram_business_content_publish",
+  "instagram_business_manage_comments",
+  "instagram_business_manage_insights",
+];
+const GRAPH = "https://graph.instagram.com/v25.0";
 
-type Responder = (url: URL, init: RequestInit) => Response | Promise<Response>;
+type Answer = Response | Error;
 
-function json(value: unknown, init: ResponseInit = {}): Response {
-  return Response.json(value, init);
-}
-
-function sequence(...responders: Responder[]) {
-  const calls: { init: RequestInit; url: URL }[] = [];
-  const fetcher = vi.fn<typeof fetch>(async (input, init = {}) => {
-    const url = new URL(input.toString());
-    calls.push({ init, url });
-    const responder = responders.shift();
-    if (!responder) throw new Error("unexpected provider request");
-    return responder(url, init);
-  });
-  return { calls, fetcher };
-}
-
-function adapter(
-  fetcher: typeof fetch,
-  now = new Date("2026-07-19T00:00:00Z"),
-  engagementEnabled = true,
-) {
-  return createInstagramAdapter({
-    clientId: "instagram-client",
-    clientSecret: "instagram-client-secret",
-    engagementEnabled,
-    fetch: fetcher,
-    now: () => now,
+function setup(answers: Answer[] = [], options: Partial<InstagramAdapterOptions> = {}) {
+  const requests: object[] = [];
+  const adapter = createInstagramAdapter({
+    clientId: "client",
+    clientSecret: "secret",
+    now: () => NOW,
     redirectUri,
-    timeoutMilliseconds: 100,
+    fetch: (target, init) => {
+      const url = new URL(String(target));
+      requests.push({
+        method: init?.method,
+        url: `${url.origin}${url.pathname}`,
+        query: Object.fromEntries(url.searchParams),
+        ...(init?.body === undefined ? {} : { body: String(init.body) }),
+      });
+      const answer = answers.shift() ?? new Error("unexpected request");
+      return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
+    },
+    ...options,
   });
+  return { adapter, requests };
 }
 
-function publishInput(patch: Partial<PublishInput> = {}): PublishInput {
-  return {
-    caption: "An Instagram post #launch",
-    hashtags: ["launch"],
-    idempotencyKey: "publish-1",
-    media: [
-      {
-        contentType: "image/jpeg",
-        fileSize: 1_024,
-        mode: "remote_ingest",
-        url: "https://assets.example/image.jpg?signature=secret",
-      },
-    ],
-    ...patch,
-  };
-}
+const json = (body: unknown, status = 200) => Response.json(body, { status });
+const down = () => json({}, 503);
+const post = (path: string, query: object) => ({ method: "POST", url: `${GRAPH}/${path}`, query });
+const get = (path: string, query: object) => ({ method: "GET", url: `${GRAPH}/${path}`, query });
+const photo = (name: string) => ({
+  contentType: "image/jpeg",
+  fileSize: 100,
+  mode: "remote_ingest" as const,
+  url: `https://assets.example/${name}.jpg`,
+});
+const clip = {
+  contentType: "video/mp4",
+  fileSize: 100,
+  mode: "remote_ingest" as const,
+  url: "https://assets.example/clip.mp4",
+};
+const input = (patch: Partial<PublishInput> = {}): PublishInput => ({
+  caption: "A post",
+  hashtags: [],
+  idempotencyKey: "publish-1",
+  media: [photo("one")],
+  ...patch,
+});
+const created = (id: string) => ({
+  outcome: "confirmed_success",
+  providerOperationId: `created:${id}`,
+});
+const token = () => json({ access_token: "long", expires_in: 5_184_000, token_type: "bearer" });
+const grant = (permissions?: unknown) =>
+  json({ data: [{ access_token: "short", user_id: "12345", permissions }] });
+const me = () =>
+  json({ data: [{ account_type: "Business", id: "98765", user_id: "178", username: "creator" }] });
+const exchange = { code: "code", codeVerifier: "unused", redirectUri };
+const tokenForm = `client_id=client&client_secret=secret&code=code&grant_type=authorization_code&redirect_uri=${encodeURIComponent(redirectUri)}`;
 
-describe("createInstagramAdapter", () => {
-  it("reads a zero follower count from Instagram Login's single-account data envelope", async () => {
-    const calls = sequence(() =>
-      json({
-        data: [{ followers_count: 0, follows_count: 4, media_count: 2 }],
-      }),
-    );
-    await expect(
-      adapter(calls.fetcher).getAccountAnalytics!(context, credentials),
-    ).resolves.toEqual({
-      followers: 0,
-      following: 4,
-      posts: 2,
-      recordedAt: "2026-07-19T00:00:00.000Z",
-    });
-  });
-
-  it("accepts three collaborators and rejects a fourth before calling Instagram", async () => {
-    const calls = sequence(() => json({ id: "collaboration-container" }));
-    const provider = adapter(calls.fetcher);
-    const collaborators = ["first", "second", "third"];
-    await expect(
-      provider.publish!(
-        context,
-        credentials,
-        publishInput({
-          providerOptions: { instagram: { content: { collaborators } } },
-        }),
-      ),
-    ).resolves.toMatchObject({
-      outcome: "confirmed_success",
-      providerOperationId: "created:collaboration-container",
-    });
-    await expect(
-      provider.publish!(
-        context,
-        credentials,
-        publishInput({
-          providerOptions: {
-            instagram: { content: { collaborators: [...collaborators, "fourth"] } },
-          },
-        }),
-      ),
-    ).rejects.toMatchObject({ failure: { classification: "deterministic" } });
-    expect(calls.calls).toHaveLength(1);
-  });
-
-  it.each([
-    { config_issue: "CAPTION_NOT_ATTACHED" },
-    { caption_add_on_attachment_status: "POLL_CREATION_FAILURE" },
-  ])("retains publication and reports Instagram partial success: %j", async (issue) => {
-    const calls = sequence(
-      () => json({ id: "partial-container", status_code: "FINISHED" }),
-      () => json({ id: "partial-post", ...issue }),
-    );
-    await expect(
-      adapter(calls.fetcher).lookupPublication!(context, credentials, {
-        providerOperationId: "created:partial-container",
-      }),
-    ).resolves.toMatchObject({
-      state: "published",
-      result: {
-        outcome: "confirmed_success",
-        providerPostId: "partial-post",
-        warnings: ["instagram_publish_partial"],
-      },
-    });
-  });
-
-  it("keeps carousel accessibility on each image and AI/collaborators on the parent", async () => {
-    const calls = sequence(
-      (url) => {
-        expect(url.searchParams.get("alt_text")).toBe("First image");
-        expect(url.searchParams.has("is_ai_generated")).toBe(false);
-        return json({ id: "image-one" });
-      },
-      (url) => {
-        expect(url.searchParams.get("alt_text")).toBe("Second image");
-        return json({ id: "image-two" });
-      },
-      (url) => {
-        expect(url.searchParams.get("children")).toBe("image-one,image-two");
-        expect(url.searchParams.get("is_ai_generated")).toBe("true");
-        expect(url.searchParams.get("collaborators")).toBe('["collaborator"]');
-        expect(url.searchParams.has("alt_text")).toBe(false);
-        return json({ id: "carousel-one" });
-      },
-    );
-    await expect(
-      adapter(calls.fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          media: [1, 2].map((number) => ({
-            contentType: "image/jpeg",
-            fileSize: 100,
-            mode: "remote_ingest" as const,
-            url: `https://assets.example/${number}.jpg`,
-          })),
-          providerOptions: {
-            instagram: {
-              postType: "feed",
-              content: { is_ai_generated: true, collaborators: ["collaborator"] },
-              mediaOptions: [{ alt_text: "First image" }, { alt_text: "Second image" }],
-            },
-          },
-        }),
-      ),
-    ).resolves.toMatchObject({ providerOperationId: "created:carousel-one" });
-  });
-
-  it("preserves Reel cover, original audio name, thumbnail offset, and feed sharing", async () => {
-    const calls = sequence((url) => {
-      expect(Object.fromEntries(url.searchParams)).toMatchObject({
-        cover_url: "https://assets.example/cover.jpg",
-        audio_name: "Original tutorial",
-        thumb_offset: "1500",
-        share_to_feed: "false",
-      });
-      return json({ id: "reel-one" });
-    });
-    await adapter(calls.fetcher).publish!(
-      context,
-      credentials,
-      publishInput({
-        media: [
-          {
-            contentType: "video/mp4",
-            fileSize: 100,
-            mode: "remote_ingest",
-            url: "https://assets.example/reel.mp4",
-          },
-        ],
-        providerOptions: {
-          instagram: {
-            postType: "reel",
-            content: {
-              cover_url: "https://assets.example/cover.jpg",
-              audio_name: "Original tutorial",
-              thumb_offset: 1500,
-              share_to_feed: false,
-            },
-          },
-        },
-      }),
-    );
-  });
-
-  it("rejects Story captions instead of silently omitting the user's text", async () => {
-    const fetcher = vi.fn<typeof fetch>();
-    await expect(
-      adapter(fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          providerOptions: { instagram: { postType: "story" } },
-        }),
-      ),
-    ).rejects.toMatchObject({ failure: { code: "instagram_story_caption_unsupported" } });
-    expect(fetcher).not.toHaveBeenCalled();
-  });
-
-  it("builds a state-bound Instagram Login URL and pins the callback", () => {
-    const provider = adapter(vi.fn<typeof fetch>());
-    const value = provider.authorizationUrl!({
-      codeChallenge: "unused-by-instagram",
-      redirectUri,
-      state: "oauth-state",
-    });
-    const url = new URL(value);
-    expect(url.origin).toBe("https://www.instagram.com");
-    expect(url.pathname).toBe("/oauth/authorize");
-    expect(Object.fromEntries(url.searchParams)).toEqual({
-      client_id: "instagram-client",
-      force_reauth: "true",
-      redirect_uri: redirectUri,
-      response_type: "code",
-      scope:
-        "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_comments,instagram_business_manage_insights",
-      state: "oauth-state",
-    });
-    expect(() =>
-      provider.authorizationUrl!({
-        codeChallenge: "unused",
-        redirectUri: "https://attacker.example/callback",
-        state: "oauth-state",
-      }),
-    ).toThrow("does not match configuration");
-  });
-
-  it.each(["string", "array"] as const)(
-    "exchanges a professional account grant with $0 permissions",
-    async (permissionFormat) => {
-      const providerCalls = sequence(
-        (url, init) => {
-          expect(url.origin).toBe("https://api.instagram.com");
-          expect(init.method).toBe("POST");
-          expect(String(init.body)).toContain("client_secret=instagram-client-secret");
-          return json({
-            data: [
-              {
-                access_token: "short-secret",
-                user_id: "12345",
-                permissions:
-                  permissionFormat === "array"
-                    ? [
-                        "instagram_business_basic",
-                        "instagram_business_content_publish",
-                        "instagram_business_manage_comments",
-                        "instagram_business_manage_insights",
-                      ]
-                    : "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_comments,instagram_business_manage_insights",
-              },
-            ],
-          });
-        },
-        (url) => {
-          expect(url.searchParams.get("grant_type")).toBe("ig_exchange_token");
-          expect(url.searchParams.get("access_token")).toBe("short-secret");
-          return json({
-            access_token: "long-secret",
-            expires_in: 5_184_000,
-            token_type: "bearer",
-          });
-        },
-        (url, init) => {
-          expect(url.pathname).toBe("/v25.0/me");
-          expect(new Headers(init.headers).get("Authorization")).toBe("Bearer long-secret");
-          return json({
-            data: [
-              {
-                account_type: "Business",
-                id: "98765",
-                user_id: "17841400000098765",
-                name: "Creator Real Name",
-                profile_picture_url: "https://cdn.example/avatar.jpg",
-                username: "creator",
-              },
-            ],
-          });
-        },
-      );
-
-      await expect(
-        adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
-          code: "authorization-code",
-          codeVerifier: "unused-by-instagram",
-          redirectUri,
-        }),
-      ).resolves.toEqual({
-        accessToken: "long-secret",
-        account: {
-          avatarUrl: "https://cdn.example/avatar.jpg",
-          displayName: "Creator Real Name",
-          id: "17841400000098765",
-          username: "creator",
-        },
-        expiresAt: "2026-09-17T00:00:00.000Z",
-        refreshToken: "long-secret",
-        scopes: [
-          "instagram_business_basic",
-          "instagram_business_content_publish",
-          "instagram_business_manage_comments",
-          "instagram_business_manage_insights",
-        ],
-      });
-    },
-  );
-
-  it.each([
-    { account_type: "Media_Creator", id: "12345", user_id: "17841400000098765", valid: true },
-    { account_type: "BUSINESS", id: "12345", user_id: "17841400000098765", valid: true },
-    { account_type: "MEDIA_CREATOR", id: "98765", user_id: "17841400000098765", valid: true },
-    { account_type: "PERSONAL", id: "12345", user_id: "17841400000098765", valid: false },
-    { account_type: "Business", id: "", user_id: "17841400000098765", valid: false },
-    { account_type: "Business", id: "12345", user_id: undefined, valid: false },
-  ])(
-    "validates Instagram identity and account type $account_type/$id/$user_id",
-    async ({ valid, ...profile }) => {
-      const providerCalls = sequence(
-        () => json({ access_token: "short-secret", user_id: "12345" }),
-        () => json({ access_token: "long-secret", token_type: "bearer", expires_in: 5_184_000 }),
-        () => json({ ...profile, username: "creator" }),
-      );
-      const connection = adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
-        code: "authorization-code",
-        codeVerifier: "unused",
-        redirectUri,
-      });
-      if (valid) {
-        await expect(connection).resolves.toMatchObject({
-          account: { id: "17841400000098765", displayName: "creator" },
-        });
-      } else {
-        await expect(connection).rejects.toBeInstanceOf(ProviderAdapterError);
-      }
-    },
-  );
-
-  it.each([
-    { permissions: "instagram_business_basic" },
-    { permissions: ["instagram_business_basic"] },
-    {
-      permissions: [
-        "instagram_business_basic",
-        "instagram_business_content_publish",
-        "instagram_business_manage_comments",
-        "instagram_business_manage_insights",
-        null,
-      ],
-    },
-  ])("refuses incomplete or malformed Instagram grants: %j", async ({ permissions }) => {
-    const providerCalls = sequence(() =>
-      json({
-        data: [
-          {
-            access_token: "short-secret",
-            user_id: "12345",
-            permissions,
-          },
-        ],
-      }),
-    );
-    await expect(
-      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
-        code: "authorization-code",
-        codeVerifier: "unused",
-        redirectUri,
-      }),
-    ).rejects.toMatchObject({ failure: { code: "instagram_permissions_missing" } });
-    expect(providerCalls.calls.map(({ url }) => url.pathname)).toEqual(["/oauth/access_token"]);
-  });
-
-  it("creates, polls, and publishes a remote-ingest media container", async () => {
-    const providerCalls = sequence(
-      () => json({ id: "container-1" }),
-      () => json({ id: "container-1", status_code: "IN_PROGRESS" }),
-      () => json({ id: "container-1", status_code: "FINISHED" }),
-      () => json({ id: "media-1" }),
-    );
-    const provider = adapter(providerCalls.fetcher);
-    await expect(provider.publish!(context, credentials, publishInput())).resolves.toEqual({
-      outcome: "confirmed_success",
-      providerOperationId: "created:container-1",
-    });
-    await expect(
-      provider.lookupPublication!(context, credentials, {
-        providerOperationId: "created:container-1",
-      }),
-    ).resolves.toEqual({
-      providerOperationId: "created:container-1",
-      state: "processing",
-    });
-    await expect(
-      provider.lookupPublication!(context, credentials, {
-        providerOperationId: "created:container-1",
-      }),
-    ).resolves.toEqual({
-      result: {
-        outcome: "confirmed_success",
-        providerOperationId: "created:container-1",
-        providerPostId: "media-1",
-      },
-      state: "published",
-    });
-
-    expect(providerCalls.calls.map(({ url }) => url.pathname)).toEqual([
-      "/v25.0/account-1/media",
-      "/v25.0/container-1",
-      "/v25.0/container-1",
-      "/v25.0/account-1/media_publish",
-    ]);
-    expect(providerCalls.calls[1]!.url.searchParams.get("fields")).toBe("id,status_code,status");
-    expect(providerCalls.calls[0]!.url.searchParams.get("image_url")).toBe(
-      "https://assets.example/image.jpg?signature=secret",
-    );
-    expect(providerCalls.calls[3]!.url.searchParams.get("creation_id")).toBe("container-1");
-  });
-
-  it("uses the Reels surface for a bounded remote video", async () => {
-    const providerCalls = sequence(() => json({ id: "video-container" }));
-    await adapter(providerCalls.fetcher).publish!(
-      context,
-      credentials,
-      publishInput({
-        media: [
-          {
-            contentType: "video/mp4",
-            fileSize: 50 * 1024 * 1024,
-            mode: "remote_ingest",
-            url: "https://assets.example/video.mp4",
-          },
-        ],
-      }),
-    );
-    expect(Object.fromEntries(providerCalls.calls[0]!.url.searchParams)).toMatchObject({
-      media_type: "REELS",
-      share_to_feed: "true",
-      video_url: "https://assets.example/video.mp4",
-    });
-  });
-
-  it("publishes a feed video, a Story, and a trial Reel with explicit shapes", async () => {
-    const video = {
-      contentType: "video/mp4",
-      fileSize: 50 * 1024 * 1024,
-      mode: "remote_ingest" as const,
-      url: "https://assets.example/video.mp4",
-    };
-    const feed = sequence(() => json({ id: "feed-container" }));
-    await adapter(feed.fetcher).publish!(
-      context,
-      credentials,
-      publishInput({
-        media: [video],
-        providerOptions: { instagram: { postType: "feed" } },
-      }),
-    );
-    expect(Object.fromEntries(feed.calls[0]!.url.searchParams)).toMatchObject({
-      media_type: "VIDEO",
-      video_url: "https://assets.example/video.mp4",
-    });
-
-    const story = sequence(() => json({ id: "story-container" }));
-    await adapter(story.fetcher).publish!(
-      context,
-      credentials,
-      publishInput({
-        caption: "",
-        hashtags: [],
-        media: [video],
-        providerOptions: { instagram: { postType: "story" } },
-      }),
-    );
-    expect(Object.fromEntries(story.calls[0]!.url.searchParams)).toMatchObject({
-      media_type: "STORIES",
-      video_url: "https://assets.example/video.mp4",
-    });
-
-    const trial = sequence(() => json({ id: "trial-container" }));
-    await adapter(trial.fetcher).publish!(
-      context,
-      credentials,
-      publishInput({
-        media: [video],
-        providerOptions: {
-          instagram: {
-            postType: "reel",
-            trialGraduation: "performance",
-            trialReel: true,
-          },
-        },
-      }),
-    );
-    expect(trial.calls[0]!.url.searchParams.get("trial_params")).toBe(
-      JSON.stringify({ graduation_strategy: "SS_PERFORMANCE" }),
-    );
-  });
-
-  it("rejects a trial Reel that is not a single video Reel", async () => {
-    const providerCalls = sequence();
-    await expect(
-      adapter(providerCalls.fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          providerOptions: { instagram: { postType: "feed", trialReel: true } },
-        }),
-      ),
-    ).rejects.toMatchObject({ failure: { code: "instagram_post_options_invalid" } });
-    expect(providerCalls.calls).toHaveLength(0);
-  });
-
-  it("creates one child container per attachment and binds them in creator order", async () => {
-    const providerCalls = sequence(
-      () => json({ id: "child-1" }),
-      () => json({ id: "child-2" }),
-      () => json({ id: "child-3" }),
-      () => json({ id: "carousel-parent" }),
-    );
-    const result = await adapter(providerCalls.fetcher).publish!(
-      context,
-      credentials,
-      publishInput({
-        media: [
-          {
-            contentType: "image/jpeg",
-            fileSize: 100,
-            mode: "remote_ingest",
-            url: "https://assets.example/one.jpg",
-          },
-          {
-            contentType: "video/mp4",
-            fileSize: 100,
-            mode: "remote_ingest",
-            url: "https://assets.example/two.mp4",
-          },
-          {
-            contentType: "image/jpeg",
-            fileSize: 100,
-            mode: "remote_ingest",
-            url: "https://assets.example/three.jpg",
-          },
-        ],
-      }),
-    );
-
-    expect(providerCalls.calls).toHaveLength(4);
-    expect(Object.fromEntries(providerCalls.calls[0]!.url.searchParams)).toMatchObject({
-      image_url: "https://assets.example/one.jpg",
-      is_carousel_item: "true",
-    });
-    expect(Object.fromEntries(providerCalls.calls[1]!.url.searchParams)).toMatchObject({
-      is_carousel_item: "true",
-      media_type: "VIDEO",
-      video_url: "https://assets.example/two.mp4",
-    });
-    expect(providerCalls.calls[1]!.url.searchParams.has("share_to_feed")).toBe(false);
-    expect(Object.fromEntries(providerCalls.calls[2]!.url.searchParams)).toMatchObject({
-      image_url: "https://assets.example/three.jpg",
-      is_carousel_item: "true",
-    });
-    expect(
-      providerCalls.calls.slice(0, 3).every(({ url }) => url.searchParams.has("caption") === false),
-    ).toBe(true);
-    expect(Object.fromEntries(providerCalls.calls[3]!.url.searchParams)).toEqual({
-      caption: "An Instagram post #launch",
-      children: "child-1,child-2,child-3",
-      media_type: "CAROUSEL",
-    });
-    expect(result).toEqual({
-      outcome: "confirmed_success",
-      providerOperationId: "created:carousel-parent",
-    });
-  });
-
-  it("keeps every attachment in a twenty-item Instagram carousel", async () => {
-    const children: Responder[] = Array.from(
-      { length: 20 },
-      (_, index) => () => json({ id: `child-${index + 1}` }),
-    );
-    const providerCalls = sequence(...children, (url) => {
-      expect(url.searchParams.get("children")).toBe(
-        "child-1,child-2,child-3,child-4,child-5,child-6,child-7,child-8,child-9,child-10,child-11,child-12,child-13,child-14,child-15,child-16,child-17,child-18,child-19,child-20",
-      );
-      return json({ id: "complete-carousel" });
-    });
-    await expect(
-      adapter(providerCalls.fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          media: Array.from({ length: 20 }, (_, index) => ({
-            contentType: "image/jpeg",
-            fileSize: 100,
-            mode: "remote_ingest" as const,
-            url: `https://assets.example/photo-${index + 1}.jpg`,
-          })),
-        }),
-      ),
-    ).resolves.toEqual({
-      outcome: "confirmed_success",
-      providerOperationId: "created:complete-carousel",
-    });
-  });
-
-  it("does not resubmit a publication after an ambiguous final write", async () => {
-    const providerCalls = sequence(
-      () => json({ id: "container-ambiguous" }),
-      () => json({ id: "container-ambiguous", status_code: "FINISHED" }),
-      () => Promise.reject(new Error("connection lost")),
-      () => json({ id: "container-ambiguous", status_code: "PUBLISHED" }),
-    );
-    const provider = adapter(providerCalls.fetcher);
-    await provider.publish!(context, credentials, publishInput());
-    const firstLookup = await provider.lookupPublication!(context, credentials, {
-      providerOperationId: "created:container-ambiguous",
-    });
-    expect(firstLookup).toMatchObject({
-      result: {
-        outcome: "unknown",
-        providerOperationId: "submitted:container-ambiguous",
-      },
-      state: "unknown",
-    });
-    await expect(
-      provider.lookupPublication!(context, credentials, {
-        providerOperationId: "submitted:container-ambiguous",
-      }),
-    ).resolves.toMatchObject({
-      result: {
-        outcome: "confirmed_success",
-        providerOperationId: "submitted:container-ambiguous",
-      },
-      state: "published",
-    });
-    expect(
-      providerCalls.calls.filter(({ url }) => url.pathname.endsWith("/media_publish")),
-    ).toHaveLength(1);
-  });
-
-  it.each([
-    [
-      "Failed downloading video from https://media.example/private?token=abc123",
-      "instagram_container_media_retrieval",
-    ],
-    ["The video format is not supported for this container", "instagram_container_media_format"],
-    [
-      "Video duration 900 seconds exceeds the allowed maximum",
-      "instagram_container_media_duration",
-    ],
-    ["The media aspect ratio is not supported", "instagram_container_media_dimensions"],
-    ["Unexpected processing failure", "instagram_container_error"],
-  ] as const)("normalizes container status detail %j to %s", async (detail, code) => {
-    const providerCalls = sequence(() =>
-      json({
-        id: "container-error",
-        status: detail,
-        status_code: "ERROR",
-      }),
-    );
-    const result = await adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
-      providerOperationId: "created:container-error",
-    });
-    expect(result).toMatchObject({
-      result: {
-        failure: { classification: "deterministic", code },
-        outcome: "confirmed_failure",
-        providerOperationId: "created:container-error",
-      },
-      state: "failed",
-    });
-    expect(JSON.stringify(result)).not.toContain("media.example");
-    expect(JSON.stringify(result)).not.toContain("abc123");
-  });
-
-  it("rejects video above Meltiply's conservative Reel size ceiling before HTTP", async () => {
-    const fetcher = vi.fn<typeof fetch>();
-    await expect(
-      adapter(fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          media: [
-            {
-              contentType: "video/mp4",
-              fileSize: 300_000_001,
-              mode: "remote_ingest",
-              url: "https://assets.example/too-large.mp4",
-            },
-          ],
-        }),
-      ),
-    ).rejects.toMatchObject({ failure: { code: "instagram_media_invalid" } });
-    expect(fetcher).not.toHaveBeenCalled();
-  });
-
-  it("rejects missing account identity and invalid media before HTTP", async () => {
-    const fetcher = vi.fn<typeof fetch>();
-    const provider = adapter(fetcher);
-    await expect(
-      provider.publish!(context, { accessToken: "access-secret" }, publishInput()),
-    ).rejects.toBeInstanceOf(ProviderAdapterError);
-    for (const input of [
-      publishInput({ media: [] }),
-      publishInput({ caption: "x".repeat(2_201) }),
-      publishInput({
-        media: [
-          {
-            contentType: "image/png",
-            fileSize: 100,
-            mode: "remote_ingest",
-            url: "https://assets.example/image.png",
-          },
-        ],
-      }),
-      publishInput({
-        media: [
-          {
-            contentType: "image/jpeg",
-            fileSize: 8 * 1024 * 1024 + 1,
-            mode: "remote_ingest",
-            url: "https://assets.example/image.jpg",
-          },
-        ],
-      }),
-      publishInput({
-        media: Array.from({ length: 21 }, () => ({
-          contentType: "image/jpeg",
-          fileSize: 100,
-          mode: "remote_ingest" as const,
-          url: "https://assets.example/image.jpg",
-        })),
-      }),
-    ]) {
-      await expect(provider.publish!(context, credentials, input)).rejects.toBeInstanceOf(
-        ProviderAdapterError,
-      );
-    }
-    expect(fetcher).not.toHaveBeenCalled();
-  });
-
-  it("looks up confirmed media and returns a sanitized permalink", async () => {
-    const providerCalls = sequence(() =>
-      json({
-        id: "media-1",
-        permalink: "https://www.instagram.com/p/media-1/",
-      }),
-    );
-    const provider = adapter(providerCalls.fetcher);
-    await expect(
-      provider.lookupPublication!(context, credentials, {
-        providerOperationId: "created:container-1",
-        providerPostId: "media-1",
-      }),
-    ).resolves.toEqual({
-      result: {
-        outcome: "confirmed_success",
-        providerOperationId: "created:container-1",
-        providerPostId: "media-1",
-        providerUrl: "https://www.instagram.com/p/media-1/",
-      },
-      state: "published",
-    });
-    expect(provider.cancelPublication).toBeUndefined();
-  });
-
-  it("normalizes media insights and cursor-paginated comments", async () => {
-    const providerCalls = sequence(
-      () =>
-        json({
-          data: [
-            { name: "views", values: [{ value: 42 }] },
-            { name: "reach", total_value: { value: 30 } },
-            { name: "likes", values: [{ value: 8 }] },
-            { name: "comments", values: [{ value: 3 }] },
-            { name: "shares", values: [{ value: 2 }] },
-          ],
-        }),
-      () =>
-        json({
-          data: [
-            {
-              from: { id: "author-1", username: "commenter" },
-              id: "comment-1",
-              text: "Great post",
-              timestamp: "2026-07-18T20:00:00+0000",
-            },
-          ],
-          paging: { cursors: { after: "next-cursor" } },
-        }),
-    );
-    const provider = adapter(providerCalls.fetcher);
-    await expect(
-      provider.listAnalytics!(context, credentials, { providerPostId: "media-1" }, { limit: 100 }),
-    ).resolves.toEqual({
-      items: [
-        {
-          comments: 3,
-          impressions: 0,
-          likes: 8,
-          providerPostId: "media-1",
-          reach: 30,
-          recordedAt: "2026-07-19T00:00:00.000Z",
-          shares: 2,
-          views: 42,
-          watchTimeSeconds: 0,
-        },
-      ],
-    });
-    await expect(
-      provider.listComments!(
-        context,
-        credentials,
-        { providerPostId: "media-1" },
-        { cursor: "current-cursor", limit: 10 },
-      ),
-    ).resolves.toEqual({
-      items: [
-        {
-          authorDisplayName: "commenter",
-          body: "Great post",
-          commentedAt: "2026-07-18T20:00:00.000Z",
-          providerCommentId: "comment-1",
-          providerPostId: "media-1",
-        },
-      ],
-      nextCursor: "next-cursor",
-    });
-    expect(providerCalls.calls[1]!.url.searchParams.get("after")).toBe("current-cursor");
-  });
-
-  it("replies publicly and refreshes a long-lived token", async () => {
-    const providerCalls = sequence(
-      (_url, init) => {
-        expect(init.body).toBe(JSON.stringify({ message: "Thank you" }));
-        return json({ id: "reply-1" });
-      },
-      (url) => {
-        expect(url.searchParams.get("grant_type")).toBe("ig_refresh_token");
-        expect(url.searchParams.get("access_token")).toBe("refresh-secret");
-        return json({
-          access_token: "refreshed-secret",
-          expires_in: 5_184_000,
-          token_type: "bearer",
-        });
-      },
-    );
-    const provider = adapter(providerCalls.fetcher);
-    await expect(
-      provider.reply!(context, credentials, {
-        idempotencyKey: "reply-operation-1",
-        providerCommentId: "comment-1",
-        text: "Thank you",
-      }),
-    ).resolves.toEqual({
-      outcome: "confirmed_success",
-      providerPostId: "reply-1",
-    });
-    await expect(provider.refreshAccessToken!(context, "refresh-secret")).resolves.toEqual({
-      accessToken: "refreshed-secret",
-      expiresAt: "2026-09-17T00:00:00.000Z",
-      refreshToken: "refreshed-secret",
-      scopes: [
-        "instagram_business_basic",
-        "instagram_business_content_publish",
-        "instagram_business_manage_comments",
-        "instagram_business_manage_insights",
-      ],
-    });
-  });
-
-  it("can expose publishing without prematurely claiming engagement", () => {
-    const provider = adapter(vi.fn<typeof fetch>(), undefined, false);
-    expect(provider.capability).toMatchObject({
-      analytics: false,
-      comments: false,
-      publish: true,
-      reply: false,
-    });
-    expect(provider.listAnalytics).toBeUndefined();
-    expect(provider.listComments).toBeUndefined();
-    expect(provider.reply).toBeUndefined();
-    expect(
-      new URL(
-        provider.authorizationUrl!({
-          codeChallenge: "unused",
-          redirectUri,
-          state: "oauth-state",
-        }),
-      ).searchParams.get("scope"),
-    ).toBe("instagram_business_basic,instagram_business_content_publish");
-  });
+beforeAll(async () => {
+  await setup([json({ id: "1" })]).adapter.publish!(context, credentials, input());
 });
 
-describe("ambiguous provider metrics", () => {
-  it("declares exactly the insights it normalizes to zero", () => {
-    const declaration = createInstagramAdapter({
-      clientId: "local-client",
-      clientSecret: "local-secret",
-      redirectUri: "https://app.example/api/auth/oauth/instagram/callback",
+describe("createInstagramAdapter", () => {
+  describe("authorizationUrl", () => {
+    it.each([
+      ["with engagement", true, allScopes.join("%2C")],
+      ["without engagement", false, allScopes.slice(0, 2).join("%2C")],
+    ])("%s", (_example, engagementEnabled, scope) => {
+      const { adapter } = setup([], { engagementEnabled });
+
+      expect(adapter.authorizationUrl!({ codeChallenge: "c", redirectUri, state: "s" })).toEqual(
+        `https://www.instagram.com/oauth/authorize?client_id=client&force_reauth=true&scope=${scope}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&state=s`,
+      );
     });
 
-    expect(declaration.ambiguousZeroMetrics).toEqual(["views", "reactions", "comments", "shares"]);
+    it("a foreign redirect URI", () => {
+      const { adapter } = setup();
+      const foreign = { codeChallenge: "c", redirectUri: "https://evil.example", state: "s" };
+
+      expect(() => adapter.authorizationUrl!(foreign)).toThrow(
+        new TypeError("OAuth redirect URI does not match configuration"),
+      );
+    });
+  });
+
+  describe("capability", () => {
+    it.each([
+      ["with engagement", true],
+      ["without engagement", false],
+    ])("%s", (_example, engagementEnabled) => {
+      const { adapter } = setup([], { engagementEnabled });
+
+      expect(adapter.capability).toEqual({
+        accepted_mime_types: ["image/jpeg", "video/mp4", "video/quicktime"],
+        analytics: engagementEnabled,
+        asset_types: ["image", "video"],
+        comments: engagementEnabled,
+        connect_available: true,
+        max_caption_length: 2_200,
+        max_file_size: 524_288_000,
+        max_hashtags: 30,
+        max_media_count: 20,
+        max_video_duration_sec: null,
+        min_media_count: 1,
+        multi_asset_types: ["image", "video"],
+        notes: [
+          "Professional Business or Creator accounts use Instagram Login.",
+          "Single images, videos, Reels, and Stories use public HTTPS remote-ingest URLs.",
+          "Up to 20 images and videos combine as one feed carousel post.",
+          "Trial Reels are shared to non-followers first and support manual or performance graduation.",
+          "Images are limited to 8 MiB; Reels are limited to 300 MB and 15 minutes, and Story videos to 100 MB and 60 seconds.",
+          "Live-account acceptance remains required before runtime enablement.",
+        ],
+        platform: "instagram",
+        publish: true,
+        reply: engagementEnabled,
+      });
+    });
+
+    it.each([
+      ["listAnalytics", true, "function"],
+      ["listComments", true, "function"],
+      ["reply", true, "function"],
+      ["listAnalytics", false, "undefined"],
+      ["listComments", false, "undefined"],
+      ["reply", false, "undefined"],
+    ] as const)("%s with engagement %s", (method, engagementEnabled, kind) => {
+      const { adapter } = setup([], { engagementEnabled });
+
+      expect(typeof adapter[method]).toEqual(kind);
+    });
+
+    it("the metrics it normalizes to zero", () => {
+      expect(setup().adapter.ambiguousZeroMetrics).toEqual([
+        "views",
+        "reactions",
+        "comments",
+        "shares",
+      ]);
+    });
+  });
+
+  describe("exchangeAuthorizationCode", () => {
+    const connection = {
+      accessToken: "long",
+      account: { displayName: "creator", id: "178", username: "creator" },
+      expiresAt: EXPIRES,
+      refreshToken: "long",
+      scopes: allScopes,
+    };
+
+    it.each([
+      ["permissions as a string", allScopes.join(",")],
+      ["permissions as a list", allScopes],
+      ["no permission list", undefined],
+    ])("a grant with %s", async (_example, permissions) => {
+      const { adapter, requests } = setup([grant(permissions), token(), me()]);
+
+      const result = await adapter.exchangeAuthorizationCode!(context, exchange);
+
+      expect(result).toEqual(connection);
+      expect(requests).toEqual([
+        {
+          method: "POST",
+          url: "https://api.instagram.com/oauth/access_token",
+          query: {},
+          body: tokenForm,
+        },
+        {
+          method: "GET",
+          url: "https://graph.instagram.com/access_token",
+          query: {
+            grant_type: "ig_exchange_token",
+            client_secret: "secret",
+            access_token: "short",
+          },
+        },
+        get("me", { fields: "id,user_id,username,name,profile_picture_url,account_type" }),
+      ]);
+    });
+
+    it.each([
+      ["a missing permission", "instagram_business_basic"],
+      ["a permission that is not text", [...allScopes, null]],
+    ])("%s stops before the token exchange", async (_example, permissions) => {
+      const { adapter, requests } = setup([grant(permissions)]);
+
+      expect(await failureOf(adapter.exchangeAuthorizationCode!(context, exchange))).toEqual(
+        providerFailure("auth", "instagram_permissions_missing"),
+      );
+      expect(requests).toEqual([
+        {
+          method: "POST",
+          url: "https://api.instagram.com/oauth/access_token",
+          query: {},
+          body: tokenForm,
+        },
+      ]);
+    });
+
+    it.each([
+      ["no short token", [json({ user_id: "12345" })]],
+      ["no user ID", [json({ access_token: "short" })]],
+      ["an unusable profile", [grant(), token(), json({ account_type: "PERSONAL" })]],
+    ])("%s", async (_example, answers) => {
+      const { adapter } = setup(answers);
+
+      expect(await failureOf(adapter.exchangeAuthorizationCode!(context, exchange))).toEqual(
+        malformedAnswer,
+      );
+    });
+
+    it("a foreign redirect URI sends nothing", async () => {
+      const { adapter, requests } = setup();
+
+      const foreign = { ...exchange, redirectUri: "https://evil.example" };
+
+      expect(await failureOf(adapter.exchangeAuthorizationCode!(context, foreign))).toEqual(
+        new TypeError("OAuth redirect URI does not match configuration"),
+      );
+      expect(requests).toEqual([]);
+    });
+
+    it("Instagram down", async () => {
+      const { adapter } = setup([down()]);
+
+      expect(await failureOf(adapter.exchangeAuthorizationCode!(context, exchange))).toEqual(
+        unavailable,
+      );
+    });
+  });
+
+  describe("getAccountAnalytics", () => {
+    const recordedAt = "2026-07-19T00:00:00.000Z";
+
+    it.each([
+      [
+        "every count",
+        { data: [{ followers_count: 0, follows_count: 4, media_count: 2 }] },
+        { followers: 0, following: 4, posts: 2, recordedAt },
+      ],
+      ["followers only", { followers_count: 7 }, { followers: 7, recordedAt }],
+    ])("%s", async (_example, body, analytics) => {
+      const { adapter, requests } = setup([json(body)]);
+
+      const result = await adapter.getAccountAnalytics!(context, credentials);
+
+      expect(result).toEqual(analytics);
+      expect(requests).toEqual([
+        get("me", { fields: "followers_count,follows_count,media_count" }),
+      ]);
+    });
+
+    it.each([
+      ["no follower count", json({}), malformedAnswer],
+      ["Instagram down", down(), unavailable],
+    ])("%s", async (_example, answer, failure) => {
+      const { adapter } = setup([answer]);
+
+      expect(await failureOf(adapter.getAccountAnalytics!(context, credentials))).toEqual(failure);
+    });
+  });
+
+  describe("listAnalytics", () => {
+    const lookup = { providerPostId: "media-1" };
+    const counts = { comments: 0, likes: 0, reach: 0, shares: 0, views: 0 };
+    const record = (patch: object) => ({
+      items: [
+        {
+          ...counts,
+          impressions: 0,
+          providerPostId: "media-1",
+          recordedAt: "2026-07-19T00:00:00.000Z",
+          watchTimeSeconds: 0,
+          ...patch,
+        },
+      ],
+    });
+    const metric = (name: string, value: number) => ({ name, total_value: { value } });
+
+    it.each([
+      [
+        "every metric",
+        [
+          metric("views", 42),
+          metric("reach", 30),
+          metric("likes", 8),
+          metric("comments", 3),
+          metric("shares", 2),
+        ],
+        { comments: 3, likes: 8, reach: 30, shares: 2, views: 42 },
+      ],
+      ["no metric", [], counts],
+    ])("%s", async (_example, data, expected) => {
+      const { adapter, requests } = setup([json({ data })]);
+
+      const result = await adapter.listAnalytics!(context, credentials, lookup, { limit: 100 });
+
+      expect(result).toEqual(record(expected));
+      expect(requests).toEqual([
+        get("media-1/insights", { metric: "views,reach,likes,comments,shares" }),
+      ]);
+    });
+
+    it.each([
+      ["a cursor", lookup, { cursor: "c", limit: 1 }, "instagram_analytics_not_paginated"],
+      ["no post ID", {}, { limit: 1 }, "instagram_media_id_required"],
+    ])("%s sends nothing", async (_example, target, page, code) => {
+      const { adapter, requests } = setup();
+
+      expect(await failureOf(adapter.listAnalytics!(context, credentials, target, page))).toEqual(
+        refused(code),
+      );
+      expect(requests).toEqual([]);
+    });
+  });
+
+  describe("listComments", () => {
+    const lookup = { providerPostId: "media-1" };
+
+    it("a page after a cursor", async () => {
+      const comment = {
+        from: { username: "ann" },
+        id: "c1",
+        text: "hi",
+        timestamp: "2026-07-18T20:00:00+0000",
+      };
+      const { adapter, requests } = setup([
+        json({ data: [comment], paging: { cursors: { after: "next" } } }),
+      ]);
+
+      const result = await adapter.listComments!(context, credentials, lookup, {
+        cursor: "current",
+        limit: 10,
+      });
+
+      expect(result).toEqual({
+        items: [
+          {
+            authorDisplayName: "ann",
+            body: "hi",
+            commentedAt: "2026-07-18T20:00:00.000Z",
+            providerCommentId: "c1",
+            providerPostId: "media-1",
+          },
+        ],
+        nextCursor: "next",
+      });
+      expect(requests).toEqual([
+        get("media-1/comments", {
+          fields: "id,text,timestamp,from{id,username}",
+          limit: "10",
+          after: "current",
+        }),
+      ]);
+    });
+
+    it("a limit of zero sends nothing", async () => {
+      const { adapter, requests } = setup();
+
+      expect(
+        await failureOf(adapter.listComments!(context, credentials, lookup, { limit: 0 })),
+      ).toEqual(refused("instagram_page_invalid"));
+      expect(requests).toEqual([]);
+    });
+  });
+
+  describe("reply", () => {
+    const reply = {
+      idempotencyKey: "r1",
+      providerCommentId: "c1",
+      providerPostId: "p",
+      text: " Thanks ",
+    };
+
+    it("a public reply", async () => {
+      const { adapter, requests } = setup([json({ id: "reply-1" })]);
+
+      const result = await adapter.reply!(context, credentials, reply);
+
+      expect(result).toEqual({ outcome: "confirmed_success", providerPostId: "reply-1" });
+      expect(requests).toEqual([{ ...post("c1/replies", {}), body: '{"message":"Thanks"}' }]);
+    });
+
+    it("a blank reply sends nothing", async () => {
+      const { adapter, requests } = setup();
+
+      const result = await adapter.reply!(context, credentials, { ...reply, text: " " });
+
+      expect(result).toEqual({
+        failure: refused("instagram_reply_invalid"),
+        outcome: "confirmed_failure",
+      });
+      expect(requests).toEqual([]);
+    });
+
+    it("an answer without a reply ID", async () => {
+      const { adapter } = setup([json({})]);
+
+      expect(await failureOf(adapter.reply!(context, credentials, reply))).toEqual(unconfirmed);
+    });
+  });
+
+  describe("lookupPublication", () => {
+    it("a published post", async () => {
+      const { adapter, requests } = setup([
+        json({ id: "media-1", permalink: "https://www.instagram.com/p/media-1/" }),
+      ]);
+
+      const result = await adapter.lookupPublication!(context, credentials, {
+        providerOperationId: "created:c1",
+        providerPostId: "media-1",
+      });
+
+      expect(result).toEqual({
+        result: {
+          outcome: "confirmed_success",
+          providerOperationId: "created:c1",
+          providerPostId: "media-1",
+          providerUrl: "https://www.instagram.com/p/media-1/",
+        },
+        state: "published",
+      });
+      expect(requests).toEqual([get("media-1", { fields: "id,permalink" })]);
+    });
+
+    it("a container still processing", async () => {
+      const { adapter, requests } = setup([json({ id: "c1", status_code: "IN_PROGRESS" })]);
+
+      const result = await adapter.lookupPublication!(context, credentials, {
+        providerOperationId: "created:c1",
+      });
+
+      expect(result).toEqual({ providerOperationId: "created:c1", state: "processing" });
+      expect(requests).toEqual([get("c1", { fields: "id,status_code,status" })]);
+    });
+
+    it("a finished container is published with its warnings", async () => {
+      const { adapter, requests } = setup([
+        json({ id: "c1", status_code: "FINISHED" }),
+        json({ id: "media-1", config_issue: "CAPTION_NOT_ATTACHED" }),
+      ]);
+
+      const result = await adapter.lookupPublication!(context, credentials, {
+        providerOperationId: "created:c1",
+      });
+
+      expect(result).toEqual({
+        result: {
+          outcome: "confirmed_success",
+          providerOperationId: "created:c1",
+          providerPostId: "media-1",
+          warnings: ["instagram_publish_partial"],
+        },
+        state: "published",
+      });
+      expect(requests).toEqual([
+        get("c1", { fields: "id,status_code,status" }),
+        post("account-1/media_publish", { creation_id: "c1" }),
+      ]);
+    });
+
+    it("a submitted container Instagram reports published", async () => {
+      const { adapter } = setup([json({ id: "c1", status_code: "PUBLISHED" })]);
+
+      const result = await adapter.lookupPublication!(context, credentials, {
+        providerOperationId: "created:c1",
+      });
+
+      expect(result).toEqual({
+        result: { outcome: "confirmed_success", providerOperationId: "submitted:c1" },
+        state: "published",
+      });
+    });
+
+    it("a failed container keeps Instagram's text out of the result", async () => {
+      const { adapter } = setup([
+        json({
+          id: "c1",
+          status: "Failed downloading https://m.example?token=x",
+          status_code: "ERROR",
+        }),
+      ]);
+
+      const result = await adapter.lookupPublication!(context, credentials, {
+        providerOperationId: "created:c1",
+      });
+
+      expect(result).toEqual({
+        result: {
+          failure: {
+            classification: "deterministic",
+            code: "instagram_container_media_retrieval",
+            message: "The provider rejected this request.",
+            retryable: false,
+          },
+          outcome: "confirmed_failure",
+          providerOperationId: "created:c1",
+        },
+        state: "failed",
+      });
+    });
+
+    it.each([
+      ["an unusable post ID", credentials, { providerPostId: "a b" }, malformedAnswer],
+      ["no operation or post", credentials, {}, malformedAnswer],
+      [
+        "no professional account",
+        { accessToken: "access" },
+        { providerOperationId: "created:c1" },
+        refused("instagram_professional_account_required"),
+      ],
+    ])("%s sends nothing", async (_example, who, lookup, failure) => {
+      const { adapter, requests } = setup();
+
+      expect(await failureOf(adapter.lookupPublication!(context, who, lookup))).toEqual(failure);
+      expect(requests).toEqual([]);
+    });
+  });
+
+  describe("publish", () => {
+    const media = "account-1/media";
+
+    it("a single image", async () => {
+      const { adapter, requests } = setup([json({ id: "c1" })]);
+
+      const result = await adapter.publish!(context, credentials, input());
+
+      expect(result).toEqual(created("c1"));
+      expect(requests).toEqual([
+        post(media, { caption: "A post", image_url: "https://assets.example/one.jpg" }),
+      ]);
+    });
+
+    it("a single video with Reel metadata", async () => {
+      const { adapter, requests } = setup([json({ id: "c1" })]);
+      const content = {
+        cover_url: "https://assets.example/cover.jpg",
+        audio_name: "Tutorial",
+        thumb_offset: 1500,
+        share_to_feed: false,
+      };
+
+      await adapter.publish!(
+        context,
+        credentials,
+        input({ media: [clip], providerOptions: { instagram: { content } } }),
+      );
+
+      expect(requests).toEqual([
+        post(media, {
+          caption: "A post",
+          video_url: clip.url,
+          media_type: "REELS",
+          share_to_feed: "false",
+          cover_url: "https://assets.example/cover.jpg",
+          audio_name: "Tutorial",
+          thumb_offset: "1500",
+        }),
+      ]);
+    });
+
+    it("a carousel in creator order with its metadata", async () => {
+      const { adapter, requests } = setup([
+        json({ id: "a" }),
+        json({ id: "b" }),
+        json({ id: "p" }),
+      ]);
+
+      const result = await adapter.publish!(
+        context,
+        credentials,
+        input({
+          media: [photo("one"), clip],
+          providerOptions: {
+            instagram: {
+              content: { is_ai_generated: true, collaborators: ["friend"] },
+              mediaOptions: [{ alt_text: "First image" }],
+            },
+          },
+        }),
+      );
+
+      expect(result).toEqual(created("p"));
+      expect(requests).toEqual([
+        post(media, {
+          is_carousel_item: "true",
+          image_url: "https://assets.example/one.jpg",
+          alt_text: "First image",
+        }),
+        post(media, { is_carousel_item: "true", media_type: "VIDEO", video_url: clip.url }),
+        post(media, {
+          caption: "A post",
+          media_type: "CAROUSEL",
+          children: "a,b",
+          is_ai_generated: "true",
+          collaborators: '["friend"]',
+        }),
+      ]);
+    });
+
+    it("a carousel without a caption", async () => {
+      const { adapter, requests } = setup([
+        json({ id: "a" }),
+        json({ id: "b" }),
+        json({ id: "p" }),
+      ]);
+
+      await adapter.publish!(
+        context,
+        credentials,
+        input({ caption: " ", media: [photo("one"), photo("two")] }),
+      );
+
+      expect(requests[2]).toEqual(post(media, { media_type: "CAROUSEL", children: "a,b" }));
+    });
+
+    it("Instagram down on the second child", async () => {
+      const { adapter, requests } = setup([json({ id: "a" }), down()]);
+
+      expect(
+        await failureOf(
+          adapter.publish!(context, credentials, input({ media: [photo("one"), photo("two")] })),
+        ),
+      ).toEqual(unavailable);
+      expect(requests).toEqual([
+        post(media, { is_carousel_item: "true", image_url: "https://assets.example/one.jpg" }),
+        post(media, { is_carousel_item: "true", image_url: "https://assets.example/two.jpg" }),
+      ]);
+    });
+
+    it("an answer without a container ID", async () => {
+      const { adapter } = setup([json({})]);
+
+      expect(await failureOf(adapter.publish!(context, credentials, input()))).toEqual(
+        malformedAnswer,
+      );
+    });
+
+    it.each([
+      [
+        "no professional account",
+        { accessToken: "a" },
+        input(),
+        "instagram_professional_account_required",
+      ],
+      ["no media", credentials, input({ media: [] }), "instagram_media_required"],
+    ])("%s sends nothing", async (_example, who, value, code) => {
+      const { adapter, requests } = setup();
+
+      expect(await failureOf(adapter.publish!(context, who, value))).toEqual(refused(code));
+      expect(requests).toEqual([]);
+    });
+  });
+
+  describe("refreshAccessToken", () => {
+    it("a long-lived token", async () => {
+      const { adapter, requests } = setup([token()]);
+
+      const result = await adapter.refreshAccessToken!(context, "refresh");
+
+      expect(result).toEqual({
+        accessToken: "long",
+        expiresAt: EXPIRES,
+        refreshToken: "long",
+        scopes: allScopes,
+      });
+      expect(requests).toEqual([
+        {
+          method: "GET",
+          url: "https://graph.instagram.com/refresh_access_token",
+          query: { grant_type: "ig_refresh_token", access_token: "refresh" },
+        },
+      ]);
+    });
+
+    it("a blank token", async () => {
+      const { adapter } = setup();
+
+      expect(await failureOf(adapter.refreshAccessToken!(context, " "))).toEqual(
+        new TypeError("refreshToken is invalid"),
+      );
+    });
   });
 });

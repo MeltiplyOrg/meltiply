@@ -2,11 +2,13 @@ import { Effect } from "effect";
 import { DatabaseError, errorMessage, InvalidRequestError } from "@meltiply/domain";
 import { Pool, type PoolConfig, type QueryResult } from "pg";
 
-interface AuthenticatedClaims {
-  org_id?: string;
-  org_role?: string;
-  sub: string;
-}
+import {
+  serializeAuthenticatedClaims,
+  statementTimeoutMilliseconds,
+  type AuthenticatedClaims,
+} from "./tenant-session";
+
+export { serializeAuthenticatedClaims } from "./tenant-session";
 
 export interface Queryable {
   query<Row extends Record<string, unknown> = Record<string, unknown>>(
@@ -82,21 +84,6 @@ export function createHyperdrivePoolCache(
     }
     return cachedPool;
   };
-}
-
-/** JSON for `request.jwt.claims`; throws `TypeError` for a blank subject and omits blank optional claims. */
-export function serializeAuthenticatedClaims(claims: AuthenticatedClaims): string {
-  const subject = claims.sub.trim();
-  const organizationId = claims.org_id?.trim();
-  const organizationRole = claims.org_role?.trim();
-  if (!subject) {
-    throw new TypeError("authenticated database claims require sub");
-  }
-  return JSON.stringify({
-    ...(organizationId ? { org_id: organizationId } : {}),
-    ...(organizationRole ? { org_role: organizationRole } : {}),
-    sub: subject,
-  });
 }
 
 export interface EffectTransactionClient {
@@ -177,8 +164,8 @@ export function withAuthenticatedTransactionEffect<A, E, R>(
       new InvalidRequestError({ message: errorMessage(cause, "Invalid claims for tenant") }),
     );
   }
-  const timeoutMs = options?.statementTimeoutMs ?? 10_000;
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
+  const timeoutMs = statementTimeoutMilliseconds(options?.statementTimeoutMs);
+  if (timeoutMs === undefined) {
     return Effect.fail(
       new InvalidRequestError({ message: "statementTimeoutMs must be a positive safe integer" }),
     );

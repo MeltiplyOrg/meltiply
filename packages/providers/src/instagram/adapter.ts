@@ -57,8 +57,10 @@ import {
   type ResolvedInstagramOptions,
 } from "./options";
 
-const apiOrigin = "https://graph.instagram.com";
-const exchangeOrigin = "https://api.instagram.com";
+export const instagramGraphOrigin = "https://graph.instagram.com";
+export const instagramApiOrigin = "https://api.instagram.com";
+const apiOrigin = instagramGraphOrigin;
+const exchangeOrigin = instagramApiOrigin;
 const graphUrl = (path: string) => new URL(`/${META_GRAPH_API_VERSION}/${path}`, apiOrigin);
 const limits = PROVIDER_LIMITS.instagram;
 const videoTypes = ["video/mp4", "video/quicktime"];

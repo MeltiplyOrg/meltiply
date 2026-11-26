@@ -55,7 +55,8 @@ import {
   type ThreadsPublishOptions,
 } from "./options";
 
-const apiOrigin = "https://graph.threads.com";
+export const threadsGraphOrigin = "https://graph.threads.com";
+const apiOrigin = threadsGraphOrigin;
 const limits = PROVIDER_LIMITS.threads;
 const imageTypes = ["image/jpeg", "image/png"];
 const videoTypes = ["video/mp4", "video/quicktime"];

@@ -50,7 +50,8 @@ const scopePattern = /^[a-z][a-z0-9._-]{0,99}$/;
 const operationPattern = /^(publish|inbox):(.+)$/;
 const maxScopes = 20;
 
-const apiOrigin = "https://open.tiktokapis.com";
+export const tiktokApiOrigin = "https://open.tiktokapis.com";
+const apiOrigin = tiktokApiOrigin;
 const limits = PROVIDER_LIMITS.tiktok;
 const jsonContentType = "application/json; charset=UTF-8";
 const videoTypes = ["video/mp4", "video/quicktime", "video/webm"];

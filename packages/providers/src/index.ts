@@ -8,6 +8,12 @@ import {
 import { createFacebookAdapter } from "./facebook/adapter";
 import { createInstagramAdapter } from "./instagram/adapter";
 import { PROVIDER_LIMITS } from "./limits";
+import {
+  providerOriginOverrides,
+  providerOriginSettings,
+  redirectingFetch,
+  type ProviderOriginSetting,
+} from "./origin-overrides";
 import { createThreadsAdapter } from "./threads/adapter";
 import { createTikTokAdapter } from "./tiktok/adapter";
 import type {
@@ -124,6 +130,7 @@ export {
   type ResolvedInstagramOptions,
 } from "./instagram/options";
 export { PROVIDER_LIMITS } from "./limits";
+export type { ProviderOriginSetting } from "./origin-overrides";
 export { extractRateLimitBudget, type RateLimitBudget } from "./rate-limit";
 export { createThreadsAdapter, type ThreadsAdapterOptions } from "./threads/adapter";
 export {
@@ -204,7 +211,9 @@ function wrapWithMetadata<
   };
 }
 
-export interface ProviderRegistryEnvironment {
+export interface ProviderRegistryEnvironment extends Partial<
+  Record<ProviderOriginSetting, string>
+> {
   FACEBOOK_CLIENT_ID?: string;
   FACEBOOK_CLIENT_SECRET?: string;
   FACEBOOK_LIVE_ACCEPTED?: string;
@@ -241,6 +250,7 @@ const registryConfigKeys = [
   "INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED",
   "INSTAGRAM_LIVE_ACCEPTED",
   "APP_URL",
+  ...providerOriginSettings,
   "TIKTOK_CLIENT_KEY",
   "TIKTOK_CLIENT_SECRET",
   "TIKTOK_LIVE_ACCEPTED",
@@ -482,8 +492,11 @@ export function createProviderRegistryFromEnvironment(
     throw new TypeError("accepted YouTube provider configuration is incomplete");
   }
   const publicUrl = trustedPublicUrl(environment.APP_URL);
+  const overrides = providerOriginOverrides(environment);
+  const send = options.fetch ?? fetch;
+  const adapterFetch = overrides.size > 0 ? redirectingFetch(overrides, send) : options.fetch;
   const commonOptions = {
-    ...(options.fetch ? { fetch: options.fetch } : {}),
+    ...(adapterFetch ? { fetch: adapterFetch } : {}),
     ...(options.now ? { now: options.now } : {}),
     ...(options.timeoutMilliseconds === undefined
       ? {}

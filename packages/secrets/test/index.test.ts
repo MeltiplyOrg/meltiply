@@ -12,7 +12,7 @@ const oldKey = "abcdef0123456789abcdef0123456789";
 const fixedNonce = Uint8Array.from({ length: 12 }, (_, index) => index);
 const CURRENT_CIPHERTEXT =
   "meltiply:v2:current:AAECAwQFBgcICQoLXZfUCrB8t96FqB7VFKGNMefcRDGv564aUK8jGEE6";
-const LEGACY_CIPHERTEXT = "meltiply:v1:AAECAwQFBgcICQoLsR5POQIi_L25H3ztNd9m0J7XZrh0mfnxOFIhTQ";
+const LEGACY_CIPHERTEXT = "meltiply:v1:AQIDBAUGBwgJCgsMKfH4s3YtSa1xMlA1V2L1sFMHzNCl1B3p7i1p2A";
 
 function cipherOf(...keys: { id: string; material: string }[]) {
   return new TokenCipher({ currentKeyId: "current", keys, randomBytes: () => fixedNonce });

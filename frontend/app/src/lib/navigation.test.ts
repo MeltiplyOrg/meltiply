@@ -104,7 +104,7 @@ describe("sameOriginPath", () => {
     ["a path with a hash", "/posts#composer", "/posts#composer"],
     ["the root", "/", "/"],
     ["a path with a parent segment", "/posts/../queues", "/queues"],
-    ["a path outside ASCII", "/café", "/caf%C3%A9"],
+    ["a path outside ASCII", "/posts/é", "/posts/%C3%A9"],
   ])("%s", (_example, requested, path) => {
     expect(sameOriginPath(requested)).toEqual(path);
   });

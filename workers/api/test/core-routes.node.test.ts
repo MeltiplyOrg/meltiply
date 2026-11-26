@@ -3366,11 +3366,11 @@ describe("provider media delivery route", () => {
     const get = vi.fn(async () => null);
     const app = createApiApp();
     const future = Math.floor(Date.now() / 1000) + 3600;
-    const encodedSlash = (await signedMediaUrl("org-1/asset-1/a/b", future)).replace(
+    const encodedSlash = (await signedMediaUrl("org-1/asset-1/a/b", future)).replaceAll(
       "/a/b?",
       "/a%2Fb?",
     );
-    const encodedDots = (await signedMediaUrl("org-1/asset-1/../secret", future)).replace(
+    const encodedDots = (await signedMediaUrl("org-1/asset-1/../secret", future)).replaceAll(
       "/../",
       "/%2E%2E/",
     );

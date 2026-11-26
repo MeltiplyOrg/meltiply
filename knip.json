@@ -40,6 +40,11 @@
         "config": ["vitest*.config.ts"]
       }
     },
+    "workers/state": {
+      "vitest": {
+        "config": ["vitest*.config.ts"]
+      }
+    },
     "scripts/selfhost": {
       "entry": [
         "api.ts",

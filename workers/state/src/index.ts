@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { Cause, Data, Effect, Exit } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import type {
   CancelSelectionResult,
   ClaimSelectionResult,
@@ -12,71 +12,30 @@ import type {
   OAuthStateRecord,
 } from "@meltiply/contracts";
 
+import {
+  decideSelectionCancel,
+  decideSelectionClaim,
+  decideSelectionCompletion,
+  decideSelectionRelease,
+  InvalidOAuthStateError,
+  OAuthStateStorageError,
+  planAlarmSweep,
+  planCandidateAppend,
+  projectPublicSelection,
+  STORAGE_DELETE_BATCH,
+  validateOAuthSelectionCreateEffect,
+  validateOAuthStateCreateEffect,
+} from "./oauth-state-rules";
+
+export {
+  InvalidOAuthStateError,
+  OAuthStateStorageError,
+  validateOAuthSelectionCreateEffect,
+  validateOAuthStateCreateEffect,
+};
+
 interface StateWorkerEnv {
   OAUTH_STATE: DurableObjectNamespace<OAuthStateCoordinator>;
-}
-
-export class InvalidOAuthStateError extends Data.TaggedError("InvalidOAuthStateError")<{
-  readonly message: string;
-}> {}
-
-export class OAuthStateStorageError extends Data.TaggedError("OAuthStateStorageError")<{
-  readonly cause?: string;
-  readonly message: string;
-}> {}
-
-export function validateOAuthStateCreateEffect(
-  state: string,
-  record: OAuthStateRecord,
-): Effect.Effect<void, InvalidOAuthStateError> {
-  if (!state || record.expires_at <= Date.now()) {
-    return Effect.fail(
-      new InvalidOAuthStateError({
-        message: "OAuth state and a future expiry are required",
-      }),
-    );
-  }
-  return Effect.void;
-}
-
-export function validateOAuthSelectionCreateEffect(
-  selectionId: string,
-  init: OAuthSelectionInit,
-): Effect.Effect<void, InvalidOAuthStateError> {
-  if (
-    !selectionId ||
-    selectionId.length < 16 ||
-    selectionId.length > 256 ||
-    init.expires_at <= Date.now()
-  ) {
-    return Effect.fail(
-      new InvalidOAuthStateError({
-        message: "Selection ID and a future expiry are required",
-      }),
-    );
-  }
-  if (typeof init.organization_id !== "string" || init.organization_id.trim().length === 0) {
-    return Effect.fail(
-      new InvalidOAuthStateError({
-        message: "An organization ID is required",
-      }),
-    );
-  }
-  if (typeof init.user_id !== "string" || init.user_id.trim().length === 0) {
-    return Effect.fail(
-      new InvalidOAuthStateError({
-        message: "A user ID is required",
-      }),
-    );
-  }
-  if (typeof init.platform !== "string" || init.platform.trim().length === 0) {
-    return Effect.fail(
-      new InvalidOAuthStateError({
-        message: "A platform is required",
-      }),
-    );
-  }
-  return Effect.void;
 }
 
 function storageEffect<A>(
@@ -92,14 +51,6 @@ function storageEffect<A>(
     try: thunk,
   });
 }
-
-const SELECTION_EVIDENCE_RETENTION_MS = 10 * 60 * 1_000;
-
-function selectionEvidenceExpiry(record: OAuthSelectionRecord): number {
-  return record.evidence_expires_at ?? record.expires_at + SELECTION_EVIDENCE_RETENTION_MS;
-}
-
-const STORAGE_DELETE_BATCH = 128;
 
 function deleteStorageKeysEffect(
   storage: DurableObjectStorage,
@@ -173,6 +124,7 @@ function deleteSelectionCandidatesEffect(
     }
   });
 }
+
 async function runStateProgram<A>(
   program: Effect.Effect<A, InvalidOAuthStateError | OAuthStateStorageError>,
 ): Promise<A> {
@@ -250,55 +202,12 @@ export class OAuthStateCoordinator
         "Failed to read OAuth selection for appending candidates.",
         () => storage.get<OAuthSelectionRecord>(key),
       );
-      if (!record || record.ready || record.status !== "pending") {
-        return yield* Effect.fail(
-          new InvalidOAuthStateError({
-            message: "Cannot append candidates to an uninitialized or finalized selection.",
-          }),
-        );
-      }
-      const newAccountIds: string[] = [];
-      const seenAccountIds = new Set(record.account_ids);
-      const entriesToPut: Record<string, unknown> = {};
-      for (const candidate of candidates) {
-        if (!candidate.account.id || candidate.account.id.length > 255) {
-          return yield* Effect.fail(
-            new InvalidOAuthStateError({
-              message: "Account ID must be a non-empty string under 255 characters",
-            }),
-          );
-        }
-        if (seenAccountIds.has(candidate.account.id)) {
-          return yield* Effect.fail(
-            new InvalidOAuthStateError({
-              message: "Account IDs must be unique within a selection.",
-            }),
-          );
-        }
-        seenAccountIds.add(candidate.account.id);
-        newAccountIds.push(candidate.account.id);
-        entriesToPut[`selection-account:${selectionId}:${candidate.account.id}`] =
-          candidate.account;
-        entriesToPut[`selection-credential:${selectionId}:${candidate.account.id}`] = {
-          encrypted_connection: candidate.encryptedConnection,
-        };
-      }
-      if (record.account_ids.length + newAccountIds.length > 1000) {
-        return yield* Effect.fail(
-          new InvalidOAuthStateError({
-            message: "Accounts list must not exceed 1000 items",
-          }),
-        );
-      }
+      const { entries, updated } = yield* planCandidateAppend(selectionId, record, candidates);
       yield* putStorageEntriesEffect(
         storage,
-        entriesToPut,
+        entries,
         "Failed to persist candidate OAuth connections.",
       );
-      const updated: OAuthSelectionRecord = {
-        ...record,
-        account_ids: [...record.account_ids, ...newAccountIds],
-      };
       yield* storageEffect("Failed to update OAuth selection account IDs.", () =>
         storage.put(key, updated),
       );
@@ -340,12 +249,8 @@ export class OAuthStateCoordinator
       const record = yield* storageEffect("Failed to read OAuth selection.", () =>
         storage.get<OAuthSelectionRecord>(key),
       );
-      if (!record || !record.ready) return null;
-      if (record.expires_at <= Date.now()) return null;
-      if (record.status !== "pending") return null;
-      if (record.organization_id !== actor.organizationId || record.user_id !== actor.userId) {
-        return null;
-      }
+      const now = Date.now();
+      if (projectPublicSelection(record, actor, [], now) === null) return null;
       const metadataEntries = yield* storageEffect(
         "Failed to list candidate accounts for selection.",
         () =>
@@ -353,21 +258,7 @@ export class OAuthStateCoordinator
             prefix: `selection-account:${selectionId}:`,
           }),
       );
-      const byId = new Map<string, OAuthSelectionAccount>();
-      for (const entry of metadataEntries.values()) {
-        byId.set(entry.id, entry);
-      }
-      const accounts: OAuthSelectionAccount[] = [];
-      for (const accountId of record.account_ids) {
-        const account = byId.get(accountId);
-        if (account) accounts.push(account);
-      }
-      return {
-        accounts,
-        expires_at: new Date(record.expires_at).toISOString(),
-        id: record.id,
-        platform: record.platform as OAuthSelectionPublic["platform"],
-      };
+      return projectPublicSelection(record, actor, metadataEntries.values(), now);
     });
     return runStateProgram(program);
   }
@@ -386,64 +277,9 @@ export class OAuthStateCoordinator
         storage.get<OAuthSelectionRecord>(key),
       );
       const now = Date.now();
-      if (!record || !record.ready) {
-        return { status: "not_found" } as const;
-      }
-      if (record.organization_id !== actor.organizationId || record.user_id !== actor.userId) {
-        return { status: "not_found" } as const;
-      }
-      const evidenceExpiry = selectionEvidenceExpiry(record);
-      if (now >= evidenceExpiry) {
-        return { status: "not_found" } as const;
-      }
-      if (record.status === "cancelled") {
-        return { status: "not_found" } as const;
-      }
-      if (record.status === "completed") {
-        if (
-          record.completed_account_id === accountId &&
-          record.completed_brand_profile_id === actor.brandProfileId &&
-          record.completed_idempotency_key === idempotencyKey
-        ) {
-          return { status: "replayed" } as const;
-        }
-        return {
-          code: "already_completed",
-          message: "This OAuth account selection has already been completed.",
-          status: "conflict",
-        } as const;
-      }
-      if (record.expires_at <= now) {
-        return { status: "not_found" } as const;
-      }
-      if (record.pinned_account_id && record.pinned_account_id !== accountId) {
-        return {
-          code: "pinned_account_mismatch",
-          message:
-            "This selection was already confirmed for a different account. Restart authorization to choose another account.",
-          status: "conflict",
-        } as const;
-      }
-      if (record.claim && record.claim.brand_profile_id !== actor.brandProfileId) {
-        return {
-          code: "pinned_profile_mismatch",
-          message:
-            "This confirmation may still be saving to another Brand Profile. Retry the original assignment.",
-          status: "conflict",
-        } as const;
-      }
-      if (record.claim && record.claim.expires_at > now) {
-        return {
-          code: "claim_active",
-          message: "Selection confirmation is currently in progress.",
-          status: "conflict",
-        } as const;
-      }
-      if (!record.account_ids.includes(accountId)) {
-        return {
-          message: "The selected account was not found in this authorization.",
-          status: "invalid_account",
-        } as const;
+      const decision = decideSelectionClaim(record, accountId, actor, idempotencyKey, now);
+      if (decision.kind === "result") {
+        return decision.result;
       }
       const candidateEntry = yield* storageEffect(
         "Failed to read candidate OAuth connection.",
@@ -460,7 +296,7 @@ export class OAuthStateCoordinator
       }
       const claimToken = crypto.randomUUID();
       const updated: OAuthSelectionRecord = {
-        ...record,
+        ...decision.record,
         claim: {
           brand_profile_id: actor.brandProfileId,
           claimed_at: now,
@@ -476,10 +312,10 @@ export class OAuthStateCoordinator
       return {
         claimToken,
         encryptedConnection: candidateEntry.encrypted_connection,
-        organizationId: record.organization_id,
-        platform: record.platform,
+        organizationId: decision.record.organization_id,
+        platform: decision.record.platform,
         status: "claimed",
-        userId: record.user_id,
+        userId: decision.record.user_id,
       } as const;
     });
     return storage.transaction(() => runStateProgram(program));
@@ -497,27 +333,15 @@ export class OAuthStateCoordinator
       const record = yield* storageEffect("Failed to read OAuth selection for completion.", () =>
         storage.get<OAuthSelectionRecord>(key),
       );
-      if (!record) return false;
-      if (record.claim?.token !== claimToken) return false;
-      if (
-        record.pinned_account_id !== accountId ||
-        record.claim.idempotency_key !== idempotencyKey
-      ) {
-        return false;
-      }
-      const now = Date.now();
-      const evidenceExpiry = selectionEvidenceExpiry(record);
-      if (now >= evidenceExpiry) return false;
+      const updated = decideSelectionCompletion(
+        record,
+        accountId,
+        claimToken,
+        idempotencyKey,
+        Date.now(),
+      );
+      if (!updated) return false;
       yield* deleteSelectionCandidatesEffect(storage, selectionId);
-      const updated: OAuthSelectionRecord = {
-        ...record,
-        account_ids: [],
-        claim: undefined,
-        completed_account_id: accountId,
-        completed_brand_profile_id: record.claim.brand_profile_id,
-        completed_idempotency_key: idempotencyKey,
-        status: "completed",
-      };
       yield* storageEffect("Failed to save completed OAuth selection.", () =>
         storage.put(key, updated),
       );
@@ -533,12 +357,8 @@ export class OAuthStateCoordinator
       const record = yield* storageEffect("Failed to read OAuth selection for release.", () =>
         storage.get<OAuthSelectionRecord>(key),
       );
-      if (!record) return false;
-      if (record.claim?.token !== claimToken) return false;
-      const updated: OAuthSelectionRecord = {
-        ...record,
-        claim: undefined,
-      };
+      const updated = decideSelectionRelease(record, claimToken);
+      if (!updated) return false;
       yield* storageEffect("Failed to release OAuth selection claim.", () =>
         storage.put(key, updated),
       );
@@ -558,40 +378,14 @@ export class OAuthStateCoordinator
       const record = yield* storageEffect("Failed to read OAuth selection for cancellation.", () =>
         storage.get<OAuthSelectionRecord>(key),
       );
-      const now = Date.now();
-      if (!record || !record.ready) {
-        return { status: "not_found" } as const;
-      }
-      if (record.organization_id !== actor.organizationId || record.user_id !== actor.userId) {
-        return { status: "not_found" } as const;
-      }
-      if (record.claim) {
-        return {
-          message: "Cannot cancel selection while confirmation is or was in progress.",
-          status: "conflict",
-        } as const;
-      }
-      if (record.status === "completed") {
-        return {
-          message: "Cannot cancel an already completed selection.",
-          status: "conflict",
-        } as const;
-      }
-      if (record.status === "cancelled") {
-        return { status: "cancelled" } as const;
-      }
-      if (record.expires_at <= now) {
-        return { status: "not_found" } as const;
+      const decision = decideSelectionCancel(record, actor, idempotencyKey, Date.now());
+      if (decision.kind === "return") {
+        return decision.result;
       }
       yield* deleteSelectionCandidatesEffect(storage, selectionId);
-      const updated: OAuthSelectionRecord = {
-        ...record,
-        account_ids: [],
-        cancelled_idempotency_key: idempotencyKey,
-        claim: undefined,
-        status: "cancelled",
-      };
-      yield* storageEffect("Failed to cancel OAuth selection.", () => storage.put(key, updated));
+      yield* storageEffect("Failed to cancel OAuth selection.", () =>
+        storage.put(key, decision.updated),
+      );
       return { status: "cancelled" } as const;
     });
     return storage.transaction(() => runStateProgram(program));
@@ -600,62 +394,28 @@ export class OAuthStateCoordinator
   async alarm(): Promise<void> {
     const storage = this.ctx.storage;
     const program = Effect.gen(function* () {
-      const now = Date.now();
       const oauthEntries = yield* storageEffect("Failed to list OAuth state entries.", () =>
         storage.list<OAuthStateRecord>({ prefix: "oauth:" }),
       );
       const selectionEntries = yield* storageEffect("Failed to list OAuth selection entries.", () =>
         storage.list<OAuthSelectionRecord>({ prefix: "selection:" }),
       );
-
-      const expiredKeys: string[] = [];
-      const strippedMasters: Record<string, OAuthSelectionRecord> = {};
-      let nextAlarm: number | undefined;
-      const scheduleAt = (at: number) => {
-        if (nextAlarm === undefined || at < nextAlarm) nextAlarm = at;
-      };
-
-      for (const [key, record] of oauthEntries) {
-        if (record.expires_at <= now) {
-          expiredKeys.push(key);
-        } else {
-          scheduleAt(record.expires_at);
-        }
+      const plan = planAlarmSweep(oauthEntries, selectionEntries, Date.now());
+      for (const selectionId of plan.cleanupSelectionIds) {
+        yield* deleteSelectionCandidatesEffect(storage, selectionId);
       }
-
-      for (const [key, record] of selectionEntries) {
-        if (record.expires_at > now) {
-          scheduleAt(record.expires_at);
-          continue;
-        }
-        yield* deleteSelectionCandidatesEffect(storage, key.slice("selection:".length));
-        const retainEvidence = record.status !== "pending" || record.claim !== undefined;
-        const evidenceExpiry =
-          record.evidence_expires_at ?? record.expires_at + SELECTION_EVIDENCE_RETENTION_MS;
-        if (!retainEvidence || now >= evidenceExpiry) {
-          expiredKeys.push(key);
-        } else {
-          strippedMasters[key] = {
-            ...record,
-            account_ids: [],
-            evidence_expires_at: evidenceExpiry,
-          };
-          scheduleAt(evidenceExpiry);
-        }
-      }
-
       yield* deleteStorageKeysEffect(
         storage,
-        expiredKeys,
+        plan.expiredKeys,
         "Failed to delete expired OAuth entries.",
       );
       yield* putStorageEntriesEffect(
         storage,
-        strippedMasters,
+        plan.strippedMasters,
         "Failed to strip expired OAuth selections.",
       );
-      if (nextAlarm !== undefined) {
-        const alarmAt = nextAlarm;
+      if (plan.nextAlarm !== undefined) {
+        const alarmAt = plan.nextAlarm;
         yield* storageEffect("Failed to reschedule the OAuth state alarm.", () =>
           storage.setAlarm(alarmAt),
         );

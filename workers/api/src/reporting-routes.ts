@@ -17,7 +17,7 @@ import {
 import type { Context, Hono } from "hono";
 
 import { auditActorFromResolved, recordWorkspaceAuditEffect } from "./audit";
-import { requireInstallationOwnerEffect } from "./authorization";
+import { requireActor, requireInstallationOwnerEffect } from "./authorization";
 import { runBackgroundContinuation } from "./background-continuation";
 import { CoreApiError } from "./api-errors";
 import { fromPromise } from "./effect/route";
@@ -118,7 +118,7 @@ export function registerReportingRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const policy = yield* withReporting(c.env, dependencies, (service) => service.policy());
         return jsonResponse(policyBody(policy, actor.isInstallationOwner), 200, c.get("requestId"));
       }),
@@ -129,7 +129,7 @@ export function registerReportingRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* requireInstallationOwnerEffect(actor);
         const body = yield* fromPromise(() => jsonBody(c, true));
         yield* fromPromise(() => onlyKeys(body, ["diagnostics", "usage"]));
@@ -183,7 +183,7 @@ export function registerReportingRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* requireInstallationOwnerEffect(actor);
         const state = yield* withReporting(c.env, dependencies, (service) =>
           service.feedbackState(),
@@ -197,7 +197,7 @@ export function registerReportingRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* requireInstallationOwnerEffect(actor);
         const body = yield* fromPromise(() => jsonBody(c, true));
         yield* fromPromise(() => onlyKeys(body, ["discovery_source"]));

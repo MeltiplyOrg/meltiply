@@ -1,5 +1,5 @@
 import { classifyProviderFailure, malformed, ProviderAdapterError, rejected } from "../failures";
-import { OAUTH_TOKEN_MAX_CHARS } from "../limits";
+import { OAUTH_TOKEN_MAX_CHARS, PROVIDER_LIMITS } from "../limits";
 import { META_GRAPH_API_VERSION } from "../meta";
 import {
   addSeconds,
@@ -30,7 +30,6 @@ import {
   FACEBOOK_BUSINESS_DISCOVERY_SCOPE,
   FACEBOOK_CONFIGURED_SCOPES,
   FACEBOOK_GRAPH_ORIGIN,
-  FACEBOOK_LIMITS,
   FACEBOOK_PUBLISHING_SCOPES,
   graphGet,
   graphUrl,
@@ -100,7 +99,7 @@ function expiryDiagnostic(
       return `${name}=${shown}`;
     });
   return new Error(
-    `Facebook OAuth expiry rejected: ${[`source=${source}`, ...rendered, `maximum_seconds=${FACEBOOK_LIMITS.tokenLifetimeMaxSeconds}`].join(", ")}`,
+    `Facebook OAuth expiry rejected: ${[`source=${source}`, ...rendered, `maximum_seconds=${PROVIDER_LIMITS.facebook.tokenLifetimeMaxSeconds}`].join(", ")}`,
   );
 }
 
@@ -114,7 +113,10 @@ function decodeRefreshSecret(value: string): FacebookRefreshSecret {
   }
   const body = record(parsed);
   const pageId = providerIdentifier(body?.pageId);
-  const userAccessToken = boundedString(body?.userAccessToken, FACEBOOK_LIMITS.tokenMaxChars);
+  const userAccessToken = boundedString(
+    body?.userAccessToken,
+    PROVIDER_LIMITS.facebook.tokenMaxChars,
+  );
   if (!body || Object.keys(body).length !== 2 || !pageId || !userAccessToken) {
     throw rejected("facebook_refresh_secret_invalid");
   }
@@ -213,11 +215,15 @@ export function createFacebookOAuth(runtime: AdapterRuntime) {
       await postForm(http, context, tokenUrl, {
         client_id: clientId,
         client_secret: clientSecret,
-        fb_exchange_token: required("userAccessToken", currentToken, FACEBOOK_LIMITS.tokenMaxChars),
+        fb_exchange_token: required(
+          "userAccessToken",
+          currentToken,
+          PROVIDER_LIMITS.facebook.tokenMaxChars,
+        ),
         grant_type: "fb_exchange_token",
       }),
     );
-    const accessToken = boundedString(body?.access_token, FACEBOOK_LIMITS.tokenMaxChars);
+    const accessToken = boundedString(body?.access_token, PROVIDER_LIMITS.facebook.tokenMaxChars);
     if (!accessToken) throw oauthMalformed("long_lived_token");
     if (boundedString(body?.token_type, 32)?.toLowerCase() !== "bearer") {
       throw oauthMalformed("token_type");
@@ -252,7 +258,11 @@ export function createFacebookOAuth(runtime: AdapterRuntime) {
     try {
       return {
         accessToken,
-        expiresAt: addSeconds(exchangedAt, lifetime, FACEBOOK_LIMITS.tokenLifetimeMaxSeconds),
+        expiresAt: addSeconds(
+          exchangedAt,
+          lifetime,
+          PROVIDER_LIMITS.facebook.tokenLifetimeMaxSeconds,
+        ),
       };
     } catch {
       throw oauthMalformed(
@@ -286,7 +296,7 @@ export function createFacebookOAuth(runtime: AdapterRuntime) {
       });
       const shortToken = boundedString(
         record(shortBody)?.access_token,
-        FACEBOOK_LIMITS.tokenMaxChars,
+        PROVIDER_LIMITS.facebook.tokenMaxChars,
       );
       if (!shortToken) throw oauthMalformed("authorization_token");
 
@@ -306,7 +316,10 @@ export function createFacebookOAuth(runtime: AdapterRuntime) {
         const page = record(value);
         const id = providerIdentifier(page?.id);
         const displayName = boundedText(page?.name, 500);
-        const accessToken = boundedString(page?.access_token, FACEBOOK_LIMITS.tokenMaxChars);
+        const accessToken = boundedString(
+          page?.access_token,
+          PROVIDER_LIMITS.facebook.tokenMaxChars,
+        );
         if (!id || !displayName) throw oauthMalformed("page_identity");
         if (!accessToken) throw oauthMalformed("page_access_token");
         const tasks = parsePageTasks(page?.tasks);
@@ -428,7 +441,7 @@ export function createFacebookOAuth(runtime: AdapterRuntime) {
         longToken.accessToken,
         nodeUrl(current.pageId, "id,name,access_token"),
       );
-      const accessToken = boundedString(page?.access_token, FACEBOOK_LIMITS.tokenMaxChars);
+      const accessToken = boundedString(page?.access_token, PROVIDER_LIMITS.facebook.tokenMaxChars);
       if (providerIdentifier(page?.id) !== current.pageId || !accessToken) throw malformed();
       return {
         accessToken,

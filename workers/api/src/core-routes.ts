@@ -66,43 +66,32 @@ export function registerCoreRoutes(
     await next();
   });
 
-  let servicePromise: Promise<CoreApiService> | undefined;
-  let assetServicePromise: Promise<AssetApiService> | undefined;
-  let brandProfileServicePromise: Promise<BrandProfileApiService> | undefined;
-  let postServicePromise: Promise<PostApiService> | undefined;
-  let preferencesServicePromise: Promise<PublishingPreferencesApiService> | undefined;
+  const lazyService = <S>(override: S | undefined, load: () => Promise<S>): (() => Promise<S>) => {
+    let promise: Promise<S> | undefined;
+    return () => {
+      if (override) return Promise.resolve(override);
+      promise ??= load();
+      return promise;
+    };
+  };
 
   const services: CoreRouteServices = {
-    assets: async () => {
-      if (dependencies.assetService) return dependencies.assetService;
-      assetServicePromise ??= import("./asset-service").then((module) =>
-        module.createAssetApiService(),
-      );
-      return assetServicePromise;
-    },
-    brandProfiles: async () => {
-      if (dependencies.brandProfileService) return dependencies.brandProfileService;
-      brandProfileServicePromise ??= import("./brand-profile-service").then((module) =>
-        module.createBrandProfileService(),
-      );
-      return brandProfileServicePromise;
-    },
-    posts: async () => {
-      if (dependencies.postService) return dependencies.postService;
-      postServicePromise ??= import("./post-service").then((module) =>
+    assets: lazyService(dependencies.assetService, () =>
+      import("./asset-service").then((module) => module.createAssetApiService()),
+    ),
+    brandProfiles: lazyService(dependencies.brandProfileService, () =>
+      import("./brand-profile-service").then((module) => module.createBrandProfileService()),
+    ),
+    posts: lazyService(dependencies.postService, () =>
+      import("./post-service").then((module) =>
         module.createPostApiService(registry().capabilities()),
-      );
-      return postServicePromise;
-    },
-    preferences: async () => {
-      if (dependencies.publishingPreferencesService) {
-        return dependencies.publishingPreferencesService;
-      }
-      preferencesServicePromise ??= import("./publishing-preferences-service").then((module) =>
+      ),
+    ),
+    preferences: lazyService(dependencies.publishingPreferencesService, () =>
+      import("./publishing-preferences-service").then((module) =>
         module.createPublishingPreferencesApiService(),
-      );
-      return preferencesServicePromise;
-    },
+      ),
+    ),
     readPublicationRequirements:
       dependencies.publicationRequirements ??
       ((env, session, accountId, providerRequestId, activeRegistry) =>
@@ -158,13 +147,11 @@ export function registerCoreRoutes(
             module.saveOAuthConnectionEffect(env, selected, owner, connection),
           ),
         )),
-    service: async () => {
-      if (dependencies.coreService) return dependencies.coreService;
-      servicePromise ??= import("./core-service").then((module) =>
+    service: lazyService(dependencies.coreService, () =>
+      import("./core-service").then((module) =>
         module.createCoreApiService(registry().capabilities()),
-      );
-      return servicePromise;
-    },
+      ),
+    ),
   };
 
   registerBrandProfileRoutes(app, services);

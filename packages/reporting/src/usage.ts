@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 
-import type { Platform } from "@meltiply/domain";
+import type { DatabaseError, Platform } from "@meltiply/domain";
 
 import type { ReportingConfiguration } from "./configuration";
 import { categoryStatus } from "./policy";
@@ -26,7 +26,7 @@ export function recordPublicationUsage(
   confirmation: PublicationConfirmation,
   configuration: ReportingConfiguration,
   options: { readonly now?: () => Date } = {},
-): Effect.Effect<PublicationMeasurementOutcome, never> {
+): Effect.Effect<PublicationMeasurementOutcome, DatabaseError> {
   return Effect.suspend(() => {
     let savepointActive = false;
     return Effect.gen(function* () {
@@ -110,12 +110,10 @@ export function recordPublicationUsage(
       savepointActive = false;
       return "counted" as const;
     }).pipe(
-      Effect.catch(() => {
-        if (!savepointActive) return Effect.succeed("unavailable" as const);
+      Effect.catch((measurementError) => {
+        if (!savepointActive) return Effect.fail(measurementError);
         return Effect.as(
-          Effect.catch(client.query(`ROLLBACK TO SAVEPOINT ${measurementSavepoint}`), () =>
-            Effect.succeed(undefined),
-          ),
+          client.query(`ROLLBACK TO SAVEPOINT ${measurementSavepoint}`),
           "unavailable" as const,
         );
       }),

@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import type { Hono } from "hono";
 
 import { CoreApiError } from "../api-errors";
+import { requireActor } from "../authorization";
 import { fromPromise } from "../effect/route";
 import { runRouteEffect } from "../effect/runtime";
 import type { ApiWorkerEnvironment } from "../env";
@@ -160,7 +161,7 @@ export function registerInboxAndPreferencesRoutes(
           booleanParam(c.req.query("unreplied"), "unreplied"),
         );
         const core = yield* fromPromise(services.service);
-        const inbox = yield* core.inbox(c.env, c.get("actor").claims, {
+        const inbox = yield* core.inbox(c.env, requireActor(c).claims, {
           ...(distributionId ? { distributionId } : {}),
           ...(brandProfileId ? { brandProfileId } : {}),
           limit,
@@ -169,7 +170,7 @@ export function registerInboxAndPreferencesRoutes(
           ...(replyStatus ? { replyStatus } : {}),
           unreplied,
         });
-        scheduleInboxCommentSync(c, c.get("actor").workspace.id, distributionId);
+        scheduleInboxCommentSync(c, requireActor(c).workspace.id, distributionId);
         return jsonResponse(inbox, 200, c.get("requestId"));
       }),
     ),
@@ -201,7 +202,7 @@ export function registerInboxAndPreferencesRoutes(
         const core = yield* fromPromise(services.service);
         const result = yield* core.replyToComment(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           commentId,
           replyBrandProfileId,
           text,
@@ -220,7 +221,7 @@ export function registerInboxAndPreferencesRoutes(
       c,
       Effect.gen(function* () {
         const service = yield* fromPromise(services.preferences);
-        const value = yield* service.get(c.env, c.get("actor").claims);
+        const value = yield* service.get(c.env, requireActor(c).claims);
         return jsonResponse(value, 200, c.get("requestId"));
       }),
     ),
@@ -234,7 +235,7 @@ export function registerInboxAndPreferencesRoutes(
         const input = yield* fromPromise(() => publishingPreferencesInput(body));
         const key = yield* fromPromise(() => idempotencyKey(c));
         const service = yield* fromPromise(services.preferences);
-        const result = yield* service.replace(c.env, c.get("actor").claims, input, key);
+        const result = yield* service.replace(c.env, requireActor(c).claims, input, key);
         return jsonResponse(result.value, 200, c.get("requestId"), {
           ...idempotencyHeaders(result.replayed),
         });

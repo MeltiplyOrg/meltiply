@@ -247,7 +247,7 @@ export function validateProductionBindings(env: ApiWorkerEnv): void {
 export type ApiWorkerEnvironment = {
   Bindings: ApiWorkerEnv;
   Variables: {
-    actor: ResolvedActor;
+    actor: ResolvedActor | undefined;
     identity: JwtIdentity;
     operator: AccessClaims;
     requestId: string;

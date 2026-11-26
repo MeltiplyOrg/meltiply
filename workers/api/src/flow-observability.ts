@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { requireActor } from "./authorization";
 import type { EffectTransactionClient } from "@meltiply/database";
 import { isoDateTime, isoDateTimeOrNull, isUuid } from "@meltiply/domain";
 import type { Hono } from "hono";
@@ -419,7 +420,7 @@ export function registerFlowRoutes(app: Hono<ApiWorkerEnvironment>): void {
     );
     const environment = c.req.query("environment");
     const status = c.req.query("status");
-    const orgId = c.get("actor").workspace.id;
+    const orgId = requireActor(c).workspace.id;
     const runs = await runWithSystemTransaction(c.env, (client) =>
       Effect.gen(function* () {
         const parameters: unknown[] = [orgId];
@@ -459,7 +460,7 @@ export function registerFlowRoutes(app: Hono<ApiWorkerEnvironment>): void {
     if (!isUuid(runId)) {
       return errorResponse(c.get("requestId"), 404, "not_found", "The route was not found.");
     }
-    const orgId = c.get("actor").workspace.id;
+    const orgId = requireActor(c).workspace.id;
     const run = await runWithSystemTransaction(c.env, (client) =>
       client
         .query<FlowRunRow>(
@@ -489,7 +490,7 @@ export function registerFlowRoutes(app: Hono<ApiWorkerEnvironment>): void {
     if (!isUuid(runId)) {
       return jsonResponse({ steps: [] }, 200, c.get("requestId"));
     }
-    const orgId = c.get("actor").workspace.id;
+    const orgId = requireActor(c).workspace.id;
     const steps = await runWithSystemTransaction(c.env, (client) =>
       client
         .query<FlowStepRow>(

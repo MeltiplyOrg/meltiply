@@ -8,7 +8,6 @@ import {
   log,
   type LogContext,
 } from "@meltiply/observability";
-import type { ResolvedActor } from "../actor-types";
 import { ProviderAdapterError } from "@meltiply/providers";
 import type { components } from "@meltiply/contracts/schema";
 
@@ -120,7 +119,7 @@ function requestScope(c: Context<ApiWorkerEnvironment>): RequestScope {
     crypto.randomUUID();
   const traceId =
     (c.get?.("traceId") as string | undefined) ?? c.req?.header?.("traceparent") ?? requestId;
-  const actor = c.get?.("actor") as ResolvedActor | undefined;
+  const actor = c.get?.("actor");
   const tenantId = actor?.workspace.id;
 
   const requestContextData: RequestContextData = {

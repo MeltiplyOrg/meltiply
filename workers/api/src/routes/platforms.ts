@@ -1,11 +1,6 @@
 import type { OAuthSelectionCandidate } from "@meltiply/contracts";
 import type { components } from "@meltiply/contracts/schema";
-import {
-  DatabaseError,
-  isDevelopmentEnvironment,
-  oauthCallbackPath,
-  type Platform,
-} from "@meltiply/domain";
+import { DatabaseError, oauthCallbackPath, type Platform } from "@meltiply/domain";
 import { errorDiagnostic, log } from "@meltiply/observability";
 import {
   createProviderServiceLive,
@@ -20,6 +15,7 @@ import { Cause, Effect } from "effect";
 import type { Hono } from "hono";
 
 import { CoreApiError } from "../api-errors";
+import { requireActor } from "../authorization";
 import {
   auditActorFromResolved,
   recordWorkspaceAuditBestEffort,
@@ -28,7 +24,12 @@ import {
 import { scheduleBackgroundWork } from "../background-continuation";
 import { fromPromise } from "../effect/route";
 import { runRouteEffect } from "../effect/runtime";
-import type { ApiWorkerEnv, ApiWorkerEnvironment, OAuthStateStub } from "../env";
+import {
+  applicationOrigin,
+  type ApiWorkerEnv,
+  type ApiWorkerEnvironment,
+  type OAuthStateStub,
+} from "../env";
 import { idempotencyHeaders, jsonResponse, noContentResponse } from "../responses";
 import { tokenCipherFor } from "../token-credentials";
 import {
@@ -79,14 +80,13 @@ function oauthCallbackUrl(env: ApiWorkerEnv, provider: Platform): string {
   if (!env.APP_URL) {
     throw new CoreApiError(503, "service_unavailable", "The public API URL is unavailable.");
   }
-  const target = new URL(oauthCallbackPath(provider), env.APP_URL);
-  if (
-    target.protocol !== "https:" &&
-    !(isDevelopmentEnvironment(env.ENVIRONMENT) && target.hostname === "localhost")
-  ) {
+  let origin: string;
+  try {
+    origin = applicationOrigin(env);
+  } catch {
     throw new CoreApiError(503, "service_unavailable", "The public API URL is not secure.");
   }
-  return target.toString();
+  return new URL(oauthCallbackPath(provider), origin).toString();
 }
 
 function frontendRedirect(
@@ -189,7 +189,7 @@ export function registerPlatformRoutes(
         const core = yield* fromPromise(services.service);
         const accounts = yield* core.listPlatformAccounts(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           brandProfileId,
         );
         return jsonResponse({ accounts }, 200, c.get("requestId"));
@@ -206,7 +206,7 @@ export function registerPlatformRoutes(
         );
         const requirements = yield* services.readPublicationRequirements(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           accountId,
           c.get("requestId"),
           services.registry(),
@@ -248,7 +248,7 @@ export function registerPlatformRoutes(
             new CoreApiError(503, "provider_unavailable", `${selected} OAuth is not configured.`),
           );
         }
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const organizationId = actor.workspace.id;
         const routingKey = yield* fromPromise(() => oauthStateRoutingKey(organizationId));
         const state = `${routingKey}.${randomBase64Url(32)}`;
@@ -473,7 +473,7 @@ export function registerPlatformRoutes(
         );
         const disconnectKey = yield* fromPromise(() => idempotencyKey(c));
         yield* services
-          .revokeConnection(c.env, c.get("actor").claims, accountId, services.registry())
+          .revokeConnection(c.env, requireActor(c).claims, accountId, services.registry())
           .pipe(
             Effect.catchCause((cause) =>
               Effect.sync(() =>
@@ -500,11 +500,11 @@ export function registerPlatformRoutes(
         const core = yield* fromPromise(services.service);
         const result = yield* core.disconnectPlatform(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           accountId,
           disconnectKey,
         );
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* recordWorkspaceAuditOnceBestEffort(
           c.env,
           {
@@ -527,7 +527,7 @@ export function registerPlatformRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const { routingKey, selectionId } = yield* resolveSelectionRoutingKey(
           c.req.param("selectionId"),
           actor.workspace.id,
@@ -550,7 +550,7 @@ export function registerPlatformRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const { routingKey, selectionId } = yield* resolveSelectionRoutingKey(
           c.req.param("selectionId"),
           actor.workspace.id,
@@ -717,7 +717,7 @@ export function registerPlatformRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const { routingKey, selectionId } = yield* resolveSelectionRoutingKey(
           c.req.param("selectionId"),
           actor.workspace.id,

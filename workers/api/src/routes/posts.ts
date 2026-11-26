@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import type { Hono } from "hono";
 
 import { CoreApiError } from "../api-errors";
+import { requireActor } from "../authorization";
 import { fromPromise } from "../effect/route";
 import { runRouteEffect } from "../effect/runtime";
 import type { ApiWorkerEnvironment } from "../env";
@@ -122,7 +123,7 @@ export function registerPostRoutes(
           integerParam(c.req.query("offset"), "offset", 0, 0, 1_000_000),
         );
         const postService = yield* fromPromise(services.posts);
-        const result = yield* postService.listPosts(c.env, c.get("actor").claims, {
+        const result = yield* postService.listPosts(c.env, requireActor(c).claims, {
           ...(brandProfileId ? { brandProfileId } : {}),
           ...(queueId ? { queueId } : {}),
           ...(queueWindow ? { queueWindow } : {}),
@@ -145,7 +146,7 @@ export function registerPostRoutes(
         const postService = yield* fromPromise(services.posts);
         const result = yield* postService.createPost(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           input,
           key,
           c.get("requestId"),
@@ -163,7 +164,7 @@ export function registerPostRoutes(
       Effect.gen(function* () {
         const postId = yield* fromPromise(() => uuidParam(c.req.param("postId"), "post_id"));
         const postService = yield* fromPromise(services.posts);
-        const post = yield* postService.getPost(c.env, c.get("actor").claims, postId);
+        const post = yield* postService.getPost(c.env, requireActor(c).claims, postId);
         return yield* fromPromise(() => conditionalJsonResponse(c, post));
       }),
     ),
@@ -180,7 +181,7 @@ export function registerPostRoutes(
         const postService = yield* fromPromise(services.posts);
         const result = yield* postService.updatePost(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           postId,
           input,
           key,
@@ -209,7 +210,7 @@ export function registerPostRoutes(
         const postService = yield* fromPromise(services.posts);
         const result = yield* postService.deletePost(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           postId,
           input,
           key,
@@ -251,7 +252,7 @@ export function registerPostRoutes(
         const postService = yield* fromPromise(services.posts);
         const result = yield* postService.schedulePost(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           postId,
           input,
           key,

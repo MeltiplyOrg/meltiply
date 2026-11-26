@@ -9,6 +9,7 @@ import { Effect } from "effect";
 import type { Hono } from "hono";
 
 import { CoreApiError } from "../api-errors";
+import { requireActor } from "../authorization";
 import type { AssetApiService } from "../asset-types";
 import { fromPromise } from "../effect/route";
 import { runRouteEffect } from "../effect/runtime";
@@ -145,7 +146,7 @@ export function registerAssetRoutes(
           );
           const result = yield* assetService.createUploadSession(
             c.env,
-            c.get("actor").claims,
+            requireActor(c).claims,
             input,
             key,
             c.get("requestId"),
@@ -171,7 +172,7 @@ export function registerAssetRoutes(
           const assetService = yield* fromPromise(services.assets);
           const sessionResult = yield* assetService.getUploadSession(
             c.env,
-            c.get("actor").claims,
+            requireActor(c).claims,
             sessionId,
           );
           return jsonResponse(sessionResult, 200, c.get("requestId"));
@@ -194,7 +195,7 @@ export function registerAssetRoutes(
           const assetService = yield* fromPromise(services.assets);
           const result = yield* assetService.abortUploadSession(
             c.env,
-            c.get("actor").claims,
+            requireActor(c).claims,
             sessionId,
             key,
           );
@@ -221,7 +222,7 @@ export function registerAssetRoutes(
           const assetService = yield* fromPromise(services.assets);
           const urls = yield* assetService.createUploadPartUrls(
             c.env,
-            c.get("actor").claims,
+            requireActor(c).claims,
             sessionId,
             { part_numbers: partNumbers },
             key,
@@ -249,7 +250,7 @@ export function registerAssetRoutes(
           const assetService = yield* fromPromise(services.assets);
           const result = yield* assetService.completeUploadSession(
             c.env,
-            c.get("actor").claims,
+            requireActor(c).claims,
             sessionId,
             { parts },
             key,
@@ -274,7 +275,7 @@ export function registerAssetRoutes(
           const assetService = yield* fromPromise(services.assets);
           const result = yield* assetService.getAssetDownloadUrl(
             c.env,
-            c.get("actor").claims,
+            requireActor(c).claims,
             assetId,
           );
           return jsonResponse(result, 200, c.get("requestId"));
@@ -294,7 +295,7 @@ export function registerAssetRoutes(
           const assetService = yield* fromPromise(services.assets);
           const result = yield* assetService.getAssetPreviewUrl(
             c.env,
-            c.get("actor").claims,
+            requireActor(c).claims,
             assetId,
           );
           return jsonResponse(result, 200, c.get("requestId"));
@@ -310,7 +311,7 @@ export function registerAssetRoutes(
       Effect.gen(function* () {
         const assetId = yield* fromPromise(() => uuidParam(c.req.param("assetId"), "asset_id"));
         const assetService = yield* fromPromise(services.assets);
-        const result = yield* assetService.getAsset(c.env, c.get("actor").claims, assetId);
+        const result = yield* assetService.getAsset(c.env, requireActor(c).claims, assetId);
         return jsonResponse(result, 200, c.get("requestId"));
       }),
     ),

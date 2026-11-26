@@ -5,7 +5,7 @@ import type { Hono } from "hono";
 
 import type { ResolvedActor } from "./actor-types";
 import { CoreApiError } from "./api-errors";
-import { requireInstallationOwnerEffect } from "./authorization";
+import { requireActor, requireInstallationOwnerEffect } from "./authorization";
 import { withSystemTransactionEffect } from "./database";
 import { fromPromise } from "./effect/route";
 import { runRouteEffect } from "./effect/runtime";
@@ -149,7 +149,7 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* requireInstallationOwnerEffect(actor);
         const progress = yield* withSystemTransactionEffect(c.env, (client) =>
           onboardingProgressEffect(client, actor),
@@ -163,7 +163,7 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* requireInstallationOwnerEffect(actor);
         const body = yield* fromPromise(() => jsonBody(c));
         yield* fromPromise(() => onlyKeys(body, ["step"]));
@@ -202,7 +202,7 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* requireInstallationOwnerEffect(actor);
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({}));

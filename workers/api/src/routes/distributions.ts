@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import type { Hono } from "hono";
 
 import { CoreApiError } from "../api-errors";
+import { requireActor } from "../authorization";
 import { endBroadcastEffect, readBroadcastEffect } from "../broadcast-service";
 import { fromPromise } from "../effect/route";
 import { runRouteEffect } from "../effect/runtime";
@@ -64,7 +65,7 @@ export function registerDistributionRoutes(
           ? yield* fromPromise(() => platformParam(platformValue))
           : undefined;
         const core = yield* fromPromise(services.service);
-        const distributions = yield* core.listDistributions(c.env, c.get("actor").claims, {
+        const distributions = yield* core.listDistributions(c.env, requireActor(c).claims, {
           ...(validatedPostId ? { postId: validatedPostId } : {}),
           ...(brandProfileId ? { brandProfileId } : {}),
           end,
@@ -83,7 +84,7 @@ export function registerDistributionRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const session = c.get("actor").claims;
+        const session = requireActor(c).claims;
         const details = yield* readBroadcastEffect(
           c.env,
           session,
@@ -99,7 +100,7 @@ export function registerDistributionRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const session = c.get("actor").claims;
+        const session = requireActor(c).claims;
         const distributionId = yield* fromPromise(() =>
           uuidParam(c.req.param("distributionId"), "distribution_id"),
         );
@@ -125,7 +126,7 @@ export function registerDistributionRoutes(
         const core = yield* fromPromise(services.service);
         const distribution = yield* core.getDistribution(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           distributionId,
         );
         return yield* fromPromise(() => conditionalJsonResponse(c, distribution));
@@ -174,7 +175,7 @@ export function registerDistributionRoutes(
         const core = yield* fromPromise(services.service);
         const result = yield* core.updateDistribution(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           distributionId,
           patch,
           key,
@@ -197,7 +198,7 @@ export function registerDistributionRoutes(
         const core = yield* fromPromise(services.service);
         const result = yield* core.cancelDistribution(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           distributionId,
           key,
           c.get("requestId"),
@@ -223,7 +224,7 @@ export function registerDistributionRoutes(
         const core = yield* fromPromise(services.service);
         const result = yield* core.retryDistribution(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           distributionId,
           key,
           c.get("requestId"),
@@ -249,7 +250,7 @@ export function registerDistributionRoutes(
         const core = yield* fromPromise(services.service);
         const events = yield* core.calendar(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           requested.start,
           requested.end,
           limit,

@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import type { Hono } from "hono";
 
 import { CoreApiError } from "../api-errors";
+import { requireActor } from "../authorization";
 import { auditActorFromResolved, recordWorkspaceAuditOnceBestEffort } from "../audit";
 import { fromPromise } from "../effect/route";
 import { runRouteEffect } from "../effect/runtime";
@@ -27,7 +28,10 @@ export function registerBrandProfileRoutes(
       c,
       Effect.gen(function* () {
         const brandProfileService = yield* fromPromise(services.brandProfiles);
-        const profiles = yield* brandProfileService.listBrandProfiles(c.env, c.get("actor").claims);
+        const profiles = yield* brandProfileService.listBrandProfiles(
+          c.env,
+          requireActor(c).claims,
+        );
         return jsonResponse({ profiles }, 200, c.get("requestId"));
       }),
     ),
@@ -48,11 +52,11 @@ export function registerBrandProfileRoutes(
         const brandProfileService = yield* fromPromise(services.brandProfiles);
         const result = yield* brandProfileService.createBrandProfile(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           { color, description, name },
           key,
         );
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* recordWorkspaceAuditOnceBestEffort(
           c.env,
           {
@@ -80,7 +84,7 @@ export function registerBrandProfileRoutes(
         const brandProfileService = yield* fromPromise(services.brandProfiles);
         const profiles = yield* brandProfileService.listDeletedBrandProfiles(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
         );
         return jsonResponse({ profiles }, 200, c.get("requestId"));
       }),
@@ -97,7 +101,7 @@ export function registerBrandProfileRoutes(
         const brandProfileService = yield* fromPromise(services.brandProfiles);
         const profile = yield* brandProfileService.getBrandProfile(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           profileId,
         );
         return jsonResponse(profile, 200, c.get("requestId"));
@@ -139,12 +143,12 @@ export function registerBrandProfileRoutes(
         const brandProfileService = yield* fromPromise(services.brandProfiles);
         const result = yield* brandProfileService.updateBrandProfile(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           profileId,
           { color, description, name },
           key,
         );
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* recordWorkspaceAuditOnceBestEffort(
           c.env,
           {
@@ -176,11 +180,11 @@ export function registerBrandProfileRoutes(
         const brandProfileService = yield* fromPromise(services.brandProfiles);
         const result = yield* brandProfileService.deleteBrandProfile(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           profileId,
           key,
         );
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* recordWorkspaceAuditOnceBestEffort(
           c.env,
           {
@@ -212,11 +216,11 @@ export function registerBrandProfileRoutes(
         const brandProfileService = yield* fromPromise(services.brandProfiles);
         const result = yield* brandProfileService.restoreBrandProfile(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           profileId,
           key,
         );
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* recordWorkspaceAuditOnceBestEffort(
           c.env,
           {

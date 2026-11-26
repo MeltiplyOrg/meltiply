@@ -1,4 +1,5 @@
 import { malformed, ProviderAdapterError, rejected } from "../failures";
+import { PROVIDER_LIMITS } from "../limits";
 import { unknownResult } from "../results";
 import {
   YOUTUBE_PRIVACY_STATUSES,
@@ -23,7 +24,6 @@ import {
   broadcastOperationId,
   parseBroadcastOperationId,
   YOUTUBE_API_ORIGIN,
-  YOUTUBE_LIMITS,
   youtubeWatchUrl,
   type GoogleRequest,
 } from "./types";
@@ -107,7 +107,7 @@ export function createYouTubeLive(request: GoogleRequest, now: () => Date) {
       const title = required(
         "title",
         firstNonEmptyLine(description) ?? "",
-        YOUTUBE_LIMITS.maxTitleCodePoints,
+        PROVIDER_LIMITS.youtube.maxTitleCodePoints,
       );
       const headers = jsonHeaders(credentials.accessToken);
       const created = await request(context, {

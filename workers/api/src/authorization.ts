@@ -12,6 +12,14 @@ export function normalizeWorkspaceRole(role: string): WorkspaceRole {
   return isWorkspaceRole(role) ? role : "viewer";
 }
 
+export function requireActor(c: Context<ApiWorkerEnvironment>): ResolvedActor {
+  const actor = c.get("actor");
+  if (!actor) {
+    throw new CoreApiError(401, "authentication_required", "Authentication is required.");
+  }
+  return actor;
+}
+
 export function requireInstallationOwnerEffect(
   actor: ResolvedActor,
   message = "The installation owner role is required.",

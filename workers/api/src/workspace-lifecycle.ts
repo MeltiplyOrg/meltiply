@@ -14,7 +14,7 @@ import type { Hono } from "hono";
 import type { ResolvedActor } from "./actor-types";
 import { CoreApiError } from "./api-errors";
 import { auditActorFrom, auditActorFromResolved, recordWorkspaceAuditEffect } from "./audit";
-import { normalizeWorkspaceRole } from "./authorization";
+import { normalizeWorkspaceRole, requireActor } from "./authorization";
 import { sha256Hex } from "./crypto";
 import { withSystemTransactionEffect } from "./database";
 import { fromPromise } from "./effect/route";
@@ -363,7 +363,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
@@ -393,7 +393,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
@@ -423,7 +423,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
@@ -510,7 +510,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
@@ -627,7 +627,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
@@ -729,7 +729,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
@@ -844,7 +844,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const token = c.req.param("token") ?? "";
         if (token.length < 16 || token.length > 255) {
           return yield* Effect.fail(
@@ -1024,7 +1024,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
@@ -1139,7 +1139,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );

@@ -23,7 +23,7 @@ import { bodyLimit } from "hono/body-limit";
 import { resolveActor } from "./actor-resolution";
 import type { ResolvedActor } from "./actor-types";
 import { CoreApiError } from "./api-errors";
-import { enforceWorkspaceCapabilities } from "./authorization";
+import { enforceWorkspaceCapabilities, requireActor } from "./authorization";
 import { activeIdentity } from "./auth-policy";
 import { scheduleBackgroundWork } from "./background-continuation";
 import {
@@ -632,7 +632,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     scheduleEagerOutboxRelay(c);
   });
   app.get("/api/v1/users/me", async (c) => {
-    const actor = c.get("actor");
+    const actor = requireActor(c);
     const layer =
       dependencies.currentUserServiceLayer ??
       createCurrentUserServiceLive(c.env, actor.claims, dependencies.loadCurrentUser);

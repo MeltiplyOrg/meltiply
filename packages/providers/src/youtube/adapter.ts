@@ -1,6 +1,7 @@
 import type { PlatformCapability } from "@meltiply/domain";
 
 import { malformed, optionalLookupPostId } from "../failures";
+import { PROVIDER_LIMITS } from "../limits";
 import { adapterRuntime, type ProviderAdapterOptions } from "../runtime";
 import type { ProviderAdapter, ProviderPublicationStatus } from "../types";
 import { required, requireIdempotencyKey, STANDARD_VIDEO_MIME_TYPES } from "../values";
@@ -15,7 +16,6 @@ import {
   parseYouTubeOperationId,
   YOUTUBE_ANALYTICS_ORIGIN,
   YOUTUBE_API_ORIGIN,
-  YOUTUBE_LIMITS,
   YOUTUBE_TOKEN_ORIGIN,
   youtubeAccountId,
   youtubeOperationId,
@@ -35,11 +35,11 @@ const capability: PlatformCapability = {
   asset_types: ["video"],
   comments: false,
   connect_available: true,
-  max_caption_length: YOUTUBE_LIMITS.maxCaptionCodePoints,
-  max_file_size: YOUTUBE_LIMITS.maxVideoBytes,
-  max_hashtags: YOUTUBE_LIMITS.maxHashtags,
-  max_media_count: YOUTUBE_LIMITS.maxMediaCount,
-  max_video_duration_sec: YOUTUBE_LIMITS.maxVideoDurationSeconds,
+  max_caption_length: PROVIDER_LIMITS.youtube.maxCaptionCodePoints,
+  max_file_size: PROVIDER_LIMITS.youtube.maxVideoBytes,
+  max_hashtags: PROVIDER_LIMITS.youtube.maxHashtags,
+  max_media_count: PROVIDER_LIMITS.youtube.maxMediaCount,
+  max_video_duration_sec: PROVIDER_LIMITS.youtube.maxVideoDurationSeconds,
   min_media_count: 1,
   multi_asset_types: [],
   notes: [

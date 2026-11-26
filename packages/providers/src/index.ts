@@ -19,7 +19,7 @@ export {
   type ProviderFailureInput,
   type ProviderRequestDiagnostic,
 } from "./failures";
-export { createFacebookAdapter, type FacebookAdapterOptions } from "./facebook/adapter";
+export { createFacebookAdapter } from "./facebook/adapter";
 export {
   ProviderHttpClient,
   type ProviderErrorDiagnosis,

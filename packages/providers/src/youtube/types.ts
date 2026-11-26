@@ -8,12 +8,12 @@ export const YOUTUBE_API_ORIGIN = "https://www.googleapis.com";
 export const YOUTUBE_ANALYTICS_ORIGIN = "https://youtubeanalytics.googleapis.com";
 export const YOUTUBE_TOKEN_ORIGIN = "https://oauth2.googleapis.com";
 export const YOUTUBE_AUTHORIZATION_ORIGIN = "https://accounts.google.com";
-export const YOUTUBE_LIMITS = PROVIDER_LIMITS.youtube;
 
 const maximumOperationIdLength = 512;
 const maximumSessionUriLength =
   maximumOperationIdLength -
-  `submitted:${YOUTUBE_LIMITS.maxVideoBytes}:${YOUTUBE_LIMITS.maxVideoBytes}:`.length;
+  `submitted:${PROVIDER_LIMITS.youtube.maxVideoBytes}:${PROVIDER_LIMITS.youtube.maxVideoBytes}:`
+    .length;
 
 const videoOperationPattern = /^video:(.+)$/;
 const broadcastOperationPattern = /^(live|ended_live):(.+)$/;
@@ -112,7 +112,7 @@ export function parseYouTubeOperationId(value: unknown): YouTubeOperation | unde
   const acknowledged = Number(session[3] ?? 0);
   if (
     !Number.isSafeInteger(fileSize) ||
-    fileSize > YOUTUBE_LIMITS.maxVideoBytes ||
+    fileSize > PROVIDER_LIMITS.youtube.maxVideoBytes ||
     !Number.isSafeInteger(acknowledged) ||
     acknowledged > fileSize
   ) {

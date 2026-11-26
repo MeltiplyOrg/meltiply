@@ -237,12 +237,9 @@ function selectCandidate(
   capability: ProviderAdapter["capability"],
   entry: PublicationMediaEntry,
 ): PublicationMediaCandidate | undefined {
-  let best: PublicationMediaCandidate | undefined;
-  for (const candidate of entry.candidates) {
-    if (candidateConstraint(capability, candidate) !== undefined) continue;
-    if (!best || candidate.fileSize < best.fileSize) best = candidate;
-  }
-  return best;
+  return entry.candidates.find(
+    (candidate) => candidateConstraint(capability, candidate) === undefined,
+  );
 }
 
 function prepareTarget(

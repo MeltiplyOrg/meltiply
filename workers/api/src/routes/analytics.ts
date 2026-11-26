@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { requireActor } from "../authorization";
 import type { Context, Hono } from "hono";
 
 import type { AnalyticsFilters } from "../core-types";
@@ -45,7 +46,7 @@ export function registerAnalyticsRoutes(
       Effect.gen(function* () {
         const filters = yield* fromPromise(() => parseAnalyticsFilters(c));
         const core = yield* fromPromise(services.service);
-        const summary = yield* core.summaryAnalytics(c.env, c.get("actor").claims, filters);
+        const summary = yield* core.summaryAnalytics(c.env, requireActor(c).claims, filters);
         return jsonResponse(summary, 200, c.get("requestId"));
       }),
     ),
@@ -64,7 +65,7 @@ export function registerAnalyticsRoutes(
           integerParam(c.req.query("offset"), "offset", 0, 0, 2_147_483_647),
         );
         const core = yield* fromPromise(services.service);
-        const posts = yield* core.analyticsPosts(c.env, c.get("actor").claims, {
+        const posts = yield* core.analyticsPosts(c.env, requireActor(c).claims, {
           ...filters,
           limit,
           metric,
@@ -81,7 +82,7 @@ export function registerAnalyticsRoutes(
       Effect.gen(function* () {
         const filters = yield* fromPromise(() => parseAnalyticsFilters(c));
         const core = yield* fromPromise(services.service);
-        const dashboard = yield* core.dashboardAnalytics(c.env, c.get("actor").claims, filters);
+        const dashboard = yield* core.dashboardAnalytics(c.env, requireActor(c).claims, filters);
         return jsonResponse(dashboard, 200, c.get("requestId"));
       }),
     ),
@@ -105,7 +106,7 @@ export function registerAnalyticsRoutes(
         const core = yield* fromPromise(services.service);
         const snapshots = yield* core.distributionAnalytics(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           distributionId,
           { end, limit, start },
         );

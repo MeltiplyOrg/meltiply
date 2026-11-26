@@ -105,7 +105,9 @@ describe("ProviderHttpClient", () => {
       method: "GET",
       url: "https://api.provider.example/status",
     });
-    expect(requestContext.metadata).toBeUndefined();
+    expect(requestContext.metadata).toEqual({
+      rateLimitBudget: { percentUsed: null, remaining: 0, resetsInSeconds: 20 },
+    });
   });
 
   it("accepts an explicitly allowed empty protocol status", async () => {
@@ -479,6 +481,7 @@ describe("ProviderHttpClient", () => {
         url: "https://api.provider.example/status",
       }),
     ).rejects.toMatchObject({
+      cause: new Error("sanitizer bug"),
       failure: { classification: "auth", code: "provider_http_403" },
     });
   });

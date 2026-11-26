@@ -8,6 +8,7 @@ import {
   rejection,
 } from "../failures";
 import type { ProviderHttpResponse } from "../http";
+import { PROVIDER_LIMITS } from "../limits";
 import { confirmedFailure, unknownResult } from "../results";
 import {
   YOUTUBE_PRIVACY_STATUSES,
@@ -35,7 +36,6 @@ import {
 } from "../values";
 import {
   YOUTUBE_API_ORIGIN,
-  YOUTUBE_LIMITS,
   validateSessionUri,
   youtubeAccountId,
   youtubeOperationId,
@@ -83,16 +83,16 @@ function parseYouTubeUploadInput(input: PublishInput): UploadInput {
     !media ||
     media.mode !== "resumable_upload" ||
     !title ||
-    codePointLength(title) > YOUTUBE_LIMITS.maxTitleCodePoints ||
-    utf8Encoder.encode(description).byteLength > YOUTUBE_LIMITS.maxCaptionCodePoints ||
+    codePointLength(title) > PROVIDER_LIMITS.youtube.maxTitleCodePoints ||
+    utf8Encoder.encode(description).byteLength > PROVIDER_LIMITS.youtube.maxCaptionCodePoints ||
     angleBracketsPattern.test(title) ||
     angleBracketsPattern.test(description) ||
-    input.hashtags.length > YOUTUBE_LIMITS.maxHashtags ||
-    input.hashtags.join(",").length > YOUTUBE_LIMITS.maxHashtagsJoinedChars ||
+    input.hashtags.length > PROVIDER_LIMITS.youtube.maxHashtags ||
+    input.hashtags.join(",").length > PROVIDER_LIMITS.youtube.maxHashtagsJoinedChars ||
     duration === undefined ||
     !Number.isFinite(duration) ||
     duration <= 0 ||
-    duration > YOUTUBE_LIMITS.maxVideoDurationSeconds ||
+    duration > PROVIDER_LIMITS.youtube.maxVideoDurationSeconds ||
     width === undefined ||
     !Number.isSafeInteger(width) ||
     width < 1 ||
@@ -105,7 +105,7 @@ function parseYouTubeUploadInput(input: PublishInput): UploadInput {
   const contentType = normalizeContentType(media.contentType);
   if (
     !STANDARD_VIDEO_MIME_TYPES.includes(contentType) ||
-    !validFileSize(media.fileSize, YOUTUBE_LIMITS.maxVideoBytes)
+    !validFileSize(media.fileSize, PROVIDER_LIMITS.youtube.maxVideoBytes)
   ) {
     throw rejected("youtube_media_invalid");
   }

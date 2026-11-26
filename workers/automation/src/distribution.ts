@@ -33,7 +33,13 @@ import {
   providerPollIntervalSeconds,
 } from "./due-work";
 import { recordDiagnostic } from "./diagnostic-reporting";
-import { classifyJobError, RetryableJobError, type AutomationJobError } from "./effect/index";
+import {
+  classifyJobError,
+  createQueuePublisherLive,
+  QueuePublisher,
+  RetryableJobError,
+  type AutomationJobError,
+} from "./effect/index";
 import {
   candidateConstraint,
   executeProviderCancelEffect,
@@ -763,50 +769,66 @@ function providerRetryDelaySeconds(
   );
 }
 
-async function dispatchInitialEngagementTriggers(
+function engagementTriggerEffect(
+  env: AutomationEnv,
+  queue: Queue<unknown> | undefined,
+  workload: "analytics" | "comments",
+  distributionId: string,
+  eventId: string | null | undefined,
+): Effect.Effect<void, never, QueuePublisher> {
+  if (!eventId || !queue) return Effect.void;
+  return Effect.flatMap(QueuePublisher, (publisher) =>
+    publisher.sendBatch(queue, [{ body: providerSyncMessage(workload, distributionId, eventId) }]),
+  ).pipe(
+    Effect.catch((cause) =>
+      Effect.sync(() =>
+        log(
+          "warn",
+          {
+            environment: env.ENVIRONMENT,
+            job_id: eventId,
+            service: "automation",
+            trace_id: eventId,
+            version: env.VERSION,
+          },
+          {
+            ...errorDiagnostic(cause),
+            distribution_id: distributionId,
+            event: "engagement_trigger_send_failed",
+            outcome: "deferred_to_sweep",
+            retry_class: "none",
+            workload,
+          },
+        ),
+      ),
+    ),
+  );
+}
+
+function dispatchInitialEngagementTriggers(
   env: AutomationEnv,
   distributionId: string,
   analyticsEventId: string | null | undefined,
   commentsEventId: string | null | undefined,
-): Promise<void> {
-  const sendTrigger = async (
-    queue: Queue<unknown> | undefined,
-    workload: "analytics" | "comments",
-    eventId: string | null | undefined,
-  ): Promise<void> => {
-    if (!eventId || !queue) return;
-    try {
-      await queue.sendBatch([
-        {
-          body: providerSyncMessage(workload, distributionId, eventId),
-          contentType: "json",
-        },
-      ]);
-    } catch (cause) {
-      log(
-        "warn",
-        {
-          environment: env.ENVIRONMENT,
-          job_id: eventId,
-          service: "automation",
-          trace_id: eventId,
-          version: env.VERSION,
-        },
-        {
-          ...errorDiagnostic(cause),
-          distribution_id: distributionId,
-          event: "engagement_trigger_send_failed",
-          outcome: "deferred_to_sweep",
-          retry_class: "none",
-          workload,
-        },
+): Effect.Effect<void> {
+  return Effect.gen(function* () {
+    yield* engagementTriggerEffect(
+      env,
+      env.ANALYTICS_QUEUE,
+      "analytics",
+      distributionId,
+      analyticsEventId,
+    );
+    if (recurringCommentsEnabled(env)) {
+      yield* engagementTriggerEffect(
+        env,
+        env.COMMENTS_QUEUE,
+        "comments",
+        distributionId,
+        commentsEventId,
       );
     }
-  };
-  await sendTrigger(env.ANALYTICS_QUEUE, "analytics", analyticsEventId);
-  if (recurringCommentsEnabled(env)) {
-    await sendTrigger(env.COMMENTS_QUEUE, "comments", commentsEventId);
-  }
+  }).pipe(Effect.provide(createQueuePublisherLive()));
 }
 
 interface UpdatedDistributionOutcomeRow extends Record<string, unknown> {
@@ -1042,9 +1064,7 @@ function recordPublishOutcome(
       }),
     );
     if (state.status === "published") {
-      yield* Effect.promise(() =>
-        dispatchInitialEngagementTriggers(env, row.id, analyticsEventId, commentsEventId),
-      );
+      yield* dispatchInitialEngagementTriggers(env, row.id, analyticsEventId, commentsEventId);
     }
   });
 }
@@ -1422,9 +1442,7 @@ function recordReconciliationOutcome(
       }),
     );
     if (outcome.status === "published") {
-      yield* Effect.promise(() =>
-        dispatchInitialEngagementTriggers(env, row.id, analyticsEventId, commentsEventId),
-      );
+      yield* dispatchInitialEngagementTriggers(env, row.id, analyticsEventId, commentsEventId);
     }
   });
 }

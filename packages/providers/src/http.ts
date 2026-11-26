@@ -294,7 +294,7 @@ export class ProviderHttpClient {
       const rateLimitBudget = this.#platform
         ? extractRateLimitBudget(this.#platform, response.headers)
         : null;
-      context.metadata = rateLimitBudget ? { rateLimitBudget } : undefined;
+      if (rateLimitBudget) context.metadata = { rateLimitBudget };
       const responseDiagnostic = { ...diagnostic, status_code: response.status };
       if (response.status >= 300 && response.status < 400 && !accepted.has(response.status)) {
         await cancelBody(response);
@@ -304,7 +304,7 @@ export class ProviderHttpClient {
         );
       }
       if (!response.ok && !accepted.has(response.status)) {
-        const diagnosis = await this.#diagnose(response, request.classifyErrorBody);
+        const { cause, diagnosis } = await this.#diagnose(response, request.classifyErrorBody);
         throw failure(
           {
             code: diagnosis?.code ?? `provider_http_${response.status}`,
@@ -315,6 +315,7 @@ export class ProviderHttpClient {
             status: response.status,
           },
           responseDiagnostic,
+          cause,
         );
       }
 
@@ -360,10 +361,10 @@ export class ProviderHttpClient {
   async #diagnose(
     response: Response,
     classifyErrorBody: ProviderHttpRequest["classifyErrorBody"],
-  ): Promise<ProviderErrorDiagnosis | undefined> {
+  ): Promise<{ cause?: unknown; diagnosis?: ProviderErrorDiagnosis }> {
     if (!classifyErrorBody) {
       await cancelBody(response);
-      return undefined;
+      return {};
     }
     let parsed: unknown;
     try {
@@ -373,9 +374,9 @@ export class ProviderHttpClient {
       await cancelBody(response);
     }
     try {
-      return classifyErrorBody(response.status, parsed);
-    } catch {
-      return undefined;
+      return { diagnosis: classifyErrorBody(response.status, parsed) };
+    } catch (cause) {
+      return { cause };
     }
   }
 }

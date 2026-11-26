@@ -14,6 +14,7 @@ import { CoreApiError } from "./api-errors";
 import { auditActorFromResolved, recordWorkspaceAuditEffect } from "./audit";
 import {
   normalizeWorkspaceRole,
+  requireActor,
   requireInstallationOwnerEffect,
   requireWorkspaceAdminEffect,
 } from "./authorization";
@@ -177,7 +178,7 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* requireWorkspaceAdminEffect(actor);
         const body = yield* withSystemTransactionEffect(c.env, (client) =>
           Effect.gen(function* () {
@@ -226,7 +227,7 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
@@ -303,7 +304,7 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* requireInstallationOwnerEffect(actor);
         const memberId = yield* fromPromise(() => uuidParam(c.req.param("memberId"), "member_id"));
         const body = yield* fromPromise(() => jsonBody(c, true));
@@ -383,7 +384,7 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* requireInstallationOwnerEffect(actor);
         const memberId = yield* fromPromise(() => uuidParam(c.req.param("memberId"), "member_id"));
         const key = yield* fromPromise(() => idempotencyKey(c));
@@ -440,7 +441,7 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* requireInstallationOwnerEffect(actor);
         const memberId = yield* fromPromise(() => uuidParam(c.req.param("memberId"), "member_id"));
         const body = yield* fromPromise(() => jsonBody(c));
@@ -504,7 +505,7 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         yield* requireInstallationOwnerEffect(actor);
         const body = yield* fromPromise(() => jsonBody(c));
         yield* fromPromise(() => onlyKeys(body, ["password", "target_user_id"]));

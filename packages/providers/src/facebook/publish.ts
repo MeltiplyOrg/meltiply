@@ -7,6 +7,7 @@ import {
   requiredIdentifier,
 } from "../failures";
 import type { ProviderHttpClient } from "../http";
+import { PROVIDER_LIMITS } from "../limits";
 import {
   confirmedFailure,
   failedWriteResult,
@@ -41,7 +42,6 @@ import {
 import { FACEBOOK_OPTION_LIMITS, resolveFacebookPostType } from "./options";
 import {
   FACEBOOK_IMAGE_TYPES,
-  FACEBOOK_LIMITS,
   FACEBOOK_VIDEO_TYPES,
   facebookAccountId,
   facebookNativeDraft,
@@ -84,7 +84,7 @@ function remoteVideoUrl(input: PublishInput): string {
   const mediaUrl = secureUrl(media.url)?.href;
   if (
     !FACEBOOK_VIDEO_TYPES.includes(normalizeContentType(media.contentType)) ||
-    !validFileSize(media.fileSize, FACEBOOK_LIMITS.maxVideoBytes) ||
+    !validFileSize(media.fileSize, PROVIDER_LIMITS.facebook.maxVideoBytes) ||
     !mediaUrl
   ) {
     throw rejected("facebook_reel_media_invalid");
@@ -97,7 +97,7 @@ function photoUrl(media: ProviderMedia): string {
   if (
     !url ||
     !FACEBOOK_IMAGE_TYPES.includes(normalizeContentType(media.contentType)) ||
-    !validFileSize(media.fileSize, FACEBOOK_LIMITS.maxImageBytes)
+    !validFileSize(media.fileSize, PROVIDER_LIMITS.facebook.maxImageBytes)
   ) {
     throw rejected("facebook_photo_invalid");
   }

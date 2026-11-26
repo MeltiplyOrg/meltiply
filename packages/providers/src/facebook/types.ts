@@ -1,6 +1,5 @@
 import { malformed, requiredIdentifier } from "../failures";
 import type { ProviderHttpClient } from "../http";
-import { PROVIDER_LIMITS } from "../limits";
 import { META_GRAPH_API_VERSION } from "../meta";
 import type { ProviderCredentials, ProviderRequestContext } from "../types";
 import type { ConfirmedSuccess } from "../results";
@@ -15,7 +14,6 @@ import {
 
 export const FACEBOOK_GRAPH_ORIGIN = "https://graph.facebook.com";
 export const FACEBOOK_UPLOAD_ORIGIN = "https://rupload.facebook.com";
-export const FACEBOOK_LIMITS = PROVIDER_LIMITS.facebook;
 export const FACEBOOK_IMAGE_TYPES = [
   "image/jpeg",
   "image/png",

@@ -3,6 +3,7 @@ import type { Hono } from "hono";
 import type { z } from "zod";
 
 import { CoreApiError } from "./api-errors";
+import { requireActor } from "./authorization";
 import type { ApiWorkerEnvironment } from "./env";
 import { fromPromise } from "./effect/route";
 import { runRouteEffect } from "./effect/runtime";
@@ -62,7 +63,7 @@ export function registerPublishingQueueRoutes(
         if (cursor !== undefined) yield* fromPromise(() => uuidParam(cursor, "cursor"));
         const api = yield* fromPromise(queues);
         return jsonResponse(
-          yield* api.list(c.env, c.get("actor").claims, brandProfileId, limit, cursor),
+          yield* api.list(c.env, requireActor(c).claims, brandProfileId, limit, cursor),
           200,
           c.get("requestId"),
         );
@@ -77,7 +78,7 @@ export function registerPublishingQueueRoutes(
         const id = yield* fromPromise(() => uuidParam(c.req.param("queueId"), "queue_id"));
         const api = yield* fromPromise(queues);
         return jsonResponse(
-          yield* api.get(c.env, c.get("actor").claims, id),
+          yield* api.get(c.env, requireActor(c).claims, id),
           200,
           c.get("requestId"),
         );
@@ -93,7 +94,7 @@ export function registerPublishingQueueRoutes(
         const input = yield* parseQueueSchema(queueConfigurationSchema, body);
         const key = yield* fromPromise(() => idempotencyKey(c));
         const api = yield* fromPromise(queues);
-        const result = yield* api.createQueue(c.env, c.get("actor").claims, input, key);
+        const result = yield* api.createQueue(c.env, requireActor(c).claims, input, key);
         return jsonResponse(
           result.value,
           201,
@@ -113,7 +114,7 @@ export function registerPublishingQueueRoutes(
         const input = yield* parseQueueSchema(queuePatchSchema, body);
         const key = yield* fromPromise(() => idempotencyKey(c));
         const api = yield* fromPromise(queues);
-        const result = yield* api.updateQueue(c.env, c.get("actor").claims, id, input, key);
+        const result = yield* api.updateQueue(c.env, requireActor(c).claims, id, input, key);
         return jsonResponse(
           result.value,
           200,
@@ -133,7 +134,7 @@ export function registerPublishingQueueRoutes(
         const input = yield* parseQueueSchema(queueScopeSchema, body);
         const key = yield* fromPromise(() => idempotencyKey(c));
         const api = yield* fromPromise(queues);
-        const result = yield* api.deleteQueue(c.env, c.get("actor").claims, id, input, key);
+        const result = yield* api.deleteQueue(c.env, requireActor(c).claims, id, input, key);
         return noContentResponse(c.get("requestId"), idempotencyHeaders(result.replayed));
       }),
     ),
@@ -155,7 +156,7 @@ export function registerPublishingQueueRoutes(
         const api = yield* fromPromise(queues);
         const result = yield* api.removePost(
           c.env,
-          c.get("actor").claims,
+          requireActor(c).claims,
           queueId,
           postId,
           input.brand_profile_id,

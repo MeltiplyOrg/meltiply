@@ -116,11 +116,13 @@ export async function contend<Transaction extends TenantTransaction, HeldFailure
   contender: (tx: Transaction) => Effect.Effect<Value, Failure>,
 ): Promise<Value> {
   const locked = signal();
+  const contending = signal();
   const contended = signal();
   const first = inTransaction(repository, session, (tx) =>
     Effect.gen(function* () {
       yield* holder.lock(tx);
       locked.resolve();
+      yield* Effect.promise(() => contending.promise);
       yield* Effect.promise(() =>
         Promise.race([
           contended.promise,
@@ -131,7 +133,10 @@ export async function contend<Transaction extends TenantTransaction, HeldFailure
     }),
   );
   await locked.promise;
-  const second = inTransaction(repository, session, contender).finally(contended.resolve);
+  const second = inTransaction(repository, session, (tx) => {
+    contending.resolve();
+    return contender(tx);
+  }).finally(contended.resolve);
   await first;
   return second;
 }

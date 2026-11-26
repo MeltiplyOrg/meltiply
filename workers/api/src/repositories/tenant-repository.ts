@@ -2,7 +2,7 @@ import type { SessionClaims } from "@meltiply/auth";
 import type { ActiveOrganizationRequiredError, DatabaseError } from "@meltiply/domain";
 import { Effect } from "effect";
 
-import type { CoreApiError, IdempotentResult } from "../core-types";
+import { CoreApiError, type IdempotentResult } from "../core-types";
 import type { ApiWorkerEnv } from "../env";
 import {
   hashIdempotencyRequestEffect,
@@ -31,6 +31,17 @@ export interface TenantRepository<Transaction extends TenantTransaction> {
 export type TenantRepositoryProvider<Transaction extends TenantTransaction> = (
   env: ApiWorkerEnv,
 ) => TenantRepository<Transaction>;
+
+export function requireSupportedTimezone(
+  tx: TenantTransaction,
+  timezone: string,
+): Effect.Effect<void, CoreApiError | DatabaseError> {
+  return Effect.flatMap(tx.timezoneExists(timezone), (exists) =>
+    exists
+      ? Effect.void
+      : Effect.fail(new CoreApiError(422, "validation_error", "Use a supported IANA timezone.")),
+  );
+}
 
 export function tenantIdempotentMutation<Transaction extends TenantTransaction, Value, Failure>(
   repository: TenantRepository<Transaction>,

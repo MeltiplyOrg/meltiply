@@ -102,6 +102,10 @@ export class FakeTenantTransaction implements TenantTransaction {
     });
   }
 
+  onRollback(revert: () => void): void {
+    this.undo.push(revert);
+  }
+
   insert<Row>(rows: Row[], row: Row): void {
     rows.push(row);
     this.undo.push(() => rows.splice(rows.indexOf(row), 1));

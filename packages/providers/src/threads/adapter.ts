@@ -1,11 +1,10 @@
 import type { PlatformCapability } from "@meltiply/domain";
 
-import { isHttp404, malformed, rejected, rejection } from "../failures";
+import { isHttp404, malformed, rejection } from "../failures";
 import { PROVIDER_LIMITS } from "../limits";
 import {
   containerOperationId,
   createMetaContainer,
-  insightValue,
   lookupMetaContainer,
   lookupMetaPost,
   parseContainerOperationId,
@@ -26,41 +25,40 @@ import { adapterRuntime, type ProviderAdapterOptions } from "../runtime";
 import type {
   OAuthConnection,
   ProviderAdapter,
-  ProviderMedia,
   ProviderRequestContext,
   ProviderTokenSet,
-  PublishInput,
 } from "../types";
 import {
   bearer,
   boundedString,
-  boundedText,
-  codePointLength,
-  normalizeContentType,
-  optionalSecureUrl,
   providerIdentifier,
   record,
   required,
   requiredIdentifier,
   requireIdempotencyKey,
-  secureUrl,
   validatePageInput,
   validateSnapshotPage,
-  validFileSize,
 } from "../values";
+import { applyThreadsOptions } from "./options";
 import {
-  applyThreadsOptions,
-  parseThreadsOptions,
-  threadsOptionsIssue,
-  type ThreadsPublishOptions,
-} from "./options";
+  imageTypes,
+  threadsMediaParameters,
+  threadsPublishPlan,
+  threadsPublishWarnings,
+  threadsTextParameters,
+  videoTypes,
+} from "./publication";
+import {
+  confirmsThreadsDeletion,
+  threadsAccount,
+  threadsEngagement,
+  threadsFollowers,
+  threadsGrantedScopes,
+} from "./responses";
 
 export const threadsGraphOrigin = "https://graph.threads.com";
 const apiOrigin = threadsGraphOrigin;
 const limits = PROVIDER_LIMITS.threads;
-const imageTypes = ["image/jpeg", "image/png"];
-const videoTypes = ["video/mp4", "video/quicktime"];
-const scopePattern = /^[a-z_]+$/;
 
 const publishingScopes = [
   "threads_basic",
@@ -109,68 +107,13 @@ export interface ThreadsAdapterOptions extends ProviderAdapterOptions {
   engagementEnabled?: boolean;
 }
 
-interface ThreadsAttachment {
-  kind: "image" | "video";
-  url: string;
-}
-
-function attachment(media: ProviderMedia): ThreadsAttachment {
-  if (media.mode !== "remote_ingest") throw rejected("threads_remote_media_required");
-  const url = secureUrl(media.url)?.href;
-  if (!url) throw rejected("threads_media_url_invalid");
-  const contentType = normalizeContentType(media.contentType);
-  const kind = imageTypes.includes(contentType)
-    ? "image"
-    : videoTypes.includes(contentType)
-      ? "video"
-      : undefined;
-  if (
-    !kind ||
-    !validFileSize(media.fileSize, kind === "image" ? limits.maxImageBytes : limits.maxVideoBytes)
-  ) {
-    throw rejected("threads_media_invalid");
-  }
-  return { kind, url };
-}
-
-function mediaParameters(item: ThreadsAttachment): Record<string, string> {
-  return item.kind === "image"
-    ? { media_type: "IMAGE", image_url: item.url }
-    : { media_type: "VIDEO", video_url: item.url };
-}
-
-function textParameters(text: string, options: ThreadsPublishOptions): URLSearchParams {
-  if (!text && !options.gif_attachment && !options.text_attachment) {
-    throw rejected("threads_text_invalid");
-  }
-  return new URLSearchParams({ ...(text ? { text } : {}), media_type: "TEXT" });
-}
-
-function publishInput(input: PublishInput): {
-  attachments: ThreadsAttachment[];
-  options: ThreadsPublishOptions;
-  text: string;
-} {
-  if (input.media.length > limits.maxCarouselItems) throw rejected("threads_carousel_too_large");
-  const attachments = input.media.map(attachment);
-  const text = input.caption.trim();
-  if (codePointLength(text) > limits.maxCaptionCodePoints)
-    throw rejected("threads_content_invalid");
-  const options = parseThreadsOptions(input.providerOptions?.threads ?? {});
-  if (!options || threadsOptionsIssue(options, text, attachments.length)) {
-    throw rejected("threads_publish_options_invalid");
-  }
-  return { attachments, options, text };
-}
-
 const containerProtocol: MetaContainerProtocol = {
   containerReadUrl(containerId) {
     const url = new URL(`/${encodeURIComponent(containerId)}`, apiOrigin);
     url.searchParams.set("fields", "id,status,error_message");
     return url.toString();
   },
-  extractWarnings: (body) =>
-    body.crossreshare_to_ig_status === "FAILED" ? ["instagram_crossshare_failed"] : undefined,
+  extractWarnings: threadsPublishWarnings,
   failureDetailField: "error_message",
   provider: "threads",
   publishUrl(_credentials, containerId) {
@@ -208,18 +151,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       method: "GET",
       url: url.toString(),
     });
-    const data = record(record(response.body)?.data);
-    const rawScopes = data?.scopes;
-    if (
-      data?.is_valid !== true ||
-      !providerIdentifier(data.user_id) ||
-      (expectedAccount && data.user_id !== expectedAccount) ||
-      !Array.isArray(rawScopes) ||
-      rawScopes.some((scope) => typeof scope !== "string" || !scopePattern.test(scope))
-    ) {
-      throw malformed();
-    }
-    return [...new Set<string>(rawScopes)];
+    return threadsGrantedScopes(response.body, expectedAccount);
   };
 
   const engagementMethods: Pick<ProviderAdapter, "listAnalytics" | "listComments" | "reply"> = {
@@ -234,19 +166,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         url: url.toString(),
       });
       const metrics = parseMetaInsightsMap(response.body);
-      return engagementSnapshot(
-        {
-          comments: metrics.get("replies") ?? 0,
-          likes: metrics.get("likes") ?? 0,
-          providerPostId,
-          shares:
-            (metrics.get("shares") ?? 0) +
-            (metrics.get("reposts") ?? 0) +
-            (metrics.get("quotes") ?? 0),
-          views: metrics.get("views") ?? 0,
-        },
-        now(),
-      );
+      return engagementSnapshot({ ...threadsEngagement(metrics), providerPostId }, now());
     },
 
     async listComments(context, credentials, lookup, page) {
@@ -328,12 +248,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
           url: `${apiOrigin}/${encodeURIComponent(providerPostId)}`,
         });
         const body = record(response.body);
-        if (
-          body?.success !== true ||
-          (body.deleted_id !== undefined && providerIdentifier(body.deleted_id) !== providerPostId)
-        ) {
-          throw malformed(true);
-        }
+        if (!confirmsThreadsDeletion(body, providerPostId)) throw malformed(true);
         return deleted;
       } catch (cause) {
         if (isHttp404(cause)) return deleted;
@@ -375,23 +290,13 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         method: "GET",
         url: profileUrl.toString(),
       });
-      const profile = record(profileResponse.body);
-      const accountId = providerIdentifier(profile?.id);
-      const username = boundedString(profile?.username, 255);
-      const displayName = boundedText(profile?.name, 500) ?? username;
-      const avatar = optionalSecureUrl(profile?.threads_profile_picture_url);
-      if (!accountId || !username || !displayName || !avatar.valid) throw malformed();
+      const account = threadsAccount(profileResponse.body);
       return {
         accessToken,
-        account: {
-          ...(avatar.href ? { avatarUrl: avatar.href } : {}),
-          displayName,
-          id: accountId,
-          username,
-        },
+        account,
         expiresAt,
         refreshToken: accessToken,
-        scopes: await grantedScopes(context, accessToken, accountId),
+        scopes: await grantedScopes(context, accessToken, account.id),
       };
     },
 
@@ -405,12 +310,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         method: "GET",
         url: url.toString(),
       });
-      const data = record(response.body)?.data;
-      if (!Array.isArray(data)) throw malformed();
-      const metric = data.map(record).find((item) => item?.name === "followers_count");
-      const followers = metric ? insightValue(metric) : undefined;
-      if (followers === undefined) throw malformed();
-      return { followers, recordedAt: now().toISOString() };
+      return { followers: threadsFollowers(response.body), recordedAt: now().toISOString() };
     },
 
     ...(engagementEnabled ? engagementMethods : {}),
@@ -435,7 +335,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
 
     async publish(context, credentials, input) {
       requireIdempotencyKey(input.idempotencyKey);
-      const { attachments, options, text } = publishInput(input);
+      const { attachments, options, text } = threadsPublishPlan(input);
       if (options.repost_id) {
         const response = await http.request(context, {
           headers: bearer(credentials.accessToken),
@@ -467,7 +367,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         for (const item of attachments) {
           children.push(
             await createContainer(
-              new URLSearchParams({ is_carousel_item: "true", ...mediaParameters(item) }),
+              new URLSearchParams({ is_carousel_item: "true", ...threadsMediaParameters(item) }),
             ),
           );
         }
@@ -481,8 +381,8 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       } else {
         parentId = await createParent(
           only
-            ? new URLSearchParams({ ...(text ? { text } : {}), ...mediaParameters(only) })
-            : textParameters(text, options),
+            ? new URLSearchParams({ ...(text ? { text } : {}), ...threadsMediaParameters(only) })
+            : threadsTextParameters(text, options),
         );
       }
       return {

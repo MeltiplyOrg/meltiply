@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import {
   createMutationKey,
@@ -12,6 +12,10 @@ function countingTracker() {
 }
 
 const indexes = (count: number) => Array.from({ length: count }, (_, index) => ({ index }));
+
+beforeAll(() => {
+  mutationFingerprint({ b: 1, a: 2 });
+});
 
 describe("createMutationKey", () => {
   it("a runtime with randomUUID", () => {

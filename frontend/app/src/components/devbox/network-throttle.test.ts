@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   installNetworkThrottle,
@@ -14,6 +14,11 @@ const record: typeof fetch = (_input, init) => {
   sent.push(init?.method ?? "GET");
   return Promise.resolve(new Response("ok"));
 };
+
+beforeAll(() => {
+  void new Response("ok");
+  void new Request(URL_UNDER_TEST);
+});
 
 beforeEach(() => {
   sent = [];

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import {
   distributionTargetBlockReason,
@@ -35,6 +35,11 @@ const asset: Asset = {
   file_size: 100,
   mime_type: "image/png",
 };
+
+beforeAll(() => {
+  platformDisplayName("tiktok");
+  distributionTargetBlockReason({ ...account, connection_status: "revoked" }, asset);
+});
 
 describe("platformDisplayName", () => {
   it.each([

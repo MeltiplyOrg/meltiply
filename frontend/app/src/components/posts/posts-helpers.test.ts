@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import {
   filterAndSortPosts,
@@ -112,6 +112,11 @@ const everything: FilterCriteria = {
   dateFilter: "all",
   sortKey: "date-desc",
 };
+
+beforeAll(() => {
+  formatPostDate("2026-01-01T00:00:00Z", "Asia/Tokyo", "de");
+  filterAndSortPosts(rows, everything);
+});
 
 describe("filterAndSortPosts", () => {
   it("no filter, newest first", () => {

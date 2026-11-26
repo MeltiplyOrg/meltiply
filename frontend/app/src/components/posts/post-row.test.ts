@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import { toCalendarRows, toPostRow } from "./post-row";
 import type { ChannelIntegration } from "@/api/types";
@@ -57,6 +57,11 @@ const row = {
   id: "post",
   brandProfileId: "profile",
 };
+
+beforeAll(() => {
+  toCalendarRows([event("warm")], new Map(), new Map(), "Pacific/Kiritimati");
+  toPostRow(post, new Map());
+});
 
 describe("toPostRow", () => {
   it("an unclaimed target with its own copy and no media", () => {

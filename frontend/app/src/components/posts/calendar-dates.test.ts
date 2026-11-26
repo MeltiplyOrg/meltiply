@@ -1,5 +1,5 @@
 import { CalendarDate } from "@internationalized/date";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import {
   calendarDateKey,
@@ -17,6 +17,10 @@ const row = (id: string, date: string): PostRow => ({
   brandProfileId: "profile",
 });
 const label = (year: number, month: number, day: number) => new Date(year, month - 1, day, 12);
+
+beforeAll(() => {
+  calendarDateKey("2026-01-01T00:00:00Z", "Pacific/Kiritimati");
+});
 
 describe("calendarDateKey", () => {
   it.each([

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import {
   captionWithSignature,
@@ -15,6 +15,11 @@ const template = {
   name: "Footer",
   position: 0,
 };
+
+beforeAll(() => {
+  wallClockToInstant("2026-01-01T00:00", "America/New_York");
+  instantToWallClock("2026-01-01T00:00:00Z", "Asia/Tokyo");
+});
 
 describe("resolveSignature", () => {
   const target = {

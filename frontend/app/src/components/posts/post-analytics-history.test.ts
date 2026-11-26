@@ -1,5 +1,5 @@
 import type { components } from "@meltiply/contracts/schema";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import { postAnalyticsHistory } from "./post-analytics-history";
 
@@ -32,6 +32,10 @@ const point = (hour: number, likes: number) => ({
   views: likes * 10,
   reach: likes * 2,
   impressions: likes * 3,
+});
+
+beforeAll(() => {
+  postAnalyticsHistory([snapshot("b", "b", 10, 1), snapshot("a", "a", 10, 1)]);
 });
 
 describe("postAnalyticsHistory", () => {

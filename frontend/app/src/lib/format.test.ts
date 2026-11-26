@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import {
   abbreviateRecordId,
@@ -8,6 +8,10 @@ import {
   postDateFormatters,
   workspaceRoleLabel,
 } from "./format";
+
+beforeAll(() => {
+  for (const timeZone of ["America/New_York", "Asia/Tokyo"]) postDateFormatters(timeZone);
+});
 
 describe("formatBytes", () => {
   it.each([

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import { calendarSlots } from "./calendar-slots";
 
@@ -7,6 +7,10 @@ function day(year: number, month: number, date: number) {
 }
 
 const newYork = { timezone: "America/New_York", slots: [{ weekday: 0, time: "01:30" }] };
+
+beforeAll(() => {
+  calendarSlots(newYork, [day(2026, 3, 8)], []);
+});
 
 describe("calendarSlots", () => {
   it("a slot in the spring-forward gap", () => {

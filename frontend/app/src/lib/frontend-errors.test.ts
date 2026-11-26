@@ -2,56 +2,72 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { apiErrorCode, userFacingErrorMessage } from "./frontend-errors";
 
+const GENERIC = "An error has occurred.";
+const NO_ACCESS = "Your session no longer has access to this workspace.";
+const GONE = "That item is no longer available.";
+
 describe("userFacingErrorMessage", () => {
-  it("retains safe domain recovery copy", () => {
-    expect(
-      userFacingErrorMessage({
-        code: "active_organization_required",
-        message: "database detail must never reach the browser",
-        status: 409,
-      }),
-    ).toBe("Choose an active workspace to continue.");
-    expect(userFacingErrorMessage({ code: "asset_in_use", status: 409 })).toBe(
-      "This asset cannot be deleted while it is in use.",
+  it.each([
+    ["active_organization_required", "Choose an active workspace to continue."],
+    ["asset_in_use", "This asset cannot be deleted while it is in use."],
+    ["conflict", "This changed while you were working. Refresh and try again."],
+    ["quota_exceeded", "Your storage or upload quota has been reached."],
+    ["rate_limited", "Too many requests. Wait a moment and try again."],
+  ])("the %s code", (code, message) => {
+    const error = { code, message: "database detail", status: 409 };
+
+    expect(userFacingErrorMessage(error)).toEqual(message);
+  });
+
+  it.each([
+    ["a public code on a 403", { code: "conflict", status: 403 }],
+    ["a public code on a 404", { code: "conflict", status: 404 }],
+  ])("%s", (_example, error) => {
+    expect(userFacingErrorMessage(error)).toEqual(
+      "This changed while you were working. Refresh and try again.",
     );
   });
 
   it.each([
-    new Error("secret provider response and SQL detail"),
-    { code: "dependency_unavailable", status: 503 },
-    { code: "provider_unavailable", status: 502 },
-    { code: "provider_unavailable", status: 404 },
-    { code: "rate_limited", status: 503 },
-    { status: 503 },
-    { status: 599 },
-    { code: "unknown_failure" },
-    { code: "constructor" },
-    { code: "toString" },
-    { code: "__proto__" },
-  ])("uses generic copy for system failures: %s", (error) => {
-    expect(userFacingErrorMessage(error)).toBe("An error has occurred.");
+    ["a status of 401", { status: 401 }, NO_ACCESS],
+    ["a status of 403", { status: 403 }, NO_ACCESS],
+    ["a status of 404", { status: 404 }, GONE],
+    [
+      "a status of 499",
+      { code: "rate_limited", status: 499 },
+      "Too many requests. Wait a moment and try again.",
+    ],
+    ["a status of 500", { code: "rate_limited", status: 500 }, GENERIC],
+    ["a status of 599", { status: 599 }, GENERIC],
+    ["an unmapped status", { status: 400 }, GENERIC],
+    ["an unavailable dependency", { code: "dependency_unavailable", status: 404 }, GENERIC],
+    ["an unavailable provider", { code: "provider_unavailable", status: 404 }, GENERIC],
+    ["an unknown code", { code: "unknown_failure" }, GENERIC],
+    ["a constructor code", { code: "constructor" }, GENERIC],
+    ["a toString code", { code: "toString" }, GENERIC],
+    ["a prototype code", { code: "__proto__" }, GENERIC],
+    ["a thrown error", new Error("secret provider response and SQL detail"), GENERIC],
+    ["a thrown null", null, GENERIC],
+  ])("%s", (_example, error, message) => {
+    expect(userFacingErrorMessage(error)).toEqual(message);
   });
 
-  it("retains safe actionable status mappings", () => {
-    expect(userFacingErrorMessage({ status: 403 })).toBe(
-      "Your session no longer has access to this workspace.",
+  it("a missing item in Spanish", () => {
+    expect(userFacingErrorMessage({ status: 404 }, "es")).toEqual(
+      "Ese elemento ya no está disponible.",
     );
-    expect(userFacingErrorMessage({ status: 404 })).toBe("That item is no longer available.");
   });
 });
 
 describe("apiErrorCode", () => {
-  it("exposes the code so a surface can branch on a masked infrastructure state", () => {
-    expect(apiErrorCode({ code: "provider_unavailable", status: 503 })).toBe(
-      "provider_unavailable",
-    );
-  });
-
-  it("returns undefined when no code is present", () => {
-    expect(apiErrorCode(new Error("plain"))).toBeUndefined();
-    expect(apiErrorCode({ status: 503 })).toBeUndefined();
-    expect(apiErrorCode({ code: 42 })).toBeUndefined();
-    expect(apiErrorCode(null)).toBeUndefined();
-    expect(apiErrorCode(["provider_unavailable"])).toBeUndefined();
+  it.each([
+    ["a coded error", { code: "provider_unavailable", status: 503 }, "provider_unavailable"],
+    ["a thrown error", new Error("plain"), undefined],
+    ["an object without a code", { status: 503 }, undefined],
+    ["a numeric code", { code: 42 }, undefined],
+    ["a null value", null, undefined],
+    ["an array", ["provider_unavailable"], undefined],
+  ])("%s", (_example, error, code) => {
+    expect(apiErrorCode(error)).toEqual(code);
   });
 });

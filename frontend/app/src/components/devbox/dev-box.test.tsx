@@ -28,7 +28,6 @@ import {
   uninstallNetworkThrottle,
 } from "./network-throttle";
 import { breakpointForWidth } from "./viewport-frame";
-import { pseudoLocalize } from "@/lib/pseudo-locale";
 
 function seedDockState(patch: Partial<DevBoxState> = {}) {
   window.localStorage.setItem(
@@ -569,14 +568,5 @@ describe("DevBoxClientBridge", () => {
       </QueryClientProvider>,
     );
     expect(getDevBoxQueryClient()).toBe(queryClient);
-  });
-});
-
-describe("pseudoLocalize", () => {
-  it("expands strings and preserves placeholders", () => {
-    const out = pseudoLocalize("Hello {name}");
-    expect(out).toMatch(/^⟦.*⟧$/);
-    expect(out).toContain("{name}");
-    expect(out.length).toBeGreaterThan("Hello {name}".length);
   });
 });

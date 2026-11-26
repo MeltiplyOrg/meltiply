@@ -213,7 +213,11 @@ export function toLocalDateKey(d: Date | string): string {
   return `${y}-${m}-${day}`;
 }
 
-export function filterAndSortPosts(posts: PostRow[], filters: FilterCriteria): PostRow[] {
+export function filterAndSortPosts(
+  posts: PostRow[],
+  filters: FilterCriteria,
+  now: number = Date.now(),
+): PostRow[] {
   let list = [...posts];
 
   if (filters.statusFilter.length > 0) {
@@ -255,17 +259,15 @@ export function filterAndSortPosts(posts: PostRow[], filters: FilterCriteria): P
   }
 
   if (filters.dateFilter === "today") {
-    const todayStr = toLocalDateKey(new Date());
+    const todayStr = toLocalDateKey(new Date(now));
     list = list.filter((row) => toLocalDateKey(row.date) === todayStr);
   } else if (filters.dateFilter === "next7") {
-    const now = Date.now();
     const in7 = now + 7 * 24 * 60 * 60 * 1000;
     list = list.filter((row) => {
       const t = new Date(row.date).getTime();
       return t >= now && t <= in7;
     });
   } else if (filters.dateFilter === "past30") {
-    const now = Date.now();
     const past30 = now - 30 * 24 * 60 * 60 * 1000;
     list = list.filter((row) => {
       const t = new Date(row.date).getTime();

@@ -80,15 +80,13 @@ export function saveOAuthConnectionEffect(
 
     yield* withSystemTransactionEffect(env, (client) =>
       Effect.gen(function* () {
-        yield* lockOrganizationEffect(client, owner.organizationId);
-        const lockedOrganization = yield* client.query<{ id: string }>(
+        const organization = yield* client.query<{ id: string }>(
           `SELECT id
            FROM organizations
-           WHERE id::text = $1
-           FOR UPDATE`,
+           WHERE id::text = $1`,
           [owner.organizationId],
         );
-        const organizationRow = lockedOrganization.rows[0];
+        let organizationRow = organization.rows[0];
         if (!organizationRow) {
           return yield* Effect.fail(
             new CoreApiError(
@@ -113,6 +111,24 @@ export function saveOAuthConnectionEffect(
               403,
               "forbidden",
               "The OAuth organization is not accessible to this account.",
+            ),
+          );
+        }
+        yield* lockOrganizationEffect(client, organizationRow.id);
+        const lockedOrganization = yield* client.query<{ id: string }>(
+          `SELECT id
+           FROM organizations
+           WHERE id = $1
+           FOR UPDATE`,
+          [organizationRow.id],
+        );
+        organizationRow = lockedOrganization.rows[0];
+        if (!organizationRow) {
+          return yield* Effect.fail(
+            new CoreApiError(
+              409,
+              "invalid_state",
+              "The OAuth organization is no longer available.",
             ),
           );
         }

@@ -1,3 +1,4 @@
+import { PLATFORM_IDS } from "@meltiply/domain";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import {
@@ -59,9 +60,13 @@ describe("platformDisplayName", () => {
 
 describe("getAvailablePlatforms", () => {
   it.each([
-    ["nothing connected", [], ["tiktok", "youtube", "instagram", "facebook", "threads"]],
-    ["two connected", ["tiktok", "instagram"], ["youtube", "facebook", "threads"]],
-    ["all connected", ["tiktok", "youtube", "instagram", "facebook", "threads"], []],
+    ["nothing connected", [], PLATFORM_IDS],
+    [
+      "two connected",
+      ["tiktok", "instagram"],
+      PLATFORM_IDS.filter((platform) => platform !== "tiktok" && platform !== "instagram"),
+    ],
+    ["all connected", [...PLATFORM_IDS], []],
   ])("%s", (_example, connected, available) => {
     expect(getAvailablePlatforms(connected)).toEqual(available);
   });

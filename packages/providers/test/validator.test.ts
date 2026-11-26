@@ -730,9 +730,18 @@ describe("validatePublishInput", () => {
   it("an unrecognized type inside a set", () => {
     const publish = input({ media: [image(), video({ contentType: "audio/mpeg" })] });
 
-    expect(validatePublishInput(capability(), publish).map((issue) => issue.constraint)).toEqual([
-      "unsupported_media_combination",
-      "unsupported_media_type",
+    expect(validatePublishInput(capability(), publish)).toEqual([
+      {
+        constraint: "unsupported_media_combination",
+        field: "media",
+        message:
+          "threads cannot combine these attachments; a multi-attachment post accepts image or video media only",
+      },
+      {
+        constraint: "unsupported_media_type",
+        field: "media[1].contentType",
+        message: "threads does not accept media type 'audio/mpeg'",
+      },
     ]);
   });
 
@@ -749,17 +758,39 @@ describe("validatePublishInput", () => {
       ],
     });
 
-    expect(
-      validatePublishInput(capability({ platform: "tiktok" }), publish).map(
-        (issue) => issue.constraint,
-      ),
-    ).toEqual([
-      "unsupported_media_type",
-      "provider_file_size_limit",
-      "provider_video_duration_limit",
-      "provider_caption_limit",
-      "provider_hashtag_limit",
-      "tiktok_publish_options_required",
+    expect(validatePublishInput(capability({ platform: "tiktok" }), publish)).toEqual([
+      {
+        constraint: "unsupported_media_type",
+        field: "media[0].contentType",
+        message: "tiktok does not accept media type 'video/quicktime'",
+      },
+      {
+        actual: 1_001,
+        constraint: "provider_file_size_limit",
+        field: "media[0].fileSize",
+        limit: 1_000,
+        message: "attachment 1 exceeds the tiktok limit of 1000 bytes",
+      },
+      {
+        actual: 61,
+        constraint: "provider_video_duration_limit",
+        field: "media[0].metadata.durationSeconds",
+        limit: 60,
+        message: "attachment 1 exceeds the tiktok limit of 60 seconds",
+      },
+      captionIssue("tiktok", 500, 501),
+      {
+        actual: 4,
+        constraint: "provider_hashtag_limit",
+        field: "hashtags",
+        limit: 3,
+        message: "tiktok accepts at most 3 hashtags",
+      },
+      {
+        constraint: "tiktok_publish_options_required",
+        field: "providerOptions.tiktok",
+        message: "TikTok requires creator publish options on every publish",
+      },
     ]);
   });
 
@@ -769,6 +800,7 @@ describe("validatePublishInput", () => {
 
     validatePublishInput(platform, publish);
 
-    expect([platform, publish]).toEqual([capability(), input({ hashtags: ["#bad"] })]);
+    expect(platform).toEqual(capability());
+    expect(publish).toEqual(input({ hashtags: ["#bad"] }));
   });
 });

@@ -7,6 +7,7 @@ import {
   failedWriteResult,
   unknownResult,
 } from "../src/results";
+import { thrownBy } from "./support";
 
 const denied = rejection("tiktok_denied", 422);
 const unknown = {
@@ -78,7 +79,7 @@ describe("failedWriteResult", () => {
   it("an error that is not from a provider", () => {
     const cause = new TypeError("bug");
 
-    expect(() => failedWriteResult(cause)).toThrow(cause);
+    expect(thrownBy(() => failedWriteResult(cause))).toBe(cause);
   });
 });
 

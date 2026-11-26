@@ -5,6 +5,7 @@ import {
   createProviderRegistryFromEnvironment,
 } from "../src";
 import { overriddenUrl, providerOriginOverrides, redirectingFetch } from "../src/origin-overrides";
+import { thrownBy } from "./support";
 
 const FAKE = "http://127.0.0.1:4010";
 
@@ -54,7 +55,7 @@ describe("providerOriginOverrides", () => {
     ["a username", "http://user@127.0.0.1:4010"],
     ["text that is not a URL", "localhost"],
   ])("%s", (_example, value) => {
-    expect(() => providerOriginOverrides({ PROVIDER_ORIGIN_TIKTOK_API: value })).toThrow(
+    expect(thrownBy(() => providerOriginOverrides({ PROVIDER_ORIGIN_TIKTOK_API: value }))).toEqual(
       new TypeError("PROVIDER_ORIGIN_TIKTOK_API must be a loopback HTTP origin"),
     );
   });

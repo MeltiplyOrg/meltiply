@@ -1,13 +1,13 @@
 import { Effect } from "effect";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 
-import { ProviderAdapterError } from "../src/failures";
 import {
   ProviderHttpClient,
   type ProviderHttpClientOptions,
   type ProviderHttpRequest,
 } from "../src/http";
 import type { ProviderRequestContext } from "../src/types";
+import { failureOf, providerFailure, thrownBy } from "./support";
 
 const ORIGIN = "https://api.provider.example";
 const newContext = (patch: Partial<ProviderRequestContext> = {}): ProviderRequestContext => ({
@@ -40,27 +40,7 @@ const get = (patch: Partial<ProviderHttpRequest> = {}): ProviderHttpRequest => (
   ...patch,
 });
 
-async function failureOf(attempt: Promise<unknown>) {
-  const error = await attempt.then(
-    () => undefined,
-    (cause: unknown) => cause,
-  );
-  if (!(error instanceof ProviderAdapterError)) return error;
-  const { classification, code, retryable, retryAfterSeconds } = error.failure;
-  return {
-    classification,
-    code,
-    retryable,
-    ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
-  };
-}
-
-const failed = (classification: string, code: string, retryable: boolean) => ({
-  classification,
-  code,
-  retryable,
-});
-const malformedRead = failed("transient", "provider_http_malformed_response", true);
+const malformedRead = providerFailure("transient", "provider_http_malformed_response");
 
 const hanging: typeof fetch = (_input, init) =>
   new Promise((_resolve, reject) => {
@@ -100,7 +80,7 @@ describe("ProviderHttpClient", () => {
       ["no origin", []],
       ["a repeated origin", [ORIGIN, ORIGIN]],
     ])("%s", (_example, allowedOrigins) => {
-      expect(() => new ProviderHttpClient({ allowedOrigins })).toThrow(
+      expect(thrownBy(() => new ProviderHttpClient({ allowedOrigins }))).toEqual(
         new TypeError("provider HTTP client requires unique allowed origins"),
       );
     });
@@ -111,18 +91,30 @@ describe("ProviderHttpClient", () => {
       ["an origin with a trailing slash", "https://a.example/"],
       ["an origin with credentials", "https://u:p@a.example"],
     ])("%s", (_example, value) => {
-      expect(() => new ProviderHttpClient({ allowedOrigins: [value] })).toThrow(
+      expect(thrownBy(() => new ProviderHttpClient({ allowedOrigins: [value] }))).toEqual(
         new TypeError("provider origin must be a canonical HTTPS origin"),
       );
     });
 
     it.each([
-      ["no response bytes", { maximumResponseBytes: 0 }, "maximumResponseBytes"],
-      ["response bytes over 1 MiB", { maximumResponseBytes: 1_048_577 }, "maximumResponseBytes"],
-      ["no timeout", { timeoutMilliseconds: 0 }, "timeoutMilliseconds"],
-      ["a timeout over two minutes", { timeoutMilliseconds: 120_001 }, "timeoutMilliseconds"],
-    ])("%s", (_example, patch, name) => {
-      expect(() => new ProviderHttpClient({ allowedOrigins: [ORIGIN], ...patch })).toThrow(name);
+      ["no response bytes", { maximumResponseBytes: 0 }, "maximumResponseBytes", 1_048_576],
+      [
+        "response bytes over 1 MiB",
+        { maximumResponseBytes: 1_048_577 },
+        "maximumResponseBytes",
+        1_048_576,
+      ],
+      ["no timeout", { timeoutMilliseconds: 0 }, "timeoutMilliseconds", 120_000],
+      [
+        "a timeout over two minutes",
+        { timeoutMilliseconds: 120_001 },
+        "timeoutMilliseconds",
+        120_000,
+      ],
+    ])("%s", (_example, patch, name, maximum) => {
+      expect(
+        thrownBy(() => new ProviderHttpClient({ allowedOrigins: [ORIGIN], ...patch })),
+      ).toEqual(new RangeError(`${name} must be between 1 and ${maximum}`));
     });
   });
 
@@ -134,11 +126,9 @@ describe("ProviderHttpClient", () => {
 
       const response = await client.request(newContext(), get());
 
-      expect([response.status, response.body, response.headers.get("X-Next-Cursor")]).toEqual([
-        200,
-        { id: 1 },
-        "c2",
-      ]);
+      expect(response.status).toEqual(200);
+      expect(response.body).toEqual({ id: 1 });
+      expect(response.headers.get("X-Next-Cursor")).toEqual("c2");
       expect(requests).toEqual([
         [
           `${ORIGIN}/items`,
@@ -164,11 +154,14 @@ describe("ProviderHttpClient", () => {
       expect(requests).toEqual([
         [
           `${ORIGIN}/items`,
-          expect.objectContaining({
+          {
             body: "payload",
+            cache: "no-store",
             headers: new Headers({ Accept: "text/plain" }),
             method: "POST",
-          }),
+            redirect: "manual",
+            signal: expect.any(AbortSignal),
+          },
         ],
       ]);
     });
@@ -193,7 +186,7 @@ describe("ProviderHttpClient", () => {
     ])("%s is refused before any request", async (_example, url) => {
       const { client, requests } = setup();
 
-      await expect(client.request(newContext(), get({ url }))).rejects.toThrow(
+      expect(await failureOf(client.request(newContext(), get({ url })))).toEqual(
         new TypeError("provider request URL is outside the allowed origins"),
       );
       expect(requests).toEqual([]);
@@ -207,7 +200,7 @@ describe("ProviderHttpClient", () => {
     ])("%s", async (_example, acceptedStatuses) => {
       const { client } = setup();
 
-      await expect(client.request(newContext(), get({ acceptedStatuses }))).rejects.toThrow(
+      expect(await failureOf(client.request(newContext(), get({ acceptedStatuses })))).toEqual(
         new TypeError("provider accepted statuses are invalid"),
       );
     });
@@ -218,7 +211,7 @@ describe("ProviderHttpClient", () => {
       );
 
       expect(await failureOf(client.request(newContext(), get()))).toEqual(
-        failed("deterministic", "provider_http_redirect", false),
+        providerFailure("deterministic", "provider_http_redirect"),
       );
     });
 
@@ -233,18 +226,19 @@ describe("ProviderHttpClient", () => {
         get({ acceptedStatuses: [status], responseType: "empty" }),
       );
 
-      expect([response.status, response.body]).toEqual([status, undefined]);
+      expect(response.status).toEqual(status);
+      expect(response.body).toEqual(undefined);
     });
 
     it.each([
-      ["a 400", 400, "deterministic", false],
-      ["a 401", 401, "auth", false],
-      ["a 500", 500, "transient", true],
-    ])("%s", async (_example, status, classification, retryable) => {
+      ["a 400", 400, "deterministic"],
+      ["a 401", 401, "auth"],
+      ["a 500", 500, "transient"],
+    ] as const)("%s", async (_example, status, classification) => {
       const { client } = setup(answering(Response.json({}, { status })));
 
       expect(await failureOf(client.request(newContext(), get()))).toEqual(
-        failed(classification, `provider_http_${status}`, retryable),
+        providerFailure(classification, `provider_http_${status}`),
       );
     });
 
@@ -258,7 +252,7 @@ describe("ProviderHttpClient", () => {
       );
 
       expect(await failureOf(client.request(newContext(), get()))).toEqual({
-        ...failed("rate_limit", "provider_http_429", true),
+        ...providerFailure("rate_limit", "provider_http_429"),
         retryAfterSeconds,
       });
     });
@@ -273,7 +267,7 @@ describe("ProviderHttpClient", () => {
       );
 
       expect(await failureOf(client.request(newContext(), get()))).toEqual(
-        failed("rate_limit", "provider_http_429", true),
+        providerFailure("rate_limit", "provider_http_429"),
       );
     });
 
@@ -287,9 +281,7 @@ describe("ProviderHttpClient", () => {
         .request(newContext(), get({ classifyErrorBody }))
         .catch((cause: unknown) => cause);
 
-      expect(error).toMatchObject({
-        request: { method: "GET", origin: ORIGIN, status_code: 400 },
-      });
+      expect(error).toHaveProperty("request", { method: "GET", origin: ORIGIN, status_code: 400 });
       expect(JSON.stringify(error)).not.toContain("must-not-leak");
     });
 
@@ -332,7 +324,7 @@ describe("ProviderHttpClient", () => {
       });
 
       expect(await failureOf(client.request(newContext(), get({ classifyErrorBody })))).toEqual(
-        failed("quota", "seen_400_reasonquota", false),
+        providerFailure("quota", "seen_400_reasonquota"),
       );
     });
 
@@ -365,7 +357,7 @@ describe("ProviderHttpClient", () => {
       };
 
       expect(await failureOf(client.request(newContext(), get({ classifyErrorBody })))).toEqual(
-        failed("deterministic", "provider_http_400", false),
+        providerFailure("deterministic", "provider_http_400"),
       );
     });
 
@@ -402,7 +394,7 @@ describe("ProviderHttpClient", () => {
       const write = get({ method: "POST", sideEffectPossible: true });
 
       expect(await failureOf(client.request(newContext(), write))).toEqual(
-        failed("ambiguous", "provider_http_malformed_response", false),
+        providerFailure("ambiguous", "provider_http_malformed_response"),
       );
     });
 
@@ -411,9 +403,9 @@ describe("ProviderHttpClient", () => {
         answering(new Response("secret", { headers: { "Content-Type": "application/json" } })),
       );
 
-      await expect(client.request(newContext(), get())).rejects.toMatchObject({
-        cause: new SyntaxError("Provider response is not valid JSON"),
-      });
+      const error = await client.request(newContext(), get()).catch((cause: unknown) => cause);
+
+      expect(error).toHaveProperty("cause", new SyntaxError("Provider response is not valid JSON"));
     });
 
     it("a body split into several chunks", async () => {
@@ -443,7 +435,7 @@ describe("ProviderHttpClient", () => {
       const { client } = setup(() => Promise.reject(new TypeError("socket")));
 
       expect(await failureOf(client.request(newContext(), get()))).toEqual(
-        failed("transient", "provider_http_request_failed", true),
+        providerFailure("transient", "provider_http_request_failed"),
       );
     });
 
@@ -452,18 +444,18 @@ describe("ProviderHttpClient", () => {
       const write = get({ method: "POST", sideEffectPossible: true });
 
       expect(await failureOf(client.request(newContext(), write))).toEqual(
-        failed("ambiguous", "provider_http_request_failed", false),
+        providerFailure("ambiguous", "provider_http_request_failed"),
       );
     });
 
     it.each([
-      ["a read", false, "timeout", true],
-      ["a possible write", true, "ambiguous", false],
-    ])("%s that never answers", async (_example, sideEffectPossible, classification, retryable) => {
+      ["a read", false, "timeout"],
+      ["a possible write", true, "ambiguous"],
+    ] as const)("%s that never answers", async (_example, sideEffectPossible, classification) => {
       const { client } = setup(hanging, { timeoutMilliseconds: 1 });
 
       expect(await failureOf(client.request(newContext(), get({ sideEffectPossible })))).toEqual(
-        failed(classification, "provider_http_timeout", retryable),
+        providerFailure(classification, "provider_http_timeout"),
       );
     });
 
@@ -471,7 +463,7 @@ describe("ProviderHttpClient", () => {
       const { client } = setup(stalledBody, { timeoutMilliseconds: 1 });
 
       expect(await failureOf(client.request(newContext(), get()))).toEqual(
-        failed("timeout", "provider_http_timeout", true),
+        providerFailure("timeout", "provider_http_timeout"),
       );
     });
 
@@ -480,7 +472,7 @@ describe("ProviderHttpClient", () => {
       const context = newContext({ signal: AbortSignal.abort() });
 
       expect(await failureOf(client.request(context, get()))).toEqual(
-        failed("timeout", "provider_http_timeout", true),
+        providerFailure("timeout", "provider_http_timeout"),
       );
     });
 
@@ -524,7 +516,7 @@ describe("ProviderHttpClient", () => {
 
       const attempt = Effect.runPromise(client.requestEffect(newContext(), get()));
 
-      expect(await failureOf(attempt)).toEqual(failed("auth", "provider_http_401", false));
+      expect(await failureOf(attempt)).toEqual(providerFailure("auth", "provider_http_401"));
     });
   });
 });

@@ -8,6 +8,7 @@ import {
   type ProviderRegistryEnvironment,
 } from "../src";
 import type { ProviderAdapter } from "../src/types";
+import { thrownBy } from "./support";
 
 type Capability = ProviderAdapter["capability"];
 
@@ -119,7 +120,7 @@ describe("ProviderRegistry", () => {
     it("a second adapter for a platform", () => {
       const registry = registered(adapter());
 
-      expect(() => registry.register("threads", adapter())).toThrow(
+      expect(thrownBy(() => registry.register("threads", adapter()))).toEqual(
         new TypeError("provider adapter is already registered: threads"),
       );
     });
@@ -128,44 +129,58 @@ describe("ProviderRegistry", () => {
       [
         "a mismatched platform",
         adapter({ platform: "tiktok" }),
-        "capability platform does not match",
+        "provider adapter capability platform does not match registry key",
       ],
       [
         "publishing without a publish method",
         adapter({ publish: true }, { ...publishing, publish: undefined }),
-        "requires publish and lookup adapters",
+        "publish capability requires publish and lookup adapters",
       ],
       [
         "publishing without a lookup",
         adapter({ publish: true }, { ...publishing, lookupPublication: undefined }),
-        "requires publish and lookup adapters",
+        "publish capability requires publish and lookup adapters",
       ],
       [
         "publishing without a retry policy",
         adapter({ publish: true }, { ...publishing, retryPolicy: undefined }),
-        "requires a retry policy",
+        "publish capability requires a retry policy",
       ],
       [
         "media publishing without a transfer mode",
         adapter({ publish: true, asset_types: ["image"] }, publishing),
-        "requires at least one transfer mode",
+        "media publish capability requires at least one transfer mode",
       ],
       [
         "connecting without OAuth methods",
         adapter({ connect_available: true }),
-        "requires authorization and code-exchange adapters",
+        "connect capability requires authorization and code-exchange adapters",
       ],
-      ["analytics without a method", adapter({ analytics: true }), "requires an analytics adapter"],
-      ["comments without a method", adapter({ comments: true }), "requires a comments adapter"],
-      ["replies without a method", adapter({ reply: true }), "requires a reply adapter"],
+      [
+        "analytics without a method",
+        adapter({ analytics: true }),
+        "analytics capability requires an analytics adapter",
+      ],
+      [
+        "comments without a method",
+        adapter({ comments: true }),
+        "comments capability requires a comments adapter",
+      ],
+      [
+        "replies without a method",
+        adapter({ reply: true }),
+        "reply capability requires a reply adapter",
+      ],
     ])("%s", (_example, value, message) => {
-      expect(() => registered(value)).toThrow(message);
+      expect(thrownBy(() => registered(value))).toEqual(new TypeError(message));
     });
 
     it("TikTok publishing without creator requirements", () => {
-      expect(() =>
-        registered(adapter({ platform: "tiktok", publish: true }, publishing), "tiktok"),
-      ).toThrow("TikTok publish capability requires publication requirements");
+      const value = adapter({ platform: "tiktok", publish: true }, publishing);
+
+      expect(thrownBy(() => registered(value, "tiktok"))).toEqual(
+        new TypeError("TikTok publish capability requires publication requirements"),
+      );
     });
 
     it.each([
@@ -192,7 +207,7 @@ describe("ProviderRegistry", () => {
     ])("a retry policy with %s", (_example, baseDelaySeconds, maxAttempts, maxDelaySeconds) => {
       const retryPolicy = { baseDelaySeconds, maxAttempts, maxDelaySeconds };
 
-      expect(() => registered(adapter({}, { retryPolicy }))).toThrow(
+      expect(thrownBy(() => registered(adapter({}, { retryPolicy })))).toEqual(
         new TypeError("provider retry policy is outside safe bounds"),
       );
     });
@@ -237,10 +252,8 @@ describe("ProviderRegistry", () => {
         const first = await call(context);
         const second = await call(context);
 
-        expect([first, second]).toEqual([
-          { outcome: "confirmed_success", metadata },
-          { outcome: "confirmed_success" },
-        ]);
+        expect(first).toEqual({ outcome: "confirmed_success", metadata });
+        expect(second).toEqual({ outcome: "confirmed_success" });
       },
     );
   });
@@ -324,7 +337,7 @@ describe("createProviderRegistryFromEnvironment", () => {
   it.each(PLATFORM_IDS)("an accepted %s without credentials", (platform) => {
     const environment = { APP_URL, [`${platform.toUpperCase()}_LIVE_ACCEPTED`]: "true" };
 
-    expect(() => createProviderRegistryFromEnvironment(environment)).toThrow(
+    expect(thrownBy(() => createProviderRegistryFromEnvironment(environment))).toEqual(
       new TypeError(`accepted ${names[platform]} provider configuration is incomplete`),
     );
   });
@@ -332,7 +345,7 @@ describe("createProviderRegistryFromEnvironment", () => {
   it.each(PLATFORM_IDS)("a %s flag that is not boolean", (platform) => {
     const name = `${platform.toUpperCase()}_LIVE_ACCEPTED`;
 
-    expect(() => createProviderRegistryFromEnvironment({ [name]: "yes" })).toThrow(
+    expect(thrownBy(() => createProviderRegistryFromEnvironment({ [name]: "yes" }))).toEqual(
       new TypeError(`${name} must be true or false`),
     );
   });
@@ -340,7 +353,7 @@ describe("createProviderRegistryFromEnvironment", () => {
   it.each(["INSTAGRAM", "THREADS"])("%s engagement without publishing acceptance", (prefix) => {
     const environment = { [`${prefix}_ENGAGEMENT_LIVE_ACCEPTED`]: "true" };
 
-    expect(() => createProviderRegistryFromEnvironment(environment)).toThrow(
+    expect(thrownBy(() => createProviderRegistryFromEnvironment(environment))).toEqual(
       new TypeError(`${prefix}_ENGAGEMENT_LIVE_ACCEPTED requires ${prefix}_LIVE_ACCEPTED=true`),
     );
   });
@@ -348,7 +361,7 @@ describe("createProviderRegistryFromEnvironment", () => {
   it.each(["INSTAGRAM", "THREADS"])("a %s engagement flag that is not boolean", (prefix) => {
     const name = `${prefix}_ENGAGEMENT_LIVE_ACCEPTED`;
 
-    expect(() => createProviderRegistryFromEnvironment({ [name]: "yes" })).toThrow(
+    expect(thrownBy(() => createProviderRegistryFromEnvironment({ [name]: "yes" }))).toEqual(
       new TypeError(`${name} must be true or false`),
     );
   });
@@ -363,12 +376,10 @@ describe("createProviderRegistryFromEnvironment", () => {
 
     const provider = createProviderRegistryFromEnvironment(environment).get(platform)!;
 
-    expect([
-      provider.capability.comments,
-      provider.capability.reply,
-      typeof provider.listComments === "function",
-      typeof provider.reply === "function",
-    ]).toEqual([engagement, engagement, engagement, engagement]);
+    expect(provider.capability.comments).toEqual(engagement);
+    expect(provider.capability.reply).toEqual(engagement);
+    expect(typeof provider.listComments === "function").toEqual(engagement);
+    expect(typeof provider.reply === "function").toEqual(engagement);
   });
 
   it.each([
@@ -380,7 +391,16 @@ describe("createProviderRegistryFromEnvironment", () => {
       ...environments[platform],
     }).get(platform)!;
 
-    expect(provider.capability).toMatchObject({
+    const { capability: registeredCapability } = provider;
+
+    expect({
+      analytics: registeredCapability.analytics,
+      asset_types: registeredCapability.asset_types,
+      comments: registeredCapability.comments,
+      connect_available: registeredCapability.connect_available,
+      publish: registeredCapability.publish,
+      reply: registeredCapability.reply,
+    }).toEqual({
       analytics,
       asset_types: assetTypes,
       comments: false,
@@ -400,7 +420,7 @@ describe("createProviderRegistryFromEnvironment", () => {
   ])("%s", (_example, appUrl, message) => {
     const environment = { APP_URL: appUrl, ...environments.threads };
 
-    expect(() => createProviderRegistryFromEnvironment(environment)).toThrow(
+    expect(thrownBy(() => createProviderRegistryFromEnvironment(environment))).toEqual(
       new TypeError(message),
     );
   });

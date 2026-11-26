@@ -214,7 +214,12 @@ describe("ProviderAdapterError", () => {
 
     const error = new ProviderAdapterError(forged, { cause });
 
-    expect(error).toMatchObject({
+    expect({
+      cause: error.cause,
+      failure: error.failure,
+      message: error.message,
+      name: error.name,
+    }).toEqual({
       cause,
       failure: failure("auth", false),
       message: "The provider authorization must be refreshed.",

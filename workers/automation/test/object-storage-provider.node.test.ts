@@ -30,41 +30,41 @@ const request = {
   outputKey: "staging/org-1/asset-1/session-1/processing-image_auto_4096_long_edge",
 };
 
-describe("processor job capabilities", () => {
-  it("mints the R2 capabilities the default provider implies", async () => {
+describe("processorJobUrlsEffect", () => {
+  it("mints R2 capabilities when default R2 provider is configured", async () => {
     const urls = await Effect.runPromise(processorJobUrlsEffect(r2Env, request));
 
-    expect(new URL(urls.input_url).origin).toBe("https://r2-account.r2.cloudflarestorage.com");
+    expect(new URL(urls.input_url).origin).toEqual("https://r2-account.r2.cloudflarestorage.com");
     expect(new URL(urls.input_url).searchParams.get("X-Amz-Credential")).toContain("/auto/s3/");
-    expect(new URL(urls.output_url).searchParams.get("X-Amz-SignedHeaders")).toBe(
+    expect(new URL(urls.output_url).searchParams.get("X-Amz-SignedHeaders")).toEqual(
       "host;if-none-match",
     );
   });
 
-  it("mints the same capabilities against an S3-compatible origin", async () => {
+  it("mints S3 capabilities without leaking credentials", async () => {
     const urls = await Effect.runPromise(processorJobUrlsEffect(s3Env, request));
 
     const input = new URL(urls.input_url);
-    expect(input.origin).toBe("https://objects.example.test");
-    expect(input.pathname).toBe("/meltiply-assets/org-1/asset-1/original");
+    expect(input.origin).toEqual("https://objects.example.test");
+    expect(input.pathname).toEqual("/meltiply-assets/org-1/asset-1/original");
     expect(input.searchParams.get("X-Amz-Credential")).toContain("/us-east-1/s3/");
 
     const output = new URL(urls.output_url);
-    expect(output.pathname).toBe(
+    expect(output.pathname).toEqual(
       "/meltiply-assets/staging/org-1/asset-1/session-1/processing-image_auto_4096_long_edge",
     );
-    expect(output.searchParams.get("X-Amz-SignedHeaders")).toBe("host;if-none-match");
+    expect(output.searchParams.get("X-Amz-SignedHeaders")).toEqual("host;if-none-match");
     const outputExpiry = Number(output.searchParams.get("X-Amz-Expires"));
     expect(outputExpiry).toBeGreaterThan(100);
     expect(outputExpiry).toBeLessThanOrEqual(120);
     expect(urls.output_url).not.toContain("s3-secret");
   });
 
-  it("fails retryably when the provider cannot sign", async () => {
+  it("fails when S3 signing credentials are incomplete", async () => {
     const exit = await Effect.runPromiseExit(
       processorJobUrlsEffect({ ...s3Env, S3_SECRET_ACCESS_KEY: undefined }, request),
     );
 
-    expect(exit._tag).toBe("Failure");
+    expect(exit._tag).toEqual("Failure");
   });
 });

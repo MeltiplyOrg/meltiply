@@ -24,7 +24,7 @@ export default defineConfig({
     reporters: process.env.CI
       ? ["default", ["junit", { outputFile: "test-results/junit.xml" }]]
       : ["default"],
-    exclude: ["test/**/*.integration.test.ts"],
+    exclude: ["test/**/*.integration.test.ts", "test/**/*.node.test.ts"],
     include: ["test/**/*.test.ts"],
   },
 });

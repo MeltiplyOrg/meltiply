@@ -1,4 +1,4 @@
-import { ProviderAdapterError, classifyProviderFailure } from "@meltiply/providers";
+import { classifyProviderFailure, ProviderAdapterError } from "@meltiply/providers";
 import { diagnosticProperties, payloadViolation } from "@meltiply/reporting";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -11,32 +11,42 @@ import {
 
 const payloadContext = { appVersion: "1.0.0", deploymentCategory: "selfhosted" } as const;
 
-describe("automation diagnostic classification", () => {
-  it("groups queue topics and scheduled units by their fixed operation", () => {
-    expect(operationForTopic("distribution.publish.requested")).toBe("publish");
-    expect(operationForTopic("comment.reply.requested")).toBe("inbox");
-    expect(operationForTopic("channel.revocation.requested")).toBe("auth");
-    expect(operationForTopic("asset.processing.requested")).toBe("assets");
-    expect(operationForTopic("provider.sync")).toBe("analytics");
-    expect(operationForTopic(undefined)).toBe("other");
-    expect(operationForTopic("unrecognized.topic")).toBe("other");
-
-    expect(operationForScheduledUnit("due-distribution-scan")).toBe("publish");
-    expect(operationForScheduledUnit("provider-sync-sweep")).toBe("analytics");
-    expect(operationForScheduledUnit("outbox-relay")).toBe("queues");
-    expect(operationForScheduledUnit("improvement-reporting-delivery")).toBe("reporting");
+describe("operationForTopic", () => {
+  it.each([
+    ["distribution.publish.requested", "publish"],
+    ["comment.reply.requested", "inbox"],
+    ["channel.revocation.requested", "auth"],
+    ["asset.processing.requested", "assets"],
+    ["provider.sync", "analytics"],
+    [undefined, "other"],
+    ["unrecognized.topic", "other"],
+  ] as const)("%s maps to %s", (topic, expected) => {
+    expect(operationForTopic(topic)).toEqual(expected);
   });
+});
 
-  it("reports a classified Provider condition as an expected Provider failure", () => {
-    const cause = new ProviderAdapterError(
-      classifyProviderFailure({ code: "rate_limited", status: 429 }),
+describe("operationForScheduledUnit", () => {
+  it.each([
+    ["due-distribution-scan", "publish"],
+    ["provider-sync-sweep", "analytics"],
+    ["outbox-relay", "queues"],
+    ["improvement-reporting-delivery", "reporting"],
+    ["retention", "other"],
+  ] as const)("%s maps to %s", (unit, expected) => {
+    expect(operationForScheduledUnit(unit)).toEqual(expected);
+  });
+});
+
+describe("queueDiagnosticReport and scheduledDiagnosticReport", () => {
+  it("reports a classified ProviderAdapterError as an expected Provider failure", () => {
+    const report = queueDiagnosticReport(
+      new ProviderAdapterError(classifyProviderFailure({ code: "rate_limited", status: 429 })),
+      {
+        outcome: "retry",
+        provider: "threads",
+        topic: "distribution.publish.requested",
+      },
     );
-
-    const report = queueDiagnosticReport(cause, {
-      outcome: "retry",
-      provider: "threads",
-      topic: "distribution.publish.requested",
-    });
 
     expect(report).toMatchObject({
       category: "provider_failure",
@@ -51,7 +61,7 @@ describe("automation diagnostic classification", () => {
     expect(serialized).not.toContain("distribution.publish.requested");
   });
 
-  it("reports an ambiguous write as the ambiguous Provider class", () => {
+  it("reports an ambiguous write outcome as the ambiguous Provider class", () => {
     const report = queueDiagnosticReport(new TypeError("timed out waiting for writes"), {
       outcome: "ambiguous",
       provider: "instagram",
@@ -66,10 +76,10 @@ describe("automation diagnostic classification", () => {
     });
     const properties = diagnosticProperties(report, payloadContext);
     expect(JSON.stringify(properties)).not.toContain("timed out waiting");
-    expect(payloadViolation(properties)).toBeUndefined();
+    expect(payloadViolation(properties)).toEqual(undefined);
   });
 
-  it("reports a scheduled unit failure as a scheduled-job class", () => {
+  it("reports a scheduled unit failure as scheduled_job_failure without leaking message or unit", () => {
     const report = scheduledDiagnosticReport(new TypeError("maintenance boom"), "retention");
 
     expect(report).toMatchObject({
@@ -80,6 +90,6 @@ describe("automation diagnostic classification", () => {
     const properties = diagnosticProperties(report, payloadContext);
     expect(JSON.stringify(properties)).not.toContain("maintenance boom");
     expect(JSON.stringify(properties)).not.toContain("retention");
-    expect(payloadViolation(properties)).toBeUndefined();
+    expect(payloadViolation(properties)).toEqual(undefined);
   });
 });

@@ -26,6 +26,7 @@ import {
 import { classifyProviderFailure, failureDiagnostic, ProviderAdapterError } from "../src/failures";
 import { unknownResult } from "../src/results";
 import type { ProviderAdapter, ProviderRequestContext } from "../src/types";
+import { failureOf, refused } from "./support";
 
 const newContext = (patch: Partial<ProviderRequestContext> = {}): ProviderRequestContext => ({
   operationId: "operation-1",
@@ -53,8 +54,8 @@ const fail = (status: number, retryAfterSeconds?: number) =>
 const errorOf = <A>(effect: Effect.Effect<A, ProviderAdapterError>) =>
   Effect.runPromise(Effect.flip(effect));
 
-const codeOf = async <A>(effect: Effect.Effect<A, ProviderAdapterError>) =>
-  (await errorOf(effect)).failure.code;
+const failedWith = <A>(effect: Effect.Effect<A, ProviderAdapterError>) =>
+  failureOf(Effect.runPromise(effect));
 
 function untilAborted(signal: AbortSignal | undefined, started: () => void): Promise<never> {
   return new Promise((_resolve, reject) => {
@@ -274,16 +275,19 @@ describe("provider operation effects", () => {
 
   it.each(direct)("%s calls the adapter once", async (name, run) => {
     const { full, calls } = recording();
+    const { args } = operations.find((candidate) => candidate.name === name)!;
 
     await Effect.runPromise(run(full));
 
-    expect(calls.map(([method]) => method)).toEqual([name]);
+    expect(calls).toEqual([[name, ...args]]);
   });
 
   it.each(direct)("%s without an adapter method", async (name, run) => {
     const operation = operations.find((candidate) => candidate.name === name)!;
 
-    expect(await codeOf(run(adapter()))).toEqual(`provider_unsupported_${operation.label}`);
+    expect(await failedWith(run(adapter()))).toEqual(
+      refused(`provider_unsupported_${operation.label}`),
+    );
   });
 
   it("an unknown publish outcome stays on the success channel", async () => {
@@ -320,13 +324,15 @@ describe("ProviderService", () => {
   });
 
   it.each(operations)("$name without an adapter method", async (operation) => {
-    expect(await codeOf(onService(operation, adapter()))).toEqual(
-      `provider_unsupported_${operation.label}`,
+    expect(await failedWith(onService(operation, adapter()))).toEqual(
+      refused(`provider_unsupported_${operation.label}`),
     );
   });
 
   it("an unconfigured platform", async () => {
-    expect(await codeOf(onService(operations[9]!, undefined))).toEqual("provider_not_configured");
+    expect(await failedWith(onService(operations[9]!, undefined))).toEqual(
+      refused("provider_not_configured"),
+    );
   });
 
   it.each(operations)("$name interrupted aborts its only call", async (operation) => {

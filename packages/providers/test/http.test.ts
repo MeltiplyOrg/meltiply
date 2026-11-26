@@ -389,6 +389,7 @@ describe("ProviderHttpClient", () => {
         "a declared length over the maximum",
         Response.json({}, { headers: { "Content-Length": "999999" } }),
       ],
+      ["one streamed chunk over the maximum", chunked('{"a":"xxxxxxxxxxxx"}')],
       ["streamed chunks over the maximum", chunked('{"a":"', "x".repeat(20), '"}')],
     ])("%s", async (_example, response) => {
       const { client } = setup(answering(response), { maximumResponseBytes: 16 });

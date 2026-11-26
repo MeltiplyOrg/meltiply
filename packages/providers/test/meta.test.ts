@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import { ProviderHttpClient } from "../src/http";
 import {
@@ -58,6 +58,11 @@ const parsedComment = {
   providerPostId: "p1",
 };
 const mapping = { usernameField: "username" };
+
+beforeAll(async () => {
+  const { http } = setup(json({ id: "9" }));
+  await readMetaContainer(http, protocol, context, "token", "9");
+});
 
 describe("containerOperationId", () => {
   it("a phase and an ID", () => {

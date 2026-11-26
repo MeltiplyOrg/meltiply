@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import { ProviderHttpClient } from "../src/http";
 import {
@@ -30,6 +30,10 @@ function setup() {
   });
   return { http, requests };
 }
+
+beforeAll(async () => {
+  await postForm(setup().http, context, "https://api.test/token", {});
+});
 
 describe("addSeconds", () => {
   it.each([

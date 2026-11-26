@@ -42,48 +42,88 @@ async function canonicalMiddleware(frontendUrl: string): Promise<Middleware> {
   return middleware;
 }
 
+function invoke(
+  middleware: Middleware,
+  request: { headers: Record<string, string | undefined>; url?: string },
+) {
+  let ended = false;
+  let nextCalled = false;
+  let head: { headers: Record<string, string>; status: number } | undefined;
+  middleware(
+    request,
+    {
+      end: () => {
+        ended = true;
+      },
+      writeHead: (status, headers) => {
+        head = { headers, status };
+      },
+    },
+    () => {
+      nextCalled = true;
+    },
+  );
+  return { ended, head, nextCalled };
+}
+
 afterEach(() => vi.unstubAllEnvs());
 
-describe("Vite frontend configuration", () => {
-  it("redirects alternate HTML navigations without redirecting canonical or asset requests", async () => {
+describe("canonical frontend origin middleware", () => {
+  it("308: redirects alternate-host HTML navigation to the canonical origin", async () => {
     const middleware = await canonicalMiddleware("http://dashboard.example.test:3000");
-    const response = { end: vi.fn(), writeHead: vi.fn() };
-    const next = vi.fn();
 
-    middleware(
-      { headers: { accept: "text/html", host: "100.64.0.1:3000" }, url: "/dashboard?tab=activity" },
-      response,
-      next,
-    );
-    expect(response.writeHead).toHaveBeenCalledWith(308, {
-      Location: "http://dashboard.example.test:3000/dashboard?tab=activity",
+    expect(
+      invoke(middleware, {
+        headers: { accept: "text/html", host: "100.64.0.1:3000" },
+        url: "/dashboard?tab=activity",
+      }),
+    ).toEqual({
+      ended: true,
+      head: {
+        headers: { Location: "http://dashboard.example.test:3000/dashboard?tab=activity" },
+        status: 308,
+      },
+      nextCalled: false,
     });
-    expect(response.end).toHaveBeenCalledOnce();
-    expect(next).not.toHaveBeenCalled();
+  });
 
-    middleware(
-      { headers: { accept: "text/html", host: "dashboard.example.test:3000" }, url: "/dashboard" },
-      response,
-      next,
-    );
-    middleware(
-      {
+  it("308: neutralizes a protocol-relative path to root", async () => {
+    const middleware = await canonicalMiddleware("http://dashboard.example.test:3000");
+
+    expect(
+      invoke(middleware, {
+        headers: { accept: "text/html", host: "100.64.0.1:3000" },
+        url: "//evil.test/phish",
+      }),
+    ).toEqual({
+      ended: true,
+      head: {
+        headers: { Location: "http://dashboard.example.test:3000/" },
+        status: 308,
+      },
+      nextCalled: false,
+    });
+  });
+
+  it("passes through requests already on the canonical host", async () => {
+    const middleware = await canonicalMiddleware("http://dashboard.example.test:3000");
+
+    expect(
+      invoke(middleware, {
+        headers: { accept: "text/html", host: "dashboard.example.test:3000" },
+        url: "/dashboard",
+      }),
+    ).toEqual({ ended: false, head: undefined, nextCalled: true });
+  });
+
+  it("passes through non-HTML asset requests on an alternate host", async () => {
+    const middleware = await canonicalMiddleware("http://dashboard.example.test:3000");
+
+    expect(
+      invoke(middleware, {
         headers: { accept: "application/javascript", host: "100.64.0.1:3000" },
         url: "/src/main.tsx",
-      },
-      response,
-      next,
-    );
-    expect(next).toHaveBeenCalledTimes(2);
-
-    const openRedirectResponse = { end: vi.fn(), writeHead: vi.fn() };
-    middleware(
-      { headers: { accept: "text/html", host: "100.64.0.1:3000" }, url: "//evil.test/phish" },
-      openRedirectResponse,
-      next,
-    );
-    expect(openRedirectResponse.writeHead).toHaveBeenCalledWith(308, {
-      Location: "http://dashboard.example.test:3000/",
-    });
+      }),
+    ).toEqual({ ended: false, head: undefined, nextCalled: true });
   });
 });

@@ -2,11 +2,39 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import worker from "./worker";
 
-const environment = {
-  ASSETS: { fetch: vi.fn() },
-  ENVIRONMENT: "test",
-  VERSION: "test-version",
-};
+class FakeBinding {
+  readonly requests: Request[] = [];
+
+  constructor(private readonly respond: (request: Request) => Promise<Response>) {}
+
+  fetch = (request: Request): Promise<Response> => {
+    this.requests.push(request);
+    return this.respond(request);
+  };
+}
+
+function setup(
+  options: {
+    api?: FakeBinding;
+    apiOrigin?: string;
+    assets?: FakeBinding;
+  } = {},
+) {
+  const assets = options.assets ?? new FakeBinding(async () => new Response("asset-ok"));
+  const env = {
+    ...(options.api ? { API: options.api } : {}),
+    ...(options.apiOrigin ? { API_ORIGIN: options.apiOrigin } : {}),
+    ASSETS: assets,
+    ENVIRONMENT: "test",
+    VERSION: "test-version",
+  };
+  const errors: unknown[] = [];
+  vi.spyOn(console, "error").mockImplementation((line: unknown) => {
+    errors.push(JSON.parse(String(line)));
+  });
+  vi.spyOn(console, "debug").mockImplementation(() => undefined);
+  return { assets, env, errors };
+}
 
 function telemetryRequest(body: unknown, headers: Record<string, string> = {}) {
   return new Request("https://frontend.test/__frontend-telemetry", {
@@ -25,404 +53,395 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("frontend Worker telemetry boundary", () => {
-  it("logs one structured, server-correlated event and returns 204", async () => {
-    const logger = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null)));
+describe("frontend Worker", () => {
+  describe("GET /health", () => {
+    it("200: returns service health JSON", async () => {
+      const { assets, env } = setup();
 
-    const response = await worker.fetch(
-      telemetryRequest({
-        code: "provider/internal",
-        configurationKey: "APP_URL",
-        configurationSource: "vite_public_env",
-        configurationState: "invalid",
-        diagnosticCode: "api_base_url_invalid",
-        field: "query-cache",
-        kind: "frontend-error",
-        message: "raw exception detail",
-        retryable: true,
-        stack: "Error: raw stack",
-        status: 503,
-        valueHash: "0123456789abcdef",
-        valueType: "Error",
-      }),
-      environment,
-    );
+      const response = await worker.fetch(new Request("https://frontend.test/health"), env);
 
-    expect(response.status).toBe(204);
-    expect(logger).toHaveBeenCalledTimes(1);
-    const event: unknown = JSON.parse(logger.mock.calls[0]?.[0] as string);
-    expect(event).toMatchObject({
-      context: expect.objectContaining({
-        configuration_key: "APP_URL",
-        configuration_source: "vite_public_env",
-        configuration_state: "invalid",
-        diagnostic_code: "api_base_url_invalid",
-        error_code: "provider_internal",
-        event: "frontend_client_error",
-        field: "query-cache",
-        hash: "0123456789abcdef",
-        outcome: "error",
-        retry_class: "client_retry",
-        status: 503,
-        type: "Error",
-      }),
-      environment: "test",
-      service: "frontend",
-      trace_id: expect.any(String),
-      version: "test-version",
+      expect(response.status).toEqual(200);
+      expect(await response.json()).toEqual({ service: "meltiply-frontend", status: "ok" });
+      expect(assets.requests).toEqual([]);
     });
-    expect(JSON.stringify(event)).not.toContain("raw exception detail");
-    expect(JSON.stringify(event)).not.toContain("raw stack");
   });
 
-  it.each([
-    [
-      "unsafe configuration key",
-      telemetryRequest({
-        configurationKey: "better_auth_secret_value",
-        kind: "frontend-error",
-      }),
-      400,
-    ],
-    [
-      "wrong method",
-      new Request("https://frontend.test/__frontend-telemetry", { method: "GET" }),
-      405,
-    ],
-    [
-      "cross origin",
-      telemetryRequest({ kind: "frontend-error" }, { Origin: "https://attacker.test" }),
-      403,
-    ],
-    [
-      "wrong content type",
-      new Request("https://frontend.test/__frontend-telemetry", {
-        body: "{}",
-        headers: { Origin: "https://frontend.test", "Content-Type": "text/plain" },
-        method: "POST",
-      }),
-      400,
-    ],
-    [
-      "oversized body",
-      telemetryRequest({ kind: "frontend-error", message: "x".repeat(5000) }),
-      413,
-    ],
-  ])("rejects %s without logging", async (_label, request, status) => {
-    const logger = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const response = await worker.fetch(request, environment);
+  describe("POST /__frontend-telemetry", () => {
+    it("204: logs one structured sanitized event without raw exception detail", async () => {
+      const { env, errors } = setup();
 
-    expect(response.status).toBe(status);
-    expect(logger).not.toHaveBeenCalled();
-  });
-
-  it("returns generic copy and emits one safe event when assets fail", async () => {
-    const logger = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const assets = { fetch: vi.fn().mockRejectedValue(new Error("private asset failure")) };
-
-    const response = await worker.fetch(new Request("https://frontend.test/assets/app.js"), {
-      ...environment,
-      ASSETS: assets,
-    });
-
-    expect(response.status).toBe(500);
-    await expect(response.text()).resolves.toBe("An error has occurred.");
-    expect(logger).toHaveBeenCalledTimes(1);
-    const event: unknown = JSON.parse(logger.mock.calls[0]?.[0] as string);
-    expect(event).toMatchObject({
-      context: expect.objectContaining({
-        error_code: "asset_fetch_failed",
-        event: "frontend_asset_fetch",
-        outcome: "error",
-        retry_class: "none",
-      }),
-    });
-    expect(JSON.stringify(event)).not.toContain("private asset failure");
-  });
-});
-
-describe("frontend Worker API proxy", () => {
-  it("forwards /api/* requests to the API service binding unchanged", async () => {
-    const api = {
-      fetch: vi.fn().mockResolvedValue(new Response("{}", { status: 200 })),
-    };
-    const request = new Request("https://frontend.test/api/v1/users/me", {
-      headers: { Authorization: "Bearer test.jwt.token" },
-    });
-
-    const response = await worker.fetch(request, { ...environment, API: api });
-
-    expect(response.status).toBe(200);
-    expect(api.fetch).toHaveBeenCalledTimes(1);
-    const forwarded = api.fetch.mock.calls[0]?.[0] as Request;
-    expect(forwarded.url).toBe("https://frontend.test/api/v1/users/me");
-    expect(forwarded.headers.get("Authorization")).toBe("Bearer test.jwt.token");
-    expect(forwarded.redirect).toBe("manual");
-  });
-
-  it("strips Better Auth session cookies from /api/v1 proxy requests", async () => {
-    const api = {
-      fetch: vi.fn().mockResolvedValue(new Response("{}", { status: 200 })),
-    };
-    const request = new Request("https://frontend.test/api/v1/users/me", {
-      headers: {
-        Cookie:
-          "better-auth.session_token=secret; __Secure-better-auth.session_token=secure; cf_clearance=access; better-auth.session_token_extra=kept",
-      },
-    });
-
-    await worker.fetch(request, { ...environment, API: api });
-
-    const forwarded = api.fetch.mock.calls[0]?.[0] as Request;
-    expect(forwarded.headers.get("Cookie")).toBe(
-      "cf_clearance=access; better-auth.session_token_extra=kept",
-    );
-  });
-
-  it("drops the Cookie header when only Better Auth cookies are present on /api/v1", async () => {
-    const api = {
-      fetch: vi.fn().mockResolvedValue(new Response("{}", { status: 200 })),
-    };
-    const request = new Request("https://frontend.test/api/v1/users/me", {
-      headers: { Cookie: "better-auth.session_token=secret" },
-    });
-
-    await worker.fetch(request, { ...environment, API: api });
-
-    const forwarded = api.fetch.mock.calls[0]?.[0] as Request;
-    expect(forwarded.headers.get("Cookie")).toBeNull();
-  });
-
-  it("forwards cookies unchanged for /api/auth requests", async () => {
-    const upstream = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
-    vi.stubGlobal("fetch", upstream);
-
-    await worker.fetch(
-      new Request("https://frontend.test/api/auth/get-session", {
-        headers: { Cookie: "better-auth.session_token=secret" },
-      }),
-      { ...environment, API_ORIGIN: "http://127.0.0.1:8787" },
-    );
-
-    const forwarded = upstream.mock.calls[0]?.[0] as Request;
-    expect(forwarded.headers.get("Cookie")).toBe("better-auth.session_token=secret");
-  });
-
-  it("prefers a local API origin over a bound service in built previews", async () => {
-    const upstream = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
-    vi.stubGlobal("fetch", upstream);
-    const api = { fetch: vi.fn() };
-
-    const response = await worker.fetch(new Request("https://frontend.test/api/auth/get-session"), {
-      ...environment,
-      API: api,
-      API_ORIGIN: "http://127.0.0.1:8787",
-    });
-
-    expect(response.status).toBe(200);
-    expect(upstream).toHaveBeenCalledTimes(1);
-    expect(api.fetch).not.toHaveBeenCalled();
-  });
-
-  it("rewrites /api/* onto API_ORIGIN when no service binding exists", async () => {
-    const upstream = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
-    vi.stubGlobal("fetch", upstream);
-
-    const response = await worker.fetch(
-      new Request("https://frontend.test/api/auth/get-session?x=1"),
-      { ...environment, API_ORIGIN: "http://127.0.0.1:8787" },
-    );
-
-    expect(response.status).toBe(200);
-    const forwarded = upstream.mock.calls[0]?.[0] as Request;
-    expect(forwarded.url).toBe("http://127.0.0.1:8787/api/auth/get-session?x=1");
-  });
-
-  it("returns 502 and logs a safe event when the API upstream fails", async () => {
-    const logger = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const api = {
-      fetch: vi.fn().mockRejectedValue(new Error("binding exploded")),
-    };
-
-    const response = await worker.fetch(new Request("https://frontend.test/api/v1/plan"), {
-      ...environment,
-      API: api,
-    });
-
-    expect(response.status).toBe(502);
-    await expect(response.text()).resolves.toBe("The API is unavailable.");
-    expect(logger).toHaveBeenCalledTimes(1);
-    const event: unknown = JSON.parse(logger.mock.calls[0]?.[0] as string);
-    expect(event).toMatchObject({
-      context: expect.objectContaining({
-        error_code: "api_proxy_failed",
-        event: "frontend_api_proxy",
-        outcome: "error",
-        retry_class: "client_retry",
-      }),
-    });
-    expect(JSON.stringify(event)).not.toContain("binding exploded");
-  });
-
-  it("does not route non-API paths to the API binding", async () => {
-    const api = { fetch: vi.fn() };
-    const assets = { fetch: vi.fn().mockResolvedValue(new Response("ok")) };
-
-    await worker.fetch(new Request("https://frontend.test/apiary"), {
-      ...environment,
-      API: api,
-      ASSETS: assets,
-    });
-
-    expect(api.fetch).not.toHaveBeenCalled();
-    expect(assets.fetch).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("frontend Worker diagnostic relay", () => {
-  it("forwards an authenticated client exception to the consent-gated route", async () => {
-    const logger = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.spyOn(console, "debug").mockImplementation(() => undefined);
-    const api = {
-      fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })),
-    };
-
-    const response = await worker.fetch(
-      telemetryRequest(
-        {
-          field: "react-render",
+      const response = await worker.fetch(
+        telemetryRequest({
+          code: "provider/internal",
+          configurationKey: "APP_URL",
+          configurationSource: "vite_public_env",
+          configurationState: "invalid",
+          diagnosticCode: "api_base_url_invalid",
+          field: "query-cache",
           kind: "frontend-error",
-          stack: "    at Composer (src/components/composer/composer.tsx:42:7)",
-          valueType: "TypeError",
-        },
-        { Authorization: "Bearer session-jwt" },
-      ),
-      { ...environment, API: api },
-    );
-
-    expect(response.status).toBe(204);
-    expect(logger).toHaveBeenCalledTimes(1);
-    expect(api.fetch).toHaveBeenCalledTimes(1);
-    const relayed = api.fetch.mock.calls[0]?.[0] as Request;
-    expect(new URL(relayed.url).pathname).toBe("/api/v1/installation/reporting/diagnostics");
-    expect(relayed.headers.get("Authorization")).toBe("Bearer session-jwt");
-    expect(JSON.parse(await relayed.text())).toEqual({
-      category: "client_exception",
-      error_name: "TypeError",
-      error_stack: "    at Composer (src/components/composer/composer.tsx:42:7)",
-      operation: "other",
-    });
-  });
-
-  it.each(["constructor", "__proto__"])(
-    "relays the inherited field name %s with the fallback operation",
-    async (field) => {
-      vi.spyOn(console, "error").mockImplementation(() => undefined);
-      vi.spyOn(console, "debug").mockImplementation(() => undefined);
-      const api = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })) };
-
-      await worker.fetch(
-        telemetryRequest(
-          { field, kind: "frontend-error", valueType: "TypeError" },
-          { Authorization: "Bearer session-jwt" },
-        ),
-        { ...environment, API: api },
+          message: "raw exception detail",
+          retryable: true,
+          stack: "Error: raw stack",
+          status: 503,
+          valueHash: "0123456789abcdef",
+          valueType: "Error",
+        }),
+        env,
       );
 
-      const relayed = api.fetch.mock.calls[0]?.[0] as Request;
-      expect(JSON.parse(await relayed.text())).toMatchObject({ operation: "other" });
-    },
-  );
-
-  it("forwards nothing without a bearer, so pre-sign-in failures stay local", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const api = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })) };
-
-    const response = await worker.fetch(
-      telemetryRequest({ field: "window-error", kind: "frontend-error", valueType: "Error" }),
-      { ...environment, API: api },
-    );
-
-    expect(response.status).toBe(204);
-    expect(api.fetch).not.toHaveBeenCalled();
-  });
-
-  it("forwards nothing for an API error the API Worker already reported itself", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const api = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })) };
-
-    const response = await worker.fetch(
-      telemetryRequest(
-        { code: "internal_error", kind: "api-error", status: 500 },
-        { Authorization: "Bearer session-jwt" },
-      ),
-      { ...environment, API: api },
-    );
-
-    expect(response.status).toBe(204);
-    expect(api.fetch).not.toHaveBeenCalled();
-  });
-
-  it("forwards nothing for a client exception tagged as an API error", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const api = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })) };
-
-    const response = await worker.fetch(
-      telemetryRequest(
-        { field: "api-error", kind: "frontend-error", valueType: "ApiError" },
-        { Authorization: "Bearer session-jwt" },
-      ),
-      { ...environment, API: api },
-    );
-
-    expect(response.status).toBe(204);
-    expect(api.fetch).not.toHaveBeenCalled();
-  });
-
-  it("never lets a relay failure change the local telemetry outcome", async () => {
-    const logger = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.spyOn(console, "debug").mockImplementation(() => undefined);
-    const api = { fetch: vi.fn().mockRejectedValue(new Error("api unreachable")) };
-
-    const response = await worker.fetch(
-      telemetryRequest(
-        { field: "window-error", kind: "frontend-error", valueType: "Error" },
-        { Authorization: "Bearer session-jwt" },
-      ),
-      { ...environment, API: api },
-    );
-
-    expect(response.status).toBe(204);
-    expect(logger).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects a malformed or cross-origin telemetry request before any relay", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const api = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 202 })) };
-
-    const crossOrigin = await worker.fetch(
-      new Request("https://frontend.test/__frontend-telemetry", {
-        body: JSON.stringify({ kind: "frontend-error" }),
-        headers: {
-          Authorization: "Bearer session-jwt",
-          "Content-Type": "application/json",
-          Origin: "https://evil.test",
+      expect(response.status).toEqual(204);
+      expect(errors).toEqual([
+        {
+          context: {
+            configuration_key: "APP_URL",
+            configuration_source: "vite_public_env",
+            configuration_state: "invalid",
+            diagnostic_code: "api_base_url_invalid",
+            error_code: "provider_internal",
+            event: "frontend_client_error",
+            field: "query-cache",
+            hash: "0123456789abcdef",
+            outcome: "error",
+            retry_class: "client_retry",
+            status: 503,
+            type: "Error",
+          },
+          environment: "test",
+          level: "error",
+          message: "frontend client error",
+          request_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+          service: "frontend",
+          timestamp: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+          trace_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+          version: "test-version",
         },
-        method: "POST",
-      }),
-      { ...environment, API: api },
-    );
-    expect(crossOrigin.status).toBe(403);
+      ]);
+      expect(JSON.stringify(errors)).not.toContain("raw exception detail");
+      expect(JSON.stringify(errors)).not.toContain("raw stack");
+    });
 
-    const malformed = await worker.fetch(
-      telemetryRequest(
-        { kind: "frontend-error", stack: "x".repeat(2_000) },
-        { Authorization: "Bearer session-jwt" },
-      ),
-      { ...environment, API: api },
+    it.each([
+      [
+        "400: unsafe configuration key",
+        telemetryRequest({ configurationKey: "better_auth_secret_value", kind: "frontend-error" }),
+        400,
+      ],
+      [
+        "405: wrong method",
+        new Request("https://frontend.test/__frontend-telemetry", { method: "GET" }),
+        405,
+      ],
+      [
+        "403: cross-origin request",
+        telemetryRequest({ kind: "frontend-error" }, { Origin: "https://attacker.test" }),
+        403,
+      ],
+      [
+        "400: wrong content type",
+        new Request("https://frontend.test/__frontend-telemetry", {
+          body: "{}",
+          headers: { "Content-Type": "text/plain", Origin: "https://frontend.test" },
+          method: "POST",
+        }),
+        400,
+      ],
+      [
+        "413: oversized body",
+        telemetryRequest({ kind: "frontend-error", message: "x".repeat(5000) }),
+        413,
+      ],
+      [
+        "400: oversized stack",
+        telemetryRequest(
+          { kind: "frontend-error", stack: "x".repeat(2_000) },
+          { Authorization: "Bearer session-jwt" },
+        ),
+        400,
+      ],
+    ])("%s", async (_example, request, status) => {
+      const api = new FakeBinding(async () => new Response(null, { status: 202 }));
+      const { env, errors } = setup({ api });
+
+      const response = await worker.fetch(request, env);
+
+      expect(response.status).toEqual(status);
+      expect(errors).toEqual([]);
+      expect(api.requests).toEqual([]);
+    });
+
+    it("204: relays an authenticated client exception to diagnostics", async () => {
+      const api = new FakeBinding(async () => new Response(null, { status: 202 }));
+      const { env, errors } = setup({ api });
+      const pending: Promise<unknown>[] = [];
+
+      const response = await worker.fetch(
+        telemetryRequest(
+          {
+            field: "react-render",
+            kind: "frontend-error",
+            stack: "    at Composer (src/components/composer/composer.tsx:42:7)",
+            valueType: "TypeError",
+          },
+          { Authorization: "Bearer session-jwt" },
+        ),
+        env,
+        { waitUntil: (promise) => pending.push(promise) },
+      );
+      await Promise.all(pending);
+
+      expect(response.status).toEqual(204);
+      expect(errors).toHaveLength(1);
+      expect(api.requests).toHaveLength(1);
+      expect({
+        authorization: api.requests[0]!.headers.get("Authorization"),
+        body: JSON.parse(await api.requests[0]!.text()),
+        pathname: new URL(api.requests[0]!.url).pathname,
+      }).toEqual({
+        authorization: "Bearer session-jwt",
+        body: {
+          category: "client_exception",
+          error_name: "TypeError",
+          error_stack: "    at Composer (src/components/composer/composer.tsx:42:7)",
+          operation: "other",
+        },
+        pathname: "/api/v1/installation/reporting/diagnostics",
+      });
+    });
+
+    it.each(["constructor", "__proto__"])(
+      "204: maps inherited field %s to the fallback operation",
+      async (field) => {
+        const api = new FakeBinding(async () => new Response(null, { status: 202 }));
+        const { env } = setup({ api });
+        const pending: Promise<unknown>[] = [];
+
+        await worker.fetch(
+          telemetryRequest(
+            { field, kind: "frontend-error", valueType: "TypeError" },
+            { Authorization: "Bearer session-jwt" },
+          ),
+          env,
+          { waitUntil: (promise) => pending.push(promise) },
+        );
+        await Promise.all(pending);
+
+        expect(JSON.parse(await api.requests[0]!.text())).toEqual({
+          category: "client_exception",
+          error_name: "TypeError",
+          operation: "other",
+        });
+      },
     );
-    expect(malformed.status).toBe(400);
-    expect(api.fetch).not.toHaveBeenCalled();
+
+    it.each([
+      [
+        "no bearer token",
+        telemetryRequest({ field: "window-error", kind: "frontend-error", valueType: "Error" }),
+      ],
+      [
+        "an api-error kind",
+        telemetryRequest(
+          { code: "internal_error", kind: "api-error", status: 500 },
+          { Authorization: "Bearer session-jwt" },
+        ),
+      ],
+      [
+        "a client exception tagged api-error",
+        telemetryRequest(
+          { field: "api-error", kind: "frontend-error", valueType: "ApiError" },
+          { Authorization: "Bearer session-jwt" },
+        ),
+      ],
+    ])("204: relays nothing for %s", async (_example, request) => {
+      const api = new FakeBinding(async () => new Response(null, { status: 202 }));
+      const { env } = setup({ api });
+
+      const response = await worker.fetch(request, env);
+
+      expect(response.status).toEqual(204);
+      expect(api.requests).toEqual([]);
+    });
+
+    it("204: tolerates a failing diagnostic relay", async () => {
+      const api = new FakeBinding(async () => {
+        throw new Error("api unreachable");
+      });
+      const { env, errors } = setup({ api });
+      const pending: Promise<unknown>[] = [];
+
+      const response = await worker.fetch(
+        telemetryRequest(
+          { field: "window-error", kind: "frontend-error", valueType: "Error" },
+          { Authorization: "Bearer session-jwt" },
+        ),
+        env,
+        { waitUntil: (promise) => pending.push(promise) },
+      );
+      await Promise.all(pending);
+
+      expect(response.status).toEqual(204);
+      expect(errors).toHaveLength(1);
+    });
+  });
+
+  describe("API proxy", () => {
+    it("200: forwards /api/v1 requests to the API binding with manual redirect", async () => {
+      const api = new FakeBinding(async () => new Response("{}", { status: 200 }));
+      const { env } = setup({ api });
+
+      const response = await worker.fetch(
+        new Request("https://frontend.test/api/v1/users/me", {
+          headers: { Authorization: "Bearer test.jwt.token" },
+        }),
+        env,
+      );
+
+      expect(response.status).toEqual(200);
+      expect(api.requests).toHaveLength(1);
+      expect({
+        authorization: api.requests[0]!.headers.get("Authorization"),
+        redirect: api.requests[0]!.redirect,
+        url: api.requests[0]!.url,
+      }).toEqual({
+        authorization: "Bearer test.jwt.token",
+        redirect: "manual",
+        url: "https://frontend.test/api/v1/users/me",
+      });
+    });
+
+    it("200: strips Better Auth session cookies from /api/v1 requests while keeping other cookies", async () => {
+      const api = new FakeBinding(async () => new Response("{}", { status: 200 }));
+      const { env } = setup({ api });
+
+      await worker.fetch(
+        new Request("https://frontend.test/api/v1/users/me", {
+          headers: {
+            Cookie:
+              "better-auth.session_token=secret; __Secure-better-auth.session_token=secure; cf_clearance=access; better-auth.session_token_extra=kept",
+          },
+        }),
+        env,
+      );
+
+      expect(api.requests[0]!.headers.get("Cookie")).toEqual(
+        "cf_clearance=access; better-auth.session_token_extra=kept",
+      );
+    });
+
+    it("200: drops the Cookie header when only Better Auth session cookies are present on /api/v1", async () => {
+      const api = new FakeBinding(async () => new Response("{}", { status: 200 }));
+      const { env } = setup({ api });
+
+      await worker.fetch(
+        new Request("https://frontend.test/api/v1/users/me", {
+          headers: { Cookie: "better-auth.session_token=secret" },
+        }),
+        env,
+      );
+
+      expect(api.requests[0]!.headers.get("Cookie")).toEqual(null);
+    });
+
+    it("200: forwards cookies unchanged for /api/auth onto API_ORIGIN, preferring it over API binding", async () => {
+      const upstream: Request[] = [];
+      vi.stubGlobal("fetch", async (request: Request) => {
+        upstream.push(request);
+        return new Response("{}", { status: 200 });
+      });
+      const api = new FakeBinding(async () => new Response("{}", { status: 200 }));
+      const { env } = setup({ api, apiOrigin: "http://127.0.0.1:8787" });
+
+      const response = await worker.fetch(
+        new Request("https://frontend.test/api/auth/get-session?x=1", {
+          headers: { Cookie: "better-auth.session_token=secret" },
+        }),
+        env,
+      );
+
+      expect(response.status).toEqual(200);
+      expect(api.requests).toEqual([]);
+      expect({
+        cookie: upstream[0]!.headers.get("Cookie"),
+        url: upstream[0]!.url,
+      }).toEqual({
+        cookie: "better-auth.session_token=secret",
+        url: "http://127.0.0.1:8787/api/auth/get-session?x=1",
+      });
+    });
+
+    it("502: logs a safe event when the API upstream fails", async () => {
+      const api = new FakeBinding(async () => {
+        throw new Error("binding exploded");
+      });
+      const { env, errors } = setup({ api });
+
+      const response = await worker.fetch(new Request("https://frontend.test/api/v1/plan"), env);
+
+      expect(response.status).toEqual(502);
+      expect(await response.text()).toEqual("The API is unavailable.");
+      expect(errors).toEqual([
+        {
+          context: {
+            error_code: "api_proxy_failed",
+            event: "frontend_api_proxy",
+            outcome: "error",
+            retry_class: "client_retry",
+          },
+          environment: "test",
+          level: "error",
+          message: "frontend api proxy",
+          request_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+          service: "frontend",
+          timestamp: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+          trace_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+          version: "test-version",
+        },
+      ]);
+      expect(JSON.stringify(errors)).not.toContain("binding exploded");
+    });
+
+    it("200: routes non-API paths like /apiary to ASSETS", async () => {
+      const api = new FakeBinding(async () => new Response("{}", { status: 200 }));
+      const { assets, env } = setup({ api });
+
+      const response = await worker.fetch(new Request("https://frontend.test/apiary"), env);
+
+      expect(response.status).toEqual(200);
+      expect(api.requests).toEqual([]);
+      expect(assets.requests).toHaveLength(1);
+    });
+  });
+
+  describe("asset fallback", () => {
+    it("500: returns generic copy and logs one safe event when assets fail", async () => {
+      const assets = new FakeBinding(async () => {
+        throw new Error("private asset failure");
+      });
+      const { env, errors } = setup({ assets });
+
+      const response = await worker.fetch(new Request("https://frontend.test/assets/app.js"), env);
+
+      expect(response.status).toEqual(500);
+      expect(await response.text()).toEqual("An error has occurred.");
+      expect(errors).toEqual([
+        {
+          context: {
+            error_code: "asset_fetch_failed",
+            event: "frontend_asset_fetch",
+            outcome: "error",
+            retry_class: "none",
+          },
+          environment: "test",
+          level: "error",
+          message: "frontend asset fetch",
+          request_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+          service: "frontend",
+          timestamp: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+          trace_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+          version: "test-version",
+        },
+      ]);
+      expect(JSON.stringify(errors)).not.toContain("private asset failure");
+    });
   });
 });

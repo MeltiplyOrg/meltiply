@@ -95,6 +95,7 @@ export interface UploadAssetFileOptions {
   onSessionStart?: (assetId: string) => void;
   onStatusChange?: (status: AssetUploadStatus) => void;
   resumeSessionId?: string;
+  retryBaseDelayMs?: number;
   storage?: Storage | null;
   workspaceId: string | null;
 }
@@ -394,6 +395,7 @@ class BrowserAssetUploadTask implements AssetUploadTask {
   readonly #onSessionStart: (assetId: string) => void;
   readonly #onStatusChange: (status: AssetUploadStatus) => void;
   readonly #resumeSessionId?: string;
+  readonly #retryBaseDelayMs: number;
   readonly #providedStorage: Storage | null | undefined;
   readonly #workspaceId: string | null;
   readonly #brandProfileId: string;
@@ -411,6 +413,7 @@ class BrowserAssetUploadTask implements AssetUploadTask {
     this.#onStatusChange = options.onStatusChange ?? (() => undefined);
     this.#onSessionStart = options.onSessionStart ?? (() => undefined);
     this.#resumeSessionId = options.resumeSessionId;
+    this.#retryBaseDelayMs = options.retryBaseDelayMs ?? 250;
     this.#providedStorage = options.storage;
     this.#workspaceId = options.workspaceId;
     this.#brandProfileId = options.brandProfileId;
@@ -573,7 +576,8 @@ class BrowserAssetUploadTask implements AssetUploadTask {
               const nextAttempt = attempt + 1;
               if (nextAttempt >= maximumUploadAttempts) return Effect.failCause(exit.cause);
               onProgress(0);
-              return Effect.sleep(250 * 2 ** (nextAttempt - 1)).pipe(
+              const delay = this.#retryBaseDelayMs * 2 ** (nextAttempt - 1);
+              return (delay > 0 ? Effect.sleep(delay) : Effect.void).pipe(
                 Effect.andThen(() => this.#waitUntilRunnable(stop)),
                 Effect.andThen(() =>
                   Effect.flatMap(refreshRequest(nextAttempt), (refreshed) => {

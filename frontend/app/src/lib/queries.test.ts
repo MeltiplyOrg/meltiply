@@ -1,73 +1,73 @@
 import { QueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { describe, expect, it } from "vite-plus/test";
+
 import { ApiError } from "./api";
-import { invalidateQueryKeys, mutationInvalidations, queryKeys, runBulkDelete } from "./queries";
 import { WorkspaceService } from "./effect";
+import { invalidateQueryKeys, mutationInvalidations, queryKeys, runBulkDelete } from "./queries";
 
-describe("React Query helpers", () => {
-  it("refreshes Post, outcome, calendar, and attachment caches on every Post write", async () => {
+describe("invalidateQueryKeys", () => {
+  it.each([
+    ["createPost", mutationInvalidations.createPost],
+    ["updatePost", mutationInvalidations.updatePost],
+    ["deletePost", mutationInvalidations.deletePost],
+    ["schedulePost", mutationInvalidations.schedulePost],
+  ])("%s invalidates Post, distribution, calendar, and asset caches", async (_name, keys) => {
     const queryClient = new QueryClient();
+    queryClient.setQueryData(queryKeys.posts(), []);
+    queryClient.setQueryData(queryKeys.post("post-1"), { id: "post-1" });
+    queryClient.setQueryData(queryKeys.distributions(), []);
+    queryClient.setQueryData(queryKeys.calendar(), []);
+    queryClient.setQueryData(queryKeys.asset("asset-1"), { id: "asset-1" });
 
-    for (const mutation of [
-      mutationInvalidations.createPost,
-      mutationInvalidations.updatePost,
-      mutationInvalidations.deletePost,
-      mutationInvalidations.schedulePost,
-    ]) {
-      queryClient.setQueryData(queryKeys.posts(), []);
-      queryClient.setQueryData(queryKeys.post("post-1"), { id: "post-1" });
-      queryClient.setQueryData(queryKeys.distributions(), []);
-      queryClient.setQueryData(queryKeys.calendar(), []);
-      queryClient.setQueryData(queryKeys.asset("asset-1"), { id: "asset-1" });
+    await invalidateQueryKeys(queryClient, keys());
 
-      await invalidateQueryKeys(queryClient, mutation());
-
-      expect(queryClient.getQueryState(queryKeys.posts())?.isInvalidated).toBe(true);
-      expect(queryClient.getQueryState(queryKeys.post("post-1"))?.isInvalidated).toBe(true);
-      expect(queryClient.getQueryState(queryKeys.distributions())?.isInvalidated).toBe(true);
-      expect(queryClient.getQueryState(queryKeys.calendar())?.isInvalidated).toBe(true);
-      expect(queryClient.getQueryState(queryKeys.asset("asset-1"))?.isInvalidated).toBe(true);
-    }
+    expect({
+      asset: queryClient.getQueryState(queryKeys.asset("asset-1"))?.isInvalidated,
+      calendar: queryClient.getQueryState(queryKeys.calendar())?.isInvalidated,
+      distributions: queryClient.getQueryState(queryKeys.distributions())?.isInvalidated,
+      post: queryClient.getQueryState(queryKeys.post("post-1"))?.isInvalidated,
+      posts: queryClient.getQueryState(queryKeys.posts())?.isInvalidated,
+    }).toEqual({
+      asset: true,
+      calendar: true,
+      distributions: true,
+      post: true,
+      posts: true,
+    });
   });
 
-  it("invalidates detail queries through their list prefixes", async () => {
+  it("updateDistribution invalidates detail queries through their list prefix", async () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(queryKeys.distribution("distribution-1"), { id: "distribution-1" });
 
-    expect(queryClient.getQueryState(queryKeys.distribution("distribution-1"))?.isInvalidated).toBe(
-      false,
-    );
-
     await invalidateQueryKeys(queryClient, mutationInvalidations.updateDistribution());
 
-    expect(queryClient.getQueryState(queryKeys.distribution("distribution-1"))?.isInvalidated).toBe(
-      true,
-    );
+    expect(
+      queryClient.getQueryState(queryKeys.distribution("distribution-1"))?.isInvalidated,
+    ).toEqual(true);
   });
 
-  it("refreshes the audit trail after every audited write", async () => {
-    for (const keys of [
-      mutationInvalidations.workspaceSettings(),
-      mutationInvalidations.createBrandProfile(),
-      mutationInvalidations.updateBrandProfile(),
-      mutationInvalidations.deleteBrandProfile(),
-      mutationInvalidations.disconnectPlatform("platform-1"),
-      mutationInvalidations.confirmOAuthSelection(),
-      mutationInvalidations.reportingPreferences(),
-      mutationInvalidations.reportingFeedback(),
-    ]) {
-      const queryClient = new QueryClient();
-      const auditKey = queryKeys.workspaceAudit({ limit: 25, offset: 0 });
-      queryClient.setQueryData(auditKey, { entries: [] });
+  it.each([
+    ["workspaceSettings", mutationInvalidations.workspaceSettings()],
+    ["createBrandProfile", mutationInvalidations.createBrandProfile()],
+    ["updateBrandProfile", mutationInvalidations.updateBrandProfile()],
+    ["deleteBrandProfile", mutationInvalidations.deleteBrandProfile()],
+    ["disconnectPlatform", mutationInvalidations.disconnectPlatform("platform-1")],
+    ["confirmOAuthSelection", mutationInvalidations.confirmOAuthSelection()],
+    ["reportingPreferences", mutationInvalidations.reportingPreferences()],
+    ["reportingFeedback", mutationInvalidations.reportingFeedback()],
+  ])("%s invalidates workspace audit queries", async (_name, keys) => {
+    const queryClient = new QueryClient();
+    const auditKey = queryKeys.workspaceAudit({ limit: 25, offset: 0 });
+    queryClient.setQueryData(auditKey, { entries: [] });
 
-      await invalidateQueryKeys(queryClient, keys);
+    await invalidateQueryKeys(queryClient, keys);
 
-      expect(queryClient.getQueryState(auditKey)?.isInvalidated).toBe(true);
-    }
+    expect(queryClient.getQueryState(auditKey)?.isInvalidated).toEqual(true);
   });
 
-  it("does not refetch static platform data after an account disconnect", async () => {
+  it("disconnectPlatform leaves static platform capabilities intact", async () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(queryKeys.platforms(), [{ id: "platform-1" }]);
     queryClient.setQueryData(queryKeys.platformCapabilities(), [{ platform: "youtube" }]);
@@ -77,22 +77,28 @@ describe("React Query helpers", () => {
 
     await invalidateQueryKeys(queryClient, mutationInvalidations.disconnectPlatform("platform-1"));
 
-    expect(queryClient.getQueryState(queryKeys.platforms())?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(queryKeys.platformCapabilities())?.isInvalidated).toBe(false);
-    expect(
-      queryClient.getQueryState(queryKeys.platformPublishingRequirements("platform-1"))
-        ?.isInvalidated,
-    ).toBe(true);
+    expect({
+      capabilities: queryClient.getQueryState(queryKeys.platformCapabilities())?.isInvalidated,
+      platforms: queryClient.getQueryState(queryKeys.platforms())?.isInvalidated,
+      requirements: queryClient.getQueryState(
+        queryKeys.platformPublishingRequirements("platform-1"),
+      )?.isInvalidated,
+    }).toEqual({
+      capabilities: false,
+      platforms: true,
+      requirements: true,
+    });
   });
 });
 
-describe("bulk Post deletion", () => {
-  it("bounds concurrency, isolates failures, and keys each request by position", async () => {
+describe("runBulkDelete", () => {
+  it("bounds concurrency at four, isolates failures, and keys each request by position", async () => {
     const targets = ["a", "b", "c", "d", "e", "f"].map((id) => ({
       brandProfileId: `profile-${id}`,
       id,
     }));
     const keys: string[] = [];
+    const waiters: (() => void)[] = [];
     let inFlight = 0;
     let maximumInFlight = 0;
 
@@ -101,7 +107,15 @@ describe("bulk Post deletion", () => {
         keys.push(idempotencyKey);
         inFlight += 1;
         maximumInFlight = Math.max(maximumInFlight, inFlight);
-        yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 5)));
+        yield* Effect.promise(
+          () =>
+            new Promise<void>((resolve) => {
+              waiters.push(resolve);
+              if (waiters.length === 4 || keys.length === targets.length) {
+                for (const wake of waiters.splice(0)) wake();
+              }
+            }),
+        );
         inFlight -= 1;
         if (target.id === "b") {
           return yield* Effect.fail(
@@ -128,12 +142,14 @@ describe("bulk Post deletion", () => {
       }),
     );
 
-    expect(maximumInFlight).toBeLessThanOrEqual(4);
+    expect(maximumInFlight).toEqual(4);
     expect(keys).toEqual(targets.map((_, index) => `batch-key:${index}`));
-    expect(outcome.deletedIds).toEqual(["a", "d", "e", "f"]);
-    expect(outcome.failed).toEqual([
-      { id: "b", message: "Post b was rejected" },
-      { id: "c", message: "network down" },
-    ]);
+    expect(outcome).toEqual({
+      deletedIds: ["a", "d", "e", "f"],
+      failed: [
+        { id: "b", message: "Post b was rejected" },
+        { id: "c", message: "network down" },
+      ],
+    });
   });
 });

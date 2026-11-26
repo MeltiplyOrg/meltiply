@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import { consentCookieName, writeCookieConsent } from "@meltiply/ui/cookie-consent";
 import {
   readInitialThemePreference,
@@ -11,6 +11,10 @@ import {
   themeStorageKey,
   writeThemePreference,
 } from "@meltiply/ui/theme-preference";
+
+beforeAll(() => {
+  readInitialThemePreference();
+});
 
 function clearPreferences(): void {
   document.documentElement.removeAttribute(themePreferenceAttribute);

@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { copyText } from "@meltiply/ui/copy-text";
+
+beforeAll(async () => {
+  await copyText("warm", { writeText: async () => undefined }, document);
+});
 
 beforeEach(() => {
   Object.defineProperty(document, "execCommand", {

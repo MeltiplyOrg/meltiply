@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { codePointLength } from "@meltiply/domain";
 import { Schema } from "effect";
+import { attachmentOverridesFromPost, clampCaption, publishModeAction } from "./composer-content";
 import { persistProfileCopies, type ProfileCopy, type ProfileCopyProgress } from "./profile-copies";
 import {
   hasCookieConsent,
@@ -118,26 +119,10 @@ function publishModeOption(mode: PublishMode, t: (message: string) => string): s
   }
 }
 
-function publishModeAction(
-  mode: PublishMode,
-  postId: string | null,
-  t: (message: string) => string,
-): string {
-  if (mode === "draft") return postId === null ? t("Save Draft") : t("Save");
-  if (mode === "schedule") return t("Schedule Post");
-  if (mode === "queue") return t("Add to Queue");
-  return t("Publish Now");
-}
-
 const PUBLISH_MODE_ICONS = { draft: Save, queue: Layers, schedule: Calendar, now: Send } as const;
 
 function captionLength(text: string): number {
   return codePointLength(text);
-}
-
-function clampCaption(text: string, limit: number | null): string {
-  if (limit === null || codePointLength(text) <= limit) return text;
-  return [...text].slice(0, limit).join("");
 }
 
 interface AttachmentEntry {
@@ -316,15 +301,6 @@ function overridesFromPost(
       ),
       signature: target.signature,
     };
-  }
-  return overrides;
-}
-
-function attachmentOverridesFromPost(post: Post): Record<string, string[]> {
-  const overrides: Record<string, string[]> = {};
-  for (const target of post.targets) {
-    if (target.attachment_ids !== null)
-      overrides[target.platform_account_id] = [...target.attachment_ids];
   }
   return overrides;
 }

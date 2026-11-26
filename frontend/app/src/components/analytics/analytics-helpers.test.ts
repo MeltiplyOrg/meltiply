@@ -11,6 +11,7 @@ import {
   formatAnalyticsWhole,
   isAnalyticsFormat,
   isAnalyticsStale,
+  isCompactOnPhone,
   nextAnalyticsLimit,
   parseAnalyticsSearchParams,
   resolveAnalyticsEmptyState,
@@ -86,6 +87,15 @@ describe("formatAnalyticsSearchParams", () => {
     expect(formatAnalyticsSearchParams(input)).toEqual(
       `metric=likes&range=90d&platform=instagram&account=${ACCOUNT}&format=image`,
     );
+  });
+});
+
+describe("isCompactOnPhone", () => {
+  it.each([
+    [9_999_999, false],
+    [10_000_000, true],
+  ])("a total of %i", (value, compact) => {
+    expect(isCompactOnPhone(value)).toEqual(compact);
   });
 });
 

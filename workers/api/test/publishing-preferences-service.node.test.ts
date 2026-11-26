@@ -31,14 +31,21 @@ const quiet = {
   events: { channel_disconnected: false, publication_failed: false },
 };
 const update = {
-  notifications: quiet,
+  notifications: {
+    ...quiet,
+    channels: { email: { enabled: false, recipients: [" A@Example.com ", "a@example.com"] } },
+  },
   signature_templates: [
     { body: " From {channel} ", id: A, is_default: true, name: " Main ", position: 3 },
   ],
   timezone: "Europe/Paris",
 };
+const normalizedNotifications = {
+  ...quiet,
+  channels: { email: { enabled: false, recipients: ["a@example.com"] } },
+};
 const stored = {
-  notification_preferences: quiet,
+  notification_preferences: normalizedNotifications,
   signature_templates: [
     { body: "From {channel}", id: A, is_default: true, name: "Main", position: 0 },
   ],
@@ -47,7 +54,7 @@ const stored = {
 };
 const saved = {
   email_available: false,
-  notifications: quiet,
+  notifications: normalizedNotifications,
   signature_templates: stored.signature_templates,
   timezone: "Europe/Paris",
   updated_at: NOW.toISOString(),

@@ -373,6 +373,13 @@ describe("PublishingQueueService", () => {
       expect(store.publishCommands).toEqual([]);
     });
 
+    it("a Post of a retired Queue", async () => {
+      const { remove, store } = queuedPost("scheduled");
+      store.queues[0]!.deleted_at = NOW.toISOString();
+
+      expect(await run(remove())).toEqual({ replayed: false, value: released });
+    });
+
     it("a Viewer", async () => {
       const { remove } = queuedPost();
 

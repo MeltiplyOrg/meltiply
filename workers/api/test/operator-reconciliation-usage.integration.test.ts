@@ -3,18 +3,19 @@ import { createHyperdrivePool } from "@meltiply/database";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { systemPoolFor } from "../src/database";
 import type { ApiWorkerEnv } from "../src/env";
 import { createOperatorReconciliationService } from "../src/operator-reconciliation";
 import type { OperatorResolutionInput } from "../src/operator-resolution";
 
-const connectionString =
-  process.env.MELTIPLY_DATABASE_TEST_URL ??
-  "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const connectionString = process.env.MELTIPLY_DATABASE_TEST_URL!;
 
-const adminConnectionString =
-  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
-  "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const adminConnectionString = integrationDatabaseUrl(
+  process.env.MELTIPLY_DATABASE_TEST_URL,
+  "admin",
+  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL,
+);
 const adminPool = createHyperdrivePool({ connectionString: adminConnectionString });
 
 const organizationId = "20000000-0000-4000-8000-0000000000b1";
@@ -27,8 +28,7 @@ const installationReportingId = "3a5b7c1d-0e22-4f4b-8f11-2a5b7c1d0e33";
 const env = {
   DB_AUTHENTICATED: { connectionString } as Hyperdrive,
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   DEPLOYMENT_CATEGORY: "selfhosted",
   ENVIRONMENT: "test",

@@ -304,6 +304,20 @@ describe("createBetterAuth", () => {
     expect(await identityOf(browser())).toEqual({ session: { id: ID }, user: { id: ID } });
   });
 
+  it("a session lookup while the database is down", async () => {
+    const failure = new Error("database down");
+    const down = new Proxy(emptyDatabase(), {
+      get() {
+        throw failure;
+      },
+    });
+    const auth = await build(down);
+
+    await expect(auth.getSession?.(new Headers(browser()))).rejects.toThrow(
+      "Failed to get session",
+    );
+  });
+
   it("a session lookup with no credential", async () => {
     const { identityOf } = await setup();
 

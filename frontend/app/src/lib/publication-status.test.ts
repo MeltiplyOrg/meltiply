@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { DistributionStatus } from "@meltiply/domain";
 
 import {
   comparePublicationStatusGroup,
@@ -11,161 +10,165 @@ import {
   summarizePublicationStatuses,
 } from "./publication-status";
 
-const DISTRIBUTION_STATUSES = [
-  "scheduled",
-  "queued",
-  "processing",
-  "awaiting_provider",
-  "published",
-  "failed",
-  "cancel_requested",
-  "cancelled",
-  "needs_reconciliation",
-] as const satisfies readonly DistributionStatus[];
-
 describe("resolvePublicationStatus", () => {
-  it.each(DISTRIBUTION_STATUSES)("keeps the contract status %s unchanged", (status) => {
-    expect(resolvePublicationStatus(status)).toBe(status);
-  });
-
-  it("keeps the Post draft state and the client unknown fallback", () => {
-    expect(resolvePublicationStatus("draft")).toBe("draft");
-    expect(resolvePublicationStatus("unknown")).toBe("unknown");
-  });
-
-  it("normalizes case and surrounding whitespace", () => {
-    expect(resolvePublicationStatus("  PUBLISHED  ")).toBe("published");
-    expect(resolvePublicationStatus("Needs_Reconciliation")).toBe("needs_reconciliation");
-  });
-
   it.each([
-    { value: "", label: "absent" },
-    { value: "   ", label: "blank" },
-    { value: null, label: "null" },
-    { value: undefined, label: "undefined" },
-    { value: "future_provider_status", label: "a new provider state" },
-    { value: "publishing", label: "a superseded client-only state" },
-  ])("treats $label as unknown", ({ value }) => {
-    expect(resolvePublicationStatus(value)).toBe("unknown");
+    ["draft", "draft"],
+    ["scheduled", "scheduled"],
+    ["queued", "queued"],
+    ["processing", "processing"],
+    ["awaiting_provider", "awaiting_provider"],
+    ["delivered", "delivered"],
+    ["published", "published"],
+    ["failed", "failed"],
+    ["needs_reconciliation", "needs_reconciliation"],
+    ["cancel_requested", "cancel_requested"],
+    ["cancelled", "cancelled"],
+    ["unknown", "unknown"],
+    ["  PUBLISHED  ", "published"],
+    ["Needs_Reconciliation", "needs_reconciliation"],
+    ["", "unknown"],
+    ["   ", "unknown"],
+    [null, "unknown"],
+    [undefined, "unknown"],
+    ["future_provider_status", "unknown"],
+    ["publishing", "unknown"],
+    ["constructor", "unknown"],
+  ])("the value %j", (value, status) => {
+    expect(resolvePublicationStatus(value)).toEqual(status);
   });
 });
 
-describe("canonical publication status classification", () => {
-  it("protects native provider handoffs without treating them as published or in flight", () => {
-    expect(isCancellablePublicationStatus("delivered")).toBe(false);
-    expect(isDeleteProtectedPublicationStatus("delivered")).toBe(true);
-    expect(isInFlightPublicationStatus("delivered")).toBe(false);
-    expect(publicationStatusFilterBucket("delivered")).toBeNull();
-    expect(summarizePublicationStatuses(["published", "delivered"])).toBe("delivered");
+describe("isCancellablePublicationStatus", () => {
+  it.each([
+    ["draft", false],
+    ["scheduled", true],
+    ["queued", true],
+    ["processing", true],
+    ["awaiting_provider", true],
+    ["delivered", false],
+    ["published", false],
+    ["failed", false],
+    ["needs_reconciliation", true],
+    ["cancel_requested", false],
+    ["cancelled", false],
+    ["unknown", false],
+  ])("a %s status", (status, cancellable) => {
+    expect(isCancellablePublicationStatus(status)).toEqual(cancellable);
   });
+});
 
-  it("keeps only pending outcomes cancellable", () => {
-    for (const status of [
-      "scheduled",
-      "queued",
-      "processing",
-      "awaiting_provider",
-      "needs_reconciliation",
-    ]) {
-      expect(isCancellablePublicationStatus(status), status).toBe(true);
-    }
-    for (const status of [
-      "draft",
-      "published",
-      "failed",
-      "cancel_requested",
-      "cancelled",
-      "unknown",
-    ]) {
-      expect(isCancellablePublicationStatus(status), status).toBe(false);
-    }
+describe("isDeleteProtectedPublicationStatus", () => {
+  it.each([
+    ["draft", false],
+    ["scheduled", false],
+    ["queued", false],
+    ["processing", true],
+    ["awaiting_provider", true],
+    ["delivered", true],
+    ["published", true],
+    ["failed", false],
+    ["needs_reconciliation", true],
+    ["cancel_requested", false],
+    ["cancelled", false],
+    ["unknown", false],
+  ])("a %s status", (status, deleteProtected) => {
+    expect(isDeleteProtectedPublicationStatus(status)).toEqual(deleteProtected);
   });
+});
 
-  it("protects every status whose Provider attempt may have published", () => {
-    for (const status of ["processing", "awaiting_provider", "published", "needs_reconciliation"]) {
-      expect(isDeleteProtectedPublicationStatus(status), status).toBe(true);
-    }
-    for (const status of [
-      "draft",
-      "scheduled",
-      "queued",
-      "failed",
-      "cancel_requested",
-      "cancelled",
-      "unknown",
-    ]) {
-      expect(isDeleteProtectedPublicationStatus(status), status).toBe(false);
-    }
+describe("isInFlightPublicationStatus", () => {
+  it.each([
+    ["draft", false],
+    ["scheduled", false],
+    ["queued", true],
+    ["processing", true],
+    ["awaiting_provider", true],
+    ["delivered", false],
+    ["published", false],
+    ["failed", false],
+    ["needs_reconciliation", false],
+    ["cancel_requested", true],
+    ["cancelled", false],
+    ["unknown", false],
+  ])("a %s status", (status, inFlight) => {
+    expect(isInFlightPublicationStatus(status)).toEqual(inFlight);
   });
+});
 
-  it("polls unresolved outcomes without polling an untouched schedule", () => {
-    for (const status of ["queued", "processing", "awaiting_provider", "cancel_requested"]) {
-      expect(isInFlightPublicationStatus(status), status).toBe(true);
-    }
-    for (const status of ["draft", "scheduled", "published", "failed", "cancelled", "unknown"]) {
-      expect(isInFlightPublicationStatus(status), status).toBe(false);
-    }
-  });
-
+describe("publicationStatusFilterBucket", () => {
   it.each([
     ["draft", "draft"],
     ["scheduled", "scheduled"],
     ["queued", "scheduled"],
     ["processing", "scheduled"],
     ["awaiting_provider", "scheduled"],
-    ["cancel_requested", "scheduled"],
+    ["delivered", null],
     ["published", "published"],
     ["failed", "failed"],
     ["needs_reconciliation", "failed"],
+    ["cancel_requested", "scheduled"],
     ["cancelled", null],
     ["unknown", null],
-  ] as const)("maps %s to the %s toolbar bucket", (status, bucket) => {
-    expect(publicationStatusFilterBucket(status)).toBe(bucket);
+  ])("a %s status", (status, bucket) => {
+    expect(publicationStatusFilterBucket(status)).toEqual(bucket);
   });
 });
 
 describe("summarizePublicationStatuses", () => {
-  it("uses the fallback when a Post has no Channel outcome yet", () => {
-    expect(summarizePublicationStatuses([], "scheduled")).toBe("scheduled");
-    expect(summarizePublicationStatuses([], "draft")).toBe("draft");
-  });
-
-  it("surfaces actionable outcomes before pending and terminal ones", () => {
-    expect(
-      summarizePublicationStatuses([
-        "published",
-        "scheduled",
-        "queued",
-        "processing",
-        "awaiting_provider",
-        "needs_reconciliation",
-        "failed",
-        "cancelled",
-      ]),
-    ).toBe("failed");
-    expect(summarizePublicationStatuses(["published", "scheduled", "processing"])).toBe(
+  it.each([
+    ["no outcome and a scheduled fallback", [], "scheduled", "scheduled"],
+    ["no outcome and a draft fallback", [], "draft", "draft"],
+    ["no outcome and an unknown fallback", [], "later", "unknown"],
+    [
+      "a failure among every kind",
+      ["published", "needs_reconciliation", "failed"],
+      "draft",
+      "failed",
+    ],
+    [
+      "a reconciliation before processing",
+      ["processing", "needs_reconciliation"],
+      "draft",
+      "needs_reconciliation",
+    ],
+    [
+      "processing before a provider wait",
+      ["awaiting_provider", "processing"],
+      "draft",
       "processing",
-    );
-    expect(summarizePublicationStatuses(["published", "scheduled", "queued"])).toBe("queued");
-    expect(summarizePublicationStatuses(["published", "scheduled"])).toBe("scheduled");
-    expect(summarizePublicationStatuses(["published", "cancelled"])).toBe("cancelled");
-    expect(summarizePublicationStatuses(["published"])).toBe("published");
+    ],
+    [
+      "a provider wait before queued",
+      ["queued", "awaiting_provider"],
+      "draft",
+      "awaiting_provider",
+    ],
+    ["queued before scheduled", ["scheduled", "queued"], "draft", "queued"],
+    ["scheduled before a cancel request", ["cancel_requested", "scheduled"], "draft", "scheduled"],
+    [
+      "a cancel request before cancelled",
+      ["cancelled", "cancel_requested"],
+      "draft",
+      "cancel_requested",
+    ],
+    ["cancelled before published", ["published", "cancelled"], "draft", "cancelled"],
+    ["published before draft", ["draft", "published"], "draft", "published"],
+    ["a native handoff beside a publication", ["published", "delivered"], "draft", "delivered"],
+    ["one publication in capitals", ["PUBLISHED"], "scheduled", "published"],
+    ["a new state beside a publication", ["future_state", "published"], "draft", "published"],
+    ["only a new state", ["future_state"], "scheduled", "unknown"],
+    ["only a null state", [null], "scheduled", "unknown"],
+  ])("%s", (_example, statuses, fallback, summary) => {
+    expect(summarizePublicationStatuses(statuses, fallback)).toEqual(summary);
   });
 
-  it("never lets an unknown value outrank a known outcome", () => {
-    expect(summarizePublicationStatuses(["future_provider_status", "published"])).toBe("published");
-    expect(summarizePublicationStatuses(["future_provider_status"])).toBe("unknown");
-    expect(summarizePublicationStatuses([""])).toBe("unknown");
-  });
-
-  it("normalizes case and never falls through to the fallback for real outcomes", () => {
-    expect(summarizePublicationStatuses(["PUBLISHED"], "scheduled")).toBe("published");
-    expect(summarizePublicationStatuses(["future_provider_status"], "scheduled")).toBe("unknown");
+  it("no outcome and no fallback", () => {
+    expect(summarizePublicationStatuses([])).toEqual("draft");
   });
 });
 
 describe("comparePublicationStatusGroup", () => {
-  it("orders the lifecycle from draft through unknown", () => {
+  it("the whole lifecycle in reverse", () => {
     const statuses = [
       "unknown",
       "cancelled",
@@ -178,7 +181,8 @@ describe("comparePublicationStatusGroup", () => {
       "queued",
       "scheduled",
       "draft",
-    ] as const;
+    ];
+
     expect([...statuses].sort(comparePublicationStatusGroup)).toEqual([
       "draft",
       "scheduled",
@@ -192,5 +196,13 @@ describe("comparePublicationStatusGroup", () => {
       "cancelled",
       "unknown",
     ]);
+  });
+
+  it.each([
+    ["two statuses of one group", "delivered", "published", 0],
+    ["an earlier status first", "draft", "scheduled", -1],
+    ["a missing status last", null, "draft", 10],
+  ])("%s", (_example, a, b, difference) => {
+    expect(comparePublicationStatusGroup(a, b)).toEqual(difference);
   });
 });

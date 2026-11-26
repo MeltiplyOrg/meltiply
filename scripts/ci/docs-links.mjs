@@ -6,7 +6,6 @@ import { markdownLines, maskInlineCode, trackedMarkdownFiles } from "./markdown-
 
 const imageLinkPattern = /!\[([^\]]*)\]\([^)]*\)/gu;
 const markdownLinkPattern = /\[([^\]]+)\]\([^)]*\)/gu;
-const htmlTagPattern = /<[^>]+>/gu;
 const markdownEmphasisPattern = /[*_~`]/gu;
 const headingPunctuationPattern = /[^\p{L}\p{M}\p{N}\-_ ]/gu;
 const headingWhitespacePattern = /\s+/gu;
@@ -18,11 +17,31 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const markdownLink = /\]\(\s*(<[^>\n]+>|[^)\s\n]+)(?:\s+["'][^"'\n]*["'])?\s*\)/g;
 const externalTarget = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
 
+function stripHtmlTags(value) {
+  let result = "";
+  let cursor = 0;
+  while (cursor < value.length) {
+    const openIndex = value.indexOf("<", cursor);
+    if (openIndex === -1) {
+      return cursor === 0 ? value : result + value.slice(cursor);
+    }
+    const closeIndex = value.indexOf(">", openIndex + 1);
+    if (closeIndex === -1) {
+      return cursor === 0 ? value : result + value.slice(cursor);
+    }
+    if (closeIndex === openIndex + 1) {
+      result += value.slice(cursor, closeIndex + 1);
+      cursor = closeIndex + 1;
+      continue;
+    }
+    result += value.slice(cursor, openIndex);
+    cursor = closeIndex + 1;
+  }
+  return result;
+}
+
 function headingSlug(value) {
-  return value
-    .replace(imageLinkPattern, "$1")
-    .replace(markdownLinkPattern, "$1")
-    .replace(htmlTagPattern, "")
+  return stripHtmlTags(value.replace(imageLinkPattern, "$1").replace(markdownLinkPattern, "$1"))
     .replace(markdownEmphasisPattern, "")
     .trim()
     .toLowerCase()

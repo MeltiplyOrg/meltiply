@@ -105,3 +105,25 @@ test("handles multi-backtick inline code spans containing single backticks", () 
     localLinks: 1,
   });
 });
+
+test("strips inline and nested HTML tags when deriving heading anchors", () => {
+  const root = fixture({
+    "index.md": [
+      "[Styled](target.md#using-code-and-text)",
+      "[Leading tag](target.md#leading-tag)",
+      "[Nested](target.md#nested-heading)",
+      "[Comparison](target.md#keep-1-2-comparison)",
+    ].join("\n"),
+    "target.md": [
+      '# Using <code>code</code> and <span class="label">text</span>',
+      "# <span>Leading</span> tag",
+      "# Nested <a<b>> heading",
+      "# Keep 1 < 2 comparison",
+    ].join("\n"),
+  });
+
+  assert.deepEqual(collectLinkFailures(root, ["index.md", "target.md"]), {
+    failures: [],
+    localLinks: 4,
+  });
+});

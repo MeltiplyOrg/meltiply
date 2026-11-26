@@ -1,1051 +1,515 @@
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
+import { ProviderAdapterError } from "../src/failures";
+import { createTikTokAdapter } from "../src/tiktok/adapter";
+import type { PublishInput, TikTokPublishOptions } from "../src/types";
 import {
-  createTikTokAdapter,
-  ProviderAdapterError,
-  type ProviderRequestContext,
-  type PublishInput,
-} from "../src";
+  failureOf,
+  malformedAnswer,
+  providerFailure,
+  refused,
+  unavailable,
+  unconfirmed,
+} from "./support";
 
-const context: ProviderRequestContext = {
-  operationId: "operation-1",
-  requestId: "request-1",
-};
-const credentials = {
-  accessToken: "access-secret",
-  accountId: "open-id-1",
-};
+const context = { operationId: "operation-1", requestId: "request-1" };
+const credentials = { accessToken: "access", accountId: "o1" };
 const redirectUri = "https://api.example.com/api/v1/platforms/tiktok/callback";
-const mediaUrlPrefix = "https://media.example.com/tiktok/";
+const NOW = new Date("2026-07-19T00:00:00.000Z");
+const API = "https://open.tiktokapis.com";
+const mediaUrl = "https://media.example/assets/a";
+const scopes = ["user.info.basic", "video.publish"];
 
-type Responder = (url: URL, init: RequestInit) => Response | Promise<Response>;
+type Answer = Response | Error;
 
-function json(value: unknown, init: ResponseInit = {}): Response {
-  return Response.json(value, init);
-}
-
-function success(data: Record<string, unknown>): Response {
-  return json({ data, error: { code: "ok", log_id: "safe-log" } });
-}
-
-function creator(
-  patch: Partial<{
-    comment_disabled: boolean;
-    duet_disabled: boolean;
-    max_video_post_duration_sec: number;
-    privacy_level_options: string[];
-    stitch_disabled: boolean;
-  }> = {},
-): Response {
-  return success({
-    comment_disabled: false,
-    creator_avatar_url: "https://cdn.example.com/avatar.jpg",
-    creator_nickname: "Meltiply Creator",
-    creator_username: "meltiply.creator",
-    duet_disabled: false,
-    max_video_post_duration_sec: 300,
-    privacy_level_options: ["PUBLIC_TO_EVERYONE", "SELF_ONLY"],
-    stitch_disabled: false,
-    ...patch,
-  });
-}
-
-function sequence(...responders: Responder[]) {
-  const calls: { init: RequestInit; url: URL }[] = [];
-  const fetcher = vi.fn<typeof fetch>(async (input, init = {}) => {
-    const url = new URL(input.toString());
-    calls.push({ init, url });
-    const responder = responders.shift();
-    if (!responder) throw new Error("unexpected provider request");
-    return responder(url, init);
-  });
-  return { calls, fetcher };
-}
-
-function adapter(fetcher: typeof fetch, now = new Date("2026-07-19T00:00:00Z")) {
-  return createTikTokAdapter({
-    clientId: "tiktok-client-key",
-    clientSecret: "tiktok-client-secret",
-    fetch: fetcher,
-    mediaUrlPrefix,
-    now: () => now,
+function setup(answers: Answer[] = []) {
+  const requests: object[] = [];
+  const adapter = createTikTokAdapter({
+    clientId: "client",
+    clientSecret: "secret",
+    mediaUrlPrefix: "https://media.example/assets/",
+    now: () => NOW,
     redirectUri,
-    timeoutMilliseconds: 100,
+    fetch: (target, init) => {
+      const body = init?.body;
+      requests.push({
+        method: init?.method,
+        url: String(target),
+        ...(body === undefined ? {} : { body: String(body) }),
+      });
+      const answer = answers.shift() ?? new Error("unexpected request");
+      return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
+    },
   });
+  return { adapter, requests };
 }
 
-function publishInput(patch: Partial<PublishInput> = {}): PublishInput {
-  return {
-    caption: "A direct post\n\n#launch",
-    hashtags: ["launch"],
-    idempotencyKey: "publish-1",
-    media: [
-      {
-        contentType: "video/mp4",
-        fileSize: 1024,
-        metadata: {
-          durationSeconds: 120,
-          height: 1920,
-          width: 1080,
-        },
-        mode: "remote_ingest",
-        url: `${mediaUrlPrefix}org/asset/video.mp4`,
-      },
-    ],
-    providerOptions: {
-      tiktok: {
-        allowComment: true,
-        allowDuet: true,
-        allowStitch: false,
-        brandContent: false,
-        brandOrganic: false,
-        isAiGenerated: true,
-        musicUsageConfirmed: true,
-        privacyLevel: "PUBLIC_TO_EVERYONE",
-      },
+const json = (body: unknown, status = 200) => Response.json(body, { status });
+const ok = (data: object) => json({ data, error: { code: "ok" } });
+const down = () => json({}, 503);
+const post = (path: string, body?: object) => ({
+  method: "POST",
+  url: `${API}${path}`,
+  ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+});
+const get = (path: string) => ({ method: "GET", url: `${API}${path}` });
+const choices: TikTokPublishOptions = {
+  allowComment: false,
+  allowDuet: false,
+  allowStitch: false,
+  brandContent: false,
+  brandOrganic: false,
+  isAiGenerated: false,
+  musicUsageConfirmed: true,
+  privacyLevel: "PUBLIC_TO_EVERYONE",
+};
+const input = (options: Partial<TikTokPublishOptions> = {}): PublishInput => ({
+  caption: "Title",
+  hashtags: [],
+  idempotencyKey: "k",
+  media: [
+    {
+      contentType: "video/mp4",
+      fileSize: 100,
+      metadata: { durationSeconds: 30, width: 1_080, height: 1_920 },
+      mode: "remote_ingest",
+      url: mediaUrl,
     },
-    ...patch,
-  };
-}
+  ],
+  providerOptions: { tiktok: { ...choices, ...options } },
+});
+const creator = () =>
+  ok({
+    creator_username: "u",
+    creator_nickname: "N",
+    privacy_level_options: ["PUBLIC_TO_EVERYONE"],
+    comment_disabled: true,
+    duet_disabled: true,
+    stitch_disabled: true,
+    max_video_post_duration_sec: 600,
+  });
+const creatorQuery = post("/v2/post/publish/creator_info/query/");
+const token = (scope = scopes.join(",")) =>
+  json({
+    access_token: "access",
+    refresh_token: "refresh",
+    open_id: "o1",
+    expires_in: 3_600,
+    scope,
+    token_type: "Bearer",
+  });
+const sourceInfo = { source: "PULL_FROM_URL", video_url: mediaUrl };
+const directBody = {
+  post_info: {
+    brand_content_toggle: false,
+    brand_organic_toggle: false,
+    disable_comment: true,
+    privacy_level: "PUBLIC_TO_EVERYONE",
+    disable_duet: true,
+    disable_stitch: true,
+    is_aigc: false,
+    title: "Title",
+  },
+  source_info: sourceInfo,
+};
+const exchange = { code: "code", codeVerifier: "unused", redirectUri };
+
+beforeAll(async () => {
+  await setup([ok({ publish_id: "v" })]).adapter.publish!(
+    context,
+    credentials,
+    input({ postMode: "inbox" }),
+  );
+});
 
 describe("createTikTokAdapter", () => {
-  it.each(["video", "photo"] as const)(
-    "delivers a %s inbox draft without claiming publication",
-    async (kind) => {
-      const calls = sequence(
-        (url, init) => {
-          const body = JSON.parse(String(init.body));
-          if (kind === "video") {
-            expect(url.pathname).toBe("/v2/post/publish/inbox/video/init/");
-            expect(body).toEqual({
-              source_info: {
-                source: "PULL_FROM_URL",
-                video_url: `${mediaUrlPrefix}org/asset/video.mp4`,
-              },
-            });
-          } else {
-            expect(url.pathname).toBe("/v2/post/publish/content/init/");
-            expect(body).toMatchObject({
-              post_mode: "MEDIA_UPLOAD",
-              media_type: "PHOTO",
-              is_aigc: true,
-            });
-            expect(body.post_info).not.toHaveProperty("privacy_level");
-          }
-          return success({ publish_id: "inbox-draft-1" });
-        },
-        () => success({ status: "SEND_TO_USER_INBOX" }),
-      );
-      const provider = adapter(calls.fetcher);
-      const input = publishInput();
-      input.providerOptions!.tiktok!.postMode = "inbox";
-      delete input.providerOptions!.tiktok!.privacyLevel;
-      if (kind === "photo") {
-        input.media = [
-          {
-            contentType: "image/jpeg",
-            fileSize: 100,
-            mode: "remote_ingest",
-            metadata: { width: 1080, height: 1080 },
-            url: `${mediaUrlPrefix}org/asset/photo.jpg`,
-          },
-        ];
-      }
-      const submitted = await provider.publish!(context, credentials, input);
-      expect(submitted).toEqual({
-        outcome: "confirmed_success",
-        providerOperationId: "inbox:inbox-draft-1",
-      });
-      await expect(provider.lookupPublication!(context, credentials, submitted)).resolves.toEqual({
-        state: "delivered",
-        result: {
-          outcome: "confirmed_success",
-          delivery: "inbox",
-          providerOperationId: "inbox:inbox-draft-1",
-        },
-      });
-    },
-  );
-  it.each(["123456", "7493812345678901234"])(
-    "retains the exact numeric public Post ID %s",
-    async (id) => {
-      const calls = sequence(
-        () =>
-          new Response(
-            `{"data":{"status":"PUBLISH_COMPLETE","publicaly_available_post_id":[${id}]},"error":{"code":"ok"}}`,
-            { headers: { "Content-Type": "application/json" } },
-          ),
-      );
-      await expect(
-        adapter(calls.fetcher).lookupPublication!(context, credentials, {
-          providerOperationId: "publish:publish-one",
-        }),
-      ).resolves.toMatchObject({ state: "published", result: { providerPostId: id } });
-    },
-  );
-
-  it("builds the exact state-bound TikTok web authorization URL", () => {
-    const provider = adapter(vi.fn<typeof fetch>());
-    const url = new URL(
-      provider.authorizationUrl!({
-        codeChallenge: "unused-by-tiktok-web",
-        redirectUri,
-        state: "oauth-state",
-      }),
-    );
-    expect(url.origin).toBe("https://www.tiktok.com");
-    expect(url.pathname).toBe("/v2/auth/authorize/");
-    expect(new Set(url.searchParams.get("scope")?.split(","))).toEqual(
-      new Set([
-        "user.info.basic",
-        "user.info.profile",
-        "user.info.stats",
-        "video.publish",
-        "video.upload",
-        "video.list",
-      ]),
-    );
-    const { scope: _scope, ...parameters } = Object.fromEntries(url.searchParams);
-    expect(parameters).toEqual({
-      client_key: "tiktok-client-key",
-      disable_auto_auth: "1",
-      redirect_uri: redirectUri,
-      response_type: "code",
-      state: "oauth-state",
+  it("authorizationUrl", () => {
+    const url = setup().adapter.authorizationUrl!({
+      codeChallenge: "c",
+      redirectUri,
+      state: "s",
     });
-    expect(() =>
-      provider.authorizationUrl!({
-        codeChallenge: "unused",
-        redirectUri: "https://attacker.example/callback",
-        state: "oauth-state",
-      }),
-    ).toThrow("does not match configuration");
+
+    expect(url).toEqual(
+      `https://www.tiktok.com/v2/auth/authorize/?client_key=client&disable_auto_auth=1&scope=user.info.basic%2Cvideo.publish%2Cvideo.upload%2Cuser.info.profile%2Cuser.info.stats%2Cvideo.list&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&state=s`,
+    );
   });
 
-  it.each([
-    "user.info.basic,user.info.profile,user.info.stats,video.publish,video.list",
-    "user.info.basic,user.info.profile,video.publish",
-    "user.info.basic,user.info.profile,video.publish,video.list",
-    "user.info.basic,user.info.profile,video.upload",
-  ])("connects with granted scopes %s and binds the token open ID", async (grantedScopes) => {
-    const providerCalls = sequence(
-      (url, init) => {
-        expect(url.toString()).toBe("https://open.tiktokapis.com/v2/oauth/token/");
-        const form = new URLSearchParams(String(init.body));
-        expect(Object.fromEntries(form)).toEqual({
-          client_key: "tiktok-client-key",
-          client_secret: "tiktok-client-secret",
-          code: "authorization-code",
-          grant_type: "authorization_code",
-          redirect_uri: redirectUri,
-        });
-        return json({
-          access_token: "access-secret",
-          expires_in: 86_400,
-          open_id: "open-id-1",
-          refresh_expires_in: 31_536_000,
-          refresh_token: "refresh-secret",
-          scope: grantedScopes,
-          token_type: "Bearer",
-        });
-      },
-      (url, init) => {
-        expect(url.pathname).toBe("/v2/user/info/");
-        expect(url.searchParams.get("fields")).toBe("open_id,display_name,avatar_url,username");
-        expect(new Headers(init.headers).get("Authorization")).toBe("Bearer access-secret");
-        return success({
-          user: {
-            avatar_url: "https://cdn.example.com/avatar.jpg",
-            display_name: "Meltiply Creator",
-            open_id: "open-id-1",
-            username: "meltiply.creator",
-          },
-        });
-      },
-    );
-    await expect(
-      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
-        code: "authorization-code",
-        codeVerifier: "unused-by-tiktok-web",
-        redirectUri,
-      }),
-    ).resolves.toEqual({
-      accessToken: "access-secret",
-      account: {
-        avatarUrl: "https://cdn.example.com/avatar.jpg",
-        displayName: "Meltiply Creator",
-        id: "open-id-1",
-        username: "meltiply.creator",
-      },
-      expiresAt: "2026-07-20T00:00:00.000Z",
-      refreshToken: "refresh-secret",
-      scopes: grantedScopes.split(","),
-    });
-  });
-
-  it("still connects when the optional profile scope is denied", async () => {
-    const providerCalls = sequence(
-      () =>
-        json({
-          access_token: "access-secret",
-          expires_in: 86_400,
-          open_id: "open-id-1",
-          refresh_token: "refresh-secret",
-          scope: "user.info.basic,video.publish",
-          token_type: "Bearer",
-        }),
-      (url) => {
-        expect(url.searchParams.get("fields")).toBe("open_id,display_name,avatar_url");
-        return success({
-          user: { display_name: "Meltiply Creator", open_id: "open-id-1" },
-        });
-      },
-    );
-    await expect(
-      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
-        code: "authorization-code",
-        codeVerifier: "unused-by-tiktok-web",
-        redirectUri,
-      }),
-    ).resolves.toEqual({
-      accessToken: "access-secret",
-      account: { displayName: "Meltiply Creator", id: "open-id-1" },
-      expiresAt: "2026-07-20T00:00:00.000Z",
-      refreshToken: "refresh-secret",
-      scopes: ["user.info.basic", "video.publish"],
-    });
-  });
-
-  it("rejects a profile that does not match the token open ID", async () => {
-    const providerCalls = sequence(
-      () =>
-        json({
-          access_token: "access-secret",
-          expires_in: 86_400,
-          open_id: "open-id-1",
-          refresh_token: "refresh-secret",
-          scope: "user.info.basic,user.info.stats,video.publish,video.list",
-          token_type: "Bearer",
-        }),
-      () =>
-        success({
-          user: { display_name: "Wrong account", open_id: "open-id-2" },
-        }),
-    );
-    await expect(
-      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
-        code: "authorization-code",
-        codeVerifier: "unused",
-        redirectUri,
-      }),
-    ).rejects.toMatchObject({
-      failure: { code: "provider_transient" },
-    });
-  });
-
-  it.each(["user.info.basic", "video.publish"])(
-    "names the scope missing from a partial TikTok grant of only %s",
-    async (scope) => {
-      const providerCalls = sequence(() =>
-        json({
-          access_token: "access-secret",
-          expires_in: 86_400,
-          open_id: "open-id-1",
-          refresh_token: "refresh-secret",
-          scope,
-          token_type: "Bearer",
-        }),
-      );
-      const error = await adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
-        code: "authorization-code",
-        codeVerifier: "unused-by-tiktok-web",
-        redirectUri,
-      }).catch((cause: unknown) => cause);
-      expect(error).toBeInstanceOf(ProviderAdapterError);
-      expect(error).toMatchObject({
-        failure: { code: "tiktok_scope_not_granted", retryable: false },
-        missingScopes: [scope === "user.info.basic" ? "video.publish" : "user.info.basic"],
-      });
-      expect(providerCalls.calls.map(({ url }) => url.pathname)).toEqual(["/v2/oauth/token/"]);
-    },
-  );
-
-  it("retains an opaque open_id that begins with a punctuation character", async () => {
-    const providerCalls = sequence(
-      () =>
-        json({
-          access_token: "access-secret",
-          expires_in: 86_400,
-          open_id: "-9f2c-open",
-          refresh_token: "refresh-secret",
-          scope: "user.info.basic,video.publish",
-          token_type: "Bearer",
-        }),
-      () =>
-        success({
-          user: { display_name: "Opaque Creator", open_id: "-9f2c-open" },
-        }),
-    );
-    await expect(
-      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
-        code: "authorization-code",
-        codeVerifier: "unused-by-tiktok-web",
-        redirectUri,
-      }),
-    ).resolves.toMatchObject({ account: { id: "-9f2c-open", displayName: "Opaque Creator" } });
-  });
-
-  it("rejects a contradictory token type as an invalid token response", async () => {
-    const providerCalls = sequence(() =>
-      json({
-        access_token: "access-secret",
-        expires_in: 86_400,
-        open_id: "open-id-1",
-        refresh_token: "refresh-secret",
-        scope: "user.info.basic,video.publish",
-        token_type: "MAC",
-      }),
-    );
-    await expect(
-      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
-        code: "authorization-code",
-        codeVerifier: "unused-by-tiktok-web",
-        redirectUri,
-      }),
-    ).rejects.toMatchObject({ failure: { code: "tiktok_token_response_invalid" } });
-    expect(providerCalls.calls).toHaveLength(1);
-  });
-  it("normalizes current creator publication requirements", async () => {
-    const providerCalls = sequence(() =>
-      creator({ duet_disabled: true, max_video_post_duration_sec: 180 }),
-    );
-    await expect(
-      adapter(providerCalls.fetcher).getPublicationRequirements!(context, credentials),
-    ).resolves.toEqual({
-      commentAllowed: true,
-      creatorAvatarUrl: "https://cdn.example.com/avatar.jpg",
-      creatorDisplayName: "Meltiply Creator",
-      creatorUsername: "meltiply.creator",
-      duetAllowed: false,
-      maxVideoDurationSeconds: 180,
+  it("capability", () => {
+    expect(setup().adapter.capability).toEqual({
+      accepted_mime_types: ["image/jpeg", "image/webp", "video/mp4", "video/quicktime"],
+      analytics: true,
+      asset_types: ["image", "video"],
+      comments: false,
+      connect_available: true,
+      max_caption_length: 4_000,
+      max_file_size: 524_288_000,
+      max_hashtags: 30,
+      max_media_count: 35,
+      max_video_duration_sec: 600,
+      min_media_count: 1,
+      multi_asset_types: ["image"],
+      notes: [
+        "One video or up to 35 images can publish directly or be handed to the creator's TikTok inbox for native completion.",
+        "A photo post is images only; mixing a video with images is not supported.",
+        "Privacy, interaction, commercial-content, AI, and music-usage choices are explicit per target.",
+        "Media uses PULL_FROM_URL from an HTTPS URL prefix verified in the TikTok developer portal.",
+        "The Channel username appears only when the optional user.info.profile scope is granted.",
+        "Direct Post re-queries creator permissions immediately before publication; inbox upload requires video.upload and is not a published outcome.",
+        "Analytics reads the creator's own view, like, comment, and share counters; comments and replies are not claimed.",
+        "Existing connections must reconnect to grant the video.list analytics scope.",
+        "TikTok app audit and approved live-account acceptance remain required.",
+      ],
       platform: "tiktok",
-      privacyLevels: ["PUBLIC_TO_EVERYONE", "SELF_ONLY"],
-      stitchAllowed: true,
+      publish: true,
+      reply: false,
     });
   });
 
-  it("queries creator info immediately before a bounded video Direct Post", async () => {
-    const providerCalls = sequence(
-      () => creator(),
-      (url, init) => {
-        expect(url.pathname).toBe("/v2/post/publish/video/init/");
-        expect(new Headers(init.headers).get("Authorization")).toBe("Bearer access-secret");
-        expect(JSON.parse(String(init.body))).toEqual({
-          post_info: {
-            brand_content_toggle: false,
-            brand_organic_toggle: false,
-            disable_comment: false,
-            disable_duet: false,
-            disable_stitch: true,
-            is_aigc: true,
-            privacy_level: "PUBLIC_TO_EVERYONE",
-            title: "A direct post\n\n#launch",
-          },
-          source_info: {
-            source: "PULL_FROM_URL",
-            video_url: `${mediaUrlPrefix}org/asset/video.mp4`,
-          },
-        });
-        return success({ publish_id: "v_pub_url~v2.123" });
-      },
-    );
-    await expect(
-      adapter(providerCalls.fetcher).publish!(context, credentials, publishInput()),
-    ).resolves.toEqual({
-      outcome: "confirmed_success",
-      providerOperationId: "publish:v_pub_url~v2.123",
+  describe("exchangeAuthorizationCode", () => {
+    const connection = {
+      accessToken: "access",
+      account: { displayName: "N", id: "o1" },
+      expiresAt: "2026-07-19T01:00:00.000Z",
+      refreshToken: "refresh",
+    };
+    const form = `client_key=client&client_secret=secret&code=code&grant_type=authorization_code&redirect_uri=${encodeURIComponent(redirectUri)}`;
+
+    it.each([
+      ["without profile access", scopes, "open_id%2Cdisplay_name%2Cavatar_url"],
+      [
+        "with profile access",
+        [...scopes, "user.info.profile"],
+        "open_id%2Cdisplay_name%2Cavatar_url%2Cusername",
+      ],
+    ])("a grant %s", async (_example, granted, fields) => {
+      const { adapter, requests } = setup([
+        token(granted.join(",")),
+        ok({ user: { open_id: "o1", display_name: "N" } }),
+      ]);
+
+      const result = await adapter.exchangeAuthorizationCode!(context, exchange);
+
+      expect(result).toEqual({ ...connection, scopes: granted });
+      expect(requests).toEqual([
+        { method: "POST", url: `${API}/v2/oauth/token/`, body: form },
+        get(`/v2/user/info/?fields=${fields}`),
+      ]);
     });
-    expect(providerCalls.calls.map(({ url }) => url.pathname)).toEqual([
-      "/v2/post/publish/creator_info/query/",
-      "/v2/post/publish/video/init/",
-    ]);
+
+    it("a grant without publishing", async () => {
+      const { adapter, requests } = setup([token("user.info.basic")]);
+
+      const error = await adapter.exchangeAuthorizationCode!(context, exchange).catch(
+        (cause: unknown) => cause,
+      );
+
+      expect(error).toEqual(
+        new ProviderAdapterError(refused("tiktok_scope_not_granted"), {
+          missingScopes: ["video.publish"],
+        }),
+      );
+      expect(requests).toEqual([{ method: "POST", url: `${API}/v2/oauth/token/`, body: form }]);
+    });
+
+    it.each([
+      ["a profile of another user", [token(), ok({ user: { open_id: "o2" } })], malformedAnswer],
+      ["TikTok down", [down()], unavailable],
+    ])("%s", async (_example, answers, failure) => {
+      const { adapter } = setup(answers);
+
+      expect(await failureOf(adapter.exchangeAuthorizationCode!(context, exchange))).toEqual(
+        failure,
+      );
+    });
   });
 
-  it("adds recommended music only when a photo target asks for it", async () => {
-    const photoUrl = `${mediaUrlPrefix}org/asset/photo.jpg?signature=safe`;
-    const providerCalls = sequence(
-      () => creator({ duet_disabled: true, stitch_disabled: true }),
-      () => success({ publish_id: "p_pub_url~v2.789" }),
+  describe("refreshAccessToken", () => {
+    it.each([
+      ["a token naming its scopes", scopes.join(","), scopes],
+      ["a token without scopes", undefined, []],
+    ])("%s", async (_example, scope, expected) => {
+      const { adapter, requests } = setup([
+        json({ access_token: "a2", refresh_token: "r2", open_id: "o1", expires_in: 60, scope }),
+      ]);
+
+      const result = await adapter.refreshAccessToken!(context, "refresh");
+
+      expect(result).toEqual({
+        accessToken: "a2",
+        expiresAt: "2026-07-19T00:01:00.000Z",
+        refreshToken: "r2",
+        scopes: expected,
+      });
+      expect(requests).toEqual([
+        {
+          method: "POST",
+          url: `${API}/v2/oauth/token/`,
+          body: "client_key=client&client_secret=secret&grant_type=refresh_token&refresh_token=refresh",
+        },
+      ]);
+    });
+  });
+
+  describe("revoke", () => {
+    const revocation = {
+      method: "POST",
+      url: `${API}/v2/oauth/revoke/`,
+      body: "client_key=client&client_secret=secret&token=access",
+    };
+
+    it("an access token", async () => {
+      const { adapter, requests } = setup([json({})]);
+
+      await adapter.revoke!("access");
+
+      expect(requests).toEqual([revocation]);
+    });
+
+    it("TikTok down", async () => {
+      const { adapter } = setup([down()]);
+
+      expect(await failureOf(adapter.revoke!("access", context))).toEqual(unavailable);
+    });
+  });
+
+  describe("getPublicationRequirements", () => {
+    it("the creator's current permissions", async () => {
+      const { adapter, requests } = setup([creator()]);
+
+      const result = await adapter.getPublicationRequirements!(context, credentials);
+
+      expect(result).toEqual({
+        commentAllowed: false,
+        creatorDisplayName: "N",
+        creatorUsername: "u",
+        duetAllowed: false,
+        maxVideoDurationSeconds: 600,
+        platform: "tiktok",
+        privacyLevels: ["PUBLIC_TO_EVERYONE"],
+        stitchAllowed: false,
+      });
+      expect(requests).toEqual([creatorQuery]);
+    });
+
+    it("no account sends nothing", async () => {
+      const { adapter, requests } = setup();
+
+      expect(
+        await failureOf(adapter.getPublicationRequirements!(context, { accessToken: "a" })),
+      ).toEqual(refused("tiktok_account_required"));
+      expect(requests).toEqual([]);
+    });
+  });
+
+  describe("getAccountAnalytics", () => {
+    it("the creator's counters", async () => {
+      const { adapter, requests } = setup([ok({ user: { follower_count: 5 } })]);
+
+      const result = await adapter.getAccountAnalytics!(context, credentials);
+
+      expect(result).toEqual({ followers: 5, recordedAt: "2026-07-19T00:00:00.000Z" });
+      expect(requests).toEqual([
+        get("/v2/user/info/?fields=open_id%2Cfollower_count%2Cfollowing_count%2Cvideo_count"),
+      ]);
+    });
+  });
+
+  describe("listAnalytics", () => {
+    const lookup = { providerPostId: "v1" };
+    const query = post(
+      "/v2/video/query/?fields=id%2Cview_count%2Clike_count%2Ccomment_count%2Cshare_count",
+      { filters: { video_ids: ["v1"] } },
     );
-    const result = await adapter(providerCalls.fetcher).publish!(
-      context,
-      credentials,
-      publishInput({
-        caption: "Photo launch",
-        media: [
+
+    it("a found video", async () => {
+      const video = { id: "v1", view_count: 1, like_count: 2, comment_count: 3, share_count: 4 };
+      const { adapter, requests } = setup([ok({ videos: [video] })]);
+
+      const result = await adapter.listAnalytics!(context, credentials, lookup, { limit: 1 });
+
+      expect(result).toEqual({
+        items: [
           {
-            contentType: "image/jpeg",
-            fileSize: 1024,
-            metadata: { height: 1080, width: 1080 },
-            mode: "remote_ingest",
-            url: photoUrl,
+            comments: 3,
+            impressions: 0,
+            likes: 2,
+            providerPostId: "v1",
+            reach: 0,
+            recordedAt: "2026-07-19T00:00:00.000Z",
+            shares: 4,
+            views: 1,
+            watchTimeSeconds: 0,
           },
         ],
-        providerOptions: {
-          tiktok: {
-            allowComment: true,
-            allowDuet: false,
-            allowStitch: false,
-            autoAddMusic: true,
-            brandContent: false,
-            brandOrganic: true,
-            isAiGenerated: false,
-            musicUsageConfirmed: true,
-            privacyLevel: "SELF_ONLY",
-          },
-        },
-      }),
-    );
-    expect(result).toEqual({
-      outcome: "confirmed_success",
-      providerOperationId: "publish:p_pub_url~v2.789",
+      });
+      expect(requests).toEqual([query]);
     });
-    const body: unknown = JSON.parse(String(providerCalls.calls[1]!.init.body));
-    expect(body).toMatchObject({ post_info: { auto_add_music: true } });
-  });
 
-  it("accepts a 1080p portrait photo rather than requiring a square image", async () => {
-    const calls = sequence(
-      () => creator(),
-      (url) => {
-        expect(url.pathname).toBe("/v2/post/publish/content/init/");
-        return success({ publish_id: "portrait-photo" });
-      },
-    );
-    await expect(
-      adapter(calls.fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          caption: "Portrait photo",
-          media: [
-            {
-              contentType: "image/jpeg",
-              fileSize: 1024,
-              mode: "remote_ingest",
-              metadata: { width: 1080, height: 1920 },
-              url: `${mediaUrlPrefix}org/asset/portrait.jpg`,
-            },
-          ],
-          providerOptions: {
-            tiktok: {
-              allowComment: false,
-              allowDuet: false,
-              allowStitch: false,
-              brandContent: false,
-              brandOrganic: false,
-              isAiGenerated: false,
-              musicUsageConfirmed: true,
-              privacyLevel: "SELF_ONLY",
-            },
-          },
-        }),
-      ),
-    ).resolves.toMatchObject({
-      outcome: "confirmed_success",
-      providerOperationId: "publish:portrait-photo",
+    it("no video", async () => {
+      const { adapter } = setup([ok({ videos: [] })]);
+
+      const result = await adapter.listAnalytics!(context, credentials, lookup, { limit: 1 });
+
+      expect(result).toEqual({ items: [] });
+    });
+
+    it("a cursor sends nothing", async () => {
+      const { adapter, requests } = setup();
+
+      expect(
+        await failureOf(
+          adapter.listAnalytics!(context, credentials, lookup, { cursor: "c", limit: 1 }),
+        ),
+      ).toEqual(refused("tiktok_analytics_not_paginated"));
+      expect(requests).toEqual([]);
     });
   });
 
-  it("rejects automatic music on a video target instead of dropping the choice", async () => {
-    const providerCalls = sequence(() => creator());
-    await expect(
-      adapter(providerCalls.fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          providerOptions: {
-            tiktok: {
-              allowComment: true,
-              allowDuet: true,
-              allowStitch: true,
-              autoAddMusic: true,
-              brandContent: false,
-              brandOrganic: false,
-              isAiGenerated: false,
-              musicUsageConfirmed: true,
-              privacyLevel: "PUBLIC_TO_EVERYONE",
-            },
-          },
-        }),
-      ),
-    ).rejects.toMatchObject({ failure: { code: "tiktok_auto_music_video_unsupported" } });
-  });
+  describe("publish", () => {
+    it("a direct video after checking the creator", async () => {
+      const { adapter, requests } = setup([creator(), ok({ publish_id: "v_1" })]);
 
-  it.each([false, true])("submits a JPEG photo with AI disclosure %s", async (isAiGenerated) => {
-    const photoUrl = `${mediaUrlPrefix}org/asset/photo.jpg?signature=safe`;
-    const providerCalls = sequence(
-      () => creator({ duet_disabled: true, stitch_disabled: true }),
-      (url, init) => {
-        expect(url.pathname).toBe("/v2/post/publish/content/init/");
-        expect(JSON.parse(String(init.body))).toEqual({
-          media_type: "PHOTO",
-          is_aigc: isAiGenerated,
-          post_info: {
-            auto_add_music: false,
-            brand_content_toggle: false,
-            brand_organic_toggle: true,
-            description: "Photo launch\n\n#launch",
-            disable_comment: false,
-            privacy_level: "SELF_ONLY",
-            title: "Photo launch",
-          },
-          post_mode: "DIRECT_POST",
-          source_info: {
-            photo_cover_index: 0,
-            photo_images: [photoUrl],
-            source: "PULL_FROM_URL",
-          },
-        });
-        return success({ publish_id: "p_pub_url~v2.456" });
-      },
-    );
-    const input = publishInput({
-      caption: "Photo launch\n\n#launch",
-      media: [
+      const result = await adapter.publish!(context, credentials, input());
+
+      expect(result).toEqual({
+        outcome: "confirmed_success",
+        providerOperationId: "publish:v_1",
+      });
+      expect(requests).toEqual([creatorQuery, post("/v2/post/publish/video/init/", directBody)]);
+    });
+
+    it("an inbox video without a creator check", async () => {
+      const { adapter, requests } = setup([ok({ publish_id: "v_1" })]);
+
+      const result = await adapter.publish!(context, credentials, input({ postMode: "inbox" }));
+
+      expect(result).toEqual({ outcome: "confirmed_success", providerOperationId: "inbox:v_1" });
+      expect(requests).toEqual([
+        post("/v2/post/publish/inbox/video/init/", { source_info: sourceInfo }),
+      ]);
+    });
+
+    it("a choice the creator does not allow", async () => {
+      const { adapter, requests } = setup([creator()]);
+
+      expect(
+        await failureOf(adapter.publish!(context, credentials, input({ allowComment: true }))),
+      ).toEqual(refused("tiktok_creator_choice_unavailable"));
+      expect(requests).toEqual([creatorQuery]);
+    });
+
+    it.each([
+      [
+        "a rejected write",
+        json({ error: { code: "invalid_params" } }),
+        { failure: refused("tiktok_invalid_params"), outcome: "confirmed_failure" },
+      ],
+      ["a write answered without an ID", ok({}), { failure: unconfirmed, outcome: "unknown" }],
+      [
+        "a lost write",
+        new Error("socket"),
         {
-          contentType: "image/jpeg",
-          fileSize: 1024,
-          metadata: { height: 1080, width: 1080 },
-          mode: "remote_ingest",
-          url: photoUrl,
+          failure: providerFailure("ambiguous", "provider_http_request_failed"),
+          outcome: "unknown",
         },
       ],
-      providerOptions: {
-        tiktok: {
-          allowComment: true,
-          allowDuet: false,
-          allowStitch: false,
-          brandContent: false,
-          brandOrganic: true,
-          isAiGenerated,
-          musicUsageConfirmed: true,
-          privacyLevel: "SELF_ONLY",
-        },
-      },
+    ])("%s", async (_example, answer, expected) => {
+      const { adapter } = setup([answer]);
+
+      const result = await adapter.publish!(context, credentials, input({ postMode: "inbox" }));
+
+      expect(result).toEqual(expected);
     });
-    await expect(
-      adapter(providerCalls.fetcher).publish!(context, credentials, input),
-    ).resolves.toMatchObject({
-      outcome: "confirmed_success",
-      providerOperationId: "publish:p_pub_url~v2.456",
+
+    it.each([
+      ["no account", { accessToken: "a" }, input(), refused("tiktok_account_required")],
+      [
+        "a blank idempotency key",
+        credentials,
+        { ...input(), idempotencyKey: " " },
+        new TypeError("idempotencyKey is invalid"),
+      ],
+      ["no media", credentials, { ...input(), media: [] }, refused("tiktok_pull_media_required")],
+    ])("%s sends nothing", async (_example, who, value, failure) => {
+      const { adapter, requests } = setup();
+
+      expect(await failureOf(adapter.publish!(context, who, value))).toEqual(failure);
+      expect(requests).toEqual([]);
     });
   });
 
-  it("stops before init when a selected creator choice is unavailable", async () => {
-    const providerCalls = sequence(() => creator({ comment_disabled: true }));
-    await expect(
-      adapter(providerCalls.fetcher).publish!(context, credentials, publishInput()),
-    ).rejects.toMatchObject({
-      failure: { code: "tiktok_creator_choice_unavailable" },
-    });
-    expect(providerCalls.calls).toHaveLength(1);
-  });
+  describe("lookupPublication", () => {
+    const query = post("/v2/post/publish/status/fetch/", { publish_id: "v_1" });
 
-  it.each([
-    [
-      "a URL outside the verified prefix",
-      publishInput({
-        media: [
-          {
-            contentType: "video/mp4",
-            fileSize: 1024,
-            mode: "remote_ingest",
-            url: "https://attacker.example/video.mp4",
-          },
-        ],
-      }),
-      "tiktok_media_prefix_invalid",
-    ],
-    [
-      "a WebM video TikTok cannot distribute",
-      publishInput({
-        media: [
-          {
-            contentType: "video/webm",
-            fileSize: 1024,
-            mode: "remote_ingest",
-            url: `${mediaUrlPrefix}org/asset/video.webm`,
-          },
-        ],
-      }),
-      "tiktok_video_invalid",
-    ],
-    [
-      "video beyond the creator duration",
-      publishInput({
-        media: [
-          {
-            contentType: "video/mp4",
-            fileSize: 1024,
-            metadata: { durationSeconds: 301, height: 1920, width: 1080 },
-            mode: "remote_ingest",
-            url: `${mediaUrlPrefix}org/asset/video.mp4`,
-          },
-        ],
-      }),
-      "tiktok_video_invalid",
-    ],
-  ])("rejects %s", async (_label, input, code) => {
-    const providerCalls = sequence(() => creator());
-    await expect(
-      adapter(providerCalls.fetcher).publish!(context, credentials, input),
-    ).rejects.toMatchObject({ failure: { code } });
-  });
+    it("a published post whose ID exceeds safe integers", async () => {
+      const { adapter, requests } = setup([
+        new Response(
+          '{"data":{"status":"PUBLISH_COMPLETE","publicaly_available_post_id":[7412345678901234567]},"error":{"code":"ok"}}',
+          { headers: { "Content-Type": "application/json" } },
+        ),
+      ]);
 
-  it("returns unknown without retrying when init may have succeeded", async () => {
-    const providerCalls = sequence(
-      () => creator(),
-      () =>
-        new Response("not-json", {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        }),
-    );
-    await expect(
-      adapter(providerCalls.fetcher).publish!(context, credentials, publishInput()),
-    ).resolves.toMatchObject({
-      failure: { classification: "ambiguous" },
-      outcome: "unknown",
-    });
-    expect(providerCalls.calls).toHaveLength(2);
-  });
+      const result = await adapter.lookupPublication!(context, credentials, {
+        providerOperationId: "publish:v_1",
+      });
 
-  it.each([
-    [
-      "PROCESSING_DOWNLOAD",
-      {},
-      {
-        providerOperationId: "publish:v_pub_url~v2.123",
-        state: "processing",
-      },
-    ],
-    [
-      "SEND_TO_USER_INBOX",
-      {},
-      {
-        result: {
-          failure: { code: "tiktok_sent_to_inbox", retryable: false },
-          outcome: "confirmed_failure",
-          providerOperationId: "publish:v_pub_url~v2.123",
-        },
-        state: "failed",
-      },
-    ],
-    [
-      "PUBLISH_COMPLETE",
-      { publicaly_available_post_id: ["741234567890"] },
-      {
+      expect(result).toEqual({
         result: {
           outcome: "confirmed_success",
-          providerOperationId: "publish:v_pub_url~v2.123",
-          providerPostId: "741234567890",
+          providerOperationId: "publish:v_1",
+          providerPostId: "7412345678901234567",
         },
         state: "published",
-      },
-    ],
-  ])("maps %s publication status", async (status, patch, expected) => {
-    const providerCalls = sequence((_url, init) => {
-      expect(JSON.parse(String(init.body))).toEqual({
-        publish_id: "v_pub_url~v2.123",
       });
-      return success({ status, ...patch });
-    });
-    await expect(
-      adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
-        providerOperationId: "publish:v_pub_url~v2.123",
-      }),
-    ).resolves.toMatchObject(expected);
-  });
-
-  it("adopts the primary identifier from a documented multi-ID list", async () => {
-    const providerCalls = sequence(() =>
-      success({
-        publicaly_available_post_id: ["741234567890", "741234567891"],
-        status: "PUBLISH_COMPLETE",
-      }),
-    );
-    await expect(
-      adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
-        providerOperationId: "publish:v_pub_url~v2.123",
-      }),
-    ).resolves.toMatchObject({
-      result: {
-        outcome: "confirmed_success",
-        providerOperationId: "publish:v_pub_url~v2.123",
-        providerPostId: "741234567890",
-      },
-      state: "published",
-    });
-  });
-
-  it("rejects a publication identifier list containing an invalid entry", async () => {
-    const providerCalls = sequence(() =>
-      success({
-        publicaly_available_post_id: ["741234567890", "not a post id"],
-        status: "PUBLISH_COMPLETE",
-      }),
-    );
-    await expect(
-      adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
-        providerOperationId: "publish:v_pub_url~v2.123",
-      }),
-    ).rejects.toMatchObject({
-      failure: { code: "provider_transient" },
-    });
-  });
-
-  it("maps TikTok's invalid publish ID envelope to not found", async () => {
-    const providerCalls = sequence(() =>
-      json({
-        data: {},
-        error: { code: "invalid_publish_id", log_id: "safe-log" },
-      }),
-    );
-    await expect(
-      adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
-        providerOperationId: "publish:v_pub_url~v2.missing",
-      }),
-    ).resolves.toEqual({ state: "not_found" });
-  });
-
-  it("performs best-effort cancel and preserves ambiguous cancellation", async () => {
-    const successful = sequence((url, init) => {
-      expect(url.pathname).toBe("/v2/post/publish/cancel/");
-      expect(JSON.parse(String(init.body))).toEqual({
-        publish_id: "v_pub_url~v2.123",
-      });
-      return success({});
-    });
-    await expect(
-      adapter(successful.fetcher).cancelPublication!(context, credentials, {
-        providerOperationId: "publish:v_pub_url~v2.123",
-      }),
-    ).resolves.toEqual({
-      outcome: "confirmed_success",
-      providerOperationId: "publish:v_pub_url~v2.123",
+      expect(requests).toEqual([query]);
     });
 
-    const ambiguous = sequence(
-      () =>
-        new Response("not-json", {
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    await expect(
-      adapter(ambiguous.fetcher).cancelPublication!(context, credentials, {
-        providerOperationId: "publish:v_pub_url~v2.123",
-      }),
-    ).resolves.toMatchObject({
-      failure: { classification: "ambiguous" },
-      outcome: "unknown",
-      providerOperationId: "publish:v_pub_url~v2.123",
-    });
-  });
+    it("no publish ID sends nothing", async () => {
+      const { adapter, requests } = setup();
 
-  it("preserves the inbox phase when cancelling an inbox operation", async () => {
-    const providerCalls = sequence((url, init) => {
-      expect(url.pathname).toBe("/v2/post/publish/cancel/");
-      expect(JSON.parse(String(init.body))).toEqual({
-        publish_id: "inbox-draft-1",
-      });
-      return success({});
-    });
-    await expect(
-      adapter(providerCalls.fetcher).cancelPublication!(context, credentials, {
-        providerOperationId: "inbox:inbox-draft-1",
-      }),
-    ).resolves.toEqual({
-      outcome: "confirmed_success",
-      providerOperationId: "inbox:inbox-draft-1",
-    });
-  });
-
-  it("refreshes credentials without renegotiating the granted scope list", async () => {
-    const providerCalls = sequence(() =>
-      json({
-        access_token: "access-rotated",
-        expires_in: 86_400,
-        open_id: "-9f2c-open",
-        refresh_token: "refresh-rotated",
-      }),
-    );
-    await expect(
-      adapter(providerCalls.fetcher).refreshAccessToken!(context, "refresh-original"),
-    ).resolves.toEqual({
-      accessToken: "access-rotated",
-      expiresAt: "2026-07-20T00:00:00.000Z",
-      refreshToken: "refresh-rotated",
-      scopes: [],
-    });
-  });
-
-  it.each([
-    "user.info.basic,user.info.stats,video.publish,video.list",
-    "user.info.basic,video.publish",
-  ])("refreshes and revokes with actual grants %s", async (grantedScopes) => {
-    const providerCalls = sequence(
-      (_url, init) => {
-        const form = new URLSearchParams(String(init.body));
-        expect(form.get("refresh_token")).toBe("refresh-original");
-        return json({
-          access_token: "access-rotated",
-          expires_in: 86_400,
-          open_id: "open-id-1",
-          refresh_token: "refresh-rotated",
-          scope: grantedScopes,
-          token_type: "Bearer",
-        });
-      },
-      (url, init) => {
-        expect(url.pathname).toBe("/v2/oauth/revoke/");
-        expect(Object.fromEntries(new URLSearchParams(String(init.body)))).toEqual({
-          client_key: "tiktok-client-key",
-          client_secret: "tiktok-client-secret",
-          token: "access-rotated",
-        });
-        return new Response(null, { status: 200 });
-      },
-    );
-    const provider = adapter(providerCalls.fetcher);
-    await expect(provider.refreshAccessToken!(context, "refresh-original")).resolves.toEqual({
-      accessToken: "access-rotated",
-      expiresAt: "2026-07-20T00:00:00.000Z",
-      refreshToken: "refresh-rotated",
-      scopes: grantedScopes.split(","),
-    });
-    await expect(provider.revoke!("access-rotated")).resolves.toBeUndefined();
-  });
-
-  it.each([
-    ["internal", "transient", true],
-    ["video_pull_failed", "transient", true],
-    ["photo_pull_failed", "transient", true],
-    ["auth_removed", "auth", false],
-    ["spam_risk_user_banned_from_posting", "deterministic", false],
-  ])(
-    "classifies terminal TikTok status reason %s for safe recovery",
-    async (reason, classification, retryable) => {
-      const providerCalls = sequence(() => success({ status: "FAILED", fail_reason: reason }));
-      await expect(
-        adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
-          providerOperationId: "publish:v_pub_file~v2-1",
-        }),
-      ).resolves.toMatchObject({
-        state: "failed",
-        result: {
-          outcome: "confirmed_failure",
-          providerOperationId: "publish:v_pub_file~v2-1",
-          failure: { code: `tiktok_${reason}`, classification, retryable },
-        },
-      });
-    },
-  );
-
-  it("normalizes TikTok error envelopes without leaking provider messages", async () => {
-    const providerCalls = sequence(() =>
-      json({
-        data: {},
-        error: {
-          code: "rate_limit_exceeded",
-          log_id: "safe-log",
-          message: "raw provider detail must not escape",
-        },
-      }),
-    );
-    const error = await adapter(providerCalls.fetcher).getPublicationRequirements!(
-      context,
-      credentials,
-    ).catch((cause: unknown) => cause);
-    expect(error).toBeInstanceOf(ProviderAdapterError);
-    expect(error).toMatchObject({
-      failure: {
-        classification: "rate_limit",
-        code: "tiktok_rate_limit_exceeded",
-        message: "The provider rate limit has been reached.",
-      },
-    });
-    expect(JSON.stringify(error)).not.toContain("raw provider detail");
-  });
-
-  it("reads the creator's video counters without inventing measurements", async () => {
-    const providerCalls = sequence((url, init) => {
-      expect(url.origin).toBe("https://open.tiktokapis.com");
-      expect(url.pathname).toBe("/v2/video/query/");
-      expect(url.searchParams.get("fields")).toBe(
-        "id,view_count,like_count,comment_count,share_count",
+      expect(await failureOf(adapter.lookupPublication!(context, credentials, {}))).toEqual(
+        refused("tiktok_publish_id_required"),
       );
-      expect(JSON.parse(String(init.body))).toEqual({ filters: { video_ids: ["video-1"] } });
-      expect(new Headers(init.headers).get("Authorization")).toBe("Bearer access-secret");
-      return success({
-        videos: [
-          {
-            comment_count: 9,
-            id: "video-1",
-            like_count: 84,
-            share_count: 12,
-            view_count: 1200,
-          },
-        ],
-      });
+      expect(requests).toEqual([]);
     });
-    await expect(
-      adapter(providerCalls.fetcher).listAnalytics!(
-        context,
-        credentials,
-        { providerPostId: "video-1" },
-        { limit: 100 },
-      ),
-    ).resolves.toEqual({
-      items: [
+  });
+
+  describe("cancelPublication", () => {
+    const operation = { providerOperationId: "publish:v_1" };
+    const cancel = post("/v2/post/publish/cancel/", { publish_id: "v_1" });
+
+    it.each([
+      [
+        "an accepted cancellation",
+        ok({}),
+        { outcome: "confirmed_success", providerOperationId: "publish:v_1" },
+      ],
+      [
+        "a refused cancellation",
+        json({ error: { code: "publish_not_cancellable" } }),
         {
-          comments: 9,
-          impressions: 0,
-          likes: 84,
-          providerPostId: "video-1",
-          recordedAt: "2026-07-19T00:00:00.000Z",
-          reach: 0,
-          shares: 12,
-          views: 1200,
-          watchTimeSeconds: 0,
+          failure: refused("tiktok_publish_not_cancellable"),
+          outcome: "confirmed_failure",
+          providerOperationId: "publish:v_1",
         },
       ],
+      [
+        "TikTok down",
+        down(),
+        {
+          failure: providerFailure("ambiguous", "provider_http_503"),
+          outcome: "unknown",
+          providerOperationId: "publish:v_1",
+        },
+      ],
+    ])("%s", async (_example, answer, expected) => {
+      const { adapter, requests } = setup([answer]);
+
+      const result = await adapter.cancelPublication!(context, credentials, operation);
+
+      expect(result).toEqual(expected);
+      expect(requests).toEqual([cancel]);
     });
-  });
-
-  it("writes no snapshot when TikTok no longer reports the video", async () => {
-    const providerCalls = sequence(() => success({ videos: [] }));
-    await expect(
-      adapter(providerCalls.fetcher).listAnalytics!(
-        context,
-        credentials,
-        { providerPostId: "video-1" },
-        { limit: 100 },
-      ),
-    ).resolves.toEqual({ items: [] });
-  });
-
-  it("rejects a metric row that omits a requested counter", async () => {
-    const providerCalls = sequence(() =>
-      success({ videos: [{ id: "video-1", like_count: 1, view_count: 2 }] }),
-    );
-    await expect(
-      adapter(providerCalls.fetcher).listAnalytics!(
-        context,
-        credentials,
-        { providerPostId: "video-1" },
-        { limit: 100 },
-      ),
-    ).rejects.toBeInstanceOf(ProviderAdapterError);
   });
 });

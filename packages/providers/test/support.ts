@@ -44,6 +44,15 @@ export async function failureOf(attempt: Promise<unknown>): Promise<unknown> {
   return "no failure";
 }
 
+export function thrownBy(call: () => unknown): unknown {
+  try {
+    call();
+  } catch (cause) {
+    return cause;
+  }
+  return "nothing thrown";
+}
+
 export function failureThrownBy(call: () => unknown): unknown {
   try {
     call();

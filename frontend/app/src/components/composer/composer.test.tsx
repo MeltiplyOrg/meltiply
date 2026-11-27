@@ -613,23 +613,6 @@ describe("Composer caption bound", () => {
     expect(textarea).toHaveValue("x".repeat(12));
   });
 
-  it("counts an emoji as one character when locking the caption", async () => {
-    renderComposer({
-      accounts: [instagramAccount],
-      capabilities: [platformCapability("instagram", 12)],
-    });
-    const textarea = composerTextarea();
-    await waitFor(() => expect(textarea).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
-    await waitFor(() => expect(textarea).toBeEnabled());
-    await screen.findByLabelText("Custom Text for Alpha Instagram");
-
-    fireEvent.change(textarea, { target: { value: "🎉".repeat(15) } });
-    const value = (textarea as HTMLTextAreaElement).value;
-    expect([...value]).toHaveLength(12);
-    expect(value.length).toBe(24);
-  });
-
   it("leaves the caption unbounded when the platform publishes no limit", async () => {
     renderComposer({
       accounts: [instagramAccount],

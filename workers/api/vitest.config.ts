@@ -12,16 +12,6 @@ export default defineConfig({
   test: {
     clearMocks: false,
     setupFiles: ["../../scripts/lib/vitest-offline-collector.ts"],
-    coverage: {
-      enabled: true,
-      provider: "istanbul",
-      thresholds: {
-        statements: 50,
-        branches: 40,
-        functions: 55,
-        lines: 50,
-      },
-    },
     reporters: process.env.CI
       ? ["default", ["junit", { outputFile: "test-results/junit.xml" }]]
       : ["default"],

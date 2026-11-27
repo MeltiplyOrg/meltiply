@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   consentCookieName,
   hasCookieConsent,
@@ -10,6 +10,10 @@ import {
   writeCookieConsent,
   writeFunctionalStorage,
 } from "@meltiply/ui/cookie-consent";
+
+beforeAll(() => {
+  readCookieConsent();
+});
 
 beforeEach(() => {
   document.cookie = `${consentCookieName}=; Path=/; Max-Age=0`;
@@ -81,18 +85,19 @@ describe("optional cookie and storage consent", () => {
     document.cookie = "session-fixture=; Path=/; Max-Age=0";
   });
 
-  it("treats expired, invalid-version, and malformed records as no consent", () => {
-    for (const value of [
-      "not-json",
-      JSON.stringify({ v: 2, functional: true, expires: Date.now() + 10000 }),
-      JSON.stringify({ v: 1, functional: true, expires: Date.now() - 1 }),
-      JSON.stringify({ v: 1, expires: Date.now() + 10000 }),
+  it.each([
+    ["non-JSON", "not-json"],
+    ["version 2", JSON.stringify({ v: 2, functional: true, expires: Date.now() + 10000 })],
+    ["expired", JSON.stringify({ v: 1, functional: true, expires: Date.now() - 1 })],
+    ["missing functional flag", JSON.stringify({ v: 1, expires: Date.now() + 10000 })],
+    [
+      "non-boolean functional flag",
       JSON.stringify({ v: 1, functional: "yes", expires: Date.now() + 10000 }),
-    ]) {
-      document.cookie = `${consentCookieName}=${encodeURIComponent(value)}; Path=/`;
-      expect(readCookieConsent()).toBeNull();
-      expect(hasCookieConsent("functional")).toBe(false);
-    }
+    ],
+  ])("treats %s record as no consent", (_example, value) => {
+    document.cookie = `${consentCookieName}=${encodeURIComponent(value)}; Path=/`;
+    expect(readCookieConsent()).toEqual(null);
+    expect(hasCookieConsent("functional")).toEqual(false);
   });
 
   it("observes sibling-site withdrawal on focus and clears this origin's optional data", () => {

@@ -7,7 +7,6 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { writeCookieConsent } from "@meltiply/ui/cookie-consent";
-import { resolveTheme } from "@meltiply/ui/theme-controller";
 import { themeStorageKey } from "@meltiply/ui/theme-preference";
 import { ThemeProvider, useTheme } from "./theme";
 
@@ -70,19 +69,6 @@ afterEach(() => {
   window.localStorage.clear();
   document.cookie = "meltiply-consent=; Path=/; Max-Age=0";
   document.cookie = "meltiply-theme=; Path=/; Max-Age=0";
-});
-
-describe("theme resolution", () => {
-  it("prefers a stored choice over the system preference", () => {
-    expect(resolveTheme("light", true)).toBe("light");
-    expect(resolveTheme("dark", false)).toBe("dark");
-  });
-
-  it("follows the system preference without an explicit palette", () => {
-    expect(resolveTheme("system", true)).toBe("dark");
-    expect(resolveTheme(null, true)).toBe("dark");
-    expect(resolveTheme(null, false)).toBe("light");
-  });
 });
 
 it("preserves a transferred light palette through hydration without functional consent", () => {

@@ -16,7 +16,7 @@ import { createJwtVerifier, jwtClaims, type JwtIdentity } from "@meltiply/auth";
 import { activeIdentity } from "../src/auth-policy";
 import { createApiApp } from "../src/app";
 import { betterAuthFor } from "../src/better-auth";
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
 import { systemPoolFor } from "../src/database";
 import { applicationOrigin, type ApiWorkerEnv } from "../src/env";
 import { logRecords } from "./log-records";
@@ -1434,7 +1434,15 @@ describe("distributed device abuse controls", () => {
     const first = await redeemDeviceCode(deviceCode, { ip });
     expect(await deviceError(first)).toMatchObject({ error: "authorization_pending" });
 
-    for (let attempt = 1; attempt < 120; attempt += 1) {
+    await systemPoolFor(env).query(
+      `UPDATE auth_rate_limits
+       SET attempt_count = 117
+       WHERE action = 'device-token'
+         AND subject LIKE 'ip:%'
+         AND window_start = date_bin(INTERVAL '60 seconds', now(), 'epoch')`,
+    );
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       const throttled = await redeemDeviceCode(deviceCode, { ip });
       expect(throttled.status).toBe(400);
       expect(await deviceError(throttled)).toMatchObject({ error: "slow_down" });

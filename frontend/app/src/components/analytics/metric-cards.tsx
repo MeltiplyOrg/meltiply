@@ -3,7 +3,11 @@ import { Button } from "@meltiply/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
 import { cn } from "@meltiply/ui/utils";
 import { useI18n } from "@/lib/i18n";
-import { formatAnalyticsCompact, formatAnalyticsInteger } from "./analytics-helpers";
+import {
+  formatAnalyticsCompact,
+  formatAnalyticsInteger,
+  isCompactOnPhone,
+} from "./analytics-helpers";
 import type { AnalyticsSummary } from "@/types";
 
 const CARDS = [
@@ -35,7 +39,7 @@ export function MetricCards({
         {CARDS.map((card) => {
           const value = totals[card.key];
           const exact = formatAnalyticsInteger(value, language);
-          const compactOnPhone = value >= 10_000_000;
+          const compactOnPhone = isCompactOnPhone(value);
           const compact = formatAnalyticsCompact(value, language);
           return (
             <div

@@ -14,6 +14,7 @@ import {
 import { Effect } from "effect";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { createApiApp } from "../src/app";
 import { systemPoolFor, withSystemTransactionEffect } from "../src/database";
 import type { ApiWorkerEnv } from "../src/env";
@@ -92,8 +93,7 @@ const env: ApiWorkerEnv = {
   APP_URL: "http://localhost:3000",
   DB_AUTHENTICATED: { connectionString } as Hyperdrive,
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   DEPLOYMENT_CATEGORY: "selfhosted",
   ENVIRONMENT: "test",

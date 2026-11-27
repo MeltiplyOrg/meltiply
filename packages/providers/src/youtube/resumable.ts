@@ -2,65 +2,39 @@ import {
   classifyProviderFailure,
   isHttp404,
   isUncertainFailure,
-  malformed,
   ProviderAdapterError,
-  rejected,
   rejection,
 } from "../failures";
 import type { ProviderHttpResponse } from "../http";
-import { PROVIDER_LIMITS } from "../limits";
 import { confirmedFailure, unknownResult } from "../results";
-import {
-  YOUTUBE_PRIVACY_STATUSES,
-  type ProviderCredentials,
-  type ProviderFailure,
-  type ProviderMedia,
-  type ProviderOperationResult,
-  type ProviderPublicationStatus,
-  type ProviderRequestContext,
-  type ProviderStreamMedia,
-  type PublishInput,
-  type YouTubePrivacyStatus,
+import type {
+  ProviderCredentials,
+  ProviderFailure,
+  ProviderMedia,
+  ProviderOperationResult,
+  ProviderPublicationStatus,
+  ProviderRequestContext,
+  ProviderStreamMedia,
+  PublishInput,
 } from "../types";
+import { bearer } from "../values";
 import {
-  bearer,
-  boundedString,
-  codePointLength,
-  firstNonEmptyLine,
-  normalizeContentType,
-  providerIdentifier,
-  record,
-  requireIdempotencyKey,
-  STANDARD_VIDEO_MIME_TYPES,
-  validFileSize,
-} from "../values";
+  acknowledgedOffset,
+  parseYouTubeUploadInput,
+  youtubeContinuationMedia,
+  youtubeVideoStatus,
+} from "./responses";
 import {
   YOUTUBE_API_ORIGIN,
   validateSessionUri,
   youtubeAccountId,
   youtubeOperationId,
   youtubeVideoId,
-  youtubeWatchUrl,
   type GoogleRequest,
   type YouTubeOperation,
 } from "./types";
 
-const angleBracketsPattern = /[<>]/;
-const uploadRangePattern = /^bytes=0-(\d+)$/;
-const utf8Encoder = new TextEncoder();
-
 const STAGING_BUFFER_BYTES = 64 * 1024;
-
-export interface UploadInput {
-  contentType: string;
-  description: string;
-  fileSize: number;
-  madeForKids?: boolean;
-  media: ProviderStreamMedia;
-  privacyStatus: YouTubePrivacyStatus;
-  tags: string[];
-  title: string;
-}
 
 type SessionProbe = { kind: "open"; acknowledged: number } | { kind: "complete"; videoId: string };
 
@@ -68,77 +42,6 @@ type UploadOutcome =
   | { failure: ProviderFailure; kind: "failed" }
   | { acknowledged: number; failure: ProviderFailure; kind: "interrupted" }
   | { id: string; kind: "complete" };
-
-function parseYouTubeUploadInput(input: PublishInput): UploadInput {
-  requireIdempotencyKey(input.idempotencyKey);
-  const description = input.caption.trim();
-  const title = firstNonEmptyLine(description);
-  const [media] = input.media;
-  const metadata = media?.metadata;
-  const duration = metadata?.durationSeconds;
-  const width = metadata?.width;
-  const height = metadata?.height;
-  if (
-    input.media.length !== 1 ||
-    !media ||
-    media.mode !== "resumable_upload" ||
-    !title ||
-    codePointLength(title) > PROVIDER_LIMITS.youtube.maxTitleCodePoints ||
-    utf8Encoder.encode(description).byteLength > PROVIDER_LIMITS.youtube.maxCaptionCodePoints ||
-    angleBracketsPattern.test(title) ||
-    angleBracketsPattern.test(description) ||
-    input.hashtags.length > PROVIDER_LIMITS.youtube.maxHashtags ||
-    input.hashtags.join(",").length > PROVIDER_LIMITS.youtube.maxHashtagsJoinedChars ||
-    duration === undefined ||
-    !Number.isFinite(duration) ||
-    duration <= 0 ||
-    duration > PROVIDER_LIMITS.youtube.maxVideoDurationSeconds ||
-    width === undefined ||
-    !Number.isSafeInteger(width) ||
-    width < 1 ||
-    height === undefined ||
-    !Number.isSafeInteger(height) ||
-    height < 1
-  ) {
-    throw rejected("youtube_video_invalid");
-  }
-  const contentType = normalizeContentType(media.contentType);
-  if (
-    !STANDARD_VIDEO_MIME_TYPES.includes(contentType) ||
-    !validFileSize(media.fileSize, PROVIDER_LIMITS.youtube.maxVideoBytes)
-  ) {
-    throw rejected("youtube_media_invalid");
-  }
-  const providerOptions = input.providerOptions?.youtube;
-  const privacyStatus = providerOptions?.privacyStatus ?? "public";
-  if (
-    providerOptions !== undefined &&
-    (typeof providerOptions.madeForKids !== "boolean" ||
-      !YOUTUBE_PRIVACY_STATUSES.has(privacyStatus))
-  ) {
-    throw rejected("youtube_publish_options_invalid");
-  }
-  return {
-    contentType,
-    description,
-    fileSize: media.fileSize,
-    ...(providerOptions ? { madeForKids: providerOptions.madeForKids } : {}),
-    media,
-    privacyStatus,
-    tags: [...input.hashtags],
-    title,
-  };
-}
-
-function acknowledgedOffset(headers: Headers, fileSize: number, absent: number): number {
-  const range = headers.get("Range");
-  if (range === null) return absent;
-  const lastByte = Number(range.match(uploadRangePattern)?.[1]);
-  if (!Number.isSafeInteger(lastByte) || lastByte + 1 > fileSize) {
-    throw malformed();
-  }
-  return lastByte + 1;
-}
 
 function isArrayBufferBacked(value: Uint8Array): value is Uint8Array<ArrayBuffer> {
   return value.buffer instanceof ArrayBuffer;
@@ -232,6 +135,10 @@ export interface YouTubeResumableConfig {
   uploadChunkBytes: number;
 }
 
+/**
+ * Builds YouTube's resumable upload initiation, chunk streaming, session probe,
+ * continuation, and video processing lookup handlers.
+ */
 export function createYouTubeResumable(config: YouTubeResumableConfig) {
   const { categoryId, googleRequest, uploadChunkBytes } = config;
 
@@ -449,53 +356,12 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
       if (isHttp404(cause)) return { state: "not_found" };
       throw cause;
     }
-    const body = record(response.body);
-    if (!Array.isArray(body?.items) || body.items.length > 1 || body.nextPageToken !== undefined) {
-      throw malformed();
-    }
-    if (body.items.length === 0) return { state: "not_found" };
-    const video = record(body.items[0]);
-    const snippet = record(video?.snippet);
-    const status = record(video?.status);
-    const processing = record(video?.processingDetails);
-    const returnedId = providerIdentifier(video?.id);
-    const channelId = providerIdentifier(snippet?.channelId);
-    const uploadStatus = boundedString(status?.uploadStatus, 32)?.toLowerCase();
-    const privacyStatus = boundedString(status?.privacyStatus, 32)?.toLowerCase();
-    const processingStatus = boundedString(processing?.processingStatus, 32)?.toLowerCase();
-    if (returnedId !== id || !channelId || !uploadStatus || !privacyStatus || !processingStatus) {
-      throw malformed();
-    }
-    if (channelId !== youtubeAccountId(credentials)) {
-      return {
-        result: confirmedFailure(rejection("youtube_channel_mismatch", 409), retainedOperationId),
-        state: "failed",
-      };
-    }
-    if (["deleted", "failed", "rejected"].includes(uploadStatus) || processingStatus === "failed") {
-      return {
-        result: confirmedFailure(
-          rejection("youtube_video_processing_failed", 422),
-          retainedOperationId,
-        ),
-        state: "failed",
-      };
-    }
-    if (uploadStatus === "processed" && ["succeeded", "terminated"].includes(processingStatus)) {
-      if (!YOUTUBE_PRIVACY_STATUSES.has(privacyStatus as YouTubePrivacyStatus)) {
-        throw malformed();
-      }
-      return {
-        result: {
-          outcome: "confirmed_success",
-          providerOperationId: retainedOperationId,
-          providerPostId: id,
-          providerUrl: youtubeWatchUrl(id),
-        },
-        state: "published",
-      };
-    }
-    return { providerOperationId: retainedOperationId, state: "processing" };
+    return youtubeVideoStatus(
+      response.body,
+      id,
+      youtubeAccountId(credentials),
+      retainedOperationId,
+    );
   };
 
   const continueSession = async (
@@ -504,12 +370,8 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
     operation: Extract<YouTubeOperation, { phase: "session" | "submitted" }>,
     media: ProviderMedia,
   ): Promise<ProviderPublicationStatus> => {
-    const contentType = normalizeContentType(media.contentType);
-    if (
-      media.mode === "remote_ingest" ||
-      media.fileSize !== operation.fileSize ||
-      !STANDARD_VIDEO_MIME_TYPES.includes(contentType)
-    ) {
+    const validated = youtubeContinuationMedia(media, operation.fileSize);
+    if (!validated) {
       return {
         result: confirmedFailure(
           rejection("youtube_media_invalid", 400),
@@ -518,6 +380,7 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
         state: "failed",
       };
     }
+    const { contentType, media: streamMedia } = validated;
     let probe: SessionProbe;
     try {
       probe = await probeSession(context, credentials, operation, true);
@@ -542,7 +405,7 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
       context,
       credentials,
       { fileSize: operation.fileSize, sessionUri: operation.sessionUri },
-      { contentType, media },
+      { contentType, media: streamMedia },
       probe.acknowledged,
     );
     if (outcome.kind === "complete") {

@@ -1,6 +1,5 @@
 import { Effect } from "effect";
-import type { EffectTransactionClient } from "@meltiply/database";
-import { can, isWorkspaceRole, type DatabaseError, type WorkspaceRole } from "@meltiply/domain";
+import { can, isWorkspaceRole, type WorkspaceRole } from "@meltiply/domain";
 import type { Context } from "hono";
 
 import type { ResolvedActor } from "./actor-types";
@@ -36,21 +35,6 @@ export function requireWorkspaceAdminEffect(
   return actor.role === "admin" || actor.isInstallationOwner
     ? Effect.void
     : Effect.fail(new CoreApiError(403, "workspace_admin_required", message));
-}
-
-export function requireActiveWorkspaceAdminEffect(
-  client: EffectTransactionClient,
-  message = "The workspace admin role is required.",
-): Effect.Effect<void, CoreApiError | DatabaseError> {
-  return client
-    .query<{ role: string | null }>("SELECT public.auth_active_org_role() AS role")
-    .pipe(
-      Effect.flatMap((result) =>
-        result.rows[0]?.role === "admin"
-          ? Effect.void
-          : Effect.fail(new CoreApiError(403, "workspace_admin_required", message)),
-      ),
-    );
 }
 
 const queueMembershipPathPattern = /^\/api\/v1\/queues\/[^/]+\/posts\/[^/]+$/;

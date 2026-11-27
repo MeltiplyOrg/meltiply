@@ -4,7 +4,7 @@ import { PROVIDER_LIMITS } from "../limits";
 import { adapterRuntime, type ProviderAdapterOptions } from "../runtime";
 import type { ProviderAdapter } from "../types";
 import { createFacebookAnalytics } from "./analytics";
-import { createFacebookOAuth } from "./oauth";
+import { createFacebookOAuth, discoveryRequestLimit } from "./oauth";
 import { createFacebookPublish } from "./publish";
 import {
   FACEBOOK_GRAPH_ORIGIN,
@@ -42,13 +42,22 @@ const capability: PlatformCapability = {
   reply: false,
 };
 
-export function createFacebookAdapter(options: ProviderAdapterOptions): ProviderAdapter {
+export interface FacebookAdapterOptions extends ProviderAdapterOptions {
+  maxDiscoveredPages?: number;
+  maxDiscoveryRequests?: number;
+}
+
+export function createFacebookAdapter(options: FacebookAdapterOptions): ProviderAdapter {
   const runtime = adapterRuntime(
     "facebook",
     [FACEBOOK_GRAPH_ORIGIN, FACEBOOK_UPLOAD_ORIGIN],
     options,
   );
-  const oauth = createFacebookOAuth(runtime);
+  const oauth = createFacebookOAuth(
+    runtime,
+    discoveryRequestLimit(options.maxDiscoveryRequests),
+    options.maxDiscoveredPages,
+  );
   const analytics = createFacebookAnalytics(runtime.http, runtime.now);
   const publish = createFacebookPublish(runtime.http);
   return {

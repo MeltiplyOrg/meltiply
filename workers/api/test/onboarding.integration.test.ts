@@ -3,16 +3,21 @@ import { createHyperdrivePool } from "@meltiply/database";
 import type { JwtIdentity } from "@meltiply/auth";
 import type { Hono } from "hono";
 
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { createApiApp } from "../src/app";
 import { systemPoolFor } from "../src/database";
 import type { ApiWorkerEnv, ApiWorkerEnvironment } from "../src/env";
 import { sha256Hex } from "../src/crypto";
 
-const baseSystemConnectionString =
-  "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
-const adminConnectionString =
-  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
-  "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const baseSystemConnectionString = integrationDatabaseUrl(
+  process.env.MELTIPLY_DATABASE_TEST_URL,
+  "system",
+);
+const adminConnectionString = integrationDatabaseUrl(
+  process.env.MELTIPLY_DATABASE_TEST_URL,
+  "admin",
+  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL,
+);
 const schema = "onboarding_lifecycle";
 const isolatedDatabase = new URL(baseSystemConnectionString);
 isolatedDatabase.searchParams.set("options", `-c search_path=${schema},public`);

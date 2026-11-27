@@ -10,6 +10,12 @@ import { createFacebookAdapter } from "./facebook/adapter";
 import { MAX_RETRY_AFTER_SECONDS } from "./failures";
 import { createInstagramAdapter } from "./instagram/adapter";
 import { PROVIDER_LIMITS } from "./limits";
+import {
+  providerOriginOverrides,
+  providerOriginSettings,
+  redirectingFetch,
+  type ProviderOriginSetting,
+} from "./origin-overrides";
 import { createThreadsAdapter } from "./threads/adapter";
 import { createTikTokAdapter } from "./tiktok/adapter";
 import type {
@@ -82,7 +88,9 @@ function wrapWithMetadata<
   }) as NonNullable<ProviderAdapter[K]>;
 }
 
-export interface ProviderRegistryEnvironment {
+export interface ProviderRegistryEnvironment extends Partial<
+  Record<ProviderOriginSetting, string>
+> {
   FACEBOOK_CLIENT_ID?: string;
   FACEBOOK_CLIENT_SECRET?: string;
   FACEBOOK_LIVE_ACCEPTED?: string;
@@ -110,31 +118,32 @@ export interface ProviderRegistryFactoryOptions {
   timeoutMilliseconds?: number;
 }
 
-const registryConfigKeyMap: Record<keyof ProviderRegistryEnvironment, true> = {
-  FACEBOOK_CLIENT_ID: true,
-  FACEBOOK_CLIENT_SECRET: true,
-  FACEBOOK_LIVE_ACCEPTED: true,
-  INSTAGRAM_CLIENT_ID: true,
-  INSTAGRAM_CLIENT_SECRET: true,
-  INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED: true,
-  INSTAGRAM_LIVE_ACCEPTED: true,
-  APP_URL: true,
-  TIKTOK_CLIENT_KEY: true,
-  TIKTOK_CLIENT_SECRET: true,
-  TIKTOK_LIVE_ACCEPTED: true,
-  TIKTOK_MEDIA_URL_PREFIX: true,
-  THREADS_CLIENT_ID: true,
-  THREADS_CLIENT_SECRET: true,
-  THREADS_ENGAGEMENT_LIVE_ACCEPTED: true,
-  THREADS_LIVE_ACCEPTED: true,
-  YOUTUBE_LIVE_ACCEPTED: true,
-  YOUTUBE_SHORTS_CLIENT_ID: true,
-  YOUTUBE_SHORTS_CLIENT_SECRET: true,
-};
+const baseRegistryConfigKeys = [
+  "FACEBOOK_CLIENT_ID",
+  "FACEBOOK_CLIENT_SECRET",
+  "FACEBOOK_LIVE_ACCEPTED",
+  "INSTAGRAM_CLIENT_ID",
+  "INSTAGRAM_CLIENT_SECRET",
+  "INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED",
+  "INSTAGRAM_LIVE_ACCEPTED",
+  "APP_URL",
+  "TIKTOK_CLIENT_KEY",
+  "TIKTOK_CLIENT_SECRET",
+  "TIKTOK_LIVE_ACCEPTED",
+  "TIKTOK_MEDIA_URL_PREFIX",
+  "THREADS_CLIENT_ID",
+  "THREADS_CLIENT_SECRET",
+  "THREADS_ENGAGEMENT_LIVE_ACCEPTED",
+  "THREADS_LIVE_ACCEPTED",
+  "YOUTUBE_LIVE_ACCEPTED",
+  "YOUTUBE_SHORTS_CLIENT_ID",
+  "YOUTUBE_SHORTS_CLIENT_SECRET",
+] as const;
 
-const registryConfigKeys = Object.keys(
-  registryConfigKeyMap,
-) as (keyof ProviderRegistryEnvironment)[];
+const registryConfigKeys: readonly (keyof ProviderRegistryEnvironment)[] = [
+  ...baseRegistryConfigKeys,
+  ...providerOriginSettings,
+];
 
 type RegistryConfigSnapshot = Record<keyof ProviderRegistryEnvironment, string | undefined>;
 
@@ -328,8 +337,11 @@ export function createProviderRegistryFromEnvironment(
     throw new TypeError("accepted YouTube provider configuration is incomplete");
   }
   const publicUrl = trustedPublicUrl(environment.APP_URL);
+  const overrides = providerOriginOverrides(environment);
+  const send = options.fetch ?? fetch;
+  const adapterFetch = overrides.size > 0 ? redirectingFetch(overrides, send) : options.fetch;
   const commonOptions = {
-    ...(options.fetch ? { fetch: options.fetch } : {}),
+    ...(adapterFetch ? { fetch: adapterFetch } : {}),
     ...(options.now ? { now: options.now } : {}),
     ...(options.timeoutMilliseconds === undefined
       ? {}

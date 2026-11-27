@@ -1,6 +1,6 @@
 import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import { Effect } from "effect";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import { afterAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { systemPoolFor } from "../src/database";
 import type { AutomationEnv } from "../src/env";
@@ -149,7 +149,7 @@ async function readProtectedPurgeState(): Promise<ProtectedPurgeState> {
 }
 
 describeIntegration("retention cleanup with PostgreSQL", () => {
-  beforeAll(async () => {
+  async function seedRetentionRows() {
     await runSystemTransaction(env, async (client) => {
       await client.query("DELETE FROM organizations WHERE id = $1", [protectedOrganizationId]);
       await client.query(
@@ -268,7 +268,7 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
         [...analyticsSnapshotIds, organizationId, distributionId],
       );
     });
-  });
+  }
 
   afterAll(async () => {
     await runSystemTransaction(env, async (client) => {
@@ -305,6 +305,7 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
   });
 
   it("deletes bounded old rows while retaining fresh and processing rows", async () => {
+    await seedRetentionRows();
     await expect(Effect.runPromise(runRetention(env, { batchSize: 1 }))).resolves.toEqual({
       deleted: 6,
       errors: 0,

@@ -17,6 +17,7 @@ import type { PostRow, CalendarDayCell } from "./types";
 import { CalendarTimeGrid } from "./calendar-time-grid";
 import { calendarDateKey, type CalendarPeriod } from "./calendar-dates";
 import type { CalendarSlot } from "./calendar-slots";
+import { monthDayEntries } from "./calendar-month-entries";
 
 const MONTH_CHIP_TONE_CLASS = `
   border-line bg-inset hover:bg-inset/70
@@ -350,21 +351,9 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                     const filledSlots = daySlots.length - emptySlots.length;
                     const monthEntries =
                       mode === "month" && timeline
-                        ? [
-                            ...daySlots.flatMap((slot) => {
-                              if (!slot.postId)
-                                return [{ instant: slot.instant, chip: renderSlotChip(slot) }];
-                              const row = postById.get(slot.postId);
-                              return row
-                                ? [{ instant: slot.instant, chip: renderPostChip(row) }]
-                                : [];
-                            }),
-                            ...dayPosts
-                              .filter((row) => !daySlots.some((slot) => slot.postId === row.id))
-                              .map((row) => ({ instant: row.date, chip: renderPostChip(row) })),
-                          ]
-                            .sort((a, b) => Date.parse(a.instant) - Date.parse(b.instant))
-                            .map((entry) => entry.chip)
+                        ? monthDayEntries(daySlots, dayPosts, postById).map((entry) =>
+                            entry.row ? renderPostChip(entry.row) : renderSlotChip(entry.slot),
+                          )
                         : [];
                     const isToday = key === today;
                     const fullDate = dateLabel.format(cell.date);

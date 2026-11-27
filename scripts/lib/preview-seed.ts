@@ -13,7 +13,7 @@ import type { EffectTransactionClient } from "../../packages/database/src/index"
 import { assemblePostsEffect } from "../../workers/api/src/post-service";
 import { mapAsset } from "../../workers/api/src/asset-types";
 import { createCoreApiService, mapSnapshot } from "../../workers/api/src/core-service";
-import { mapQueue } from "../../workers/api/src/publishing-queue-store";
+import { mapQueue } from "../../workers/api/src/publishing-queue-rules";
 import { seatUsageEffect } from "../../workers/api/src/seats";
 import {
   previewObjectSchema,

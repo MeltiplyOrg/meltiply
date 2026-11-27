@@ -1,4 +1,5 @@
 import { objectStorageBindings } from "@meltiply/storage";
+import type { ProviderOriginSetting } from "@meltiply/providers";
 import type { AccessClaims, JwtIdentity } from "@meltiply/auth";
 import {
   isDevelopmentEnvironment,
@@ -22,7 +23,7 @@ export interface AutomationRelayStub {
   requestCommentsSync(organizationId: string, distributionId: string | null): Promise<number>;
 }
 
-export interface ApiWorkerEnv {
+export interface ApiWorkerEnv extends Partial<Record<ProviderOriginSetting, string>> {
   ACCESS_POLICY_AUD?: string;
   ACCESS_TEAM_DOMAIN?: string;
   ALLOWED_ORIGINS?: string;

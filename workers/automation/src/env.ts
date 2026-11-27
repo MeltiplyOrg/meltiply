@@ -1,3 +1,4 @@
+import type { ProviderOriginSetting } from "@meltiply/providers";
 import type { MediaProcessorRpcOutcome, NativeProcessorJob } from "./native-processor-types";
 import type { ReplyWorkflowPayload } from "./messages";
 
@@ -9,7 +10,7 @@ export interface MediaProcessorStub extends Rpc.DurableObjectBranded {
   process(job: NativeProcessorJob): Promise<MediaProcessorRpcOutcome>;
 }
 
-export interface AutomationEnv {
+export interface AutomationEnv extends Partial<Record<ProviderOriginSetting, string>> {
   ANALYTICS_QUEUE?: Queue<unknown>;
   ASSETS?: R2Bucket;
   ASSET_PROCESSING_QUEUE?: Queue<unknown>;

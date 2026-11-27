@@ -1,14 +1,6 @@
 import type { components } from "@meltiply/contracts/schema";
-import type { EffectTransactionClient } from "@meltiply/database";
-import {
-  codePointLength,
-  isPlatform,
-  isUuid,
-  type DatabaseError,
-  type Platform,
-} from "@meltiply/domain";
+import { codePointLength, isPlatform, isUuid, type Platform } from "@meltiply/domain";
 import { parseProviderWireOptions, type ParsedPostProviderOptions } from "@meltiply/providers";
-import { Effect } from "effect";
 import type { Context } from "hono";
 import { z } from "zod";
 
@@ -240,27 +232,6 @@ export function parseProviderOptionsField(
     throw new CoreApiError(400, "validation_error", parsed.message);
   }
   return parsed.value;
-}
-
-export function validateIanaTimezoneEffect(
-  client: EffectTransactionClient,
-  timezone: string | null,
-): Effect.Effect<void, CoreApiError | DatabaseError> {
-  if (timezone === null) return Effect.void;
-  return client
-    .query<{ valid: boolean }>(
-      "SELECT EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = $1) AS valid",
-      [timezone],
-    )
-    .pipe(
-      Effect.flatMap((result) =>
-        result.rows[0]?.valid
-          ? Effect.void
-          : Effect.fail(
-              new CoreApiError(422, "validation_error", "Use a supported IANA timezone."),
-            ),
-      ),
-    );
 }
 
 export const OAUTH_ROUTING_KEY_PATTERN = /^[A-Za-z0-9_-]{22}$/;

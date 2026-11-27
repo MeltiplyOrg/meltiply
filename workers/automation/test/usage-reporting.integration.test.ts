@@ -9,6 +9,7 @@ import {
 } from "@meltiply/reporting";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import type { AutomationEnv } from "../src/env";
 import type { OutboxMessage } from "../src/messages";
 import { processDistributionMessage } from "../src/distribution";
@@ -22,12 +23,16 @@ if (!connectionString) {
 }
 
 const schema = "usage_reporting_measurement";
-const adminConnectionString =
-  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
-  "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const adminConnectionString = integrationDatabaseUrl(
+  process.env.MELTIPLY_DATABASE_TEST_URL,
+  "admin",
+  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL,
+);
 const adminPool = createHyperdrivePool({ connectionString: adminConnectionString });
-const baseSystemConnectionString =
-  "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const baseSystemConnectionString = integrationDatabaseUrl(
+  process.env.MELTIPLY_DATABASE_TEST_URL,
+  "system",
+);
 const isolatedDatabase = new URL(baseSystemConnectionString);
 isolatedDatabase.searchParams.set("options", `-c search_path=${schema},public`);
 const isolatedConnectionString = isolatedDatabase.href;

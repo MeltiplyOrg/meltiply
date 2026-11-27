@@ -19,7 +19,7 @@ export {
   type ProviderFailureInput,
   type ProviderRequestDiagnostic,
 } from "./failures";
-export { createFacebookAdapter } from "./facebook/adapter";
+export { createFacebookAdapter, type FacebookAdapterOptions } from "./facebook/adapter";
 export {
   ProviderHttpClient,
   type ProviderErrorDiagnosis,
@@ -30,6 +30,7 @@ export {
   type ProviderHttpResponseType,
 } from "./http";
 export { createInstagramAdapter, type InstagramAdapterOptions } from "./instagram/adapter";
+export type { ProviderOriginSetting } from "./origin-overrides";
 export { extractRateLimitBudget, type RateLimitBudget } from "./rate-limit";
 export {
   cachedProviderRegistryFromEnvironment,

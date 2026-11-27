@@ -1,82 +1,99 @@
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
+import { createFacebookAdapter, type FacebookAdapterOptions } from "../src/facebook/adapter";
+import { discoveryRequestLimit } from "../src/facebook/oauth";
+import { failureDiagnostic, ProviderAdapterError } from "../src/failures";
+import type { PublishInput } from "../src/types";
 import {
-  createFacebookAdapter,
-  failureDiagnostic,
-  ProviderAdapterError,
-  type ProviderRequestContext,
-  type PublishInput,
-} from "../src";
+  failureOf,
+  malformedAnswer,
+  providerFailure,
+  refused,
+  thrownBy,
+  unavailable,
+} from "./support";
 
-const context: ProviderRequestContext = {
-  operationId: "operation-1",
-  requestId: "request-1",
-};
-const credentials = {
-  accessToken: "page-access-secret",
-  accountId: "page-1",
-};
+const context = { operationId: "operation-1", requestId: "request-1" };
+const credentials = { accessToken: "page-access-secret", accountId: "page-1" };
 const redirectUri = "https://api.example.com/api/v1/platforms/facebook/callback";
+const NOW = new Date("2026-07-19T00:00:00.000Z");
+const GRAPH = "https://graph.facebook.com/v25.0";
+const RUPLOAD = "https://rupload.facebook.com/video-upload/v25.0";
 
-type Responder = (url: URL, init: RequestInit) => Response | Promise<Response>;
+type Answer = Response | Error;
 
-function json(value: unknown, init: ResponseInit = {}): Response {
-  return Response.json(value, init);
+interface RecordedRequest {
+  body?: string;
+  headers: Record<string, string>;
+  method: string | undefined;
+  query: Record<string, string>;
+  redirect: RequestRedirect | undefined;
+  url: string;
 }
 
-function sequence(...responders: Responder[]) {
-  const calls: { init: RequestInit; url: URL }[] = [];
-  const fetcher = vi.fn<typeof fetch>(async (input, init = {}) => {
-    const url = new URL(input.toString());
-    calls.push({ init, url });
-    const responder = responders.shift();
-    if (!responder) throw new Error("unexpected provider request");
-    return responder(url, init);
+function setup(answers: Answer[] = [], options: Partial<FacebookAdapterOptions> = {}) {
+  const requests: RecordedRequest[] = [];
+  const adapter = createFacebookAdapter({
+    clientId: "facebook-client",
+    clientSecret: "facebook-client-secret",
+    now: () => NOW,
+    redirectUri,
+    timeoutMilliseconds: 100,
+    fetch: (target, init) => {
+      const url = new URL(String(target));
+      requests.push({
+        ...(init?.body === undefined ? {} : { body: String(init.body) }),
+        headers: Object.fromEntries(new Headers(init?.headers).entries()),
+        method: init?.method,
+        query: Object.fromEntries(url.searchParams),
+        redirect: init?.redirect,
+        url: `${url.origin}${url.pathname}`,
+      });
+      const answer = answers.shift() ?? new Error("unexpected provider request");
+      return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
+    },
+    ...options,
   });
-  return { calls, fetcher };
+  return { adapter, requests };
 }
-const defaultGrantedPermissions: Responder = () =>
+
+const json = (body: unknown, status = 200) => Response.json(body, { status });
+const down = () => json({}, 503);
+
+const defaultPermissions = () =>
   json({
     data: [
       { permission: "pages_show_list", status: "granted" },
       { permission: "pages_read_engagement", status: "granted" },
       { permission: "pages_manage_posts", status: "granted" },
-
       { permission: "pages_manage_engagement", status: "granted" },
-
       { permission: "read_insights", status: "granted" },
     ],
   });
 
-function adapter(fetcher: typeof fetch, now = new Date("2026-07-19T00:00:00Z")) {
-  return createFacebookAdapter({
-    clientId: "facebook-client",
-    clientSecret: "facebook-client-secret",
-    fetch: fetcher,
-    now: () => now,
-    redirectUri,
-    timeoutMilliseconds: 100,
-  });
-}
+const publishInput = (patch: Partial<PublishInput> = {}): PublishInput => ({
+  caption: "A Page Reel #launch",
+  hashtags: ["launch"],
+  idempotencyKey: "publish-1",
+  media: [
+    {
+      contentType: "video/mp4",
+      fileSize: 20 * 1024 * 1024,
+      mode: "remote_ingest",
+      url: "https://assets.example/reel.mp4?signature=secret",
+    },
+  ],
+  ...patch,
+});
 
-function publishInput(patch: Partial<PublishInput> = {}): PublishInput {
-  return {
-    caption: "A Page Reel #launch",
-    hashtags: ["launch"],
-    idempotencyKey: "publish-1",
-    media: [
-      {
-        contentType: "video/mp4",
-        fileSize: 20 * 1024 * 1024,
-        mode: "remote_ingest",
-        url: "https://assets.example/reel.mp4?signature=secret",
-      },
-    ],
-    ...patch,
-  };
-}
+const photo = (name: string) => ({
+  contentType: "image/jpeg",
+  fileSize: 100,
+  mode: "remote_ingest" as const,
+  url: `https://assets.example/${name}.jpg`,
+});
 
-function reelStatus(
+const reelStatus = (
   id: string,
   patch: Partial<{
     processing: string;
@@ -84,485 +101,119 @@ function reelStatus(
     uploading: string;
     video: string;
   }> = {},
-) {
-  const status = {
-    processing: "in_progress",
-    publishing: "not_started",
-    uploading: "complete",
-    video: "processing",
-    ...patch,
-  };
-  return {
-    id,
-    status: {
-      processing_phase: { status: status.processing },
-      publishing_phase: { status: status.publishing },
-      uploading_phase: { status: status.uploading },
-      video_status: status.video,
-    },
-  };
-}
+) => ({
+  id,
+  status: {
+    processing_phase: { status: patch.processing ?? "in_progress" },
+    publishing_phase: { status: patch.publishing ?? "not_started" },
+    uploading_phase: { status: patch.uploading ?? "complete" },
+    video_status: patch.video ?? "processing",
+  },
+});
+
+const pageItem = (id: string, token = `page-token-${id}`) => ({
+  access_token: token,
+  id,
+  name: `Page ${id}`,
+  tasks: ["CREATE_CONTENT"],
+});
+
+beforeAll(async () => {
+  await setup([json({ id: "page-1_warm" })]).adapter.publish!(
+    context,
+    credentials,
+    publishInput({ caption: "Warm", hashtags: [], media: [] }),
+  );
+});
 
 describe("createFacebookAdapter", () => {
-  it("publishes a caption-only Page feed post without requiring a Reel", async () => {
-    const providerCalls = sequence((url, init) => {
-      expect(url.pathname).toBe("/v25.0/page-1/feed");
-      expect(JSON.parse(String(init.body))).toEqual({
-        message: "A regular Page update",
-        published: true,
+  describe("capability", () => {
+    it("declares Facebook Page publishing and analytics capabilities", () => {
+      const { adapter } = setup();
+      expect({
+        capability: adapter.capability,
+        retryPolicy: adapter.retryPolicy,
+        transferModes: adapter.transferModes,
+      }).toEqual({
+        capability: {
+          accepted_mime_types: [
+            "image/jpeg",
+            "image/png",
+            "image/gif",
+            "image/bmp",
+            "image/tiff",
+            "video/mp4",
+            "video/quicktime",
+          ],
+          analytics: true,
+          asset_types: ["image", "video"],
+          comments: false,
+          connect_available: true,
+          max_caption_length: null,
+          max_file_size: 500 * 1024 * 1024,
+          max_hashtags: null,
+          max_media_count: null,
+          max_video_duration_sec: null,
+          min_media_count: 0,
+          multi_asset_types: ["image"],
+          notes: adapter.capability.notes,
+          platform: "facebook",
+          publish: true,
+          reply: false,
+        },
+        retryPolicy: { baseDelaySeconds: 30, maxAttempts: 8, maxDelaySeconds: 900 },
+        transferModes: ["remote_ingest"],
       });
-      return json({ id: "page-1_post-1" });
-    });
-    await expect(
-      adapter(providerCalls.fetcher).publish!(
-        context,
-        credentials,
-        publishInput({ caption: "A regular Page update", hashtags: [], media: [] }),
-      ),
-    ).resolves.toEqual({
-      outcome: "confirmed_success",
-      providerOperationId: "post:page-1_post-1",
-      providerPostId: "page-1_post-1",
-      providerUrl: "https://www.facebook.com/page-1_post-1",
     });
   });
 
-  it("publishes ordered photos as one Page feed post", async () => {
-    const providerCalls = sequence(
-      (url, init) => {
-        expect(url.pathname).toBe("/v25.0/page-1/photos");
-        expect(JSON.parse(String(init.body))).toEqual({
-          url: "https://assets.example/first.jpg",
-          published: false,
-        });
-        return json({ id: "photo-1" });
-      },
-      () => json({ id: "photo-2" }),
-      (url, init) => {
-        expect(url.pathname).toBe("/v25.0/page-1/feed");
-        expect(JSON.parse(String(init.body))).toEqual({
-          message: "Two moments",
-          published: true,
-          attached_media: [{ media_fbid: "photo-1" }, { media_fbid: "photo-2" }],
-        });
-        return json({ id: "page-1_photos" });
-      },
-    );
-    await expect(
-      adapter(providerCalls.fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          caption: "Two moments",
-          hashtags: [],
-          media: [
-            {
-              contentType: "image/jpeg",
-              fileSize: 100,
-              mode: "remote_ingest",
-              url: "https://assets.example/first.jpg",
-            },
-            {
-              contentType: "image/jpeg",
-              fileSize: 100,
-              mode: "remote_ingest",
-              url: "https://assets.example/second.jpg",
-            },
-          ],
-        }),
-      ),
-    ).resolves.toMatchObject({
-      outcome: "confirmed_success",
-      providerPostId: "page-1_photos",
-    });
-  });
-
-  it("publishes a regular Page video rather than forcing the Reel endpoint", async () => {
-    const providerCalls = sequence(
-      (url, init) => {
-        expect(url.pathname).toBe("/v25.0/page-1/videos");
-        expect(JSON.parse(String(init.body))).toMatchObject({
-          description: "A longer Page video",
-          file_url: "https://assets.example/long.mp4",
-          published: true,
-        });
-        return json({ id: "long-video" });
-      },
-      () => json({ id: "long-video", status: { video_status: "ready" } }),
-    );
-    const provider = adapter(providerCalls.fetcher);
-    const submitted = await provider.publish!(
-      context,
-      credentials,
-      publishInput({
-        caption: "A longer Page video",
-        hashtags: [],
-        media: [
-          {
-            contentType: "video/mp4",
-            fileSize: 1024,
-            mode: "remote_ingest",
-            metadata: { durationSeconds: 600, width: 1920, height: 1080 },
-            url: "https://assets.example/long.mp4",
-          },
-        ],
-        providerOptions: { facebook: { postType: "video" } },
-      }),
-    );
-    expect(submitted).toEqual({
-      outcome: "confirmed_success",
-      providerOperationId: "video:long-video",
-    });
-    await expect(
-      provider.lookupPublication!(context, credentials, submitted),
-    ).resolves.toMatchObject({
-      state: "published",
-      result: { providerPostId: "long-video", providerUrl: "https://www.facebook.com/long-video" },
-    });
-  });
-
-  it("publishes a photo Story using fresh unpublished media", async () => {
-    const providerCalls = sequence(
-      (_url, init) => {
-        expect(JSON.parse(String(init.body))).toEqual({
-          url: "https://assets.example/story.jpg",
-          published: false,
-        });
-        return json({ id: "story-photo" });
-      },
-      (url, init) => {
-        expect(url.pathname).toBe("/v25.0/page-1/photo_stories");
-        expect(JSON.parse(String(init.body))).toEqual({ photo_id: "story-photo" });
-        return json({ success: true, post_id: 1234 });
-      },
-    );
-    await expect(
-      adapter(providerCalls.fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          caption: "",
-          hashtags: [],
-          media: [
-            {
-              contentType: "image/jpeg",
-              fileSize: 100,
-              mode: "remote_ingest",
-              url: "https://assets.example/story.jpg",
-            },
-          ],
-          providerOptions: { facebook: { postType: "story" } },
-        }),
-      ),
-    ).resolves.toEqual({
-      outcome: "confirmed_success",
-      providerOperationId: "story:story-photo",
-      providerPostId: "1234",
-    });
-  });
-
-  it("publishes a video Story without substituting a Reel", async () => {
-    const calls = sequence(
-      (url) => {
-        expect(url.pathname).toBe("/v25.0/page-1/video_stories");
-        return json({
-          video_id: "story-video",
-          upload_url: "https://rupload.facebook.com/video-upload/v25.0/story-video",
-        });
-      },
-      () => json({ success: true }),
-      (url) => {
-        expect(url.pathname).toBe("/v25.0/page-1/video_stories");
-        expect(Object.fromEntries(url.searchParams)).toEqual({
-          video_id: "story-video",
-          upload_phase: "finish",
-        });
-        return json({ success: true, post_id: "video-story-post" });
-      },
-    );
-    await expect(
-      adapter(calls.fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          caption: "",
-          hashtags: [],
-          providerOptions: { facebook: { postType: "story" } },
-        }),
-      ),
-    ).resolves.toEqual({
-      outcome: "confirmed_success",
-      providerOperationId: "story:story-video",
-      providerPostId: "video-story-post",
-    });
-  });
-
-  it("creates a slideshow video from the ordered photo attachments", async () => {
-    const calls = sequence((url, init) => {
-      expect(url.pathname).toBe("/v25.0/page-1/videos");
-      expect(JSON.parse(String(init.body))).toMatchObject({
-        slideshow_spec: {
-          images_urls: [
-            "https://assets.example/one.jpg",
-            "https://assets.example/two.jpg",
-            "https://assets.example/three.jpg",
-          ],
+  describe("authorizationUrl", () => {
+    it("a state-bound Facebook dialog URL", () => {
+      const { adapter } = setup();
+      const url = new URL(
+        adapter.authorizationUrl!({ codeChallenge: "unused", redirectUri, state: "oauth-state" }),
+      );
+      expect({
+        origin: url.origin,
+        pathname: url.pathname,
+        query: Object.fromEntries(url.searchParams),
+      }).toEqual({
+        origin: "https://www.facebook.com",
+        pathname: "/v25.0/dialog/oauth",
+        query: {
+          client_id: "facebook-client",
+          redirect_uri: redirectUri,
+          response_type: "code",
+          scope:
+            "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement,read_insights,pages_read_user_content,business_management",
+          state: "oauth-state",
         },
       });
-      return json({ id: "slideshow-video" });
     });
-    await expect(
-      adapter(calls.fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          media: ["one", "two", "three"].map((name) => ({
-            contentType: "image/jpeg",
-            fileSize: 100,
-            mode: "remote_ingest" as const,
-            url: `https://assets.example/${name}.jpg`,
-          })),
-          providerOptions: { facebook: { postType: "slideshow" } },
-        }),
-      ),
-    ).resolves.toEqual({
-      outcome: "confirmed_success",
-      providerOperationId: "video:slideshow-video",
+
+    it("a foreign redirect URI", () => {
+      const { adapter } = setup();
+      expect(
+        thrownBy(() =>
+          adapter.authorizationUrl!({
+            codeChallenge: "unused",
+            redirectUri: "https://attacker.example/callback",
+            state: "oauth-state",
+          }),
+        ),
+      ).toEqual(new TypeError("OAuth redirect URI does not match configuration"));
     });
   });
 
-  it("crossposts an authorized existing video without re-uploading media", async () => {
-    const calls = sequence((url, init) => {
-      expect(url.pathname).toBe("/v25.0/page-1/videos");
-      expect(JSON.parse(String(init.body))).toEqual({
-        description: "",
-        published: true,
-        crossposted_video_id: "source-video",
-      });
-      return json({ id: "crossposted-copy" });
-    });
-    await expect(
-      adapter(calls.fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          caption: "",
-          hashtags: [],
-          media: [],
-          providerOptions: {
-            facebook: { postType: "crosspost", crosspostedVideoId: "source-video" },
-          },
-        }),
-      ),
-    ).resolves.toEqual({
-      outcome: "confirmed_success",
-      providerOperationId: "video:crossposted-copy",
-    });
-  });
+  describe("exchangeAuthorizationCode", () => {
+    const exchangeInput = { code: "authorization-code", codeVerifier: "unused", redirectUri };
 
-  it("hands a native Page draft off without claiming a public post", async () => {
-    const calls = sequence((_url, init) => {
-      expect(JSON.parse(String(init.body))).toEqual({
-        message: "Review this in Meta",
-        published: false,
-      });
-      return json({ id: "page-1_native-draft" });
-    });
-    await expect(
-      adapter(calls.fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          caption: "Review this in Meta",
-          hashtags: [],
-          media: [],
-          providerOptions: { facebook: { postType: "feed", deliveryMode: "draft" } },
-        }),
-      ),
-    ).resolves.toEqual({
-      outcome: "confirmed_success",
-      delivery: "draft",
-      providerOperationId: "post_draft:page-1_native-draft",
-    });
-  });
-
-  it("creates an experiment from native draft videos without inventing a winning post", async () => {
-    const calls = sequence((url, init) => {
-      expect(url.pathname).toBe("/v25.0/page-1/ab_tests");
-      expect(JSON.parse(String(init.body))).toEqual({
-        name: "Launch comparison",
-        description: "Compare both openings",
-        control_video_id: "draft-one",
-        experiment_video_ids: ["draft-one", "draft-two"],
-        optimization_goal: "REELS_PLAYS",
-        duration: 1800,
-      });
-      return json({ id: "experiment-1" });
-    });
-    await expect(
-      adapter(calls.fetcher).publish!(
-        context,
-        credentials,
-        publishInput({
-          caption: "Compare both openings",
-          hashtags: [],
-          media: [],
-          providerOptions: {
-            facebook: {
-              postType: "ab_test",
-              abTest: {
-                name: "Launch comparison",
-                controlVideoId: "draft-one",
-                experimentVideoIds: ["draft-one", "draft-two"],
-                optimizationGoal: "REELS_PLAYS",
-                durationSeconds: 1800,
-              },
-            },
-          },
-        }),
-      ),
-    ).resolves.toEqual({
-      outcome: "confirmed_success",
-      delivery: "experiment",
-      providerOperationId: "ab_test:experiment-1",
-    });
-  });
-
-  it("creates a live broadcast and exposes encoder credentials only through the explicit read", async () => {
-    const calls = sequence(
-      (url, init) => {
-        expect(url.pathname).toBe("/v25.0/page-1/live_videos");
-        expect(JSON.parse(String(init.body))).toMatchObject({
-          status: "LIVE_NOW",
-          description: "Live launch",
-        });
-        return json({
-          id: "live-1",
-          secure_stream_url: "rtmps://live-api.facebook.com:443/rtmp/secret-key",
-        });
-      },
-      () =>
+    it("a single publishable Page with explicit expiry", async () => {
+      const { adapter, requests } = setup([
+        json({ access_token: "short-user-secret" }),
+        json({ access_token: "long-user-secret", expires_in: 5_184_000, token_type: "bearer" }),
+        defaultPermissions(),
         json({
-          id: "live-1",
-          status: "LIVE",
-          secure_stream_url: "rtmps://live-api.facebook.com:443/rtmp/secret-key",
-        }),
-      () => json({ id: "live-1" }),
-      () => json({ id: "live-1", status: "VOD" }),
-    );
-    const provider = adapter(calls.fetcher);
-    const submitted = await provider.publish!(
-      context,
-      credentials,
-      publishInput({
-        caption: "Live launch",
-        hashtags: [],
-        media: [],
-        providerOptions: { facebook: { postType: "live" } },
-      }),
-    );
-    expect(submitted).toEqual({
-      outcome: "confirmed_success",
-      delivery: "broadcast",
-      providerOperationId: "live:live-1",
-    });
-    await expect(provider.getBroadcastInfo!(context, credentials, submitted)).resolves.toEqual({
-      state: "live",
-      ingestUrl: "rtmps://live-api.facebook.com:443/rtmp/secret-key",
-      providerPostId: "live-1",
-      providerUrl: "https://www.facebook.com/live-1",
-    });
-    await expect(provider.endBroadcast!(context, credentials, submitted)).resolves.toMatchObject({
-      outcome: "confirmed_success",
-      providerPostId: "live-1",
-    });
-  });
-
-  it("recognizes a terminal ended_live operation without another provider read", async () => {
-    const fetcher = vi.fn<typeof fetch>(async () => {
-      throw new Error("ended_live lookup must not contact Facebook");
-    });
-    await expect(
-      adapter(fetcher).lookupPublication!(context, credentials, {
-        providerOperationId: "ended_live:live-1",
-      }),
-    ).resolves.toEqual({
-      state: "delivered",
-      result: {
-        outcome: "confirmed_success",
-        delivery: "broadcast",
-        providerOperationId: "ended_live:live-1",
-      },
-    });
-    expect(fetcher).not.toHaveBeenCalled();
-  });
-
-  it("measures followers without misreporting Page likes as following", async () => {
-    const providerCalls = sequence((url) => {
-      expect(url.searchParams.get("fields")).toBe("followers_count");
-      return json({ followers_count: 420, fan_count: 350 });
-    });
-    await expect(
-      adapter(providerCalls.fetcher).getAccountAnalytics!(context, credentials),
-    ).resolves.toEqual({
-      followers: 420,
-      recordedAt: "2026-07-19T00:00:00.000Z",
-    });
-  });
-
-  it("builds a state-bound Facebook dialog URL and pins the callback", () => {
-    const provider = adapter(vi.fn<typeof fetch>());
-    const url = new URL(
-      provider.authorizationUrl!({
-        codeChallenge: "unused-by-facebook",
-        redirectUri,
-        state: "oauth-state",
-      }),
-    );
-    expect(url.origin).toBe("https://www.facebook.com");
-    expect(url.pathname).toBe("/v25.0/dialog/oauth");
-    expect(Object.fromEntries(url.searchParams)).toEqual({
-      client_id: "facebook-client",
-      redirect_uri: redirectUri,
-      response_type: "code",
-      scope:
-        "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement,read_insights,pages_read_user_content,business_management",
-      state: "oauth-state",
-    });
-    expect(() =>
-      provider.authorizationUrl!({
-        codeChallenge: "unused",
-        redirectUri: "https://attacker.example/callback",
-        state: "oauth-state",
-      }),
-    ).toThrow("does not match configuration");
-  });
-
-  it("exchanges a code for one explicit publishable Page", async () => {
-    const providerCalls = sequence(
-      (url, init) => {
-        expect(url.pathname).toBe("/v25.0/oauth/access_token");
-        expect(String(init.body)).toContain("code=authorization-code");
-        return json({ access_token: "short-user-secret" });
-      },
-      (_url, init) => {
-        expect(String(init.body)).toContain("fb_exchange_token=short-user-secret");
-        return json({
-          access_token: "long-user-secret",
-          expires_in: 5_184_000,
-          token_type: "bearer",
-        });
-      },
-      (url, init) => {
-        expect(url.pathname).toBe("/v25.0/me/permissions");
-        expect(new Headers(init.headers).get("Authorization")).toBe("Bearer long-user-secret");
-        return defaultGrantedPermissions(url, init);
-      },
-      (url, init) => {
-        expect(url.pathname).toBe("/v25.0/me/accounts");
-        expect(url.searchParams.get("limit")).toBe("100");
-        expect(new Headers(init.headers).get("Authorization")).toBe("Bearer long-user-secret");
-        return json({
           data: [
             {
               access_token: "page-access-secret",
@@ -571,1451 +222,1260 @@ describe("createFacebookAdapter", () => {
               tasks: ["PROFILE_PLUS_CREATE_CONTENT", "PROFILE_PLUS_ANALYZE"],
             },
           ],
-        });
-      },
-    );
+        }),
+      ]);
 
-    await expect(
-      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
-        code: "authorization-code",
-        codeVerifier: "unused-by-facebook",
-        redirectUri,
-      }),
-    ).resolves.toEqual({
-      accounts: [
-        {
-          accessToken: "page-access-secret",
-          account: { displayName: "Meltiply Page", id: "page-1" },
-          expiresAt: "2026-09-17T00:00:00.000Z",
-          refreshToken: '{"pageId":"page-1","userAccessToken":"long-user-secret"}',
-          scopes: [
-            "pages_show_list",
-            "pages_read_engagement",
-            "pages_manage_posts",
-            "pages_manage_engagement",
-            "read_insights",
-          ],
-        },
-      ],
-    });
-  });
-
-  it("connects a Page using inspected expiry when the exchange omits expires_in", async () => {
-    const calls = sequence(
-      () => json({ access_token: "short-user-secret" }),
-      () => json({ access_token: "long-user-secret", token_type: "bearer" }),
-      () =>
-        json({
-          data: {
-            app_id: "facebook-client",
-            is_valid: true,
-            expires_at: 1_788_566_400,
+      expect(await adapter.exchangeAuthorizationCode!(context, exchangeInput)).toEqual({
+        accounts: [
+          {
+            accessToken: "page-access-secret",
+            account: { displayName: "Meltiply Page", id: "page-1" },
+            expiresAt: "2026-09-17T00:00:00.000Z",
+            refreshToken: '{"pageId":"page-1","userAccessToken":"long-user-secret"}',
+            scopes: [
+              "pages_show_list",
+              "pages_read_engagement",
+              "pages_manage_posts",
+              "pages_manage_engagement",
+              "read_insights",
+            ],
           },
-        }),
-      defaultGrantedPermissions,
-      () =>
-        json({
-          data: [
-            {
-              access_token: "page-access-secret",
-              id: "page-1",
-              name: "Meltiply Page",
-              tasks: ["CREATE_CONTENT"],
-            },
-          ],
-        }),
-    );
-    await expect(
-      adapter(calls.fetcher, new Date("2026-07-19T00:00:00.123Z")).exchangeAuthorizationCode!(
-        context,
-        {
-          code: "authorization-code",
-          codeVerifier: "unused",
-          redirectUri,
-        },
-      ),
-    ).resolves.toMatchObject({
-      accounts: [
-        {
-          accessToken: "page-access-secret",
-          account: { id: "page-1" },
-          expiresAt: "2026-09-05T00:00:00.000Z",
-        },
-      ],
-    });
-  });
-
-  it("connects and refreshes a Page with inspected zero expiry", async () => {
-    const inspect = () =>
-      json({
-        data: { app_id: "facebook-client", is_valid: true, expires_at: 0 },
+        ],
       });
-    const calls = sequence(
-      () => json({ access_token: "short-user-secret" }),
-      () => json({ access_token: "long-user-secret", token_type: "bearer" }),
-      inspect,
-      defaultGrantedPermissions,
-      () =>
-        json({
-          data: [
-            {
-              access_token: "page-access-secret",
-              id: "page-1",
-              name: "Meltiply Page",
-              tasks: ["CREATE_CONTENT"],
-            },
-          ],
-        }),
-      () => json({ access_token: "rotated-user-secret", token_type: "bearer" }),
-      inspect,
-      () => json({ id: "page-1", access_token: "rotated-page-secret" }),
-      defaultGrantedPermissions,
-    );
-    const provider = adapter(calls.fetcher);
-    const result = await provider.exchangeAuthorizationCode!(context, {
-      code: "authorization-code",
-      codeVerifier: "unused",
-      redirectUri,
-    });
-    expect("accounts" in result).toBe(true);
-    if (!("accounts" in result)) throw new Error("Expected account selection");
-    expect(result.accounts).toHaveLength(1);
-    const connection = result.accounts[0]!;
-    expect(connection.accessToken).toBe("page-access-secret");
-    expect(connection.account.id).toBe("page-1");
-    expect(connection.expiresAt).toBeUndefined();
-    const refreshed = await provider.refreshAccessToken!(context, connection.refreshToken ?? "");
-    expect(refreshed.accessToken).toBe("rotated-page-secret");
-    expect(refreshed.expiresAt).toBeUndefined();
-    expect(refreshed.refreshToken).toBe(
-      '{"pageId":"page-1","userAccessToken":"rotated-user-secret"}',
-    );
-  });
-
-  it.each([
-    { app_id: "another-app", is_valid: true, expires_at: 0 },
-    { app_id: "facebook-client", is_valid: false, expires_at: 0 },
-    { app_id: "facebook-client", is_valid: true, expires_at: -1 },
-    { app_id: "facebook-client", is_valid: true, expires_at: 1_700_000_000 },
-    { app_id: "facebook-client", is_valid: true, expires_at: 2_000_000_000 },
-    { app_id: "facebook-client", is_valid: true, expires_at: "1788566400" },
-    { app_id: "facebook-client", is_valid: true },
-  ])("rejects unsafe inspected token metadata: %j", async (data) => {
-    const calls = sequence(
-      () => json({ access_token: "short-user-secret" }),
-      () => json({ access_token: "long-user-secret", token_type: "bearer" }),
-      () => json({ data }),
-    );
-    await expect(
-      adapter(calls.fetcher).exchangeAuthorizationCode!(context, {
-        code: "authorization-code",
-        codeVerifier: "unused",
-        redirectUri,
-      }),
-    ).rejects.toMatchObject({
-      failure: { code: "facebook_oauth_token_expiry_invalid" },
-    });
-  });
-
-  it.each([
-    {
-      code: "facebook_oauth_authorization_token_invalid",
-      responses: [{ access_token: 123 }],
-    },
-    {
-      code: "facebook_oauth_token_type_invalid",
-      responses: [
-        { access_token: "short-user-secret" },
-        { access_token: "long-user-secret", expires_in: 3600 },
-      ],
-    },
-    {
-      code: "facebook_oauth_token_expiry_invalid",
-      responses: [
-        { access_token: "short-user-secret" },
-        {
-          access_token: "long-user-secret",
-          token_type: "bearer",
-          expires_in: 0,
-        },
-      ],
-    },
-    {
-      code: "facebook_oauth_permissions_invalid",
-      responses: [
-        { access_token: "short-user-secret" },
-        {
-          access_token: "long-user-secret",
-          token_type: "bearer",
-          expires_in: 3600,
-        },
-        { data: null },
-      ],
-    },
-    {
-      code: "facebook_oauth_page_list_invalid",
-      responses: [
-        { access_token: "short-user-secret" },
-        {
-          access_token: "long-user-secret",
-          token_type: "bearer",
-          expires_in: 3600,
-        },
-        {
-          data: [
-            { permission: "pages_show_list", status: "granted" },
-            { permission: "pages_read_engagement", status: "granted" },
-            { permission: "pages_manage_posts", status: "granted" },
-
-            { permission: "pages_manage_engagement", status: "granted" },
-
-            { permission: "read_insights", status: "granted" },
-          ],
-        },
-        { data: null },
-      ],
-    },
-    {
-      code: "facebook_oauth_page_access_token_invalid",
-      responses: [
-        { access_token: "short-user-secret" },
-        {
-          access_token: "long-user-secret",
-          token_type: "bearer",
-          expires_in: 3600,
-        },
-        {
-          data: [
-            { permission: "pages_show_list", status: "granted" },
-            { permission: "pages_read_engagement", status: "granted" },
-            { permission: "pages_manage_posts", status: "granted" },
-
-            { permission: "pages_manage_engagement", status: "granted" },
-
-            { permission: "read_insights", status: "granted" },
-          ],
-        },
-        {
-          data: [
-            {
-              id: "page-1",
-              name: "private-page-name",
-              tasks: ["CREATE_CONTENT"],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      code: "facebook_oauth_page_tasks_invalid",
-      responses: [
-        { access_token: "short-user-secret" },
-        {
-          access_token: "long-user-secret",
-          token_type: "bearer",
-          expires_in: 3600,
-        },
-        {
-          data: [
-            { permission: "pages_show_list", status: "granted" },
-            { permission: "pages_read_engagement", status: "granted" },
-            { permission: "pages_manage_posts", status: "granted" },
-
-            { permission: "pages_manage_engagement", status: "granted" },
-
-            { permission: "read_insights", status: "granted" },
-          ],
-        },
-        {
-          data: [
-            {
-              id: "page-1",
-              name: "private-page-name",
-              access_token: "page-secret",
-              tasks: "CREATE_CONTENT",
-            },
-          ],
-        },
-      ],
-    },
-    {
-      code: "facebook_oauth_page_pagination_invalid",
-      responses: [
-        { access_token: "short-user-secret" },
-        {
-          access_token: "long-user-secret",
-          token_type: "bearer",
-          expires_in: 3600,
-        },
-        {
-          data: [
-            { permission: "pages_show_list", status: "granted" },
-            { permission: "pages_read_engagement", status: "granted" },
-            { permission: "pages_manage_posts", status: "granted" },
-
-            { permission: "pages_manage_engagement", status: "granted" },
-
-            { permission: "read_insights", status: "granted" },
-          ],
-        },
-        {
-          data: [],
-          paging: { next: "https://evil.example/me/accounts?after=bad" },
-        },
-      ],
-    },
-  ])("reports $code without credentials", async ({ code, responses }) => {
-    const calls = sequence(...responses.map((body) => () => json(body)));
-    const error: unknown = await adapter(calls.fetcher).exchangeAuthorizationCode!(context, {
-      code: "authorization-code",
-      codeVerifier: "unused",
-      redirectUri,
-    }).catch((failure: unknown) => failure);
-    expect(error).toBeInstanceOf(ProviderAdapterError);
-    if (!(error instanceof ProviderAdapterError)) throw new Error("Expected provider failure");
-    const diagnostic = failureDiagnostic(error);
-    expect(diagnostic).toEqual({
-      classification: "transient",
-      code,
-      retryable: true,
-    });
-    expect(JSON.stringify(diagnostic)).not.toMatch(/secret|authorization-code|private-page-name/);
-  });
-
-  it("returns selection candidates for multiple eligible Pages without auto-connecting or rejecting", async () => {
-    const multiplePages = sequence(
-      () => json({ access_token: "short" }),
-      () =>
-        json({
-          access_token: "long",
-          expires_in: 3_600,
-          token_type: "bearer",
-        }),
-      defaultGrantedPermissions,
-      () =>
-        json({
-          data: [
-            {
-              access_token: "page-one-token",
-              id: "page-1",
-              link: "https://www.facebook.com/meltiply.page",
-              name: "Page One",
-              picture: {
-                data: { url: "https://cdn.example/page-1.jpg" },
-              },
-              tasks: ["CREATE_CONTENT"],
-            },
-            {
-              access_token: "page-two-token",
-              id: "page-2",
-              link: "https://www.facebook.com/profile.php?id=page-2",
-              name: "Page Two",
-              tasks: ["PROFILE_PLUS_CREATE_CONTENT"],
-            },
-            {
-              access_token: "page-three-token",
-              id: "page-3",
-              name: "Page Three Ineligible",
-              tasks: ["ANALYZE", "MODERATE"],
-            },
-          ],
-        }),
-    );
-    const result = await adapter(multiplePages.fetcher).exchangeAuthorizationCode!(context, {
-      code: "code",
-      codeVerifier: "unused",
-      redirectUri,
-    });
-    expect("accounts" in result).toBe(true);
-    if (!("accounts" in result)) throw new Error("Expected account selection");
-    expect(result.accounts).toHaveLength(2);
-    expect(result.accounts[0]).toMatchObject({
-      accessToken: "page-one-token",
-      account: {
-        avatarUrl: "https://cdn.example/page-1.jpg",
-        displayName: "Page One",
-        id: "page-1",
-        username: "meltiply.page",
-      },
-      expiresAt: "2026-07-19T01:00:00.000Z",
-      refreshToken: '{"pageId":"page-1","userAccessToken":"long"}',
-    });
-    expect(result.accounts[1]).toMatchObject({
-      accessToken: "page-two-token",
-      account: {
-        displayName: "Page Two",
-        id: "page-2",
-      },
-      expiresAt: "2026-07-19T01:00:00.000Z",
-      refreshToken: '{"pageId":"page-2","userAccessToken":"long"}',
-    });
-    expect(result.accounts[1]!.account.username).toBeUndefined();
-  });
-
-  it("includes business-assigned Pages across pagination and deduplicates shared Pages", async () => {
-    const page = (id: string, accessToken = `page-token-${id}`) => ({
-      id,
-      name: `Page ${id}`,
-      access_token: accessToken,
-      tasks: ["CREATE_CONTENT"],
-    });
-    const fetcher = vi.fn<typeof fetch>(async (input, init = {}) => {
-      const url = new URL(input.toString());
-      if (url.pathname.endsWith("/oauth/access_token")) {
-        const form = new URLSearchParams(String(init.body));
-        return json({
-          access_token: form.get("grant_type") === "fb_exchange_token" ? "long" : "short",
-          expires_in: 3_600,
-          token_type: "bearer",
-        });
-      }
-      if (url.pathname.endsWith("/me/permissions")) {
-        return json({
-          data: [
-            { permission: "pages_show_list", status: "granted" },
-            { permission: "pages_read_engagement", status: "granted" },
-            { permission: "pages_manage_posts", status: "granted" },
-            { permission: "business_management", status: "granted" },
-          ],
-        });
-      }
-      if (url.pathname.endsWith("/me/accounts")) return json({ data: [page("direct")] });
-      if (url.pathname.endsWith("/me/business_users")) {
-        return url.searchParams.has("after")
-          ? json({ data: [{ id: "business-user-2" }] })
-          : json({
-              data: [{ id: "business-user-1" }],
-              paging: {
-                cursors: { after: "next" },
-                next: "https://graph.facebook.com/v25.0/me/business_users?after=next",
-              },
-            });
-      }
-      if (url.pathname.endsWith("/business-user-1/assigned_pages")) {
-        return url.searchParams.has("after")
-          ? json({ data: [page("business-2")] })
-          : json({
-              data: [page("direct", "page-token-direct-via-business"), page("business-1")],
-              paging: {
-                cursors: { after: "next" },
-                next: "https://graph.facebook.com/v25.0/business-user-1/assigned_pages?after=next",
-              },
-            });
-      }
-      if (url.pathname.endsWith("/business-user-2/assigned_pages")) {
-        return json({
-          data: [page("business-2", "page-token-business-2-via-user-2"), page("business-3")],
-        });
-      }
-      throw new Error(`Unexpected discovery endpoint: ${url.pathname}`);
-    });
-    const result = await adapter(fetcher).exchangeAuthorizationCode!(context, {
-      code: "code",
-      codeVerifier: "unused",
-      redirectUri,
-    });
-    if (!("accounts" in result)) throw new Error("Expected account selection");
-    expect(result.accounts.map((connection) => connection.account.id)).toEqual([
-      "direct",
-      "business-1",
-      "business-2",
-      "business-3",
-    ]);
-    expect(result.accounts.map((connection) => connection.accessToken)).toEqual([
-      "page-token-direct",
-      "page-token-business-1",
-      "page-token-business-2",
-      "page-token-business-3",
-    ]);
-  });
-
-  it("discovers independent business Page edges concurrently without unbounded fan-out", async () => {
-    let release!: () => void;
-    let started!: () => void;
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const overlapping = new Promise<void>((resolve) => {
-      started = resolve;
-    });
-    let active = 0;
-    let peak = 0;
-    const users = Array.from({ length: 8 }, (_, index) => ({ id: `business-${index}` }));
-    const fetcher = vi.fn<typeof fetch>(async (input, init = {}) => {
-      const url = new URL(input.toString());
-      if (url.pathname.endsWith("/oauth/access_token")) {
-        return json({
-          access_token: new URLSearchParams(String(init.body)).has("fb_exchange_token")
-            ? "long"
-            : "short",
-          expires_in: 3_600,
-          token_type: "bearer",
-        });
-      }
-      if (url.pathname.endsWith("/me/permissions")) {
-        return json({
-          data: [
-            { permission: "pages_show_list", status: "granted" },
-            { permission: "pages_read_engagement", status: "granted" },
-            { permission: "pages_manage_posts", status: "granted" },
-            { permission: "business_management", status: "granted" },
-          ],
-        });
-      }
-      if (url.pathname.endsWith("/me/accounts")) return json({ data: [] });
-      if (url.pathname.endsWith("/me/business_users")) return json({ data: users });
-      const id = url.pathname.split("/")[2];
-      if (!users.some((user) => user.id === id) || !url.pathname.endsWith("/assigned_pages")) {
-        throw new Error(`Unexpected discovery endpoint: ${url.pathname}`);
-      }
-      active++;
-      peak = Math.max(peak, active);
-      if (active >= 2) started();
-      try {
-        await held;
-        return json({
-          data: [
-            {
-              id: `page-${id}`,
-              name: `Page ${id}`,
-              access_token: `token-${id}`,
-              tasks: ["CREATE_CONTENT"],
-            },
-          ],
-        });
-      } finally {
-        active--;
-      }
-    });
-    const exchange = adapter(fetcher).exchangeAuthorizationCode!(context, {
-      code: "code",
-      codeVerifier: "unused",
-      redirectUri,
-    });
-    try {
-      await Promise.race([overlapping, exchange]);
-      expect(peak).toBeGreaterThan(1);
-      expect(peak).toBeLessThanOrEqual(4);
-    } finally {
-      release();
-    }
-    const result = await exchange;
-    if (!("accounts" in result)) throw new Error("Expected account selection");
-    expect(result.accounts.map((connection) => connection.account.id)).toEqual(
-      users.map((user) => `page-${user.id}`),
-    );
-    expect(peak).toBeLessThanOrEqual(4);
-  });
-
-  it("traverses Graph API pagination safely using validated cursors and Graph origin", async () => {
-    const paginated = sequence(
-      () => json({ access_token: "short" }),
-      () =>
-        json({
-          access_token: "long",
-          expires_in: 3_600,
-          token_type: "bearer",
-        }),
-      defaultGrantedPermissions,
-      (url) => {
-        expect(url.pathname).toBe("/v25.0/me/accounts");
-        expect(url.searchParams.get("after")).toBeNull();
-        return json({
-          data: [
-            {
-              access_token: "page-one-token",
-              id: "page-1",
-              name: "Page One",
-              tasks: ["CREATE_CONTENT"],
-            },
-          ],
-          paging: {
-            cursors: { after: "cursor-page-2" },
-            next: "https://graph.facebook.com/v25.0/me/accounts?after=cursor-page-2",
-          },
-        });
-      },
-      (url) => {
-        expect(url.pathname).toBe("/v25.0/me/accounts");
-        expect(url.searchParams.get("after")).toBe("cursor-page-2");
-        return json({
-          data: [
-            {
-              access_token: "page-two-token",
-              id: "page-2",
-              name: "Page Two",
-              tasks: ["CREATE_CONTENT"],
-            },
-          ],
-          paging: {
-            cursors: { after: "cursor-page-2-end" },
-          },
-        });
-      },
-    );
-    const result = await adapter(paginated.fetcher).exchangeAuthorizationCode!(context, {
-      code: "code",
-      codeVerifier: "unused",
-      redirectUri,
-    });
-    expect("accounts" in result).toBe(true);
-    if (!("accounts" in result)) throw new Error("Expected account selection");
-    expect(result.accounts).toHaveLength(2);
-    expect(result.accounts.map((item) => item.account.id)).toEqual(["page-1", "page-2"]);
-  });
-
-  it("deduplicates repeated page IDs across pagination without failing", async () => {
-    const deduplicating = sequence(
-      () => json({ access_token: "short" }),
-      () =>
-        json({
-          access_token: "long",
-          expires_in: 3_600,
-          token_type: "bearer",
-        }),
-      defaultGrantedPermissions,
-      () =>
-        json({
-          data: [
-            {
-              access_token: "page-one-token",
-              id: "page-1",
-              name: "Page One",
-              tasks: ["CREATE_CONTENT"],
-            },
-          ],
-          paging: {
-            cursors: { after: "cursor-next" },
-            next: "https://graph.facebook.com/v25.0/me/accounts?after=cursor-next",
-          },
-        }),
-      () =>
-        json({
-          data: [
-            {
-              access_token: "page-one-token-dup",
-              id: "page-1",
-              name: "Page One Duplicate",
-              tasks: ["CREATE_CONTENT"],
-            },
-            {
-              access_token: "page-two-token",
-              id: "page-2",
-              name: "Page Two",
-              tasks: ["CREATE_CONTENT"],
-            },
-          ],
-        }),
-    );
-    const result = await adapter(deduplicating.fetcher).exchangeAuthorizationCode!(context, {
-      code: "code",
-      codeVerifier: "unused",
-      redirectUri,
-    });
-    expect("accounts" in result).toBe(true);
-    if (!("accounts" in result)) throw new Error("Expected account selection");
-    expect(result.accounts).toHaveLength(2);
-    expect(result.accounts.map((item) => item.account.id)).toEqual(["page-1", "page-2"]);
-    expect(result.accounts.map((item) => item.accessToken)).toEqual([
-      "page-one-token",
-      "page-two-token",
-    ]);
-    expect(result.accounts[0]!.account.displayName).toBe("Page One");
-  });
-
-  it("returns empty accounts list when no Pages are eligible for content creation", async () => {
-    const emptyPages = sequence(
-      () => json({ access_token: "short" }),
-      () =>
-        json({
-          access_token: "long",
-          expires_in: 3_600,
-          token_type: "bearer",
-        }),
-      defaultGrantedPermissions,
-      () => json({ data: [] }),
-    );
-    const result = await adapter(emptyPages.fetcher).exchangeAuthorizationCode!(context, {
-      code: "code",
-      codeVerifier: "unused",
-      redirectUri,
-    });
-    expect(result).toEqual({ accounts: [] });
-  });
-
-  it("rejects pagination targeting untrusted origins or malformed cursors", async () => {
-    const untrustedOrigin = sequence(
-      () => json({ access_token: "short" }),
-      () =>
-        json({
-          access_token: "long",
-          expires_in: 3_600,
-          token_type: "bearer",
-        }),
-      defaultGrantedPermissions,
-      () =>
-        json({
-          data: [
-            {
-              access_token: "page-token",
-              id: "page-1",
-              name: "Page 1",
-              tasks: ["CREATE_CONTENT"],
-            },
-          ],
-          paging: {
-            next: "https://evil.example.com/v25.0/me/accounts?after=cursor",
-          },
-        }),
-    );
-    await expect(
-      adapter(untrustedOrigin.fetcher).exchangeAuthorizationCode!(context, {
-        code: "code",
-        codeVerifier: "unused",
-        redirectUri,
-      }),
-    ).rejects.toMatchObject({
-      failure: {
-        code: "facebook_oauth_page_pagination_invalid",
-      },
+      expect(requests.map(({ method, url }) => ({ method, url }))).toEqual([
+        { method: "POST", url: `${GRAPH}/oauth/access_token` },
+        { method: "POST", url: `${GRAPH}/oauth/access_token` },
+        { method: "GET", url: `${GRAPH}/me/permissions` },
+        { method: "GET", url: `${GRAPH}/me/accounts` },
+      ]);
     });
 
-    const malformedCursor = sequence(
-      () => json({ access_token: "short" }),
-      () =>
-        json({
-          access_token: "long",
-          expires_in: 3_600,
-          token_type: "bearer",
-        }),
-      defaultGrantedPermissions,
-      () =>
-        json({
-          data: [],
-          paging: {
-            cursors: { after: "\u0000bad-cursor" },
-            next: "https://graph.facebook.com/v25.0/me/accounts?after=valid",
-          },
-        }),
-    );
-    await expect(
-      adapter(malformedCursor.fetcher).exchangeAuthorizationCode!(context, {
-        code: "code",
-        codeVerifier: "unused",
-        redirectUri,
-      }),
-    ).rejects.toMatchObject({
-      failure: {
-        code: "facebook_oauth_page_pagination_invalid",
-      },
-    });
-  });
-
-  it("bounds pagination without discovered Pages", async () => {
-    const atLimitPages = Array.from(
-      { length: 1_000 },
-      (_, index) => () =>
-        json({
-          data: [],
-          ...(index === 999
-            ? {}
-            : {
-                paging: {
-                  cursors: { after: `at-limit-${index}` },
-                  next: `https://graph.facebook.com/v25.0/me/accounts?after=at-limit-${index}`,
-                },
-              }),
-        }),
-    );
-    const atLimit = sequence(
-      () => json({ access_token: "short" }),
-      () => json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
-      defaultGrantedPermissions,
-      ...atLimitPages,
-    );
-    await expect(
-      adapter(atLimit.fetcher).exchangeAuthorizationCode!(context, {
-        code: "code",
-        codeVerifier: "unused",
-        redirectUri,
-      }),
-    ).resolves.toEqual({ accounts: [] });
-
-    const responders: Responder[] = [
-      () => json({ access_token: "short" }),
-      () => json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
-      defaultGrantedPermissions,
-      ...Array.from(
-        { length: 1_001 },
-        (_, index) => () =>
-          json({
-            data: [],
-            paging: {
-              cursors: { after: `empty-${index}` },
-              next: `https://graph.facebook.com/v25.0/me/accounts?after=empty-${index}`,
-            },
-          }),
-      ),
-      () =>
-        json({
-          data: [
-            {
-              id: "eventual-page",
-              name: "Too late",
-              access_token: "page-token",
-              tasks: ["CREATE_CONTENT"],
-            },
-          ],
-        }),
-    ];
-    await expect(
-      adapter(sequence(...responders).fetcher).exchangeAuthorizationCode!(context, {
-        code: "code",
-        codeVerifier: "unused",
-        redirectUri,
-      }),
-    ).rejects.toMatchObject({
-      failure: { code: "facebook_oauth_page_pagination_invalid" },
-    });
-  });
-
-  it("fails closed when discovered pages exceed 1,000 bounds", async () => {
-    const generatePages = (count: number, prefix: string) =>
-      Array.from({ length: count }, (_, idx) => ({
-        access_token: `token-${prefix}-${idx}`,
-        id: `page-${prefix}-${idx}`,
-        name: `Page ${prefix} ${idx}`,
-        tasks: ["CREATE_CONTENT"],
-      }));
-
-    const atLimitResponders = [
-      () => json({ access_token: "short" }),
-      () => json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
-      defaultGrantedPermissions,
-    ];
-    for (let pageIdx = 0; pageIdx < 10; pageIdx++) {
-      atLimitResponders.push(() =>
-        json({
-          data: generatePages(100, `at-limit-${pageIdx}`),
-          ...(pageIdx === 9
-            ? {}
-            : {
-                paging: {
-                  cursors: { after: `at-limit-cursor-${pageIdx}` },
-                  next: `https://graph.facebook.com/v25.0/me/accounts?after=at-limit-cursor-${pageIdx}`,
-                },
-              }),
-        }),
+    it("an exchange omitting expires_in inspects debug_token", async () => {
+      const { adapter } = setup(
+        [
+          json({ access_token: "short-user-secret" }),
+          json({ access_token: "long-user-secret", token_type: "bearer" }),
+          json({ data: { app_id: "facebook-client", expires_at: 1_788_566_400, is_valid: true } }),
+          defaultPermissions(),
+          json({ data: [pageItem("page-1", "page-access-secret")] }),
+        ],
+        { now: () => new Date("2026-07-19T00:00:00.123Z") },
       );
-    }
-    const atLimitProvider = adapter(sequence(...atLimitResponders).fetcher);
-    const atLimit = await atLimitProvider.exchangeAuthorizationCode!(context, {
-      code: "code",
-      codeVerifier: "unused",
-      redirectUri,
-    });
-    if (!("accounts" in atLimit)) throw new Error("Expected account selection");
-    expect(atLimit.accounts).toHaveLength(1_000);
 
-    const responders = [
-      () => json({ access_token: "short" }),
-      () =>
-        json({
-          access_token: "long",
-          expires_in: 3_600,
-          token_type: "bearer",
-        }),
-      defaultGrantedPermissions,
-    ];
-    for (let pageIdx = 0; pageIdx < 10; pageIdx++) {
-      responders.push(() =>
-        json({
-          data: generatePages(100, `p${pageIdx}`),
-          paging: {
-            cursors: { after: `cursor-${pageIdx}` },
-            next: `https://graph.facebook.com/v25.0/me/accounts?after=cursor-${pageIdx}`,
+      expect(await adapter.exchangeAuthorizationCode!(context, exchangeInput)).toEqual({
+        accounts: [
+          {
+            accessToken: "page-access-secret",
+            account: { displayName: "Page page-1", id: "page-1" },
+            expiresAt: "2026-09-05T00:00:00.000Z",
+            refreshToken: '{"pageId":"page-1","userAccessToken":"long-user-secret"}',
+            scopes: [
+              "pages_show_list",
+              "pages_read_engagement",
+              "pages_manage_posts",
+              "pages_manage_engagement",
+              "read_insights",
+            ],
           },
-        }),
-      );
-    }
-    responders.push(() =>
-      json({
-        data: generatePages(1, "overflow"),
-      }),
-    );
-
-    const calls = sequence(...responders);
-    await expect(
-      adapter(calls.fetcher).exchangeAuthorizationCode!(context, {
-        code: "code",
-        codeVerifier: "unused",
-        redirectUri,
-      }),
-    ).rejects.toMatchObject({
-      failure: {
-        code: "facebook_oauth_page_list_invalid",
-      },
+        ],
+      });
     });
-  });
 
-  it("declined publishing permission returns empty accounts and cannot appear as authorized publishing candidate", async () => {
-    const declinedPermission = sequence(
-      () => json({ access_token: "short" }),
-      () =>
+    it("an exchange with inspected zero expiry omits expiresAt", async () => {
+      const { adapter } = setup([
+        json({ access_token: "short-user-secret" }),
+        json({ access_token: "long-user-secret", token_type: "bearer" }),
+        json({ data: { app_id: "facebook-client", expires_at: 0, is_valid: true } }),
+        defaultPermissions(),
+        json({ data: [pageItem("page-1", "page-access-secret")] }),
+      ]);
+
+      expect(await adapter.exchangeAuthorizationCode!(context, exchangeInput)).toEqual({
+        accounts: [
+          {
+            accessToken: "page-access-secret",
+            account: { displayName: "Page page-1", id: "page-1" },
+            refreshToken: '{"pageId":"page-1","userAccessToken":"long-user-secret"}',
+            scopes: [
+              "pages_show_list",
+              "pages_read_engagement",
+              "pages_manage_posts",
+              "pages_manage_engagement",
+              "read_insights",
+            ],
+          },
+        ],
+      });
+    });
+
+    it("a declined publishing permission stops before reading Pages", async () => {
+      const { adapter, requests } = setup([
+        json({ access_token: "short" }),
+        json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
         json({
-          access_token: "long",
-          expires_in: 3_600,
-          token_type: "bearer",
-        }),
-      (url) => {
-        expect(url.pathname).toBe("/v25.0/me/permissions");
-        return json({
           data: [
             { permission: "pages_show_list", status: "granted" },
             { permission: "pages_read_engagement", status: "granted" },
             { permission: "pages_manage_posts", status: "declined" },
           ],
-        });
-      },
-      () =>
-        json({
-          data: [
-            {
-              access_token: "page-token",
-              id: "page-1",
-              name: "Page One",
-              tasks: ["CREATE_CONTENT"],
-            },
-          ],
         }),
-    );
+      ]);
 
-    const result = await adapter(declinedPermission.fetcher).exchangeAuthorizationCode!(context, {
-      code: "code",
-      codeVerifier: "unused",
-      redirectUri,
-    });
-    expect(result).toEqual({ accounts: [] });
-  });
-
-  it("attaches actual granted scopes list to candidate connections", async () => {
-    const customPermissions = sequence(
-      () => json({ access_token: "short" }),
-      () =>
-        json({
-          access_token: "long",
-          expires_in: 3_600,
-          token_type: "bearer",
-        }),
-      () =>
-        json({
-          data: [
-            { permission: "public_profile", status: "granted" },
-            { permission: "pages_show_list", status: "granted" },
-            { permission: "pages_read_engagement", status: "granted" },
-            { permission: "pages_manage_posts", status: "granted" },
-
-            { permission: "pages_manage_engagement", status: "granted" },
-
-            { permission: "read_insights", status: "granted" },
-            { permission: "email", status: "declined" },
-          ],
-        }),
-      () =>
-        json({
-          data: [
-            {
-              access_token: "page-access-secret",
-              id: "page-1",
-              name: "Meltiply Page",
-              tasks: ["CREATE_CONTENT"],
-            },
-          ],
-        }),
-    );
-
-    const result = await adapter(customPermissions.fetcher).exchangeAuthorizationCode!(context, {
-      code: "code",
-      codeVerifier: "unused",
-      redirectUri,
-    });
-    if (!("accounts" in result)) throw new Error("Expected account selection");
-    expect(result.accounts).toHaveLength(1);
-    expect(result.accounts[0]!.scopes).toEqual([
-      "public_profile",
-      "pages_show_list",
-      "pages_read_engagement",
-      "pages_manage_posts",
-      "pages_manage_engagement",
-      "read_insights",
-    ]);
-  });
-
-  it("creates, uploads, and submits one hosted Page Reel", async () => {
-    const providerCalls = sequence(
-      (url, init) => {
-        expect(url.pathname).toBe("/v25.0/page-1/video_reels");
-        expect(url.searchParams.get("upload_phase")).toBe("start");
-        expect(new Headers(init.headers).get("Authorization")).toBe("Bearer page-access-secret");
-        return json({
-          upload_url: "https://rupload.facebook.com/video-upload/v25.0/video-1",
-          video_id: "video-1",
-        });
-      },
-      (url, init) => {
-        expect(url.origin).toBe("https://rupload.facebook.com");
-        const headers = new Headers(init.headers);
-        expect(headers.get("Authorization")).toBe("OAuth page-access-secret");
-        expect(headers.get("file_url")).toBe("https://assets.example/reel.mp4?signature=secret");
-        expect(init.body).toBeUndefined();
-        return json({ success: true });
-      },
-      (url, init) => {
-        expect(url.pathname).toBe("/v25.0/page-1/video_reels");
-        expect(Object.fromEntries(url.searchParams)).toEqual({
-          description: "A Page Reel #launch",
-          upload_phase: "finish",
-          video_id: "video-1",
-          video_state: "PUBLISHED",
-        });
-        expect(new Headers(init.headers).get("Authorization")).toBe("Bearer page-access-secret");
-        return json({ success: true });
-      },
-    );
-
-    await expect(
-      adapter(providerCalls.fetcher).publish!(context, credentials, publishInput()),
-    ).resolves.toEqual({
-      outcome: "confirmed_success",
-      providerOperationId: "finishing:video-1",
-    });
-    expect(providerCalls.calls.every(({ init }) => init.redirect === "manual")).toBe(true);
-  });
-
-  it("rejects unsupported and unsafe media before contacting Facebook", async () => {
-    const fetcher = vi.fn<typeof fetch>();
-    const provider = adapter(fetcher);
-    const invalidInputs: PublishInput[] = [
-      publishInput({ caption: "", hashtags: [], media: [] }),
-      publishInput({
-        media: [
-          {
-            body: new ReadableStream<Uint8Array>(),
-            contentType: "video/mp4",
-            fileSize: 1_024,
-            mode: "byte_upload",
-          },
-        ],
-      }),
-      publishInput({
-        media: [
-          {
-            contentType: "video/webm",
-            fileSize: 1_024,
-            mode: "remote_ingest",
-            url: "https://assets.example/reel.webm",
-          },
-        ],
-      }),
-      publishInput({
-        media: [
-          {
-            contentType: "video/mp4",
-            fileSize: 1_024,
-            mode: "remote_ingest",
-            url: "https://assets.example/one.mp4",
-          },
-          {
-            contentType: "video/mp4",
-            fileSize: 1_024,
-            mode: "remote_ingest",
-            url: "https://assets.example/two.mp4",
-          },
-        ],
-      }),
-    ];
-    for (const input of invalidInputs) {
-      await expect(provider.publish!(context, credentials, input)).rejects.toBeInstanceOf(
-        ProviderAdapterError,
-      );
-    }
-    await expect(
-      provider.publish!(context, { accessToken: "token" }, publishInput()),
-    ).rejects.toMatchObject({
-      failure: { code: "facebook_page_account_required" },
-    });
-    expect(fetcher).not.toHaveBeenCalled();
-  });
-
-  it.each(["complete", "completed"])(
-    "recognizes Meta publishing phase %s as published",
-    async (publishing) => {
-      const providerCalls = sequence(() =>
-        json(reelStatus("video-1", { processing: "completed", publishing, video: "ready" })),
-      );
-      await expect(
-        adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
-          providerOperationId: "finish_submitted:video-1",
-        }),
-      ).resolves.toMatchObject({
-        state: "published",
-        result: { outcome: "confirmed_success", providerPostId: "video-1" },
+      expect(await adapter.exchangeAuthorizationCode!(context, exchangeInput)).toEqual({
+        accounts: [],
       });
-    },
-  );
+      expect(requests).toHaveLength(3);
+    });
 
-  it.each(["expired", "upload_failed"])(
-    "terminates a Reel whose video status is %s",
-    async (video) => {
-      const providerCalls = sequence(() => json(reelStatus("video-1", { video })));
-      await expect(
-        adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
-          providerOperationId: "finishing:video-1",
-        }),
-      ).resolves.toMatchObject({
-        state: "failed",
-        result: { outcome: "confirmed_failure", failure: { retryable: false } },
+    it("paginates and deduplicates direct and business-assigned Pages", async () => {
+      const adapter = createFacebookAdapter({
+        clientId: "facebook-client",
+        clientSecret: "facebook-client-secret",
+        now: () => NOW,
+        redirectUri,
+        fetch: async (target, init) => {
+          const url = new URL(String(target));
+          if (url.pathname.endsWith("/oauth/access_token")) {
+            const form = new URLSearchParams(String(init?.body));
+            return json({
+              access_token: form.get("grant_type") === "fb_exchange_token" ? "long" : "short",
+              expires_in: 3_600,
+              token_type: "bearer",
+            });
+          }
+          if (url.pathname.endsWith("/me/permissions")) {
+            return json({
+              data: [
+                { permission: "pages_show_list", status: "granted" },
+                { permission: "pages_read_engagement", status: "granted" },
+                { permission: "pages_manage_posts", status: "granted" },
+                { permission: "business_management", status: "granted" },
+              ],
+            });
+          }
+          if (url.pathname.endsWith("/me/accounts")) {
+            return url.searchParams.has("after")
+              ? json({ data: [pageItem("direct", "dup-token"), pageItem("direct-2")] })
+              : json({
+                  data: [pageItem("direct")],
+                  paging: {
+                    cursors: { after: "c1" },
+                    next: `${GRAPH}/me/accounts?after=c1`,
+                  },
+                });
+          }
+          if (url.pathname.endsWith("/me/business_users")) {
+            return json({ data: [{ id: "bu-1" }, { id: "bu-2" }] });
+          }
+          if (url.pathname.endsWith("/bu-1/assigned_pages")) {
+            return json({ data: [pageItem("direct", "via-bu1"), pageItem("biz-1")] });
+          }
+          if (url.pathname.endsWith("/bu-2/assigned_pages")) {
+            return json({ data: [pageItem("biz-1", "via-bu2"), pageItem("biz-2")] });
+          }
+          throw new Error(`unexpected ${url.pathname}`);
+        },
       });
-    },
-  );
 
-  it("polls a confirmed finish until Facebook proves publication", async () => {
-    const providerCalls = sequence(
-      () => json(reelStatus("video-1")),
-      () =>
-        json(
-          reelStatus("video-1", {
-            processing: "complete",
-            publishing: "complete",
-            video: "ready",
+      const result = await adapter.exchangeAuthorizationCode!(context, exchangeInput);
+
+      expect(
+        "accounts" in result ? result.accounts.map((c) => [c.account.id, c.accessToken]) : [],
+      ).toEqual([
+        ["direct", "page-token-direct"],
+        ["direct-2", "page-token-direct-2"],
+        ["biz-1", "page-token-biz-1"],
+        ["biz-2", "page-token-biz-2"],
+      ]);
+    });
+
+    it("caps concurrent business Page discovery at four edges", async () => {
+      let release!: () => void;
+      let started!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const overlapping = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let active = 0;
+      let peak = 0;
+      const users = Array.from({ length: 6 }, (_, index) => ({ id: `bu-${index}` }));
+      const adapter = createFacebookAdapter({
+        clientId: "facebook-client",
+        clientSecret: "facebook-client-secret",
+        now: () => NOW,
+        redirectUri,
+        fetch: async (target, init) => {
+          const url = new URL(String(target));
+          if (url.pathname.endsWith("/oauth/access_token")) {
+            return json({
+              access_token: new URLSearchParams(String(init?.body)).has("fb_exchange_token")
+                ? "long"
+                : "short",
+              expires_in: 3_600,
+              token_type: "bearer",
+            });
+          }
+          if (url.pathname.endsWith("/me/permissions")) {
+            return json({
+              data: [
+                { permission: "pages_show_list", status: "granted" },
+                { permission: "pages_read_engagement", status: "granted" },
+                { permission: "pages_manage_posts", status: "granted" },
+                { permission: "business_management", status: "granted" },
+              ],
+            });
+          }
+          if (url.pathname.endsWith("/me/accounts")) return json({ data: [] });
+          if (url.pathname.endsWith("/me/business_users")) return json({ data: users });
+          const id = url.pathname.split("/")[2]!;
+          active += 1;
+          peak = Math.max(peak, active);
+          if (active >= 2) started();
+          try {
+            await held;
+            return json({ data: [pageItem(`page-${id}`)] });
+          } finally {
+            active -= 1;
+          }
+        },
+      });
+
+      const exchange = adapter.exchangeAuthorizationCode!(context, exchangeInput);
+      try {
+        await Promise.race([overlapping, exchange]);
+        expect(peak).toBeGreaterThan(1);
+        expect(peak).toBeLessThanOrEqual(4);
+      } finally {
+        release();
+      }
+      const result = await exchange;
+      expect("accounts" in result ? result.accounts.map((c) => c.account.id) : []).toEqual(
+        users.map((user) => `page-${user.id}`),
+      );
+      expect(peak).toBeLessThanOrEqual(4);
+    });
+
+    const discoveryPage = (index: number, hasNext: boolean) =>
+      json({
+        data: [],
+        ...(hasNext
+          ? {
+              paging: {
+                cursors: { after: `c-${index}` },
+                next: `${GRAPH}/me/accounts?after=c-${index}`,
+              },
+            }
+          : {}),
+      });
+
+    it("pages ending on the last allowed discovery request", async () => {
+      const { adapter } = setup(
+        [
+          json({ access_token: "short" }),
+          json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
+          defaultPermissions(),
+          discoveryPage(0, true),
+          discoveryPage(1, true),
+          discoveryPage(2, false),
+        ],
+        { maxDiscoveryRequests: 3 },
+      );
+
+      expect(await adapter.exchangeAuthorizationCode!(context, exchangeInput)).toEqual({
+        accounts: [],
+      });
+    });
+
+    it("pages continuing past maxDiscoveryRequests", async () => {
+      const { adapter } = setup(
+        [
+          json({ access_token: "short" }),
+          json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
+          defaultPermissions(),
+          discoveryPage(0, true),
+          discoveryPage(1, true),
+          discoveryPage(2, true),
+          discoveryPage(3, false),
+        ],
+        { maxDiscoveryRequests: 3 },
+      );
+
+      expect(await failureOf(adapter.exchangeAuthorizationCode!(context, exchangeInput))).toEqual(
+        providerFailure("transient", "facebook_oauth_page_pagination_invalid"),
+      );
+      expect(discoveryRequestLimit(undefined)).toEqual(1_000);
+    });
+
+    it("discovered Pages exactly at maxDiscoveredPages", async () => {
+      const { adapter } = setup(
+        [
+          json({ access_token: "short" }),
+          json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
+          defaultPermissions(),
+          json({ data: [pageItem("1"), pageItem("2")] }),
+        ],
+        { maxDiscoveredPages: 2 },
+      );
+
+      const ok = await adapter.exchangeAuthorizationCode!(context, exchangeInput);
+
+      expect("accounts" in ok ? ok.accounts.map((c) => c.account.id) : []).toEqual(["1", "2"]);
+    });
+
+    it("discovered Pages past maxDiscoveredPages", async () => {
+      const { adapter } = setup(
+        [
+          json({ access_token: "short" }),
+          json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
+          defaultPermissions(),
+          json({ data: [pageItem("1"), pageItem("2"), pageItem("3")] }),
+        ],
+        { maxDiscoveredPages: 2 },
+      );
+
+      expect(await failureOf(adapter.exchangeAuthorizationCode!(context, exchangeInput))).toEqual(
+        providerFailure("transient", "facebook_oauth_page_list_invalid"),
+      );
+    });
+
+    it("reports malformed OAuth responses without leaking credentials", async () => {
+      const { adapter } = setup([
+        json({ access_token: "short-secret" }),
+        json({ access_token: "long-secret", expires_in: 0, token_type: "bearer" }),
+      ]);
+
+      const error = await adapter.exchangeAuthorizationCode!(context, exchangeInput).catch(
+        (cause: unknown) => cause,
+      );
+
+      expect(error).toBeInstanceOf(ProviderAdapterError);
+      const diagnostic = failureDiagnostic(error as ProviderAdapterError);
+      expect(diagnostic).toEqual({
+        classification: "transient",
+        code: "facebook_oauth_token_expiry_invalid",
+        retryable: true,
+      });
+      expect(JSON.stringify(diagnostic)).not.toMatch(/secret|authorization-code/);
+    });
+
+    it("a foreign redirect URI sends nothing", async () => {
+      const { adapter, requests } = setup();
+
+      await expect(
+        adapter.exchangeAuthorizationCode!(context, {
+          ...exchangeInput,
+          redirectUri: "https://evil.example/callback",
+        }),
+      ).rejects.toEqual(new TypeError("OAuth redirect URI does not match configuration"));
+      expect(requests).toEqual([]);
+    });
+
+    it("Facebook down", async () => {
+      const { adapter } = setup([down()]);
+
+      expect(await failureOf(adapter.exchangeAuthorizationCode!(context, exchangeInput))).toEqual(
+        unavailable,
+      );
+    });
+  });
+
+  describe("refreshAccessToken", () => {
+    const refreshSecret = '{"pageId":"page-1","userAccessToken":"current-user-secret"}';
+
+    it("exchanges the user token and derives a fresh Page token", async () => {
+      const { adapter, requests } = setup([
+        json({ access_token: "new-user-secret", expires_in: 5_184_000, token_type: "bearer" }),
+        json({ access_token: "new-page-secret", id: "page-1", name: "Meltiply Page" }),
+        defaultPermissions(),
+      ]);
+
+      expect(await adapter.refreshAccessToken!(context, refreshSecret)).toEqual({
+        accessToken: "new-page-secret",
+        expiresAt: "2026-09-17T00:00:00.000Z",
+        refreshToken: '{"pageId":"page-1","userAccessToken":"new-user-secret"}',
+        scopes: [
+          "pages_show_list",
+          "pages_read_engagement",
+          "pages_manage_posts",
+          "pages_manage_engagement",
+          "read_insights",
+        ],
+      });
+      expect(requests.map(({ method, url }) => ({ method, url }))).toEqual([
+        { method: "POST", url: `${GRAPH}/oauth/access_token` },
+        { method: "GET", url: `${GRAPH}/page-1` },
+        { method: "GET", url: `${GRAPH}/me/permissions` },
+      ]);
+    });
+
+    it("a mismatched Page response is malformed", async () => {
+      const { adapter } = setup([
+        json({ access_token: "new-user-secret", expires_in: 3_600, token_type: "bearer" }),
+        json({ access_token: "new-page-secret", id: "other-page" }),
+      ]);
+
+      expect(await failureOf(adapter.refreshAccessToken!(context, refreshSecret))).toEqual(
+        malformedAnswer,
+      );
+    });
+
+    it("an invalid refresh secret sends nothing", async () => {
+      const { adapter, requests } = setup();
+
+      expect(await failureOf(adapter.refreshAccessToken!(context, "not-json"))).toEqual(
+        refused("facebook_refresh_secret_invalid"),
+      );
+      expect(requests).toEqual([]);
+    });
+
+    it("Facebook down", async () => {
+      const { adapter } = setup([down()]);
+
+      expect(await failureOf(adapter.refreshAccessToken!(context, refreshSecret))).toEqual(
+        unavailable,
+      );
+    });
+  });
+
+  describe("getAccountAnalytics", () => {
+    it("reads followers_count without using fan_count", async () => {
+      const { adapter, requests } = setup([json({ fan_count: 350, followers_count: 420 })]);
+
+      expect(await adapter.getAccountAnalytics!(context, credentials)).toEqual({
+        followers: 420,
+        recordedAt: NOW.toISOString(),
+      });
+      expect(requests).toEqual([
+        {
+          headers: { accept: "application/json", authorization: "Bearer page-access-secret" },
+          method: "GET",
+          query: { fields: "followers_count" },
+          redirect: "manual",
+          url: `${GRAPH}/page-1`,
+        },
+      ]);
+    });
+
+    it("Facebook down", async () => {
+      const { adapter } = setup([down()]);
+
+      expect(await failureOf(adapter.getAccountAnalytics!(context, credentials))).toEqual(
+        unavailable,
+      );
+    });
+  });
+
+  describe("listAnalytics", () => {
+    it("reads Reel insights and video edge counts", async () => {
+      const { adapter, requests } = setup([
+        json({
+          data: [
+            { name: "blue_reels_play_count", period: "lifetime", values: [{ value: 1200 }] },
+            { name: "post_video_social_actions", period: "lifetime", values: [{ value: 21 }] },
+          ],
+        }),
+        json({
+          comments: { summary: { total_count: 9 } },
+          likes: { summary: { total_count: 84 } },
+        }),
+      ]);
+
+      expect(
+        await adapter.listAnalytics!(
+          context,
+          credentials,
+          { providerPostId: "video-1" },
+          { limit: 100 },
+        ),
+      ).toEqual({
+        items: [
+          {
+            comments: 9,
+            impressions: 0,
+            likes: 84,
+            providerPostId: "video-1",
+            recordedAt: NOW.toISOString(),
+            reach: 0,
+            shares: 12,
+            views: 1200,
+            watchTimeSeconds: 0,
+          },
+        ],
+      });
+      expect(requests.map(({ query, url }) => ({ query, url }))).toEqual([
+        {
+          query: {
+            metric: "blue_reels_play_count,post_video_social_actions",
+            period: "lifetime",
+          },
+          url: `${GRAPH}/video-1/video_insights`,
+        },
+        {
+          query: { fields: "likes.summary(true).limit(0),comments.summary(true).limit(0)" },
+          url: `${GRAPH}/video-1`,
+        },
+      ]);
+    });
+
+    it("a non-Reel operation sends nothing", async () => {
+      const { adapter, requests } = setup();
+
+      expect(
+        await failureOf(
+          adapter.listAnalytics!(
+            context,
+            credentials,
+            { providerOperationId: "post:page-1_1", providerPostId: "page-1_1" },
+            { limit: 100 },
+          ),
+        ),
+      ).toEqual(refused("facebook_format_analytics_unavailable"));
+      expect(requests).toEqual([]);
+    });
+
+    it("Facebook down", async () => {
+      const { adapter } = setup([down()]);
+
+      expect(
+        await failureOf(
+          adapter.listAnalytics!(
+            context,
+            credentials,
+            { providerPostId: "video-1" },
+            { limit: 100 },
+          ),
+        ),
+      ).toEqual(unavailable);
+    });
+  });
+
+  describe("publish", () => {
+    it("a caption-only feed post", async () => {
+      const { adapter, requests } = setup([json({ id: "page-1_post-1" })]);
+
+      expect(
+        await adapter.publish!(
+          context,
+          credentials,
+          publishInput({ caption: "A regular Page update", hashtags: [], media: [] }),
+        ),
+      ).toEqual({
+        outcome: "confirmed_success",
+        providerOperationId: "post:page-1_post-1",
+        providerPostId: "page-1_post-1",
+        providerUrl: "https://www.facebook.com/page-1_post-1",
+      });
+      expect(requests).toEqual([
+        {
+          body: JSON.stringify({ message: "A regular Page update", published: true }),
+          headers: {
+            accept: "application/json",
+            authorization: "Bearer page-access-secret",
+            "content-type": "application/json",
+          },
+          method: "POST",
+          query: {},
+          redirect: "manual",
+          url: `${GRAPH}/page-1/feed`,
+        },
+      ]);
+    });
+
+    it("ordered photos staged before creating one feed post", async () => {
+      const { adapter, requests } = setup([
+        json({ id: "photo-1" }),
+        json({ id: "photo-2" }),
+        json({ id: "page-1_photos" }),
+      ]);
+
+      expect(
+        await adapter.publish!(
+          context,
+          credentials,
+          publishInput({
+            caption: "Two moments",
+            hashtags: [],
+            media: [photo("first"), photo("second")],
           }),
         ),
-    );
-    const provider = adapter(providerCalls.fetcher);
-    await expect(
-      provider.lookupPublication!(context, credentials, {
-        providerOperationId: "finishing:video-1",
-      }),
-    ).resolves.toEqual({
-      providerOperationId: "finishing:video-1",
-      state: "processing",
+      ).toEqual({
+        outcome: "confirmed_success",
+        providerOperationId: "post:page-1_photos",
+        providerPostId: "page-1_photos",
+        providerUrl: "https://www.facebook.com/page-1_photos",
+      });
+      expect(requests.map(({ body, url }) => ({ body: JSON.parse(body!), url }))).toEqual([
+        {
+          body: { published: false, url: "https://assets.example/first.jpg" },
+          url: `${GRAPH}/page-1/photos`,
+        },
+        {
+          body: { published: false, url: "https://assets.example/second.jpg" },
+          url: `${GRAPH}/page-1/photos`,
+        },
+        {
+          body: {
+            attached_media: [{ media_fbid: "photo-1" }, { media_fbid: "photo-2" }],
+            message: "Two moments",
+            published: true,
+          },
+          url: `${GRAPH}/page-1/feed`,
+        },
+      ]);
     });
-    await expect(
-      provider.lookupPublication!(context, credentials, {
-        providerOperationId: "finishing:video-1",
-      }),
-    ).resolves.toEqual({
-      result: {
+
+    it("a native feed draft", async () => {
+      const { adapter, requests } = setup([json({ id: "page-1_draft-1" })]);
+
+      expect(
+        await adapter.publish!(
+          context,
+          credentials,
+          publishInput({
+            caption: "Review this in Meta",
+            hashtags: [],
+            media: [],
+            providerOptions: { facebook: { deliveryMode: "draft", postType: "feed" } },
+          }),
+        ),
+      ).toEqual({
+        delivery: "draft",
+        outcome: "confirmed_success",
+        providerOperationId: "post_draft:page-1_draft-1",
+      });
+      expect(JSON.parse(requests[0]!.body!)).toEqual({
+        message: "Review this in Meta",
+        published: false,
+      });
+    });
+
+    it("a Page video", async () => {
+      const { adapter, requests } = setup([json({ id: "long-video" })]);
+
+      expect(
+        await adapter.publish!(
+          context,
+          credentials,
+          publishInput({
+            caption: "A longer Page video",
+            hashtags: [],
+            providerOptions: { facebook: { postType: "video" } },
+          }),
+        ),
+      ).toEqual({
+        outcome: "confirmed_success",
+        providerOperationId: "video:long-video",
+      });
+      expect(JSON.parse(requests[0]!.body!)).toEqual({
+        description: "A longer Page video",
+        file_url: "https://assets.example/reel.mp4?signature=secret",
+        published: true,
+      });
+    });
+
+    it("a slideshow from ordered photos", async () => {
+      const { adapter, requests } = setup([json({ id: "slideshow-1" })]);
+
+      expect(
+        await adapter.publish!(
+          context,
+          credentials,
+          publishInput({
+            media: [photo("one"), photo("two"), photo("three")],
+            providerOptions: { facebook: { postType: "slideshow" } },
+          }),
+        ),
+      ).toEqual({
+        outcome: "confirmed_success",
+        providerOperationId: "video:slideshow-1",
+      });
+      expect(JSON.parse(requests[0]!.body!)).toEqual({
+        description: "A Page Reel #launch",
+        published: true,
+        slideshow_spec: {
+          images_urls: [
+            "https://assets.example/one.jpg",
+            "https://assets.example/two.jpg",
+            "https://assets.example/three.jpg",
+          ],
+        },
+      });
+    });
+
+    it("a slideshow with a GIF sends nothing", async () => {
+      const { adapter, requests } = setup();
+
+      expect(
+        await failureOf(
+          adapter.publish!(
+            context,
+            credentials,
+            publishInput({
+              media: [{ ...photo("one"), contentType: "image/gif" }, photo("two"), photo("three")],
+              providerOptions: { facebook: { postType: "slideshow" } },
+            }),
+          ),
+        ),
+      ).toEqual(refused("facebook_slideshow_invalid"));
+      expect(requests).toEqual([]);
+    });
+
+    it("a crossposted video", async () => {
+      const { adapter, requests } = setup([json({ id: "crossposted-copy" })]);
+
+      expect(
+        await adapter.publish!(
+          context,
+          credentials,
+          publishInput({
+            caption: "",
+            hashtags: [],
+            media: [],
+            providerOptions: {
+              facebook: { crosspostedVideoId: "source-video", postType: "crosspost" },
+            },
+          }),
+        ),
+      ).toEqual({
+        outcome: "confirmed_success",
+        providerOperationId: "video:crossposted-copy",
+      });
+      expect(JSON.parse(requests[0]!.body!)).toEqual({
+        crossposted_video_id: "source-video",
+        description: "",
+        published: true,
+      });
+    });
+
+    it("a photo Story", async () => {
+      const { adapter, requests } = setup([
+        json({ id: "story-photo" }),
+        json({ post_id: 1234, success: true }),
+      ]);
+
+      expect(
+        await adapter.publish!(
+          context,
+          credentials,
+          publishInput({
+            caption: "",
+            hashtags: [],
+            media: [photo("story")],
+            providerOptions: { facebook: { postType: "story" } },
+          }),
+        ),
+      ).toEqual({
+        outcome: "confirmed_success",
+        providerOperationId: "story:story-photo",
+        providerPostId: "1234",
+      });
+      expect(requests.map(({ url }) => url)).toEqual([
+        `${GRAPH}/page-1/photos`,
+        `${GRAPH}/page-1/photo_stories`,
+      ]);
+    });
+
+    it("a photo Story whose commit fails retains the story operation", async () => {
+      const { adapter } = setup([json({ id: "story-photo" }), down()]);
+
+      expect(
+        await adapter.publish!(
+          context,
+          credentials,
+          publishInput({
+            caption: "",
+            hashtags: [],
+            media: [photo("story")],
+            providerOptions: { facebook: { postType: "story" } },
+          }),
+        ),
+      ).toEqual({
+        failure: providerFailure("ambiguous", "provider_http_503"),
+        outcome: "unknown",
+        providerOperationId: "story:story-photo",
+      });
+    });
+
+    it("a video Story", async () => {
+      const { adapter, requests } = setup([
+        json({ upload_url: `${RUPLOAD}/story-video`, video_id: "story-video" }),
+        json({ success: true }),
+        json({ post_id: "video-story-post", success: true }),
+      ]);
+
+      expect(
+        await adapter.publish!(
+          context,
+          credentials,
+          publishInput({
+            caption: "",
+            hashtags: [],
+            providerOptions: { facebook: { postType: "story" } },
+          }),
+        ),
+      ).toEqual({
+        outcome: "confirmed_success",
+        providerOperationId: "story:story-video",
+        providerPostId: "video-story-post",
+      });
+      expect(requests.map(({ query, url }) => ({ query, url }))).toEqual([
+        { query: { upload_phase: "start" }, url: `${GRAPH}/page-1/video_stories` },
+        { query: {}, url: `${RUPLOAD}/story-video` },
+        {
+          query: { upload_phase: "finish", video_id: "story-video" },
+          url: `${GRAPH}/page-1/video_stories`,
+        },
+      ]);
+    });
+
+    it("a Story with a caption sends nothing", async () => {
+      const { adapter, requests } = setup();
+
+      expect(
+        await failureOf(
+          adapter.publish!(
+            context,
+            credentials,
+            publishInput({
+              caption: "Not allowed",
+              hashtags: [],
+              providerOptions: { facebook: { postType: "story" } },
+            }),
+          ),
+        ),
+      ).toEqual(refused("facebook_story_caption_unsupported"));
+      expect(requests).toEqual([]);
+    });
+
+    it("a hosted Page Reel", async () => {
+      const { adapter, requests } = setup([
+        json({ upload_url: `${RUPLOAD}/video-1`, video_id: "video-1" }),
+        json({ success: true }),
+        json({ success: true }),
+      ]);
+
+      expect(await adapter.publish!(context, credentials, publishInput())).toEqual({
         outcome: "confirmed_success",
         providerOperationId: "finishing:video-1",
-        providerPostId: "video-1",
-      },
-      state: "published",
+      });
+      expect(requests).toEqual([
+        {
+          headers: { accept: "application/json", authorization: "Bearer page-access-secret" },
+          method: "POST",
+          query: { upload_phase: "start" },
+          redirect: "manual",
+          url: `${GRAPH}/page-1/video_reels`,
+        },
+        {
+          headers: {
+            accept: "application/json",
+            authorization: "OAuth page-access-secret",
+            file_url: "https://assets.example/reel.mp4?signature=secret",
+          },
+          method: "POST",
+          query: {},
+          redirect: "manual",
+          url: `${RUPLOAD}/video-1`,
+        },
+        {
+          headers: { accept: "application/json", authorization: "Bearer page-access-secret" },
+          method: "POST",
+          query: {
+            description: "A Page Reel #launch",
+            upload_phase: "finish",
+            video_id: "video-1",
+            video_state: "PUBLISHED",
+          },
+          redirect: "manual",
+          url: `${GRAPH}/page-1/video_reels`,
+        },
+      ]);
     });
-    expect(providerCalls.calls[0]!.url.searchParams.get("fields")).toBe("id,status");
-  });
 
-  it("never re-submits an ambiguous finish and accepts later provider proof", async () => {
-    const providerCalls = sequence(
-      () =>
-        json({
-          upload_url: "https://rupload.facebook.com/video-upload/v25.0/video-ambiguous",
-          video_id: "video-ambiguous",
-        }),
-      () => json({ success: true }),
-      () => Promise.reject(new Error("connection lost after finish")),
-      () =>
-        json(
-          reelStatus("video-ambiguous", {
-            processing: "complete",
-            publishing: "complete",
-            video: "ready",
+    it("a Reel whose upload loses the connection retains upload_submitted", async () => {
+      const { adapter } = setup([
+        json({ upload_url: `${RUPLOAD}/video-upload`, video_id: "video-upload" }),
+        new TypeError("connection lost"),
+      ]);
+
+      expect(await adapter.publish!(context, credentials, publishInput())).toEqual({
+        failure: providerFailure("ambiguous", "provider_http_request_failed"),
+        outcome: "unknown",
+        providerOperationId: "upload_submitted:video-upload",
+      });
+    });
+
+    it("a Reel whose finish loses the connection retains finish_submitted", async () => {
+      const { adapter } = setup([
+        json({ upload_url: `${RUPLOAD}/video-finish`, video_id: "video-finish" }),
+        json({ success: true }),
+        new TypeError("connection lost"),
+      ]);
+
+      expect(await adapter.publish!(context, credentials, publishInput())).toEqual({
+        failure: providerFailure("ambiguous", "provider_http_request_failed"),
+        outcome: "unknown",
+        providerOperationId: "finish_submitted:video-finish",
+      });
+    });
+
+    it("an A/B experiment", async () => {
+      const { adapter, requests } = setup([json({ id: "experiment-1" })]);
+
+      expect(
+        await adapter.publish!(
+          context,
+          credentials,
+          publishInput({
+            caption: "Compare both openings",
+            hashtags: [],
+            media: [],
+            providerOptions: {
+              facebook: {
+                abTest: {
+                  controlVideoId: "draft-one",
+                  durationSeconds: 1800,
+                  experimentVideoIds: ["draft-one", "draft-two"],
+                  name: "Launch comparison",
+                  optimizationGoal: "REELS_PLAYS",
+                },
+                postType: "ab_test",
+              },
+            },
           }),
         ),
-    );
-    const provider = adapter(providerCalls.fetcher);
-    await expect(provider.publish!(context, credentials, publishInput())).resolves.toMatchObject({
-      failure: { classification: "ambiguous", retryable: false },
-      outcome: "unknown",
-      providerOperationId: "finish_submitted:video-ambiguous",
+      ).toEqual({
+        delivery: "experiment",
+        outcome: "confirmed_success",
+        providerOperationId: "ab_test:experiment-1",
+      });
+      expect(JSON.parse(requests[0]!.body!)).toEqual({
+        control_video_id: "draft-one",
+        description: "Compare both openings",
+        duration: 1800,
+        experiment_video_ids: ["draft-one", "draft-two"],
+        name: "Launch comparison",
+        optimization_goal: "REELS_PLAYS",
+      });
     });
-    await expect(
-      provider.lookupPublication!(context, credentials, {
-        providerOperationId: "finish_submitted:video-ambiguous",
-      }),
-    ).resolves.toMatchObject({
-      result: { providerPostId: "video-ambiguous" },
-      state: "published",
+
+    it("a live broadcast", async () => {
+      const { adapter, requests } = setup([json({ id: "live-1" })]);
+
+      expect(
+        await adapter.publish!(
+          context,
+          credentials,
+          publishInput({
+            caption: "Live launch",
+            hashtags: [],
+            media: [],
+            providerOptions: { facebook: { postType: "live" } },
+          }),
+        ),
+      ).toEqual({
+        delivery: "broadcast",
+        outcome: "confirmed_success",
+        providerOperationId: "live:live-1",
+      });
+      expect(JSON.parse(requests[0]!.body!)).toEqual({
+        description: "Live launch",
+        status: "LIVE_NOW",
+        title: "Live launch",
+      });
     });
-    expect(providerCalls.calls).toHaveLength(4);
-    expect(
-      providerCalls.calls.filter(({ url }) => url.pathname.endsWith("/video_reels")),
-    ).toHaveLength(2);
+
+    it("an empty feed post sends nothing", async () => {
+      const { adapter, requests } = setup();
+
+      expect(
+        await failureOf(
+          adapter.publish!(
+            context,
+            credentials,
+            publishInput({ caption: "", hashtags: [], media: [] }),
+          ),
+        ),
+      ).toEqual(refused("facebook_feed_invalid"));
+      expect(requests).toEqual([]);
+    });
+
+    it("no Page account sends nothing", async () => {
+      const { adapter, requests } = setup();
+
+      expect(
+        await failureOf(adapter.publish!(context, { accessToken: "token" }, publishInput())),
+      ).toEqual(refused("facebook_page_account_required"));
+      expect(requests).toEqual([]);
+    });
   });
 
-  it("does not finish after an ambiguous upload without retained caption evidence", async () => {
-    const providerCalls = sequence(
-      () =>
+  describe("getBroadcastInfo", () => {
+    it("reads the RTMPS ingest URL for a live broadcast", async () => {
+      const { adapter } = setup([
         json({
-          upload_url: "https://rupload.facebook.com/video-upload/v25.0/video-upload",
-          video_id: "video-upload",
+          id: "live-1",
+          secure_stream_url: "rtmps://live-api.facebook.com:443/rtmp/secret-key",
+          status: "LIVE",
         }),
-      () => Promise.reject(new Error("upload response lost")),
-      () => json(reelStatus("video-upload")),
-    );
-    const provider = adapter(providerCalls.fetcher);
-    await expect(provider.publish!(context, credentials, publishInput())).resolves.toMatchObject({
-      failure: { classification: "ambiguous" },
-      outcome: "unknown",
-      providerOperationId: "upload_submitted:video-upload",
+      ]);
+
+      expect(
+        await adapter.getBroadcastInfo!(context, credentials, {
+          providerOperationId: "live:live-1",
+        }),
+      ).toEqual({
+        ingestUrl: "rtmps://live-api.facebook.com:443/rtmp/secret-key",
+        providerPostId: "live-1",
+        providerUrl: "https://www.facebook.com/live-1",
+        state: "live",
+      });
     });
-    await expect(
-      provider.lookupPublication!(context, credentials, {
-        providerOperationId: "upload_submitted:video-upload",
-      }),
-    ).resolves.toMatchObject({
-      result: {
-        failure: { code: "facebook_upload_evidence_pending" },
-        providerOperationId: "upload_submitted:video-upload",
-      },
-      state: "unknown",
+
+    it("Facebook down", async () => {
+      const { adapter } = setup([down()]);
+
+      expect(
+        await failureOf(
+          adapter.getBroadcastInfo!(context, credentials, { providerOperationId: "live:live-1" }),
+        ),
+      ).toEqual(unavailable);
     });
-    expect(providerCalls.calls).toHaveLength(3);
   });
 
-  it("maps processing failures and HTTP 404 without provider detail leakage", async () => {
-    const providerDetail = "private provider detail code=abc123";
-    const failedCalls = sequence(() =>
-      json({
-        id: "video-failed",
-        status: {
-          processing_phase: {
-            error: { message: providerDetail },
-            status: "error",
+  describe("endBroadcast", () => {
+    it("a live broadcast that becomes VOD returns its permalink", async () => {
+      const { adapter, requests } = setup([
+        json({ id: "live-1" }),
+        json({ id: "live-1", status: "VOD" }),
+      ]);
+
+      expect(
+        await adapter.endBroadcast!(context, credentials, { providerOperationId: "live:live-1" }),
+      ).toEqual({
+        outcome: "confirmed_success",
+        providerOperationId: "ended_live:live-1",
+        providerPostId: "live-1",
+        providerUrl: "https://www.facebook.com/live-1",
+      });
+      expect(requests.map(({ method, query, url }) => ({ method, query, url }))).toEqual([
+        { method: "POST", query: { end_live_video: "true" }, url: `${GRAPH}/live-1` },
+        { method: "GET", query: { fields: "id,status" }, url: `${GRAPH}/live-1` },
+      ]);
+    });
+
+    it("a live broadcast not yet VOD returns broadcast delivery", async () => {
+      const { adapter } = setup([
+        json({ id: "live-1" }),
+        json({ id: "live-1", status: "PROCESSING" }),
+      ]);
+
+      expect(
+        await adapter.endBroadcast!(context, credentials, { providerOperationId: "live:live-1" }),
+      ).toEqual({
+        delivery: "broadcast",
+        outcome: "confirmed_success",
+        providerOperationId: "ended_live:live-1",
+      });
+    });
+  });
+
+  describe("lookupPublication", () => {
+    it("an ended_live operation resolves without contacting Facebook", async () => {
+      const { adapter, requests } = setup();
+
+      expect(
+        await adapter.lookupPublication!(context, credentials, {
+          providerOperationId: "ended_live:live-1",
+        }),
+      ).toEqual({
+        result: {
+          delivery: "broadcast",
+          outcome: "confirmed_success",
+          providerOperationId: "ended_live:live-1",
+        },
+        state: "delivered",
+      });
+      expect(requests).toEqual([]);
+    });
+
+    it("an ab_test operation confirms the experiment node", async () => {
+      const { adapter } = setup([json({ id: "exp-1" })]);
+
+      expect(
+        await adapter.lookupPublication!(context, credentials, {
+          providerOperationId: "ab_test:exp-1",
+        }),
+      ).toEqual({
+        result: {
+          delivery: "experiment",
+          outcome: "confirmed_success",
+          providerOperationId: "ab_test:exp-1",
+        },
+        state: "delivered",
+      });
+    });
+
+    it("a story operation reads the Page stories edge", async () => {
+      const { adapter } = setup([
+        json({ data: [{ media_id: "m1", post_id: "p1", status: "PUBLISHED" }] }),
+      ]);
+
+      expect(
+        await adapter.lookupPublication!(context, credentials, { providerOperationId: "story:m1" }),
+      ).toEqual({
+        result: {
+          outcome: "confirmed_success",
+          providerOperationId: "story:m1",
+          providerPostId: "p1",
+        },
+        state: "published",
+      });
+    });
+
+    it("a ready video resolves as published", async () => {
+      const { adapter } = setup([json({ id: "v1", status: { video_status: "ready" } })]);
+
+      expect(
+        await adapter.lookupPublication!(context, credentials, {
+          providerOperationId: "video:v1",
+        }),
+      ).toEqual({
+        result: {
+          outcome: "confirmed_success",
+          providerOperationId: "video:v1",
+          providerPostId: "v1",
+          providerUrl: "https://www.facebook.com/v1",
+        },
+        state: "published",
+      });
+    });
+
+    it("a missing video (404) returns not_found", async () => {
+      const { adapter } = setup([json({}, 404)]);
+
+      expect(
+        await adapter.lookupPublication!(context, credentials, {
+          providerOperationId: "video:v1",
+        }),
+      ).toEqual({ state: "not_found" });
+    });
+
+    it("a published Page post resolves as published", async () => {
+      const { adapter } = setup([json({ id: "page-1_p1", is_published: true })]);
+
+      expect(
+        await adapter.lookupPublication!(context, credentials, {
+          providerOperationId: "post:page-1_p1",
+        }),
+      ).toEqual({
+        result: {
+          outcome: "confirmed_success",
+          providerOperationId: "post:page-1_p1",
+          providerPostId: "page-1_p1",
+          providerUrl: "https://www.facebook.com/page-1_p1",
+        },
+        state: "published",
+      });
+    });
+
+    it("a missing Page post (404) returns not_found", async () => {
+      const { adapter } = setup([json({}, 404)]);
+
+      expect(
+        await adapter.lookupPublication!(context, credentials, {
+          providerOperationId: "post:page-1_p1",
+        }),
+      ).toEqual({ state: "not_found" });
+    });
+
+    it("a post ID for another Page sends nothing", async () => {
+      const { adapter, requests } = setup();
+
+      expect(
+        await failureOf(
+          adapter.lookupPublication!(context, credentials, {
+            providerOperationId: "post:other_p1",
+          }),
+        ),
+      ).toEqual(malformedAnswer);
+      expect(requests).toEqual([]);
+    });
+
+    it("a finishing Reel still processing", async () => {
+      const { adapter } = setup([json(reelStatus("v1"))]);
+
+      expect(
+        await adapter.lookupPublication!(context, credentials, {
+          providerOperationId: "finishing:v1",
+        }),
+      ).toEqual({ providerOperationId: "finishing:v1", state: "processing" });
+    });
+
+    it("a finish_submitted Reel that completed resolves as published", async () => {
+      const { adapter } = setup([
+        json(reelStatus("v1", { processing: "complete", publishing: "complete", video: "ready" })),
+      ]);
+
+      expect(
+        await adapter.lookupPublication!(context, credentials, {
+          providerOperationId: "finish_submitted:v1",
+        }),
+      ).toEqual({
+        result: {
+          outcome: "confirmed_success",
+          providerOperationId: "finish_submitted:v1",
+          providerPostId: "v1",
+        },
+        state: "published",
+      });
+    });
+
+    it("a failed Reel hides provider error details", async () => {
+      const { adapter } = setup([
+        json({
+          id: "v1",
+          status: {
+            processing_phase: { error: { message: "private detail secret=1" }, status: "error" },
+            publishing_phase: { status: "not_started" },
+            uploading_phase: { status: "complete" },
+            video_status: "error",
           },
-          publishing_phase: { status: "not_started" },
-          uploading_phase: { status: "complete" },
-          video_status: "error",
+        }),
+      ]);
+
+      const failedResult = await adapter.lookupPublication!(context, credentials, {
+        providerOperationId: "finishing:v1",
+      });
+
+      expect(failedResult).toEqual({
+        result: {
+          failure: refused("facebook_reel_processing_failed"),
+          outcome: "confirmed_failure",
+          providerOperationId: "finishing:v1",
         },
-      }),
-    );
-    const failed = await adapter(failedCalls.fetcher).lookupPublication!(context, credentials, {
-      providerOperationId: "finishing:video-failed",
-    });
-    expect(failed).toMatchObject({
-      result: {
-        failure: {
-          classification: "deterministic",
-          code: "facebook_reel_processing_failed",
-        },
-      },
-      state: "failed",
+        state: "failed",
+      });
+      expect(JSON.stringify(failedResult)).not.toContain("private detail");
     });
 
-    const missingCalls = sequence(() =>
-      json({ error: { message: "private provider detail" } }, { status: 404 }),
-    );
-    await expect(
-      adapter(missingCalls.fetcher).lookupPublication!(context, credentials, {
-        providerPostId: "video-missing",
-      }),
-    ).resolves.toEqual({ state: "not_found" });
-    expect(JSON.stringify(failed)).not.toContain(providerDetail);
-  });
+    it("a missing Reel (404) returns not_found", async () => {
+      const { adapter } = setup([json({}, 404)]);
 
-  it("refreshes the user token and derives a replacement Page token", async () => {
-    const providerCalls = sequence(
-      (_url, init) => {
-        expect(String(init.body)).toContain("fb_exchange_token=current-user-secret");
-        return json({
-          access_token: "new-user-secret",
-          expires_in: 5_184_000,
-          token_type: "bearer",
-        });
-      },
-      (url, init) => {
-        expect(url.pathname).toBe("/v25.0/page-1");
-        expect(url.searchParams.get("fields")).toBe("id,name,access_token");
-        expect(new Headers(init.headers).get("Authorization")).toBe("Bearer new-user-secret");
-        return json({
-          access_token: "new-page-secret",
-          id: "page-1",
-          name: "Meltiply Page",
-        });
-      },
-      defaultGrantedPermissions,
-    );
-    await expect(
-      adapter(providerCalls.fetcher).refreshAccessToken!(
-        context,
-        '{"pageId":"page-1","userAccessToken":"current-user-secret"}',
-      ),
-    ).resolves.toEqual({
-      accessToken: "new-page-secret",
-      expiresAt: "2026-09-17T00:00:00.000Z",
-      refreshToken: '{"pageId":"page-1","userAccessToken":"new-user-secret"}',
-      scopes: [
-        "pages_show_list",
-        "pages_read_engagement",
-        "pages_manage_posts",
-        "pages_manage_engagement",
-        "read_insights",
-      ],
+      expect(
+        await adapter.lookupPublication!(context, credentials, { providerPostId: "v1" }),
+      ).toEqual({ state: "not_found" });
     });
 
-    await expect(
-      adapter(vi.fn<typeof fetch>()).refreshAccessToken!(context, "not-json"),
-    ).rejects.toMatchObject({
-      failure: { code: "facebook_refresh_secret_invalid" },
+    it("no operation or post ID sends nothing", async () => {
+      const { adapter, requests } = setup();
+
+      expect(await failureOf(adapter.lookupPublication!(context, credentials, {}))).toEqual(
+        malformedAnswer,
+      );
+      expect(requests).toEqual([]);
     });
-  });
-
-  it("keeps a publishing-only grant connectable while analytics scopes stay ungranted", async () => {
-    const providerCalls = sequence(
-      () => json({ access_token: "short" }),
-      () => json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
-      () =>
-        json({
-          data: [
-            { permission: "pages_show_list", status: "granted" },
-            { permission: "pages_read_engagement", status: "granted" },
-            { permission: "pages_manage_posts", status: "granted" },
-            { permission: "pages_manage_engagement", status: "granted" },
-            { permission: "read_insights", status: "declined" },
-          ],
-        }),
-      () =>
-        json({
-          data: [
-            {
-              access_token: "page-access-secret",
-              id: "page-1",
-              name: "Meltiply Page",
-              tasks: ["CREATE_CONTENT"],
-            },
-          ],
-        }),
-    );
-    await expect(
-      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
-        code: "code",
-        codeVerifier: "unused",
-        redirectUri,
-      }),
-    ).resolves.toMatchObject({
-      accounts: [
-        {
-          account: { displayName: "Meltiply Page", id: "page-1" },
-          scopes: [
-            "pages_show_list",
-            "pages_read_engagement",
-            "pages_manage_posts",
-            "pages_manage_engagement",
-          ],
-        },
-      ],
-    });
-  });
-
-  it("reads Reel plays, likes, comments, and derived shares from the video identity", async () => {
-    const providerCalls = sequence(
-      (url, init) => {
-        expect(url.origin).toBe("https://graph.facebook.com");
-        expect(url.pathname).toBe("/v25.0/video-1/video_insights");
-        expect(url.searchParams.get("metric")).toBe(
-          "blue_reels_play_count,post_video_social_actions",
-        );
-        expect(url.searchParams.get("period")).toBe("lifetime");
-        expect(new Headers(init.headers).get("Authorization")).toBe("Bearer page-access-secret");
-        return json({
-          data: [
-            {
-              name: "blue_reels_play_count",
-              period: "lifetime",
-              values: [{ value: 1200 }],
-            },
-            {
-              name: "post_video_social_actions",
-              period: "lifetime",
-              values: [{ value: 21 }],
-            },
-          ],
-        });
-      },
-      (url) => {
-        expect(url.pathname).toBe("/v25.0/video-1");
-        expect(url.searchParams.get("fields")).toBe(
-          "likes.summary(true).limit(0),comments.summary(true).limit(0)",
-        );
-        return json({
-          likes: { summary: { total_count: 84 } },
-          comments: { summary: { total_count: 9 } },
-        });
-      },
-    );
-    await expect(
-      adapter(providerCalls.fetcher).listAnalytics!(
-        context,
-        credentials,
-        { providerPostId: "video-1" },
-        { limit: 100 },
-      ),
-    ).resolves.toEqual({
-      items: [
-        {
-          comments: 9,
-          impressions: 0,
-          likes: 84,
-          providerPostId: "video-1",
-          recordedAt: "2026-07-19T00:00:00.000Z",
-          reach: 0,
-          shares: 12,
-          views: 1200,
-          watchTimeSeconds: 0,
-        },
-      ],
-    });
-  });
-
-  it("rejects social actions below comments and missing Reel metrics", async () => {
-    const inconsistent = sequence(
-      () =>
-        json({
-          data: [
-            { name: "blue_reels_play_count", values: [{ value: 1200 }] },
-            { name: "post_video_social_actions", values: [{ value: 4 }] },
-          ],
-        }),
-      () =>
-        json({
-          likes: { summary: { total_count: 84 } },
-          comments: { summary: { total_count: 9 } },
-        }),
-    );
-    await expect(
-      adapter(inconsistent.fetcher).listAnalytics!(
-        context,
-        credentials,
-        { providerPostId: "video-1" },
-        { limit: 100 },
-      ),
-    ).rejects.toBeInstanceOf(ProviderAdapterError);
-
-    const missingPlays = sequence(
-      () => json({ data: [{ name: "post_video_social_actions", values: [{ value: 0 }] }] }),
-      () =>
-        json({
-          likes: { summary: { total_count: 0 } },
-          comments: { summary: { total_count: 0 } },
-        }),
-    );
-    await expect(
-      adapter(missingPlays.fetcher).listAnalytics!(
-        context,
-        credentials,
-        { providerPostId: "video-1" },
-        { limit: 100 },
-      ),
-    ).rejects.toBeInstanceOf(ProviderAdapterError);
   });
 });

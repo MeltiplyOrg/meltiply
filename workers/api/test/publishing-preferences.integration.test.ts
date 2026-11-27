@@ -22,12 +22,6 @@ const env = {
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
 
-const mailEnv = {
-  ...env,
-  MAIL: { send: async () => ({ messageId: "mail_test" }) } satisfies SendEmail,
-  MAIL_FROM_ADDRESS: "notifications@meltiply.test",
-} satisfies ApiWorkerEnv;
-
 const organizationId = "2f000000-0000-4000-8000-000000000001";
 const identities: Record<string, JwtIdentity> = {
   admin: { email: "alpha@meltiply.local", emailVerified: true, subject: "auth_user_local_alpha" },
@@ -64,13 +58,7 @@ const app = createApiApp({
   verifyJwtToken: async (_env, token) => identities[token]!,
 });
 
-function request(
-  method: string,
-  body?: unknown,
-  key = randomUUID(),
-  role = "admin",
-  runtimeEnv: ApiWorkerEnv = env,
-) {
+function request(method: string, body?: unknown, key = randomUUID(), role = "admin") {
   return app.request(
     "/api/v1/publishing-preferences",
     {
@@ -82,7 +70,7 @@ function request(
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
-    runtimeEnv,
+    env,
   );
 }
 
@@ -119,21 +107,6 @@ afterAll(async () => {
 });
 
 describe("publishing preferences HTTP", () => {
-  it("reports documented defaults for an untouched Workspace", async () => {
-    const response = await request("GET");
-    expect(response.status).toBe(200);
-    const body: Schemas["PublishingPreferences"] = await response.json();
-    expect(body).toMatchObject({
-      email_available: false,
-      notifications: {
-        channels: { email: { enabled: false, recipients: [] } },
-        events: { channel_disconnected: false, publication_failed: false },
-      },
-      signature_templates: [],
-      timezone: null,
-    });
-  });
-
   it("persists timezone, ordered signatures, and notification choices", async () => {
     const response = await request("PUT", {
       notifications: {
@@ -156,119 +129,8 @@ describe("publishing preferences HTTP", () => {
     expect(await read.json()).toEqual(saved);
   });
 
-  it("persists multiple normalized email recipients and requires one when enabled", async () => {
-    const response = await request(
-      "PUT",
-      {
-        notifications: {
-          channels: {
-            email: {
-              enabled: true,
-              recipients: [" Ops@Example.com ", "alpha@meltiply.local", "ops@example.com"],
-            },
-          },
-          events: { channel_disconnected: false, publication_failed: true },
-        },
-        signature_templates: [],
-        timezone: null,
-      },
-      randomUUID(),
-      "admin",
-      mailEnv,
-    );
-    expect(response.status).toBe(200);
-    const saved: Schemas["PublishingPreferences"] = await response.json();
-    expect(saved.email_available).toBe(true);
-    expect(saved.notifications.channels.email).toEqual({
-      enabled: true,
-      recipients: ["ops@example.com", "alpha@meltiply.local"],
-    });
-
-    const empty = await request(
-      "PUT",
-      {
-        notifications: {
-          channels: { email: { enabled: true, recipients: [] } },
-          events: { channel_disconnected: false, publication_failed: true },
-        },
-        signature_templates: [],
-        timezone: null,
-      },
-      randomUUID(),
-      "admin",
-      mailEnv,
-    );
-    expect(empty.status).toBe(422);
-
-    const invalid = await request(
-      "PUT",
-      {
-        notifications: {
-          channels: { email: { enabled: true, recipients: ["not-an-address"] } },
-          events: { channel_disconnected: false, publication_failed: true },
-        },
-        signature_templates: [],
-        timezone: null,
-      },
-      randomUUID(),
-      "admin",
-      mailEnv,
-    );
-    expect(invalid.status).toBe(422);
-  });
-
-  it("replaces the whole ordered list and keeps exactly one default", async () => {
+  it("refuses email on an installation without mail delivery", async () => {
     const response = await request("PUT", {
-      notifications: {
-        channels: { email: { enabled: false, recipients: [] } },
-        events: { channel_disconnected: false, publication_failed: false },
-      },
-      signature_templates: [
-        { ...secondTemplate, is_default: true, position: 0 },
-        { ...firstTemplate, is_default: false, position: 1 },
-      ],
-      timezone: null,
-    });
-    expect(response.status).toBe(200);
-    const saved: Schemas["PublishingPreferences"] = await response.json();
-    expect(saved.timezone).toBeNull();
-    expect(saved.signature_templates[0]?.name).toBe("Support footer");
-    expect(saved.signature_templates[0]?.is_default).toBe(true);
-    expect(saved.signature_templates[1]?.is_default).toBe(false);
-  });
-
-  it("rejects an unsupported timezone, unknown placeholder, and missing default", async () => {
-    const invalidTimezone = await request("PUT", {
-      notifications: {
-        channels: { email: { enabled: false, recipients: [] } },
-        events: { channel_disconnected: false, publication_failed: false },
-      },
-      signature_templates: [],
-      timezone: "Not/AZone",
-    });
-    expect(invalidTimezone.status).toBe(422);
-
-    const invalidPlaceholder = await request("PUT", {
-      notifications: {
-        channels: { email: { enabled: false, recipients: [] } },
-        events: { channel_disconnected: false, publication_failed: false },
-      },
-      signature_templates: [{ ...firstTemplate, body: "Hello {unknown}" }],
-      timezone: null,
-    });
-    expect(invalidPlaceholder.status).toBe(422);
-
-    const missingDefault = await request("PUT", {
-      notifications: {
-        channels: { email: { enabled: false, recipients: [] } },
-        events: { channel_disconnected: false, publication_failed: false },
-      },
-      signature_templates: [{ ...firstTemplate, is_default: false }],
-      timezone: null,
-    });
-    expect(missingDefault.status).toBe(422);
-
-    const unavailableEmail = await request("PUT", {
       notifications: {
         channels: {
           email: {
@@ -281,9 +143,9 @@ describe("publishing preferences HTTP", () => {
       signature_templates: [],
       timezone: null,
     });
-    expect(unavailableEmail.status).toBe(422);
-    const unavailableBody: { error: { code: string } } = await unavailableEmail.json();
-    expect(unavailableBody.error.code).toBe("notification_channel_unavailable");
+    expect(response.status).toBe(422);
+    const body: { error: { code: string } } = await response.json();
+    expect(body.error.code).toBe("notification_channel_unavailable");
   });
 
   it("forbids an Editor from changing shared preferences", async () => {

@@ -74,6 +74,10 @@ export function formatAnalyticsSearchParams(input: {
   return params.toString();
 }
 
+export function isCompactOnPhone(value: number): boolean {
+  return value >= 10_000_000;
+}
+
 export function nextAnalyticsLimit(current: number): number {
   return Math.min(current + ANALYTICS_LIMIT_STEP, ANALYTICS_MAX_LIMIT);
 }

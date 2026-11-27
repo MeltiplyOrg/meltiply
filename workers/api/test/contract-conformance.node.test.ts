@@ -45,7 +45,8 @@ import { createApiApp } from "../src/app";
 import type { AssetApiService } from "../src/asset-types";
 import type { BrandProfileApiService } from "../src/brand-profile-service";
 import type { PostApiService } from "../src/post-types";
-import { CoreApiError, type CoreApiService } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
+import { type CoreApiService } from "../src/core-types";
 import type { ApiWorkerEnv, ApiWorkerEnvironment } from "../src/env";
 interface ExampleResponse {
   body?: unknown;

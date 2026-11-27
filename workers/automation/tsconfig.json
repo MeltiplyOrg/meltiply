@@ -9,6 +9,7 @@
     "test/**/*.ts",
     "test-support/**/*.ts",
     "vitest.config.ts",
-    "vitest.integration.config.ts"
+    "vitest.integration.config.ts",
+    "vitest.node.config.ts"
   ]
 }

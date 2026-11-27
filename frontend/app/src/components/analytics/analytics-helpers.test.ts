@@ -1,174 +1,252 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  ANALYTICS_MAX_LIMIT,
   analyticsRowMetricState,
+  formatAnalyticsCompact,
+  formatAnalyticsDecimal,
   formatAnalyticsInteger,
   formatAnalyticsRelativeTime,
   formatAnalyticsSearchParams,
+  formatAnalyticsTimestamp,
+  formatAnalyticsWhole,
+  isAnalyticsFormat,
   isAnalyticsStale,
+  isCompactOnPhone,
   nextAnalyticsLimit,
   parseAnalyticsSearchParams,
   resolveAnalyticsEmptyState,
 } from "./analytics-helpers";
 import type { AnalyticsSummary, PlatformMetrics } from "@/types";
 
-function summary(overrides: Partial<AnalyticsSummary> = {}): AnalyticsSummary {
-  return {
-    by_platform: [],
-    last_synced_at: null,
-    partial: false,
-    range: { end: "2026-10-31T00:00:00Z", start: "2026-10-01T00:00:00Z" },
-    totals: {
-      comments: 0,
-      impressions: 0,
-      likes: 0,
-      post_count: 0,
-      reach: 0,
-      shares: 0,
-      views: 0,
-      watch_time_sec: 0,
-    },
-    unsupported_platforms: [],
-    ...overrides,
-  };
-}
+const ACCOUNT = "00000000-0000-4000-8000-000000000111";
+const defaults = {
+  accountId: undefined,
+  format: undefined,
+  metric: "views",
+  platform: undefined,
+  range: "30d",
+};
 
-function platformRow(overrides: Partial<PlatformMetrics> = {}): PlatformMetrics {
-  return {
-    comments: 0,
-    impressions: 0,
-    last_synced_at: "2026-10-30T00:00:00Z",
-    likes: 0,
-    platform: "instagram",
-    post_count: 1,
-    reach: 0,
-    shares: 0,
-    views: 10,
-    watch_time_sec: 0,
-    ...overrides,
-  };
-}
+describe("isAnalyticsFormat", () => {
+  it.each([
+    ["carousel", true],
+    ["story", false],
+    ["", false],
+  ])("the value %j", (value, expected) => {
+    expect(isAnalyticsFormat(value)).toEqual(expected);
+  });
+});
 
-describe("analytics URL state", () => {
-  it("parses supported values and falls back without throwing", () => {
-    const platforms = ["instagram", "threads"] as const;
-    expect(
-      parseAnalyticsSearchParams(
-        new URLSearchParams("range=7d&metric=shares&platform=threads"),
-        platforms,
-      ),
-    ).toEqual({
+describe("parseAnalyticsSearchParams", () => {
+  const parse = (query: string) =>
+    parseAnalyticsSearchParams(new URLSearchParams(query), ["instagram", "threads"]);
+
+  it("every supported value", () => {
+    const query = `range=7d&metric=shares&platform=threads&account=${ACCOUNT}&format=video`;
+
+    expect(parse(query)).toEqual({
+      accountId: ACCOUNT,
+      format: "video",
       metric: "shares",
       platform: "threads",
       range: "7d",
     });
-    expect(
-      parseAnalyticsSearchParams(
-        new URLSearchParams("range=year&metric=reach&platform=tiktok"),
-        platforms,
-      ),
-    ).toEqual({
-      accountId: undefined,
-      format: undefined,
-      metric: "views",
-      platform: undefined,
-      range: "30d",
-    });
   });
 
-  it("serializes only shareable state, omitting the aggregate platform", () => {
-    expect(
-      formatAnalyticsSearchParams({ metric: "likes", platform: "instagram", range: "90d" }),
-    ).toBe("metric=likes&range=90d&platform=instagram");
-    expect(formatAnalyticsSearchParams({ metric: "views", range: "30d" })).toBe(
+  it("no parameters", () => {
+    expect(parse("")).toEqual(defaults);
+  });
+
+  it("unsupported values", () => {
+    expect(parse("range=year&metric=reach&platform=tiktok&account=abc&format=story")).toEqual(
+      defaults,
+    );
+  });
+
+  it.each(["likes", "comments"])("the %s metric", (metric) => {
+    expect(parse(`metric=${metric}`)).toEqual({ ...defaults, metric });
+  });
+});
+
+describe("formatAnalyticsSearchParams", () => {
+  it("only a metric and a range", () => {
+    expect(formatAnalyticsSearchParams({ metric: "views", range: "30d" })).toEqual(
       "metric=views&range=30d",
+    );
+  });
+
+  it("every filter", () => {
+    const input = {
+      accountId: ACCOUNT,
+      format: "image",
+      metric: "likes",
+      platform: "instagram",
+      range: "90d",
+    } as const;
+
+    expect(formatAnalyticsSearchParams(input)).toEqual(
+      `metric=likes&range=90d&platform=instagram&account=${ACCOUNT}&format=image`,
     );
   });
 });
 
-describe("analytics pagination and row honesty", () => {
-  it("raises the top-N window by ten up to the page maximum", () => {
-    expect(nextAnalyticsLimit(10)).toBe(20);
-    expect(nextAnalyticsLimit(40)).toBe(ANALYTICS_MAX_LIMIT);
-    expect(nextAnalyticsLimit(ANALYTICS_MAX_LIMIT)).toBe(ANALYTICS_MAX_LIMIT);
-  });
-
-  it("never reports an unsupported or unsynced row as measured", () => {
-    expect(
-      analyticsRowMetricState({
-        last_synced_at: null,
-        platforms: ["tiktok"],
-        unsupported_platforms: ["tiktok"],
-      }),
-    ).toBe("unsupported");
-    expect(
-      analyticsRowMetricState({
-        last_synced_at: null,
-        platforms: ["instagram"],
-        unsupported_platforms: [],
-      }),
-    ).toBe("awaiting-sync");
-    expect(
-      analyticsRowMetricState({
-        last_synced_at: "2026-10-30T00:00:00Z",
-        platforms: ["instagram", "tiktok"],
-        unsupported_platforms: ["tiktok"],
-      }),
-    ).toBe("partial");
-    expect(
-      analyticsRowMetricState({
-        last_synced_at: "2026-10-30T00:00:00Z",
-        platforms: ["instagram"],
-        unsupported_platforms: [],
-      }),
-    ).toBe("measured");
-  });
-
-  it("selects distinct cohort empty states", () => {
-    expect(resolveAnalyticsEmptyState(summary())).toBe("no-posts");
-    expect(
-      resolveAnalyticsEmptyState(
-        summary({
-          by_platform: [platformRow({ last_synced_at: null, platform: "youtube", post_count: 2 })],
-          partial: true,
-          totals: { ...summary().totals, post_count: 2 },
-          unsupported_platforms: ["youtube"],
-        }),
-      ),
-    ).toBe("all-unsupported");
-    expect(
-      resolveAnalyticsEmptyState(
-        summary({
-          by_platform: [platformRow({ last_synced_at: null })],
-          totals: { ...summary().totals, post_count: 1 },
-        }),
-      ),
-    ).toBe("awaiting-sync");
-    expect(
-      resolveAnalyticsEmptyState(
-        summary({
-          by_platform: [platformRow()],
-          totals: { ...summary().totals, post_count: 1 },
-        }),
-      ),
-    ).toBeNull();
+describe("isCompactOnPhone", () => {
+  it.each([
+    [9_999_999, false],
+    [10_000_000, true],
+  ])("a total of %i", (value, compact) => {
+    expect(isCompactOnPhone(value)).toEqual(compact);
   });
 });
 
-describe("analytics freshness and formatting", () => {
-  it("warns only after the 26-hour sync margin", () => {
-    const now = Date.parse("2026-10-20T12:00:00Z");
-    expect(isAnalyticsStale("2026-10-20T12:00:00Z", now)).toBe(false);
-    expect(isAnalyticsStale("2026-10-19T10:00:00Z", now)).toBe(false);
-    expect(isAnalyticsStale("2026-10-19T09:59:59Z", now)).toBe(true);
-    expect(isAnalyticsStale(null, now)).toBe(false);
+describe("nextAnalyticsLimit", () => {
+  it.each([
+    [10, 20],
+    [40, 50],
+    [45, 50],
+    [50, 50],
+  ])("a limit of %i", (current, next) => {
+    expect(nextAnalyticsLimit(current)).toEqual(next);
+  });
+});
+
+describe("analyticsRowMetricState", () => {
+  const synced = "2026-10-30T00:00:00Z";
+
+  it.each([
+    ["every platform unsupported", null, ["tiktok"], ["tiktok"], "unsupported"],
+    ["no sync yet", null, ["instagram"], [], "awaiting-sync"],
+    ["one platform unsupported", synced, ["instagram", "tiktok"], ["tiktok"], "partial"],
+    ["every platform measured", synced, ["instagram"], [], "measured"],
+    ["no platforms", synced, [], [], "measured"],
+  ] as const)("%s", (_example, last_synced_at, platforms, unsupported, state) => {
+    const row = {
+      last_synced_at,
+      platforms: [...platforms],
+      unsupported_platforms: [...unsupported],
+    };
+
+    expect(analyticsRowMetricState(row)).toEqual(state);
+  });
+});
+
+describe("resolveAnalyticsEmptyState", () => {
+  const totals = {
+    comments: 0,
+    impressions: 0,
+    likes: 0,
+    post_count: 1,
+    reach: 0,
+    shares: 0,
+    views: 0,
+    watch_time_sec: 0,
+  };
+  const platformRow: PlatformMetrics = {
+    ...totals,
+    last_synced_at: "2026-10-30T00:00:00Z",
+    platform: "instagram",
+  };
+  const summary = (patch: Partial<AnalyticsSummary>): AnalyticsSummary => ({
+    by_platform: [platformRow],
+    last_synced_at: null,
+    partial: false,
+    range: { end: "2026-10-31T00:00:00Z", start: "2026-10-01T00:00:00Z" },
+    totals,
+    unsupported_platforms: [],
+    ...patch,
   });
 
-  it("formats exact integers and relative publication times", () => {
-    expect(formatAnalyticsInteger(1234567)).toBe("1,234,567");
-    expect(
-      formatAnalyticsRelativeTime("2026-10-18T12:00:00Z", "en", Date.parse("2026-10-20T12:00:00Z")),
-    ).toBe("2 days ago");
+  it.each([
+    ["no posts", summary({ totals: { ...totals, post_count: 0 } }), "no-posts"],
+    [
+      "only unsupported platforms",
+      summary({ unsupported_platforms: ["instagram"] }),
+      "all-unsupported",
+    ],
+    [
+      "no platform synced",
+      summary({ by_platform: [{ ...platformRow, last_synced_at: null }] }),
+      "awaiting-sync",
+    ],
+    ["a synced platform", summary({}), null],
+    ["posts without a platform breakdown", summary({ by_platform: [] }), null],
+  ])("%s", (_example, input, state) => {
+    expect(resolveAnalyticsEmptyState(input)).toEqual(state);
+  });
+});
+
+const NOW = Date.parse("2026-10-20T12:00:00Z");
+
+describe("isAnalyticsStale", () => {
+  it.each([
+    ["a sync just now", "2026-10-20T12:00:00Z", false],
+    ["a sync exactly 26 hours ago", "2026-10-19T10:00:00Z", false],
+    ["a sync just over 26 hours ago", "2026-10-19T09:59:59Z", true],
+    ["no sync", null, false],
+    ["an unreadable sync time", "yesterday", false],
+  ])("%s", (_example, lastSyncedAt, stale) => {
+    expect(isAnalyticsStale(lastSyncedAt, NOW)).toEqual(stale);
+  });
+});
+
+describe("formatAnalyticsInteger", () => {
+  it.each([
+    ["en", "1,234,567"],
+    ["de", "1.234.567"],
+  ] as const)("a large count in %s", (language, text) => {
+    expect(formatAnalyticsInteger(1234567, language)).toEqual(text);
+  });
+
+  it("a zero count in the default language", () => {
+    expect(formatAnalyticsInteger(0)).toEqual("0");
+  });
+});
+
+describe("formatAnalyticsDecimal", () => {
+  it("a value with two decimals", () => {
+    expect(formatAnalyticsDecimal(12.36)).toEqual("12.4");
+  });
+});
+
+describe("formatAnalyticsWhole", () => {
+  it("a value with decimals", () => {
+    expect(formatAnalyticsWhole(12.5)).toEqual("13");
+  });
+});
+
+describe("formatAnalyticsCompact", () => {
+  it("a count in the thousands", () => {
+    expect(formatAnalyticsCompact(12_345)).toEqual("12.3K");
+  });
+});
+
+describe("formatAnalyticsTimestamp", () => {
+  it("an instant", () => {
+    expect(formatAnalyticsTimestamp("2026-10-20T12:00:00Z")).toEqual(
+      expect.stringMatching(/^Oct (19|20|21), 2026, \d{1,2}:\d{2}\s(AM|PM)$/),
+    );
+  });
+
+  it("text that is not an instant", () => {
+    expect(formatAnalyticsTimestamp("yesterday")).toEqual("yesterday");
+  });
+});
+
+describe("formatAnalyticsRelativeTime", () => {
+  it.each([
+    ["a year ago", "2025-10-20T12:00:00Z", "last year"],
+    ["two months ago", "2026-08-21T12:00:00Z", "2 months ago"],
+    ["two days ago", "2026-10-18T12:00:00Z", "2 days ago"],
+    ["three hours ahead", "2026-10-20T15:00:00Z", "in 3 hours"],
+    ["exactly one minute ago", "2026-10-20T11:59:00Z", "1 minute ago"],
+    ["59 seconds ago", "2026-10-20T11:59:01Z", "59 seconds ago"],
+    ["this instant", "2026-10-20T12:00:00Z", "now"],
+    ["text that is not an instant", "yesterday", "yesterday"],
+  ])("%s", (_example, iso, text) => {
+    expect(formatAnalyticsRelativeTime(iso, "en", NOW)).toEqual(text);
+  });
+
+  it("two days ago in German", () => {
+    expect(formatAnalyticsRelativeTime("2026-10-18T12:00:00Z", "de", NOW)).toEqual("vorgestern");
   });
 });

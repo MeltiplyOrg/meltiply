@@ -7,8 +7,9 @@
     "build": "wrangler deploy --dry-run --outdir dist",
     "dev": "wrangler dev",
     "smoke:processor": "processor/smoke/run.sh",
-    "test": "vp test run",
+    "test": "vp test run && bun run test:node",
     "test:integration": "vp test run --config vitest.integration.config.ts",
+    "test:node": "vp test run --config vitest.node.config.ts",
     "type-check": "tsc --project tsconfig.json",
     "types": "wrangler types worker-configuration.d.ts --env-interface WranglerEnv"
   },

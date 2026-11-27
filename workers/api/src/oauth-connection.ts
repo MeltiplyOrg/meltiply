@@ -3,17 +3,23 @@ import type { Platform } from "@meltiply/domain";
 import type { OAuthConnection } from "@meltiply/providers";
 import { Effect } from "effect";
 
-import { requireActiveBrandProfileEffect } from "./brand-profile-guard";
 import { CoreApiError } from "./api-errors";
-import { withSystemTransactionEffect } from "./database";
 import type { ApiWorkerEnv } from "./env";
-import { lockOrganizationEffect } from "./organization-lock";
+import {
+  createPostgresOAuthConnectionRepository,
+  type OAuthConnectionRepository,
+} from "./repositories/oauth-connection-repository";
 import { tokenCipherFor } from "./token-credentials";
 
 export interface OAuthConnectionOwner {
   brandProfileId: string;
   organizationId: string;
   userId: string;
+}
+
+export interface SaveOAuthConnectionOptions {
+  readonly now?: () => Date;
+  readonly repository?: OAuthConnectionRepository;
 }
 
 function expiresAt(value: string | undefined): Date | null {
@@ -30,7 +36,10 @@ export function saveOAuthConnectionEffect(
   platform: Platform,
   owner: OAuthConnectionOwner,
   connection: OAuthConnection,
+  options: SaveOAuthConnectionOptions = {},
 ): Effect.Effect<void, CoreApiError | DatabaseError> {
+  const repository = options.repository ?? createPostgresOAuthConnectionRepository(env);
+  const now = options.now ?? (() => new Date());
   return Effect.gen(function* () {
     const prepared = yield* Effect.try({
       try: () => {
@@ -40,11 +49,11 @@ export function saveOAuthConnectionEffect(
           throw new TypeError("provider account ID and access token are required");
         }
         return {
-          platformUserId,
           accessToken,
+          cipher: tokenCipherFor(env),
+          platformUserId,
           refreshToken: connection.refreshToken?.trim(),
           tokenExpiresAt: expiresAt(connection.expiresAt),
-          cipher: tokenCipherFor(env),
         };
       },
       catch: (cause) =>
@@ -78,16 +87,10 @@ export function saveOAuthConnectionEffect(
       ...new Set(connection.scopes.map((scope) => scope.trim()).filter(Boolean)),
     ].sort();
 
-    yield* withSystemTransactionEffect(env, (client) =>
+    yield* repository.transaction((tx) =>
       Effect.gen(function* () {
-        const organization = yield* client.query<{ id: string }>(
-          `SELECT id
-           FROM organizations
-           WHERE id::text = $1`,
-          [owner.organizationId],
-        );
-        let organizationRow = organization.rows[0];
-        if (!organizationRow) {
+        let organizationId = yield* tx.findOrganizationId(owner.organizationId);
+        if (!organizationId) {
           return yield* Effect.fail(
             new CoreApiError(
               409,
@@ -96,16 +99,8 @@ export function saveOAuthConnectionEffect(
             ),
           );
         }
-        const membership = yield* client.query<{ role: string }>(
-          `SELECT om.role
-           FROM org_members om
-           JOIN users u ON u.id = om.user_id
-           WHERE om.org_id = $1
-             AND (u.id::text = $2 OR u.auth_user_id = $2)
-           LIMIT 1`,
-          [organizationRow.id, owner.userId],
-        );
-        if (membership.rows.length === 0) {
+        const isMember = yield* tx.hasOrganizationMember(organizationId, owner.userId);
+        if (!isMember) {
           return yield* Effect.fail(
             new CoreApiError(
               403,
@@ -114,16 +109,8 @@ export function saveOAuthConnectionEffect(
             ),
           );
         }
-        yield* lockOrganizationEffect(client, organizationRow.id);
-        const lockedOrganization = yield* client.query<{ id: string }>(
-          `SELECT id
-           FROM organizations
-           WHERE id = $1
-           FOR UPDATE`,
-          [organizationRow.id],
-        );
-        organizationRow = lockedOrganization.rows[0];
-        if (!organizationRow) {
+        organizationId = yield* tx.lockOrganization(organizationId);
+        if (!organizationId) {
           return yield* Effect.fail(
             new CoreApiError(
               409,
@@ -133,18 +120,9 @@ export function saveOAuthConnectionEffect(
           );
         }
 
-        yield* requireActiveBrandProfileEffect(client, organizationRow.id, owner.brandProfileId);
+        yield* tx.requireActiveBrandProfile(organizationId, owner.brandProfileId);
 
-        const existing = yield* client.query<{
-          brand_profile_id: string;
-          id: string;
-        }>(
-          `SELECT id, brand_profile_id
-         FROM platform_accounts
-         WHERE platform = $1 AND platform_user_id = $2`,
-          [platform, platformUserId],
-        );
-        const existingRow = existing.rows[0];
+        const existingRow = yield* tx.findPlatformAccount(platform, platformUserId);
         if (existingRow && existingRow.brand_profile_id !== owner.brandProfileId) {
           return yield* Effect.fail(
             new CoreApiError(
@@ -155,14 +133,11 @@ export function saveOAuthConnectionEffect(
           );
         }
         if (!existingRow) {
-          const profileChannel = yield* client.query<{ id: string }>(
-            `SELECT id
-         FROM platform_accounts
-         WHERE brand_profile_id = $1 AND platform = $2
-         LIMIT 1`,
-            [owner.brandProfileId, platform],
+          const hasChannel = yield* tx.hasBrandProfilePlatformChannel(
+            owner.brandProfileId,
+            platform,
           );
-          if (profileChannel.rows.length > 0) {
+          if (hasChannel) {
             return yield* Effect.fail(
               new CoreApiError(
                 409,
@@ -171,15 +146,9 @@ export function saveOAuthConnectionEffect(
               ),
             );
           }
-        }
-        if (!existingRow) {
           const limit = COMMUNITY_LIMITS.max_platforms;
           if (limit !== null) {
-            const count = yield* client.query<{ count: string }>(
-              "SELECT COUNT(*)::text AS count FROM platform_accounts WHERE org_id = $1",
-              [organizationRow.id],
-            );
-            const current = Number(count.rows[0]?.count ?? 0);
+            const current = yield* tx.countOrganizationPlatformAccounts(organizationId);
             if (current >= limit) {
               return yield* Effect.fail(
                 new CoreApiError(
@@ -195,58 +164,25 @@ export function saveOAuthConnectionEffect(
         const tokenRefreshNextAttemptAt =
           tokenExpiresAt === null
             ? null
-            : new Date(Math.max(Date.now() + 3_600_000, tokenExpiresAt.getTime() - 7 * 86_400_000));
-        const result = yield* client.query(
-          `INSERT INTO platform_accounts (
-         org_id, brand_profile_id, platform, platform_user_id, display_name,
-         avatar_url, access_token, refresh_token, token_expires_at, scopes,
-         metadata, connection_status, last_synced_at, revoked_at, updated_at,
-         token_refresh_next_attempt_at, username
-       )
-       VALUES (
-         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-         jsonb_build_object('connected_by', $11::text),
-         'connected', now(), NULL, now(), $12, $13
-       )
-       ON CONFLICT (platform, platform_user_id)
-       DO UPDATE SET
-         display_name = EXCLUDED.display_name,
-         avatar_url = EXCLUDED.avatar_url,
-         username = EXCLUDED.username,
-         access_token = EXCLUDED.access_token,
-         refresh_token = COALESCE(EXCLUDED.refresh_token, platform_accounts.refresh_token),
-         token_expires_at = EXCLUDED.token_expires_at,
-         scopes = EXCLUDED.scopes,
-         metadata = platform_accounts.metadata || EXCLUDED.metadata,
-         connection_status = 'connected',
-         last_synced_at = now(),
-         revoked_at = NULL,
-         token_refresh_event_id = NULL,
-         token_refresh_lease_expires_at = NULL,
-         token_refresh_next_attempt_at = EXCLUDED.token_refresh_next_attempt_at,
-         token_refresh_attempt_count = 0,
-         token_refresh_last_error = NULL,
-         reconnect_notified_at = NULL,
-         updated_at = now()
-       WHERE platform_accounts.brand_profile_id = EXCLUDED.brand_profile_id
-       RETURNING id`,
-          [
-            organizationRow.id,
-            owner.brandProfileId,
-            platform,
-            platformUserId,
-            connection.account.displayName?.trim() || null,
-            connection.account.avatarUrl?.trim() || null,
-            encryptedAccessToken,
-            encryptedRefreshToken,
-            tokenExpiresAt,
-            scopes,
-            owner.userId,
-            tokenRefreshNextAttemptAt,
-            connection.account.username?.trim() || null,
-          ],
-        );
-        if (result.rowCount !== 1)
+            : new Date(
+                Math.max(now().getTime() + 3_600_000, tokenExpiresAt.getTime() - 7 * 86_400_000),
+              );
+        const stored = yield* tx.upsertPlatformAccount({
+          avatarUrl: connection.account.avatarUrl?.trim() || null,
+          brandProfileId: owner.brandProfileId,
+          displayName: connection.account.displayName?.trim() || null,
+          encryptedAccessToken,
+          encryptedRefreshToken,
+          organizationId,
+          platform,
+          platformUserId,
+          scopes,
+          tokenExpiresAt,
+          tokenRefreshNextAttemptAt,
+          userId: owner.userId,
+          username: connection.account.username?.trim() || null,
+        });
+        if (!stored) {
           return yield* Effect.fail(
             new CoreApiError(
               409,
@@ -254,6 +190,7 @@ export function saveOAuthConnectionEffect(
               "This platform account is already connected. Disconnect it before connecting it to another brand profile.",
             ),
           );
+        }
       }),
     );
   });

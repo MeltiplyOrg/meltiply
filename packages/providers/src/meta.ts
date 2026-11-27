@@ -54,7 +54,7 @@ export function parseContainerOperationId(value: unknown): MetaContainerOperatio
   return { id, phase };
 }
 
-function insightValue(metric: Record<string, unknown>): number | undefined {
+export function insightValue(metric: Record<string, unknown>): number | undefined {
   const values = metric.values;
   if (Array.isArray(values)) return metricValue(record(values[0])?.value);
   return metricValue(record(metric.total_value)?.value);

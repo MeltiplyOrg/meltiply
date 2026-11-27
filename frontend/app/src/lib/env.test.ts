@@ -6,77 +6,51 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("public env parsing", () => {
-  it("defaults to the page origin in browsers and the local API elsewhere", () => {
-    expect(getPublicEnv({})).toEqual({
-      APP_URL: "http://localhost:8787",
-    });
+describe("getPublicEnv", () => {
+  it.each([
+    ["no configured value", {}],
+    ["an empty value", { APP_URL: "" }],
+    ["a blank value", { APP_URL: "   " }],
+  ])("%s outside a browser", (_example, source) => {
+    expect(getPublicEnv(source)).toEqual({ APP_URL: "http://localhost:8787" });
+  });
 
+  it("no configured value on a page", () => {
     vi.stubGlobal("location", { origin: "https://app.example.com" });
-    expect(getPublicEnv({})).toEqual({
-      APP_URL: "https://app.example.com",
-    });
+
+    expect(getPublicEnv({})).toEqual({ APP_URL: "https://app.example.com" });
   });
 
-  it("falls back to the same-origin default for empty or whitespace values", () => {
-    expect(getPublicEnv({ APP_URL: "" })).toEqual({
-      APP_URL: "http://localhost:8787",
-    });
-    expect(getPublicEnv({ APP_URL: "   " })).toEqual({
-      APP_URL: "http://localhost:8787",
-    });
+  it.each([
+    ["a padded origin with a slash", " https://api.example.com/ ", "https://api.example.com"],
+    ["a plain http origin", "http://api.example.com", "http://api.example.com"],
+  ])("%s", (_example, APP_URL, origin) => {
+    expect(getPublicEnv({ APP_URL })).toEqual({ APP_URL: origin });
   });
 
-  it("trims and normalizes configured backend origins", () => {
-    expect(
-      getPublicEnv({
-        APP_URL: " https://api.example.com/ ",
-      }),
-    ).toEqual({
-      APP_URL: "https://api.example.com",
-    });
-  });
-
-  it("rejects invalid backend origins", () => {
-    expect(() =>
-      getPublicEnv({
-        APP_URL: "not-a-url",
-      }),
-    ).toThrow("APP_URL");
-  });
-
-  it("rejects non-http/https URL schemes", () => {
-    for (const scheme of ["ftp://api.example.com", "javascript:alert(1)"]) {
-      expect(() =>
-        getPublicEnv({
-          APP_URL: scheme,
-        }),
-      ).toThrow("Invalid public environment: APP_URL must be a valid URL");
-    }
-  });
-
-  it("rejects backend origins with a path, query, or hash", () => {
-    for (const apiBaseUrl of [
-      "https://api.example.com/base",
-      "https://api.example.com/base?x=1",
-      "https://api.example.com/base#frag",
-    ]) {
-      expect(() =>
-        getPublicEnv({
-          APP_URL: apiBaseUrl,
-        }),
-      ).toThrow("Invalid public environment: APP_URL must be a valid URL");
-    }
+  it.each([
+    ["text that is not a URL", "not-a-url"],
+    ["an ftp URL", "ftp://api.example.com"],
+    ["a script URL", "javascript:alert(1)"],
+    ["a path", "https://api.example.com/base"],
+    ["a query", "https://api.example.com/?x=1"],
+    ["a hash", "https://api.example.com/#frag"],
+  ])("%s", (_example, APP_URL) => {
+    expect(() => getPublicEnv({ APP_URL })).toThrow(
+      "Invalid public environment: APP_URL must be a valid URL",
+    );
   });
 });
 
-describe("dev mode accessor", () => {
-  it("enables tooling in local development and isolated previews, not production or staging", () => {
-    expect(isDevMode({ DEV: true })).toBe(true);
-    expect(isDevMode({ DEV: false })).toBe(false);
-    expect(isDevMode({ DEV: false, MODE: "ui-preview" })).toBe(true);
-    expect(isDevMode({ DEV: false, MODE: "production" })).toBe(false);
-    expect(isDevMode({ DEV: false, MODE: "staging" })).toBe(false);
-    expect(isDevMode({})).toBe(false);
+describe("isDevMode", () => {
+  it.each([
+    ["a development build", { DEV: true }, true],
+    ["a built bundle", { DEV: false }, false],
+    ["an isolated preview", { DEV: false, MODE: "ui-preview" }, true],
+    ["production", { DEV: false, MODE: "production" }, false],
+    ["staging", { DEV: false, MODE: "staging" }, false],
+    ["an empty environment", {}, false],
+  ])("%s", (_example, source, devMode) => {
+    expect(isDevMode(source)).toEqual(devMode);
   });
 });

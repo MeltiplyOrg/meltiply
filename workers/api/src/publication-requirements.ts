@@ -14,7 +14,7 @@ import type { ApiWorkerEnv } from "./env";
 import { SingleFlightGroup, type SingleFlight } from "./single-flight";
 import { tokenCipherFor } from "./token-credentials";
 
-interface PublicationAccountRow extends Record<string, unknown> {
+export interface PublicationAccountRow extends Record<string, unknown> {
   access_token: string;
   connection_status: string;
   platform: Platform;
@@ -22,6 +22,13 @@ interface PublicationAccountRow extends Record<string, unknown> {
   revoked_at: Date | string | null;
   token_expires_at: Date | string | null;
   updated_at: Date | string;
+}
+
+export interface PublicationRequirementsOptions {
+  readonly decryptToken?: (encrypted: string) => Promise<string>;
+  readonly loadAccount?: (
+    accountId: string,
+  ) => Effect.Effect<PublicationAccountRow | null, DatabaseError>;
 }
 
 function providerFailure(cause: ProviderAdapterError): CoreApiError {
@@ -199,21 +206,24 @@ export function getPublicationRequirementsEffect(
   requestId: string,
   registry: ProviderRegistry,
   now = new Date(),
+  options: PublicationRequirementsOptions = {},
 ): Effect.Effect<ProviderPublicationRequirements, CoreApiError | DatabaseError, ProviderService> {
   return Effect.gen(function* () {
-    const account = yield* withTenantTransactionEffect(env, session, (client) =>
-      Effect.gen(function* () {
-        const result = yield* client.query<PublicationAccountRow>(
-          `SELECT platform, platform_user_id, access_token, connection_status,
-                    token_expires_at, revoked_at, extract(epoch FROM updated_at)::text AS updated_at
-               FROM platform_accounts
-               WHERE id = $1
-               LIMIT 1`,
-          [accountId],
+    const account = options.loadAccount
+      ? yield* options.loadAccount(accountId)
+      : yield* withTenantTransactionEffect(env, session, (client) =>
+          Effect.gen(function* () {
+            const result = yield* client.query<PublicationAccountRow>(
+              `SELECT platform, platform_user_id, access_token, connection_status,
+                        token_expires_at, revoked_at, extract(epoch FROM updated_at)::text AS updated_at
+                   FROM platform_accounts
+                   WHERE id = $1
+                   LIMIT 1`,
+              [accountId],
+            );
+            return result.rows[0] ?? null;
+          }),
         );
-        return result.rows[0] ?? null;
-      }),
-    );
     if (!account) {
       return yield* Effect.fail(
         new CoreApiError(404, "not_found", "The platform account was not found."),
@@ -243,7 +253,10 @@ export function getPublicationRequirementsEffect(
               "dependency_unavailable",
               "Platform credentials are temporarily unavailable.",
             ),
-      try: () => tokenCipherFor(env).decrypt(account.access_token),
+      try: () =>
+        options.decryptToken
+          ? options.decryptToken(account.access_token)
+          : tokenCipherFor(env).decrypt(account.access_token),
     });
     const providerRead = providerRequirementsEffect(account, accessToken, requestId);
     return yield* Effect.uninterruptibleMask((restore) =>

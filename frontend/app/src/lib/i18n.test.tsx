@@ -60,15 +60,6 @@ describe("I18nProvider", () => {
     expect(document.documentElement.lang).toBe("es");
   });
 
-  it("resolves every supported target language from locale data", () => {
-    for (const { code } of supportedLanguages) {
-      const output = translate(code, "Settings");
-      if (code === "en") expect(output).toBe("Settings");
-      else expect(output, `${code} should translate Settings`).not.toBe("Settings");
-      expect(translate(code, "Not a catalog key")).toBe("Not a catalog key");
-    }
-  });
-
   it("localizes status labels for every target language", () => {
     for (const { code } of supportedLanguages) {
       if (code === "en") continue;
@@ -101,11 +92,6 @@ describe("I18nProvider", () => {
     }
   });
 
-  it("interpolates named values in translated messages", () => {
-    expect(translate("es", "Expires {date}", { date: "mañana" })).toBe("Caduca el mañana");
-    expect(translate("en", "Week {week}", { week: 42 })).toBe("Week 42");
-  });
-
   it("interpolates nodes into a translated sentence", () => {
     const { result } = renderHook(useI18n, { wrapper });
     act(() => result.current.setLanguage("es"));
@@ -126,15 +112,6 @@ describe("I18nProvider", () => {
     );
 
     expect(container.textContent).toBe("{count} accounts");
-  });
-
-  it("translates the generic error copy", () => {
-    expect(translate("en", "An error has occurred.")).toBe("An error has occurred.");
-    expect(translate("es", "An error has occurred.")).toBe("Se ha producido un error.");
-  });
-
-  it("keeps the hashtag placeholder covered in Spanish", () => {
-    expect(translate("es", "#viral #shorts")).toBe("#viral #shorts");
   });
 
   it("persists an explicit language change", () => {

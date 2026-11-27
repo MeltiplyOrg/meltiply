@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import type { AutomationEnv } from "../src/env";
 import { deliverImprovementReports } from "../src/reporting";
 import { recordDiagnostic } from "../src/diagnostic-reporting";
@@ -48,8 +49,7 @@ let receiverOrigin = "";
 
 const env: AutomationEnv = {
   DB_SYSTEM: {
-    connectionString:
-      "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    connectionString: integrationDatabaseUrl(process.env.MELTIPLY_DATABASE_TEST_URL, "system"),
   } as Hyperdrive,
   DEPLOYMENT_CATEGORY: "selfhosted",
   ENVIRONMENT: "test",

@@ -43,6 +43,9 @@ export async function persistProfileCopies({
   update,
   schedule,
   onProgress,
+  readAsset = getAsset,
+  readinessTimeoutMs = 5 * 60_000,
+  readinessPollIntervalMs = 1_000,
 }: {
   profileIds: readonly string[];
   sourceProfileId: string;
@@ -60,6 +63,9 @@ export async function persistProfileCopies({
   update: (variables: { id: string; input: UpdatePostInput }) => Promise<Post>;
   schedule: (variables: { id: string; input: SchedulePostInput }) => Promise<unknown>;
   onProgress: (progress: ProfileCopyProgress) => void;
+  readAsset?: (workspaceId: string | null, assetId: string) => Effect.Effect<Asset, unknown>;
+  readinessTimeoutMs?: number;
+  readinessPollIntervalMs?: number;
 }): Promise<boolean> {
   let saveFailed = false;
   const intents = new Map<
@@ -179,9 +185,9 @@ export async function persistProfileCopies({
       const copy = copies.get(profileId);
       if (!copy?.postId) throw new Error("The saved profile copy is missing.");
       onProgress({ profileId, phase: "media" });
-      const readinessSignal = AbortSignal.any([signal, AbortSignal.timeout(5 * 60_000)]);
+      const readinessSignal = AbortSignal.any([signal, AbortSignal.timeout(readinessTimeoutMs)]);
       for (const assetId of intent.assetIds) {
-        let asset: Asset = await runQueryEffect(getAsset(workspaceId, assetId), {
+        let asset: Asset = await runQueryEffect(readAsset(workspaceId, assetId), {
           signal: readinessSignal,
         });
         while (
@@ -189,8 +195,10 @@ export async function persistProfileCopies({
           asset.status === "uploading" ||
           asset.status === "processing"
         ) {
-          await runQueryEffect(Effect.sleep("1 second"), { signal: readinessSignal });
-          asset = await runQueryEffect(getAsset(workspaceId, assetId), { signal: readinessSignal });
+          await runQueryEffect(Effect.sleep(readinessPollIntervalMs), { signal: readinessSignal });
+          asset = await runQueryEffect(readAsset(workspaceId, assetId), {
+            signal: readinessSignal,
+          });
         }
         if (asset.status !== "ready")
           throw new Error(asset.failure?.message ?? "An attachment could not finish processing.");

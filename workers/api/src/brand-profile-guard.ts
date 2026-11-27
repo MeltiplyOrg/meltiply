@@ -4,6 +4,22 @@ import type { EffectTransactionClient } from "@meltiply/database";
 
 import { CoreApiError } from "./api-errors";
 
+export function inactiveBrandProfileError(
+  row: { deleted_at: Date | string | null } | undefined,
+): CoreApiError | null {
+  if (!row) {
+    return new CoreApiError(404, "brand_profile_not_found", "The brand profile was not found.");
+  }
+  if (row.deleted_at !== null) {
+    return new CoreApiError(
+      409,
+      "brand_profile_deleted",
+      "The brand profile is deleted and cannot accept new data.",
+    );
+  }
+  return null;
+}
+
 export function requireActiveBrandProfileEffect(
   client: EffectTransactionClient,
   organizationId: string,
@@ -18,22 +34,8 @@ export function requireActiveBrandProfileEffect(
     )
     .pipe(
       Effect.flatMap((result) => {
-        const row = result.rows[0];
-        if (!row) {
-          return Effect.fail(
-            new CoreApiError(404, "brand_profile_not_found", "The brand profile was not found."),
-          );
-        }
-        if (row.deleted_at !== null) {
-          return Effect.fail(
-            new CoreApiError(
-              409,
-              "brand_profile_deleted",
-              "The brand profile is deleted and cannot accept new data.",
-            ),
-          );
-        }
-        return Effect.void;
+        const rejection = inactiveBrandProfileError(result.rows[0]);
+        return rejection ? Effect.fail(rejection) : Effect.void;
       }),
     );
 }

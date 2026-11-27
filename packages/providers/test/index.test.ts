@@ -1,863 +1,446 @@
-import { describe, expect, it } from "vite-plus/test";
+import { PLATFORM_IDS, type Platform } from "@meltiply/domain";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
+
 import {
   cachedProviderRegistryFromEnvironment,
-  classifyProviderFailure,
   createProviderRegistryFromEnvironment,
-  normalizeProviderFailure,
-  ProviderAdapterError,
   ProviderRegistry,
-  validatePublishInput,
+  type ProviderRegistryEnvironment,
 } from "../src";
 import type { ProviderAdapter } from "../src/types";
+import { thrownBy } from "./support";
+
+type Capability = ProviderAdapter["capability"];
+
+const capability = (patch: Partial<Capability> = {}): Capability => ({
+  accepted_mime_types: [],
+  analytics: false,
+  asset_types: [],
+  comments: false,
+  connect_available: false,
+  max_caption_length: 500,
+  max_file_size: null,
+  max_hashtags: null,
+  max_media_count: null,
+  max_video_duration_sec: null,
+  min_media_count: 0,
+  multi_asset_types: [],
+  notes: [],
+  platform: "threads",
+  publish: false,
+  reply: false,
+  ...patch,
+});
+
+const adapter = (patch: Partial<Capability> = {}, methods: Partial<ProviderAdapter> = {}) => ({
+  capability: capability(patch),
+  transferModes: [],
+  ...methods,
+});
+
+const done = () => Promise.resolve({ outcome: "confirmed_success" } as const);
+const publishing = {
+  lookupPublication: () => Promise.resolve({ state: "not_found" } as const),
+  publish: done,
+  retryPolicy: { baseDelaySeconds: 15, maxAttempts: 5, maxDelaySeconds: 300 },
+};
+
+function registered(value: ProviderAdapter, platform: Platform = "threads") {
+  const registry = new ProviderRegistry();
+  registry.register(platform, value);
+  return registry;
+}
+
+const unconfigured = (platform: Platform, captionLimit: number | null, analytics: boolean) => ({
+  accepted_mime_types: [],
+  analytics,
+  asset_types: [],
+  comments: false,
+  connect_available: false,
+  max_caption_length: captionLimit,
+  max_file_size: null,
+  max_hashtags: null,
+  max_media_count: null,
+  max_video_duration_sec: null,
+  min_media_count: 0,
+  multi_asset_types: [],
+  notes: ["Provider adapter is not configured."],
+  platform,
+  publish: false,
+  reply: false,
+});
+
+const roster = [
+  ["tiktok", 4_000],
+  ["youtube", 5_000],
+  ["instagram", 2_200],
+  ["facebook", null],
+  ["threads", 500],
+] as const;
+
+const environments = {
+  facebook: {
+    FACEBOOK_CLIENT_ID: "id",
+    FACEBOOK_CLIENT_SECRET: "secret",
+    FACEBOOK_LIVE_ACCEPTED: "true",
+  },
+  instagram: {
+    INSTAGRAM_CLIENT_ID: "id",
+    INSTAGRAM_CLIENT_SECRET: "secret",
+    INSTAGRAM_LIVE_ACCEPTED: "true",
+  },
+  threads: {
+    THREADS_CLIENT_ID: "id",
+    THREADS_CLIENT_SECRET: "secret",
+    THREADS_LIVE_ACCEPTED: "true",
+  },
+  tiktok: { TIKTOK_CLIENT_KEY: "id", TIKTOK_CLIENT_SECRET: "secret", TIKTOK_LIVE_ACCEPTED: "true" },
+  youtube: {
+    YOUTUBE_SHORTS_CLIENT_ID: "id",
+    YOUTUBE_SHORTS_CLIENT_SECRET: "secret",
+    YOUTUBE_LIVE_ACCEPTED: "true",
+  },
+} satisfies Record<Platform, ProviderRegistryEnvironment>;
+
+const APP_URL = "https://app.example.com/base";
+const names = {
+  facebook: "Facebook",
+  instagram: "Instagram",
+  threads: "Threads",
+  tiktok: "TikTok",
+  youtube: "YouTube",
+};
+
+beforeAll(() => {
+  createProviderRegistryFromEnvironment({ APP_URL, ...environments.threads });
+});
 
 describe("ProviderRegistry", () => {
-  it("attaches adapter metadata to operation results and clears stale context", async () => {
-    const adapter: ProviderAdapter = {
-      capability: {
-        platform: "threads",
-        connect_available: false,
-        asset_types: [],
-        publish: true,
-        analytics: false,
-        comments: false,
-        reply: false,
-        max_caption_length: 500,
-        max_hashtags: 30,
-        max_file_size: null,
-        max_media_count: null,
-        max_video_duration_sec: null,
-        min_media_count: 0,
-        multi_asset_types: [],
-        accepted_mime_types: [],
-        notes: [],
-      },
-      lookupPublication: async () => ({ state: "not_found" }),
-      publish: async (context) => {
-        context.metadata = {
-          rateLimitBudget: {
-            percentUsed: 80,
-            remaining: 4,
-            resetsInSeconds: 30,
-          },
-        };
-        return { outcome: "confirmed_success" };
-      },
-      retryPolicy: {
-        baseDelaySeconds: 1,
-        maxAttempts: 3,
-        maxDelaySeconds: 60,
-      },
-      transferModes: [],
-    };
-    const registry = new ProviderRegistry();
-    registry.register("threads", adapter);
-    const registered = registry.get("threads")!;
-    const context = { operationId: "operation-1", requestId: "request-1" };
+  describe("register", () => {
+    it("a second adapter for a platform", () => {
+      const registry = registered(adapter());
 
-    await expect(
-      registered.publish!(context, { accessToken: "token" }, {} as never),
-    ).resolves.toMatchObject({
-      metadata: {
-        rateLimitBudget: { percentUsed: 80, remaining: 4, resetsInSeconds: 30 },
-      },
-      outcome: "confirmed_success",
-    });
-
-    adapter.publish = async () => ({ outcome: "confirmed_success" });
-    await expect(
-      registered.publish!(context, { accessToken: "token" }, {} as never),
-    ).resolves.toEqual({ outcome: "confirmed_success" });
-  });
-
-  it("reuses an immutable environment registry and invalidates mutations", () => {
-    const environment = {
-      APP_URL: "https://api.example.com",
-      THREADS_CLIENT_ID: "threads-client",
-      THREADS_CLIENT_SECRET: "threads-secret",
-      THREADS_LIVE_ACCEPTED: "true",
-    };
-    const first = cachedProviderRegistryFromEnvironment(environment);
-    expect(cachedProviderRegistryFromEnvironment(environment)).toBe(first);
-
-    environment.THREADS_LIVE_ACCEPTED = "false";
-    const invalidated = cachedProviderRegistryFromEnvironment(environment);
-    expect(invalidated).not.toBe(first);
-    expect(invalidated.get("threads")).toBeUndefined();
-  });
-
-  it("returns deeply frozen capability descriptors without cloning per call", () => {
-    const registry = new ProviderRegistry();
-    const first = registry.capabilities();
-    const second = registry.capabilities();
-    expect(first[0]).toBe(second[0]);
-    expect(Object.isFrozen(first[0])).toBe(true);
-    expect(Object.isFrozen(first[0]!.accepted_mime_types)).toBe(true);
-    expect(Object.isFrozen(first[0]!.notes)).toBe(true);
-  });
-
-  it("fails closed for every unconfigured provider", () => {
-    const capabilities = new ProviderRegistry().capabilities();
-    expect(capabilities).toHaveLength(5);
-    expect(capabilities.every((capability) => !capability.connect_available)).toBe(true);
-    expect(capabilities.every((capability) => !capability.publish)).toBe(true);
-  });
-
-  it("keeps declared analytics support for stored snapshots while providers are unconfigured", () => {
-    const capabilities = new ProviderRegistry().capabilities();
-    expect(capabilities.every((capability) => capability.analytics)).toBe(true);
-  });
-
-  it("fails analytics coverage closed once any adapter is configured", () => {
-    const registry = new ProviderRegistry();
-    registry.register("instagram", {
-      capability: {
-        accepted_mime_types: [],
-        analytics: true,
-        asset_types: [],
-        comments: false,
-        connect_available: false,
-        max_caption_length: 2200,
-        max_file_size: null,
-        max_hashtags: 30,
-        max_media_count: null,
-        max_video_duration_sec: null,
-        min_media_count: 0,
-        multi_asset_types: [],
-        notes: [],
-        platform: "instagram",
-        publish: false,
-        reply: false,
-      },
-      listAnalytics: async () => ({ items: [] }),
-      transferModes: [],
-    });
-    const capabilities = registry.capabilities();
-    expect(capabilities.find(({ platform }) => platform === "instagram")?.analytics).toBe(true);
-    expect(capabilities.find(({ platform }) => platform === "tiktok")?.analytics).toBe(false);
-  });
-
-  it("checks the declared caption boundary before a provider is activated", () => {
-    const threads = new ProviderRegistry()
-      .capabilities()
-      .find(({ platform }) => platform === "threads")!;
-    const input = {
-      caption: "🚀".repeat(500),
-      hashtags: [],
-      idempotencyKey: "draft-caption",
-      media: [],
-    };
-    expect(validatePublishInput(threads, input)).toEqual([]);
-    expect(validatePublishInput(threads, { ...input, caption: input.caption + "🚀" })).toEqual([
-      expect.objectContaining({
-        actual: 501,
-        constraint: "provider_caption_limit",
-        field: "caption",
-        limit: 500,
-      }),
-    ]);
-  });
-
-  it("keeps runtime providers closed until live acceptance is explicit", () => {
-    const environment = {
-      APP_URL: "https://api.example.com",
-      THREADS_CLIENT_ID: "threads-client",
-      THREADS_CLIENT_SECRET: "threads-secret",
-    };
-    for (const THREADS_LIVE_ACCEPTED of [undefined, "", "false"]) {
-      const registry = createProviderRegistryFromEnvironment({
-        ...environment,
-        ...(THREADS_LIVE_ACCEPTED === undefined ? {} : { THREADS_LIVE_ACCEPTED }),
-      });
-      expect(registry.get("threads")).toBeUndefined();
-      expect(registry.capabilities().find(({ platform }) => platform === "threads")).toMatchObject({
-        connect_available: false,
-        publish: false,
-      });
-    }
-  });
-
-  it("requires complete accepted configuration and pins the Threads callback", () => {
-    expect(() => createProviderRegistryFromEnvironment({ THREADS_LIVE_ACCEPTED: "yes" })).toThrow(
-      "must be true or false",
-    );
-    expect(() => createProviderRegistryFromEnvironment({ THREADS_LIVE_ACCEPTED: "true" })).toThrow(
-      "configuration is incomplete",
-    );
-    expect(() =>
-      createProviderRegistryFromEnvironment({
-        APP_URL: "https://user:password@api.example.com",
-        THREADS_CLIENT_ID: "threads-client",
-        THREADS_CLIENT_SECRET: "threads-secret",
-        THREADS_LIVE_ACCEPTED: "true",
-      }),
-    ).toThrow("APP_URL");
-
-    const registry = createProviderRegistryFromEnvironment({
-      APP_URL: "https://api.example.com/base",
-      THREADS_CLIENT_ID: "threads-client",
-      THREADS_CLIENT_SECRET: "threads-secret",
-      THREADS_LIVE_ACCEPTED: "true",
-    });
-    const threads = registry.get("threads")!;
-    expect(threads.capability).toMatchObject({
-      analytics: false,
-      comments: false,
-      connect_available: true,
-      publish: true,
-      reply: false,
-    });
-    expect(threads.listAnalytics).toBeUndefined();
-    expect(threads.listComments).toBeUndefined();
-    expect(threads.reply).toBeUndefined();
-    const authorizationUrl = new URL(
-      threads.authorizationUrl!({
-        codeChallenge: "unused",
-        redirectUri: "https://api.example.com/api/v1/platforms/threads/callback",
-        state: "oauth-state",
-      }),
-    );
-    expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
-      "https://api.example.com/api/v1/platforms/threads/callback",
-    );
-  });
-
-  it("requires independent live acceptance before exposing engagement", () => {
-    const environment = {
-      APP_URL: "https://api.example.com",
-      THREADS_CLIENT_ID: "threads-client",
-      THREADS_CLIENT_SECRET: "threads-secret",
-      THREADS_LIVE_ACCEPTED: "true",
-    };
-    expect(() =>
-      createProviderRegistryFromEnvironment({
-        ...environment,
-        THREADS_ENGAGEMENT_LIVE_ACCEPTED: "yes",
-      }),
-    ).toThrow("THREADS_ENGAGEMENT_LIVE_ACCEPTED must be true or false");
-    expect(() =>
-      createProviderRegistryFromEnvironment({
-        ...environment,
-        THREADS_ENGAGEMENT_LIVE_ACCEPTED: "true",
-        THREADS_LIVE_ACCEPTED: "false",
-      }),
-    ).toThrow("requires THREADS_LIVE_ACCEPTED=true");
-
-    const threads = createProviderRegistryFromEnvironment({
-      ...environment,
-      THREADS_ENGAGEMENT_LIVE_ACCEPTED: "true",
-    }).get("threads")!;
-    expect(threads.capability).toMatchObject({
-      analytics: true,
-      comments: true,
-      reply: true,
-    });
-    expect(threads.listAnalytics).toBeTypeOf("function");
-    expect(threads.listComments).toBeTypeOf("function");
-    expect(threads.reply).toBeTypeOf("function");
-    expect(
-      new URL(
-        threads.authorizationUrl!({
-          codeChallenge: "unused",
-          redirectUri: "https://api.example.com/api/v1/platforms/threads/callback",
-          state: "oauth-state",
-        }),
-      ).searchParams.get("scope"),
-    ).toContain("threads_manage_replies");
-  });
-
-  it("keeps Instagram absent until publishing acceptance is explicit", () => {
-    const environment = {
-      INSTAGRAM_CLIENT_ID: "instagram-client",
-      INSTAGRAM_CLIENT_SECRET: "instagram-secret",
-      APP_URL: "https://api.example.com",
-    };
-    for (const INSTAGRAM_LIVE_ACCEPTED of [undefined, "", "false"]) {
-      const registry = createProviderRegistryFromEnvironment({
-        ...environment,
-        ...(INSTAGRAM_LIVE_ACCEPTED === undefined ? {} : { INSTAGRAM_LIVE_ACCEPTED }),
-      });
-      expect(registry.get("instagram")).toBeUndefined();
-      expect(
-        registry.capabilities().find(({ platform }) => platform === "instagram"),
-      ).toMatchObject({ connect_available: false, publish: false });
-    }
-  });
-
-  it("requires complete, independently accepted Instagram configuration", () => {
-    expect(() =>
-      createProviderRegistryFromEnvironment({
-        INSTAGRAM_LIVE_ACCEPTED: "yes",
-      }),
-    ).toThrow("INSTAGRAM_LIVE_ACCEPTED must be true or false");
-    expect(() =>
-      createProviderRegistryFromEnvironment({
-        INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED: "yes",
-      }),
-    ).toThrow("INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED must be true or false");
-    expect(() =>
-      createProviderRegistryFromEnvironment({
-        INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED: "true",
-        INSTAGRAM_LIVE_ACCEPTED: "false",
-      }),
-    ).toThrow("requires INSTAGRAM_LIVE_ACCEPTED=true");
-    expect(() =>
-      createProviderRegistryFromEnvironment({
-        INSTAGRAM_LIVE_ACCEPTED: "true",
-      }),
-    ).toThrow("Instagram provider configuration is incomplete");
-
-    const environment = {
-      INSTAGRAM_CLIENT_ID: "instagram-client",
-      INSTAGRAM_CLIENT_SECRET: "instagram-secret",
-      INSTAGRAM_LIVE_ACCEPTED: "true",
-      APP_URL: "https://api.example.com/base",
-    };
-    const instagram = createProviderRegistryFromEnvironment(environment).get("instagram")!;
-    expect(instagram.capability).toMatchObject({
-      analytics: false,
-      comments: false,
-      connect_available: true,
-      publish: true,
-      reply: false,
-    });
-    expect(instagram.listAnalytics).toBeUndefined();
-    expect(instagram.listComments).toBeUndefined();
-    expect(instagram.reply).toBeUndefined();
-    const authorizationUrl = new URL(
-      instagram.authorizationUrl!({
-        codeChallenge: "unused",
-        redirectUri: "https://api.example.com/api/v1/platforms/instagram/callback",
-        state: "oauth-state",
-      }),
-    );
-    expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
-      "https://api.example.com/api/v1/platforms/instagram/callback",
-    );
-    expect(authorizationUrl.searchParams.get("scope")).toBe(
-      "instagram_business_basic,instagram_business_content_publish",
-    );
-
-    const engagement = createProviderRegistryFromEnvironment({
-      ...environment,
-      INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED: "true",
-    }).get("instagram")!;
-    expect(engagement.capability).toMatchObject({
-      analytics: true,
-      comments: true,
-      reply: true,
-    });
-    expect(engagement.listAnalytics).toBeTypeOf("function");
-    expect(engagement.listComments).toBeTypeOf("function");
-    expect(engagement.reply).toBeTypeOf("function");
-  });
-
-  it("keeps Facebook absent until Page publishing acceptance is explicit", () => {
-    const environment = {
-      FACEBOOK_CLIENT_ID: "facebook-client",
-      FACEBOOK_CLIENT_SECRET: "facebook-secret",
-      APP_URL: "https://api.example.com",
-    };
-    for (const FACEBOOK_LIVE_ACCEPTED of [undefined, "", "false"]) {
-      const registry = createProviderRegistryFromEnvironment({
-        ...environment,
-        ...(FACEBOOK_LIVE_ACCEPTED === undefined ? {} : { FACEBOOK_LIVE_ACCEPTED }),
-      });
-      expect(registry.get("facebook")).toBeUndefined();
-      expect(registry.capabilities().find(({ platform }) => platform === "facebook")).toMatchObject(
-        { connect_available: false, publish: false },
+      expect(thrownBy(() => registry.register("threads", adapter()))).toEqual(
+        new TypeError("provider adapter is already registered: threads"),
       );
-    }
-  });
-
-  it("requires complete accepted Facebook configuration and pins the callback", () => {
-    expect(() =>
-      createProviderRegistryFromEnvironment({
-        FACEBOOK_LIVE_ACCEPTED: "yes",
-      }),
-    ).toThrow("FACEBOOK_LIVE_ACCEPTED must be true or false");
-    expect(() =>
-      createProviderRegistryFromEnvironment({
-        FACEBOOK_LIVE_ACCEPTED: "true",
-      }),
-    ).toThrow("Facebook provider configuration is incomplete");
-
-    const facebook = createProviderRegistryFromEnvironment({
-      FACEBOOK_CLIENT_ID: "facebook-client",
-      FACEBOOK_CLIENT_SECRET: "facebook-secret",
-      FACEBOOK_LIVE_ACCEPTED: "true",
-      APP_URL: "https://api.example.com/base",
-    }).get("facebook")!;
-    const authorizationUrl = new URL(
-      facebook.authorizationUrl!({
-        codeChallenge: "unused",
-        redirectUri: "https://api.example.com/api/v1/platforms/facebook/callback",
-        state: "oauth-state",
-      }),
-    );
-    expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
-      "https://api.example.com/api/v1/platforms/facebook/callback",
-    );
-  });
-
-  it("keeps YouTube absent until Shorts publishing acceptance is explicit", () => {
-    const environment = {
-      APP_URL: "https://api.example.com",
-      YOUTUBE_SHORTS_CLIENT_ID: "youtube-client",
-      YOUTUBE_SHORTS_CLIENT_SECRET: "youtube-secret",
-    };
-    for (const YOUTUBE_LIVE_ACCEPTED of [undefined, "", "false"]) {
-      const registry = createProviderRegistryFromEnvironment({
-        ...environment,
-        ...(YOUTUBE_LIVE_ACCEPTED === undefined ? {} : { YOUTUBE_LIVE_ACCEPTED }),
-      });
-      expect(registry.get("youtube")).toBeUndefined();
-      expect(registry.capabilities().find(({ platform }) => platform === "youtube")).toMatchObject({
-        connect_available: false,
-        publish: false,
-      });
-    }
-  });
-
-  it("keeps TikTok absent until Direct Post acceptance is explicit", () => {
-    const environment = {
-      APP_URL: "https://api.example.com",
-      TIKTOK_CLIENT_KEY: "tiktok-client",
-      TIKTOK_CLIENT_SECRET: "tiktok-secret",
-      TIKTOK_MEDIA_URL_PREFIX: "https://account.r2.cloudflarestorage.com/assets/",
-    };
-    for (const TIKTOK_LIVE_ACCEPTED of [undefined, "", "false"]) {
-      const registry = createProviderRegistryFromEnvironment({
-        ...environment,
-        ...(TIKTOK_LIVE_ACCEPTED === undefined ? {} : { TIKTOK_LIVE_ACCEPTED }),
-      });
-      expect(registry.get("tiktok")).toBeUndefined();
-      expect(registry.capabilities().find(({ platform }) => platform === "tiktok")).toMatchObject({
-        connect_available: false,
-        publish: false,
-      });
-    }
-  });
-
-  it("requires complete accepted TikTok configuration and pins the callback", () => {
-    expect(() => createProviderRegistryFromEnvironment({ TIKTOK_LIVE_ACCEPTED: "yes" })).toThrow(
-      "TIKTOK_LIVE_ACCEPTED must be true or false",
-    );
-    expect(() => createProviderRegistryFromEnvironment({ TIKTOK_LIVE_ACCEPTED: "true" })).toThrow(
-      "TikTok provider configuration is incomplete",
-    );
-
-    const tiktok = createProviderRegistryFromEnvironment({
-      APP_URL: "https://api.example.com/base",
-      TIKTOK_CLIENT_KEY: "tiktok-client",
-      TIKTOK_CLIENT_SECRET: "tiktok-secret",
-      TIKTOK_LIVE_ACCEPTED: "true",
-      TIKTOK_MEDIA_URL_PREFIX: "https://account.r2.cloudflarestorage.com/assets/",
-    }).get("tiktok")!;
-    expect(tiktok.capability).toMatchObject({
-      analytics: true,
-      asset_types: ["image", "video"],
-      comments: false,
-      connect_available: true,
-      publish: true,
-      reply: false,
     });
-    expect(tiktok.getPublicationRequirements).toBeTypeOf("function");
-    expect(tiktok.listAnalytics).toBeTypeOf("function");
-    expect(tiktok.listComments).toBeUndefined();
-    expect(tiktok.reply).toBeUndefined();
-    const authorizationUrl = new URL(
-      tiktok.authorizationUrl!({
-        codeChallenge: "unused",
-        redirectUri: "https://api.example.com/api/v1/platforms/tiktok/callback",
-        state: "oauth-state",
-      }),
-    );
-    expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
-      "https://api.example.com/api/v1/platforms/tiktok/callback",
-    );
-  });
 
-  it("requires complete accepted YouTube configuration and pins the callback", () => {
-    expect(() => createProviderRegistryFromEnvironment({ YOUTUBE_LIVE_ACCEPTED: "yes" })).toThrow(
-      "YOUTUBE_LIVE_ACCEPTED must be true or false",
-    );
-    expect(() => createProviderRegistryFromEnvironment({ YOUTUBE_LIVE_ACCEPTED: "true" })).toThrow(
-      "YouTube provider configuration is incomplete",
-    );
-
-    const youtube = createProviderRegistryFromEnvironment({
-      APP_URL: "https://api.example.com/base",
-      YOUTUBE_LIVE_ACCEPTED: "true",
-      YOUTUBE_SHORTS_CLIENT_ID: "youtube-client",
-      YOUTUBE_SHORTS_CLIENT_SECRET: "youtube-secret",
-    }).get("youtube")!;
-    expect(youtube.capability).toMatchObject({
-      analytics: true,
-      asset_types: ["video"],
-      comments: false,
-      connect_available: true,
-      publish: true,
-      reply: false,
-    });
-    expect(youtube.listAnalytics).toBeTypeOf("function");
-    expect(youtube.listComments).toBeUndefined();
-    expect(youtube.reply).toBeUndefined();
-    const authorizationUrl = new URL(
-      youtube.authorizationUrl!({
-        codeChallenge: "a".repeat(43),
-        redirectUri: "https://api.example.com/api/v1/platforms/youtube/callback",
-        state: "oauth-state",
-      }),
-    );
-    expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
-      "https://api.example.com/api/v1/platforms/youtube/callback",
-    );
-  });
-
-  it("rejects claimed publishing without an implementation", () => {
-    const registry = new ProviderRegistry();
-    expect(() =>
-      registry.register("threads", {
-        capability: {
-          accepted_mime_types: ["text/plain"],
-          analytics: false,
-          asset_types: [],
-          comments: false,
-          connect_available: true,
-          max_caption_length: 500,
-          max_file_size: null,
-          max_hashtags: null,
-          max_media_count: null,
-          max_video_duration_sec: null,
-          min_media_count: 0,
-          multi_asset_types: [],
-          notes: [],
-          platform: "threads",
-          publish: true,
-          reply: false,
-        },
-        transferModes: [],
-      }),
-    ).toThrow("requires publish and lookup adapters");
-  });
-
-  it("rejects TikTok publishing without current creator requirements", () => {
-    const registry = new ProviderRegistry();
-    expect(() =>
-      registry.register("tiktok", {
-        capability: {
-          accepted_mime_types: ["video/mp4"],
-          analytics: false,
-          asset_types: ["video"],
-          comments: false,
-          connect_available: false,
-          max_caption_length: 2_200,
-          max_file_size: 1024,
-          max_hashtags: 30,
-          max_media_count: 1,
-          max_video_duration_sec: 600,
-          min_media_count: 1,
-          multi_asset_types: [],
-          notes: [],
-          platform: "tiktok",
-          publish: true,
-          reply: false,
-        },
-        lookupPublication: async () => ({ state: "not_found" }),
-        publish: async () => ({ outcome: "confirmed_success" }),
-        retryPolicy: {
-          baseDelaySeconds: 30,
-          maxAttempts: 1,
-          maxDelaySeconds: 30,
-        },
-        transferModes: ["remote_ingest"],
-      }),
-    ).toThrow("requires publication requirements");
-  });
-
-  it("rejects claimed OAuth without start and exchange implementations", () => {
-    const registry = new ProviderRegistry();
-    expect(() =>
-      registry.register("threads", {
-        capability: {
-          accepted_mime_types: ["text/plain"],
-          analytics: false,
-          asset_types: [],
-          comments: false,
-          connect_available: true,
-          max_caption_length: 500,
-          max_file_size: null,
-          max_hashtags: null,
-          max_media_count: null,
-          max_video_duration_sec: null,
-          min_media_count: 0,
-          multi_asset_types: [],
-          notes: [],
-          platform: "threads",
-          publish: false,
-          reply: false,
-        },
-        transferModes: [],
-      }),
-    ).toThrow("requires authorization and code-exchange adapters");
-  });
-
-  it("requires every advertised downstream capability to have an implementation", () => {
-    const base = {
-      accepted_mime_types: [],
-      analytics: false,
-      asset_types: [],
-      comments: false,
-      connect_available: false,
-      max_caption_length: 500,
-      max_file_size: null,
-      max_hashtags: null,
-      max_media_count: null,
-      max_video_duration_sec: null,
-      min_media_count: 0,
-      multi_asset_types: [],
-      notes: [],
-      platform: "threads" as const,
-      publish: false,
-      reply: false,
-    };
-    expect(() =>
-      new ProviderRegistry().register("threads", {
-        capability: { ...base, analytics: true },
-        transferModes: [],
-      }),
-    ).toThrow("requires an analytics adapter");
-    expect(() =>
-      new ProviderRegistry().register("threads", {
-        capability: { ...base, comments: true },
-        transferModes: [],
-      }),
-    ).toThrow("requires a comments adapter");
-    expect(() =>
-      new ProviderRegistry().register("threads", {
-        capability: { ...base, reply: true },
-        transferModes: [],
-      }),
-    ).toThrow("requires a reply adapter");
-  });
-
-  it("requires an explicit media transfer mode and prevents registry replacement", () => {
-    const registry = new ProviderRegistry();
-    const capability = {
-      accepted_mime_types: ["image/jpeg"],
-      analytics: false,
-      asset_types: ["image" as const],
-      comments: false,
-      connect_available: false,
-      max_caption_length: 500,
-      max_file_size: 1_000_000,
-      max_hashtags: 5,
-      max_media_count: 10,
-      max_video_duration_sec: null,
-      min_media_count: 0,
-      multi_asset_types: ["image" as const],
-      notes: [],
-      platform: "threads" as const,
-      publish: true,
-      reply: false,
-    };
-    expect(() =>
-      registry.register("threads", {
-        capability,
-        lookupPublication: async () => ({ state: "not_found" }),
-        publish: async () => ({
-          outcome: "confirmed_success",
-          providerPostId: "post-1",
-        }),
-        transferModes: ["remote_ingest"],
-      }),
-    ).toThrow("requires a retry policy");
-    const acceptedRetryPolicy = {
-      baseDelaySeconds: 15,
-      maxAttempts: 5,
-      maxDelaySeconds: 300,
-    };
-    const invalidRetryPolicies = [
-      ["baseDelaySeconds below 1", { ...acceptedRetryPolicy, baseDelaySeconds: 0 }],
-      ["baseDelaySeconds above 3600", { ...acceptedRetryPolicy, baseDelaySeconds: 3_601 }],
-      ["maxAttempts above 10", { ...acceptedRetryPolicy, maxAttempts: 11 }],
-      ["maxAttempts below 1", { ...acceptedRetryPolicy, maxAttempts: 0 }],
-      ["maxDelaySeconds above 86400", { ...acceptedRetryPolicy, maxDelaySeconds: 86_401 }],
+    it.each([
       [
-        "maxDelaySeconds below baseDelaySeconds",
-        { baseDelaySeconds: 300, maxAttempts: 5, maxDelaySeconds: 299 },
+        "a mismatched platform",
+        adapter({ platform: "tiktok" }),
+        "provider adapter capability platform does not match registry key",
       ],
-    ] as const;
-    for (const [label, retryPolicy] of invalidRetryPolicies) {
-      expect(
-        () =>
-          registry.register("threads", {
-            capability,
-            lookupPublication: async () => ({ state: "not_found" }),
-            publish: async () => ({
-              outcome: "confirmed_success",
-              providerPostId: "post-1",
-            }),
-            retryPolicy,
-            transferModes: ["remote_ingest"],
-          }),
-        label,
-      ).toThrow("outside safe bounds");
-    }
-    expect(() =>
-      registry.register("threads", {
-        capability,
-        lookupPublication: async () => ({
-          result: {
-            outcome: "confirmed_success",
-            providerPostId: "post-1",
-          },
-          state: "published",
-        }),
-        publish: async () => ({
-          outcome: "confirmed_success",
-          providerPostId: "post-1",
-        }),
-        retryPolicy: {
-          baseDelaySeconds: 15,
-          maxAttempts: 5,
-          maxDelaySeconds: 300,
-        },
-        transferModes: [],
-      }),
-    ).toThrow("requires at least one transfer mode");
-
-    registry.register("threads", {
-      capability,
-      lookupPublication: async () => ({
-        result: {
-          outcome: "confirmed_success",
-          providerPostId: "post-1",
-        },
-        state: "published",
-      }),
-      publish: async () => ({
-        outcome: "confirmed_success",
-        providerPostId: "post-1",
-      }),
-      retryPolicy: {
-        baseDelaySeconds: 15,
-        maxAttempts: 5,
-        maxDelaySeconds: 300,
-      },
-      transferModes: ["remote_ingest"],
+      [
+        "publishing without a publish method",
+        adapter({ publish: true }, { ...publishing, publish: undefined }),
+        "publish capability requires publish and lookup adapters",
+      ],
+      [
+        "publishing without a lookup",
+        adapter({ publish: true }, { ...publishing, lookupPublication: undefined }),
+        "publish capability requires publish and lookup adapters",
+      ],
+      [
+        "publishing without a retry policy",
+        adapter({ publish: true }, { ...publishing, retryPolicy: undefined }),
+        "publish capability requires a retry policy",
+      ],
+      [
+        "media publishing without a transfer mode",
+        adapter({ publish: true, asset_types: ["image"] }, publishing),
+        "media publish capability requires at least one transfer mode",
+      ],
+      [
+        "connecting without OAuth methods",
+        adapter({ connect_available: true }),
+        "connect capability requires authorization and code-exchange adapters",
+      ],
+      [
+        "analytics without a method",
+        adapter({ analytics: true }),
+        "analytics capability requires an analytics adapter",
+      ],
+      [
+        "comments without a method",
+        adapter({ comments: true }),
+        "comments capability requires a comments adapter",
+      ],
+      [
+        "replies without a method",
+        adapter({ reply: true }),
+        "reply capability requires a reply adapter",
+      ],
+    ])("%s", (_example, value, message) => {
+      expect(thrownBy(() => registered(value))).toEqual(new TypeError(message));
     });
-    expect(() =>
-      registry.register("threads", {
-        capability,
-        lookupPublication: async () => ({
-          result: {
-            outcome: "confirmed_failure",
-            failure: classifyProviderFailure({ status: 400 }),
-          },
-          state: "failed",
-        }),
-        publish: async () => ({
-          outcome: "confirmed_failure",
-          failure: classifyProviderFailure({ status: 400 }),
-        }),
-        retryPolicy: {
-          baseDelaySeconds: 15,
-          maxAttempts: 5,
-          maxDelaySeconds: 300,
-        },
-        transferModes: ["remote_ingest"],
-      }),
-    ).toThrow("already registered");
+
+    it("TikTok publishing without creator requirements", () => {
+      const value = adapter({ platform: "tiktok", publish: true }, publishing);
+
+      expect(thrownBy(() => registered(value, "tiktok"))).toEqual(
+        new TypeError("TikTok publish capability requires publication requirements"),
+      );
+    });
+
+    it.each([
+      ["the smallest retry policy", 1, 1, 1],
+      ["the largest retry policy", 3_600, 10, 86_400],
+    ])("%s", (_example, baseDelaySeconds, maxAttempts, maxDelaySeconds) => {
+      const retryPolicy = { baseDelaySeconds, maxAttempts, maxDelaySeconds };
+
+      const registry = registered(adapter({}, { retryPolicy }));
+
+      expect(registry.get("threads")?.retryPolicy).toEqual(retryPolicy);
+    });
+
+    it.each([
+      ["no attempt", 1, 0, 1],
+      ["eleven attempts", 1, 11, 1],
+      ["a fractional attempt count", 1, 1.5, 2],
+      ["no base delay", 0, 1, 1],
+      ["a base delay over an hour", 3_601, 1, 3_601],
+      ["a fractional base delay", 1.5, 1, 2],
+      ["a maximum under the base", 300, 5, 299],
+      ["a maximum over a day", 1, 1, 86_401],
+      ["a fractional maximum", 1, 1, 1.5],
+    ])("a retry policy with %s", (_example, baseDelaySeconds, maxAttempts, maxDelaySeconds) => {
+      const retryPolicy = { baseDelaySeconds, maxAttempts, maxDelaySeconds };
+
+      expect(thrownBy(() => registered(adapter({}, { retryPolicy })))).toEqual(
+        new TypeError("provider retry policy is outside safe bounds"),
+      );
+    });
+
+    it("a capability the caller later changes", () => {
+      const value = adapter({ notes: ["a"] });
+
+      const registry = registered(value);
+      value.capability.notes.push("b");
+
+      expect(registry.get("threads")?.capability.notes).toEqual(["a"]);
+    });
   });
 
-  it("accepts retry policies at the inclusive bounds", () => {
-    const registerWith = (retryPolicy: {
-      baseDelaySeconds: number;
-      maxAttempts: number;
-      maxDelaySeconds: number;
-    }) => {
-      const registry = new ProviderRegistry();
-      registry.register("threads", {
-        capability: {
-          accepted_mime_types: ["image/jpeg"],
-          analytics: false,
-          asset_types: ["image"],
-          comments: false,
-          connect_available: false,
-          max_caption_length: 500,
-          max_file_size: 1_000_000,
-          max_hashtags: 5,
-          max_media_count: 10,
-          max_video_duration_sec: null,
-          min_media_count: 0,
-          multi_asset_types: ["image"],
-          notes: [],
-          platform: "threads",
-          publish: true,
-          reply: false,
-        },
-        lookupPublication: async () => ({ state: "not_found" }),
-        publish: async () => ({ outcome: "confirmed_success", providerPostId: "post-1" }),
-        retryPolicy,
-        transferModes: ["remote_ingest"],
-      });
-      return registry.get("threads");
-    };
+  describe("get", () => {
+    it("an unregistered platform", () => {
+      expect(new ProviderRegistry().get("threads")).toEqual(undefined);
+    });
 
-    expect(registerWith({ baseDelaySeconds: 1, maxAttempts: 1, maxDelaySeconds: 1 })).toBeDefined();
-    expect(
-      registerWith({ baseDelaySeconds: 3_600, maxAttempts: 10, maxDelaySeconds: 86_400 }),
-    ).toBeDefined();
+    it.each(["publish", "cancelPublication", "reply", "lookupPublication"] as const)(
+      "%s adds the call's metadata to its result and clears stale metadata",
+      async (method) => {
+        const metadata = {
+          rateLimitBudget: { percentUsed: 80, remaining: 4, resetsInSeconds: 30 },
+        };
+        let calls = 0;
+        const value = adapter(
+          {},
+          {
+            [method]: (context: { metadata?: unknown }) => {
+              calls += 1;
+              if (calls === 1) context.metadata = metadata;
+              return Promise.resolve({ outcome: "confirmed_success" });
+            },
+          },
+        );
+        const call = registered(value).get("threads")![method] as (
+          context: object,
+        ) => Promise<unknown>;
+        const context = { operationId: "o", requestId: "r" };
+
+        const first = await call(context);
+        const second = await call(context);
+
+        expect(first).toEqual({ outcome: "confirmed_success", metadata });
+        expect(second).toEqual({ outcome: "confirmed_success" });
+      },
+    );
+  });
+
+  describe("ambiguousZeroMetrics", () => {
+    it.each([
+      [
+        "an adapter that declares them",
+        registered(adapter({}, { ambiguousZeroMetrics: ["views"] })),
+        ["views"],
+      ],
+      ["an adapter that declares none", registered(adapter()), []],
+      ["an unregistered platform", new ProviderRegistry(), []],
+    ])("%s", (_example, registry, metrics) => {
+      expect(registry.ambiguousZeroMetrics("threads")).toEqual(metrics);
+    });
+  });
+
+  describe("capabilities", () => {
+    it("with no adapter", () => {
+      expect(new ProviderRegistry().capabilities()).toEqual(
+        roster.map(([platform, limit]) => unconfigured(platform, limit, true)),
+      );
+    });
+
+    it("with one adapter", () => {
+      expect(registered(adapter()).capabilities()).toEqual([
+        ...roster.slice(0, 4).map(([platform, limit]) => unconfigured(platform, limit, false)),
+        capability(),
+      ]);
+    });
+
+    it("hands out one frozen descriptor", () => {
+      const registry = new ProviderRegistry();
+
+      const [first] = registry.capabilities();
+
+      expect(registry.capabilities()[0]).toBe(first);
+      expect(
+        [first, first!.accepted_mime_types, first!.asset_types, first!.notes].map((value) =>
+          Object.isFrozen(value),
+        ),
+      ).toEqual([true, true, true, true]);
+    });
   });
 });
 
-describe("provider failure classification", () => {
-  it.each([
-    [{ status: 400 }, "deterministic", false],
-    [{ status: 401 }, "auth", false],
-    [{ status: 402 }, "quota", false],
-    [{ retryAfterSeconds: 30, status: 429 }, "rate_limit", true],
-    [{ timedOut: true }, "timeout", true],
-    [{ status: 503 }, "transient", true],
-    [{ sideEffectPossible: true, timedOut: true }, "ambiguous", false],
-  ] as const)("normalizes %o as %s", (input, expectedClass, expectedRetryable) => {
-    const failure = classifyProviderFailure(input);
-    expect(failure.classification).toBe(expectedClass);
-    expect(failure.retryable).toBe(expectedRetryable);
-    expect(failure.message).not.toMatch(/https?:|token|secret/i);
+describe("createProviderRegistryFromEnvironment", () => {
+  const registeredPlatforms = (environment: ProviderRegistryEnvironment) => {
+    const registry = createProviderRegistryFromEnvironment(environment);
+    return PLATFORM_IDS.filter((platform) => registry.get(platform));
+  };
+
+  it.each([undefined, "", "false"])("a live acceptance flag of %s", (flag) => {
+    const environment = {
+      APP_URL,
+      ...environments.threads,
+      THREADS_LIVE_ACCEPTED: flag,
+    };
+
+    expect(registeredPlatforms(environment)).toEqual([]);
   });
 
-  it("accepts only bounded safe codes and retry delays", () => {
-    const failure = classifyProviderFailure({
-      code: "Bearer secret https://provider.example/failure",
-      retryAfterSeconds: 100_000,
-      status: 429,
+  it.each(PLATFORM_IDS)("an accepted %s", (platform) => {
+    expect(registeredPlatforms({ APP_URL, ...environments[platform] })).toEqual([platform]);
+  });
+
+  it.each(PLATFORM_IDS)("the %s authorization callback", (platform) => {
+    const redirectUri = `https://app.example.com/api/v1/platforms/${platform}/callback`;
+    const registry = createProviderRegistryFromEnvironment({ APP_URL, ...environments[platform] });
+
+    const url = registry.get(platform)!.authorizationUrl!({
+      codeChallenge: "a".repeat(43),
+      redirectUri,
+      state: "state",
     });
-    expect(failure).toEqual({
-      classification: "rate_limit",
-      code: "provider_rate_limit",
-      message: "The provider rate limit has been reached.",
-      retryable: true,
+
+    expect(new URL(url).searchParams.get("redirect_uri")).toEqual(redirectUri);
+  });
+
+  it.each(PLATFORM_IDS)("an accepted %s without credentials", (platform) => {
+    const environment = { APP_URL, [`${platform.toUpperCase()}_LIVE_ACCEPTED`]: "true" };
+
+    expect(thrownBy(() => createProviderRegistryFromEnvironment(environment))).toEqual(
+      new TypeError(`accepted ${names[platform]} provider configuration is incomplete`),
+    );
+  });
+
+  it.each(PLATFORM_IDS)("a %s flag that is not boolean", (platform) => {
+    const name = `${platform.toUpperCase()}_LIVE_ACCEPTED`;
+
+    expect(thrownBy(() => createProviderRegistryFromEnvironment({ [name]: "yes" }))).toEqual(
+      new TypeError(`${name} must be true or false`),
+    );
+  });
+
+  it.each(["INSTAGRAM", "THREADS"])("%s engagement without publishing acceptance", (prefix) => {
+    const environment = { [`${prefix}_ENGAGEMENT_LIVE_ACCEPTED`]: "true" };
+
+    expect(thrownBy(() => createProviderRegistryFromEnvironment(environment))).toEqual(
+      new TypeError(`${prefix}_ENGAGEMENT_LIVE_ACCEPTED requires ${prefix}_LIVE_ACCEPTED=true`),
+    );
+  });
+
+  it.each(["INSTAGRAM", "THREADS"])("a %s engagement flag that is not boolean", (prefix) => {
+    const name = `${prefix}_ENGAGEMENT_LIVE_ACCEPTED`;
+
+    expect(thrownBy(() => createProviderRegistryFromEnvironment({ [name]: "yes" }))).toEqual(
+      new TypeError(`${name} must be true or false`),
+    );
+  });
+
+  it.each([
+    ["instagram", "INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED", undefined, false],
+    ["instagram", "INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED", "true", true],
+    ["threads", "THREADS_ENGAGEMENT_LIVE_ACCEPTED", undefined, false],
+    ["threads", "THREADS_ENGAGEMENT_LIVE_ACCEPTED", "true", true],
+  ] as const)("%s with %s %s", (platform, name, value, engagement) => {
+    const environment = { APP_URL, ...environments[platform], [name]: value };
+
+    const provider = createProviderRegistryFromEnvironment(environment).get(platform)!;
+
+    expect(provider.capability.comments).toEqual(engagement);
+    expect(provider.capability.reply).toEqual(engagement);
+    expect(typeof provider.listComments === "function").toEqual(engagement);
+    expect(typeof provider.reply === "function").toEqual(engagement);
+  });
+
+  it.each([
+    ["tiktok", true, ["image", "video"]],
+    ["youtube", true, ["video"]],
+  ] as const)("the %s capability", (platform, analytics, assetTypes) => {
+    const provider = createProviderRegistryFromEnvironment({
+      APP_URL,
+      ...environments[platform],
+    }).get(platform)!;
+
+    const { capability: registeredCapability } = provider;
+
+    expect({
+      analytics: registeredCapability.analytics,
+      asset_types: registeredCapability.asset_types,
+      comments: registeredCapability.comments,
+      connect_available: registeredCapability.connect_available,
+      publish: registeredCapability.publish,
+      reply: registeredCapability.reply,
+    }).toEqual({
+      analytics,
+      asset_types: assetTypes,
+      comments: false,
+      connect_available: true,
+      publish: true,
+      reply: false,
     });
-    expect(new ProviderAdapterError(failure)).toMatchObject({
-      failure,
-      message: failure.message,
-      name: "ProviderAdapterError",
-    });
-    expect(
-      normalizeProviderFailure({
-        classification: "auth",
-        code: "Bearer secret https://provider.example/failure",
-        message: "access_token=secret",
-        retryable: true,
-        retryAfterSeconds: 30,
-      }),
-    ).toEqual({
-      classification: "auth",
-      code: "provider_auth",
-      message: "The provider authorization must be refreshed.",
-      retryable: false,
-    });
+  });
+
+  it.each([
+    ["no APP_URL", undefined, "accepted provider configuration is incomplete"],
+    [
+      "an APP_URL with credentials",
+      "https://u:p@app.example.com",
+      "APP_URL must be HTTPS or an exact loopback HTTP URL",
+    ],
+  ])("%s", (_example, appUrl, message) => {
+    const environment = { APP_URL: appUrl, ...environments.threads };
+
+    expect(thrownBy(() => createProviderRegistryFromEnvironment(environment))).toEqual(
+      new TypeError(message),
+    );
+  });
+});
+
+describe("cachedProviderRegistryFromEnvironment", () => {
+  it("the same environment twice", () => {
+    const environment = { APP_URL, ...environments.threads };
+
+    const first = cachedProviderRegistryFromEnvironment(environment);
+
+    expect(cachedProviderRegistryFromEnvironment(environment)).toBe(first);
+  });
+
+  it("a flag changed on the same environment", () => {
+    const environment = { APP_URL, ...environments.threads };
+    cachedProviderRegistryFromEnvironment(environment);
+
+    environment.THREADS_LIVE_ACCEPTED = "false";
+
+    expect(cachedProviderRegistryFromEnvironment(environment).get("threads")).toEqual(undefined);
   });
 });

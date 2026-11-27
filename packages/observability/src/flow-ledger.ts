@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 
-import { errorDiagnostic, isLocalOrTestEnvironment, log } from "./log";
+import { isLocalOrTestEnvironment, log } from "./log";
+import { errorDiagnostic } from "./sanitize";
 
 export interface FlowLedgerQueryResult<Row> {
   readonly rows: readonly Row[];

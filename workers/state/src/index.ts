@@ -7,7 +7,6 @@ import type {
   OAuthSelectionCandidate,
   OAuthSelectionInit,
   OAuthSelectionPublic,
-  OAuthSelectionRecord,
   OAuthStateCoordinatorStub,
   OAuthStateRecord,
 } from "@meltiply/contracts";
@@ -25,6 +24,7 @@ import {
   STORAGE_DELETE_BATCH,
   validateOAuthSelectionCreateEffect,
   validateOAuthStateCreateEffect,
+  type OAuthSelectionRecord,
 } from "./oauth-state-rules";
 
 export {
@@ -32,6 +32,7 @@ export {
   OAuthStateStorageError,
   validateOAuthSelectionCreateEffect,
   validateOAuthStateCreateEffect,
+  type OAuthSelectionRecord,
 };
 
 interface StateWorkerEnv {

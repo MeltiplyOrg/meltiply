@@ -1,7 +1,6 @@
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import {
-  providerMediaPayload,
   signProviderMediaSignature,
   signProviderMediaUrl,
   verifyProviderMediaSignature,
@@ -15,14 +14,6 @@ const input = { appUrl: "https://app.meltiply.test", expiresAtSeconds, key, secr
 
 beforeAll(async () => {
   await signProviderMediaSignature(secret, expiresAtSeconds, key);
-});
-
-describe("providerMediaPayload", () => {
-  it("an expiry and a key", () => {
-    expect(providerMediaPayload(expiresAtSeconds, key)).toEqual(
-      "meltiply-provider-media-v1\n1800000000\norg-1/asset-1/original",
-    );
-  });
 });
 
 describe("signProviderMediaSignature", () => {
@@ -61,8 +52,8 @@ describe("signProviderMediaUrl", () => {
   });
 
   it("a key with a space outside ASCII", async () => {
-    expect(await signProviderMediaUrl({ ...input, key: "org 1/café.png" })).toEqual(
-      `https://app.meltiply.test/api/v1/provider-media/org%201/caf%C3%A9.png?expires=1800000000&signature=1OcnQGKYsuiB_HnI_aL9r1fPDoaEZF3mTJt1q4PDvmQ`,
+    expect(await signProviderMediaUrl({ ...input, key: "org 1/asset-1/post é.png" })).toEqual(
+      `https://app.meltiply.test/api/v1/provider-media/org%201/asset-1/post%20%C3%A9.png?expires=1800000000&signature=uQQaN_fjYPhi_0TdMZGZ2UJqISk0Y5KUr6GdMWg6j2w`,
     );
   });
 

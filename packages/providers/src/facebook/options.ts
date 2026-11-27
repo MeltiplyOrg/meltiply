@@ -2,7 +2,7 @@ import type { components } from "@meltiply/contracts/schema";
 import type { FacebookOptimizationGoal, FacebookPostType, FacebookPublishOptions } from "../types";
 import { providerIdentifier } from "../values";
 
-const postTypes: readonly FacebookPostType[] = [
+export const FACEBOOK_POST_TYPES: readonly FacebookPostType[] = [
   "feed",
   "video",
   "reel",
@@ -26,8 +26,26 @@ export const facebookOptimizationGoals: readonly FacebookOptimizationGoal[] = [
   "VIDEO_VIEWS_60S",
 ];
 
+export const FACEBOOK_OPTION_LIMITS = {
+  maxAbTestDurationSeconds: 604_800,
+  maxAbTestNameChars: 200,
+  maxCardDescriptionChars: 5_000,
+  maxCardNameChars: 200,
+  maxExperimentVideos: 4,
+  maxLinkCards: 5,
+  maxUrlChars: 2_048,
+  minAbTestDurationSeconds: 1_800,
+  minExperimentVideos: 2,
+  minLinkCards: 2,
+} as const;
+
 function pageLink(value: unknown, httpsOnly = false): boolean {
-  if (typeof value !== "string" || !value || value.length > 2048 || !URL.canParse(value))
+  if (
+    typeof value !== "string" ||
+    !value ||
+    value.length > FACEBOOK_OPTION_LIMITS.maxUrlChars ||
+    !URL.canParse(value)
+  )
     return false;
   const url = new URL(value);
   return (
@@ -37,18 +55,13 @@ function pageLink(value: unknown, httpsOnly = false): boolean {
   );
 }
 
-/**
- * Resolves the Page publishing method against the attachment kinds: one video
- * defaults to a Reel, anything else to feed. An explicit method never falls back;
- * incompatible choices return null.
- */
 export function resolveFacebookPostType(
   options: FacebookPublishOptions | undefined,
   kinds: readonly ("image" | "video" | null)[],
 ): FacebookPostType | null {
   const postType =
     options?.postType ?? (kinds.length === 1 && kinds[0] === "video" ? "reel" : "feed");
-  if (!postTypes.includes(postType) || kinds.includes(null)) return null;
+  if (!FACEBOOK_POST_TYPES.includes(postType) || kinds.includes(null)) return null;
   if (postType === "feed" && kinds.some((kind) => kind !== "image")) return null;
   if ((postType === "video" || postType === "reel") && (kinds.length !== 1 || kinds[0] !== "video"))
     return null;
@@ -71,21 +84,21 @@ export function resolveFacebookPostType(
     const ids = test?.experimentVideoIds;
     if (
       !test?.name?.trim() ||
-      test.name.length > 200 ||
+      test.name.length > FACEBOOK_OPTION_LIMITS.maxAbTestNameChars ||
       !test.controlVideoId ||
       !providerIdentifier(test.controlVideoId) ||
       !test.optimizationGoal ||
       !facebookOptimizationGoals.includes(test.optimizationGoal) ||
       !ids ||
-      ids.length < 2 ||
-      ids.length > 4 ||
+      ids.length < FACEBOOK_OPTION_LIMITS.minExperimentVideos ||
+      ids.length > FACEBOOK_OPTION_LIMITS.maxExperimentVideos ||
       new Set(ids).size !== ids.length ||
       ids.some((id) => !providerIdentifier(id)) ||
       !ids.includes(test.controlVideoId) ||
       (test.durationSeconds !== undefined &&
         (!Number.isInteger(test.durationSeconds) ||
-          test.durationSeconds < 1800 ||
-          test.durationSeconds > 604800))
+          test.durationSeconds < FACEBOOK_OPTION_LIMITS.minAbTestDurationSeconds ||
+          test.durationSeconds > FACEBOOK_OPTION_LIMITS.maxAbTestDurationSeconds))
     )
       return null;
   }
@@ -95,8 +108,9 @@ export function resolveFacebookPostType(
       (card) =>
         !pageLink(card.link) ||
         !pageLink(card.picture, true) ||
-        (card.name !== undefined && card.name.length > 200) ||
-        (card.description !== undefined && card.description.length > 5000),
+        (card.name !== undefined && card.name.length > FACEBOOK_OPTION_LIMITS.maxCardNameChars) ||
+        (card.description !== undefined &&
+          card.description.length > FACEBOOK_OPTION_LIMITS.maxCardDescriptionChars),
     )
   )
     return null;
@@ -104,7 +118,9 @@ export function resolveFacebookPostType(
     return null;
   if (
     options?.linkCards &&
-    (!options.link || options.linkCards.length < 2 || options.linkCards.length > 5)
+    (!options.link ||
+      options.linkCards.length < FACEBOOK_OPTION_LIMITS.minLinkCards ||
+      options.linkCards.length > FACEBOOK_OPTION_LIMITS.maxLinkCards)
   )
     return null;
   return postType;

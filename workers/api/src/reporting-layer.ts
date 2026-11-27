@@ -18,7 +18,7 @@ export interface ReportingDependencies {
 
 export function reportingLayer(
   env: ApiWorkerEnv,
-  dependencies: ReportingDependencies,
+  dependencies: ReportingDependencies = {},
   client?: EffectTransactionClient,
 ): Layer.Layer<ReportingService, never, never> {
   const injected = dependencies.reportingServiceLayer;

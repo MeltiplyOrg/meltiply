@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import type { ResolvedActor } from "../src/actor-resolution";
 import { createApiApp } from "../src/app";
 import { authPolicyHandler } from "../src/auth-policy";
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
 import type { ApiWorkerEnv } from "../src/env";
 
 const database = vi.hoisted(() => ({

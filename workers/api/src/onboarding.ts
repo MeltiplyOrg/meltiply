@@ -1,19 +1,19 @@
 import { Effect } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
 import { isoDateTime, type DatabaseError } from "@meltiply/domain";
-import type { Context, Hono } from "hono";
+import type { Hono } from "hono";
 
-import type { ResolvedActor } from "./actor-resolution";
-import { CoreApiError } from "./core-types";
+import type { ResolvedActor } from "./actor-types";
+import { CoreApiError } from "./api-errors";
+import { requireActor, requireInstallationOwnerEffect } from "./authorization";
 import { withSystemTransactionEffect } from "./database";
 import { fromPromise } from "./effect/route";
 import { runRouteEffect } from "./effect/runtime";
 import type { ApiWorkerEnvironment } from "./env";
 import { hashIdempotencyRequestEffect } from "./idempotency";
-import { idempotencyHeaders } from "./idempotent-response";
-import { jsonResponse } from "./responses";
+import { idempotentInstallationMutation } from "./idempotent-mutation";
+import { idempotencyHeaders, jsonResponse } from "./responses";
 import { idempotencyKey, jsonBody, onlyKeys } from "./validation";
-import { idempotentInstallationMutation } from "./installation-mutation";
 
 interface OnboardingProgress {
   completed_at: string | null;
@@ -73,19 +73,6 @@ function onboardingProgressEffect(
         } satisfies OnboardingProgress;
       }),
     );
-}
-
-function requireCurrentOwner(actor: ResolvedActor): Effect.Effect<void, CoreApiError> {
-  if (!actor.isInstallationOwner) {
-    return Effect.fail(
-      new CoreApiError(
-        403,
-        "installation_owner_required",
-        "The installation owner role is required.",
-      ),
-    );
-  }
-  return Effect.void;
 }
 
 function lockOnboardingRow(
@@ -157,21 +144,17 @@ function completeOnboardingEffect(
   });
 }
 
-function requestId(c: Context<ApiWorkerEnvironment>): string {
-  return c.get("requestId");
-}
-
 export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void {
   app.get("/api/v1/onboarding", (c) =>
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
-        yield* requireCurrentOwner(actor);
+        const actor = requireActor(c);
+        yield* requireInstallationOwnerEffect(actor);
         const progress = yield* withSystemTransactionEffect(c.env, (client) =>
           onboardingProgressEffect(client, actor),
         );
-        return jsonResponse(progress, 200, requestId(c));
+        return jsonResponse(progress, 200, c.get("requestId"));
       }),
     ),
   );
@@ -180,8 +163,8 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
-        yield* requireCurrentOwner(actor);
+        const actor = requireActor(c);
+        yield* requireInstallationOwnerEffect(actor);
         const body = yield* fromPromise(() => jsonBody(c));
         yield* fromPromise(() => onlyKeys(body, ["step"]));
         const step = yield* fromPromise(() => {
@@ -205,11 +188,10 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
           (client) =>
             Effect.map(saveOnboardingStepEffect(client, actor, step), (body) => ({
               body,
-              replayed: false,
               status: 200,
             })),
         );
-        return jsonResponse(result.body, result.status, requestId(c), {
+        return jsonResponse(result.body, result.status, c.get("requestId"), {
           ...idempotencyHeaders(result.replayed),
         });
       }),
@@ -220,8 +202,8 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
-        yield* requireCurrentOwner(actor);
+        const actor = requireActor(c);
+        yield* requireInstallationOwnerEffect(actor);
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({}));
         const result = yield* idempotentInstallationMutation(
@@ -233,11 +215,10 @@ export function registerOnboardingRoutes(app: Hono<ApiWorkerEnvironment>): void 
           (client) =>
             Effect.map(completeOnboardingEffect(client, actor), (body) => ({
               body,
-              replayed: false,
               status: 200,
             })),
         );
-        return jsonResponse(result.body, result.status, requestId(c), {
+        return jsonResponse(result.body, result.status, c.get("requestId"), {
           ...idempotencyHeaders(result.replayed),
         });
       }),

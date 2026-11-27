@@ -2,7 +2,7 @@ import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
 import { Effect } from "effect";
 
-import { CoreApiError } from "../core-types";
+import { CoreApiError } from "../api-errors";
 import {
   mapQueue,
   type QueuedDistribution,

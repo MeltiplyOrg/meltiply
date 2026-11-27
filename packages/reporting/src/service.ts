@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import type { DatabaseError } from "@meltiply/domain";
+import { isoDateTimeOrNull, type DatabaseError } from "@meltiply/domain";
 
 import type { ReportingConfiguration } from "./configuration";
 import { reportedAppVersion } from "./configuration";
@@ -24,7 +24,6 @@ import {
 import {
   categoryEffective,
   feedbackEffective,
-  isoOrNull,
   policySnapshot,
   retryDelaySeconds,
   type PreferencesRow,
@@ -125,7 +124,7 @@ function feedbackStateFrom(
     deliveryStatus: row ? deliveryStatus : "not_shared",
     discoverySource: row ? (row.discovery_source as DiscoverySource) : null,
     shared: row?.shared === true,
-    submittedAt: row ? isoOrNull(row.submitted_at) : null,
+    submittedAt: row ? isoDateTimeOrNull(row.submitted_at) : null,
   };
 }
 
@@ -450,7 +449,7 @@ export function createReportingServiceLive(
               }
               if (!categoryEffective(policy, current.category)) return "revoked" as const;
               const liveInterval = policy.categories[current.category].intervalStartedAt;
-              const rowInterval = isoOrNull(current.interval_started_at);
+              const rowInterval = isoDateTimeOrNull(current.interval_started_at);
               if (rowInterval === null || liveInterval !== rowInterval) {
                 return "stale_interval" as const;
               }

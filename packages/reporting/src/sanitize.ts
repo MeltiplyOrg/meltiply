@@ -1,4 +1,4 @@
-import { PLATFORM_IDS, isPlatform } from "@meltiply/domain";
+import { isoDateTimeOrNull, PLATFORM_IDS, isPlatform } from "@meltiply/domain";
 import type { Platform } from "@meltiply/domain";
 
 import {
@@ -15,7 +15,6 @@ import {
   type UsageReportInput,
 } from "./contracts";
 
-/** Event names published in the versioned catalog. */
 export const REPORTING_EVENTS = {
   diagnostics: "$exception",
   feedback: "meltiply_feedback_discovery_source",
@@ -96,18 +95,11 @@ const forbiddenValuePatterns: readonly RegExp[] = [
   /\?\S*=\S*/,
 ];
 
-/** Leaked-value detector applied to every string that reaches a payload. */
 export function containsForbiddenValue(value: string): boolean {
   return forbiddenValuePatterns.some((pattern) => pattern.test(value));
 }
 
-/**
- * Bounds a counter to a non-negative safe integer.
- *
- * A measurement that is missing, negative, fractional or non-finite is `null`
- * (unknown) rather than `0`, so an unsupported metric is never reported as an
- * observed zero.
- */
+/** Returns null for missing, negative, or non-finite values so unknown metrics never read as zero. */
 export function boundedCount(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
   const integer = Math.floor(value);
@@ -146,13 +138,13 @@ function engagementProperty(input: UsageReportInput): Record<string, unknown> | 
     const gauge: UsageEngagement | undefined = input.engagement[platform];
     if (!gauge || typeof gauge !== "object") continue;
     const measured: Record<string, unknown> = {};
-    for (const metric of ["views", "reactions", "comments", "shares"] as const) {
+    for (const metric of USAGE_ENGAGEMENT_METRICS) {
       const count = boundedCount(gauge[metric]);
       if (count !== null) measured[metric] = count;
     }
     const distributions = boundedCount(gauge.distributions);
     if (distributions !== null) measured.distributions = distributions;
-    const asOf = validTimestamp(gauge.asOf ?? null);
+    const asOf = isoDateTimeOrNull(gauge.asOf);
     if (asOf) measured.as_of = asOf;
     if (Object.keys(measured).length > 0) property[platform] = measured;
   }
@@ -166,13 +158,6 @@ function validReportDate(value: string): string | undefined {
   return parsed.toISOString().slice(0, 10) === value ? value : undefined;
 }
 
-function validTimestamp(value: string | null | undefined): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
-}
-
-/** Builds the allowlisted `meltiply_usage_daily` properties. */
 export function usageProperties(
   input: UsageReportInput,
   context: { appVersion: string; deploymentCategory: DeploymentCategory },
@@ -184,7 +169,7 @@ export function usageProperties(
   };
   const reportDate = validReportDate(input.reportDate);
   if (reportDate) properties.report_date = reportDate;
-  const interval = validTimestamp(input.expectedIntervalStartedAt);
+  const interval = isoDateTimeOrNull(input.expectedIntervalStartedAt);
   if (interval) properties.consent_interval_started_at = interval;
   const channels = channelsProperty(input);
   if (channels) properties.channels = channels;
@@ -192,7 +177,7 @@ export function usageProperties(
   if (publications) properties.publications = publications;
   const engagement = engagementProperty(input);
   if (engagement) properties.engagement = engagement;
-  const asOf = validTimestamp(input.engagementAsOf);
+  const asOf = isoDateTimeOrNull(input.engagementAsOf);
   if (asOf) properties.engagement_as_of = asOf;
   const coverage = input.engagementCoverage;
   if (coverage) {
@@ -226,21 +211,24 @@ interface SanitizedFrame {
 
 const approvedExceptionTypes: Record<string, true> = {
   AggregateError: true,
+  AssetPolicyError: true,
   DOMException: true,
   DatabaseError: true,
   Error: true,
   EvalError: true,
+  ForbiddenError: true,
+  InvalidRequestError: true,
   MailSubmissionError: true,
+  NotFoundError: true,
   ProviderAdapterError: true,
-  ProviderError: true,
   RangeError: true,
   ReferenceError: true,
-  ReportingInputError: true,
   StorageUnavailableError: true,
   SyntaxError: true,
+  TokenCipherUnavailableError: true,
+  TokenCiphertextError: true,
   TypeError: true,
   URIError: true,
-  ValidationError: true,
 };
 
 const releaseBundleNames: Record<string, true> = {
@@ -252,6 +240,7 @@ const releaseBundleNames: Record<string, true> = {
 const hashedAssetPath = /(?:^|\/)assets\/[A-Za-z0-9_-]*-([A-Za-z0-9_-]{8,64})\.(?:js|mjs)$/;
 
 const sourceModuleAreas: Readonly<Record<string, Readonly<Record<string, true>>>> = {
+  "frontend/": { app: true, public: true, shared: true },
   "packages/": {
     auth: true,
     contracts: true,
@@ -262,7 +251,6 @@ const sourceModuleAreas: Readonly<Record<string, Readonly<Record<string, true>>>
     reporting: true,
     secrets: true,
     storage: true,
-    ui: true,
   },
   "src/": {
     app: true,
@@ -273,7 +261,7 @@ const sourceModuleAreas: Readonly<Record<string, Readonly<Record<string, true>>>
     types: true,
     worker: true,
   },
-  "workers/": { api: true, automation: true },
+  "workers/": { api: true, automation: true, state: true },
 };
 
 const sourceToken = "source";
@@ -371,7 +359,6 @@ function sanitizeFrame(line: string): SanitizedFrame | undefined {
   return frame;
 }
 
-/** Sanitizes a raw stack into at most `maximumFrames` allowlisted frames. */
 export function sanitizedFrames(stack: string | undefined): SanitizedFrame[] {
   if (typeof stack !== "string" || stack.length === 0) return [];
   const frames: SanitizedFrame[] = [];
@@ -398,20 +385,7 @@ function sanitizeOperationCategory(value: unknown): OperationCategory {
   return isOperationCategory(value) ? value : "other";
 }
 
-/**
- * Builds the allowlisted `$exception` properties for PostHog Error Tracking.
- *
- * The shape mirrors what the maintained SDKs emit (see
- * posthog-js `ErrorPropertiesBuilder`): a `$exception_list` whose single entry
- * carries `type`, `value`, a `mechanism` with `type`/`handled`/`synthetic`/
- * `exception_id`, and a `stacktrace` of `raw` frames, plus
- * `$exception_level: "error"`.
- *
- * The exception `value` is the fixed category label rather than the runtime
- * message. Exception grouping therefore keys on the sanitized type and frame
- * locations — which are what identify a defect — while a Post title, email, URL
- * or SQL parameter cannot ride along in a group name.
- */
+/** Matches PostHog Error Tracking's `$exception_list` schema; `value` is the fixed category, never the raw message. */
 export function diagnosticProperties(
   input: DiagnosticReportInput,
   context: { appVersion: string; deploymentCategory: DeploymentCategory },
@@ -450,7 +424,6 @@ export function diagnosticProperties(
   return properties;
 }
 
-/** Builds the one-time discovery-source attribution properties. */
 export function feedbackProperties(
   source: string,
   context: { appVersion: string; deploymentCategory: DeploymentCategory },
@@ -522,13 +495,6 @@ function exceptionViolation(exceptions: unknown): string | undefined {
   return undefined;
 }
 
-/**
- * Validates an assembled payload against the property and value allowlist.
- *
- * Runs immediately before transport, so the transport can only ever submit a
- * payload this module assembled. Any violation means a bug in payload
- * construction; the caller discards the row rather than sending it.
- */
 export function payloadViolation(properties: Record<string, unknown>): string | undefined {
   const collected: string[] = [];
   const nested = collectPayloadStrings(properties, collected, 0);

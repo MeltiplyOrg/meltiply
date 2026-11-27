@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { ResolvedActor } from "../src/actor-resolution";
 import { createApiApp, responseErrorCode } from "../src/app";
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
 import type { ApiWorkerEnv, AutomationRelayStub, OAuthStateStub } from "../src/env";
 import { bindingStatuses, requiresEmailVerification, validateProductionBindings } from "../src/env";
 import { logRecords } from "./log-records";

@@ -4,7 +4,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createBrandProfileService } from "../src/brand-profile-service";
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
 import {
   FakeBrandProfileRepository,
   FakeBrandProfileStore,

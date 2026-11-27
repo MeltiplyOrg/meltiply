@@ -2,11 +2,11 @@ import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
 import { Effect } from "effect";
 
-import { CoreApiError, type IdempotentResult } from "./core-types";
+import { CoreApiError, type TenantServiceError } from "./api-errors";
+import type { IdempotentResult } from "./core-types";
 import { isPendingDistribution, settledDistributionStatuses } from "./distribution-service";
 import type { ApiWorkerEnv } from "./env";
 import { hashIdempotencyRequestEffect, idempotentMutation } from "./idempotency";
-import type { PostServiceError } from "./post-types";
 import {
   isQueueInScope,
   mapQueue,
@@ -25,8 +25,12 @@ import type {
   PublishingQueueTransaction,
 } from "./repositories/publishing-queue-repository";
 import { requireSupportedTimezone } from "./repositories/tenant-repository";
+import type { QueueConfiguration } from "./validation";
 
 type Schemas = components["schemas"];
+type QueuePatchInput = Pick<QueueConfiguration, "brand_profile_id"> &
+  Partial<Omit<QueueConfiguration, "brand_profile_id">>;
+type QueueScopeInput = Pick<QueueConfiguration, "brand_profile_id">;
 
 export interface PublishingQueueApiService {
   list(
@@ -35,20 +39,32 @@ export interface PublishingQueueApiService {
     brandProfileId: string,
     limit: number,
     cursor?: string,
-  ): Effect.Effect<Schemas["QueueListResponse"], PostServiceError>;
+  ): Effect.Effect<Schemas["QueueListResponse"], TenantServiceError>;
   get(
     env: ApiWorkerEnv,
     session: SessionClaims,
     id: string,
-  ): Effect.Effect<PublishingQueue, PostServiceError>;
-  mutate(
+  ): Effect.Effect<PublishingQueue, TenantServiceError>;
+  createQueue(
     env: ApiWorkerEnv,
     session: SessionClaims,
-    action: "create" | "update" | "delete",
-    id: string | undefined,
-    input: QueueMutationInput,
+    input: QueueConfiguration,
     key: string,
-  ): Effect.Effect<IdempotentResult<PublishingQueue | null>, PostServiceError>;
+  ): Effect.Effect<IdempotentResult<PublishingQueue>, TenantServiceError>;
+  updateQueue(
+    env: ApiWorkerEnv,
+    session: SessionClaims,
+    id: string,
+    input: QueuePatchInput,
+    key: string,
+  ): Effect.Effect<IdempotentResult<PublishingQueue>, TenantServiceError>;
+  deleteQueue(
+    env: ApiWorkerEnv,
+    session: SessionClaims,
+    id: string,
+    input: QueueScopeInput,
+    key: string,
+  ): Effect.Effect<IdempotentResult<null>, TenantServiceError>;
   removePost(
     env: ApiWorkerEnv,
     session: SessionClaims,
@@ -56,7 +72,7 @@ export interface PublishingQueueApiService {
     postId: string,
     brandProfileId: string,
     key: string,
-  ): Effect.Effect<IdempotentResult<Schemas["Post"]>, PostServiceError>;
+  ): Effect.Effect<IdempotentResult<Schemas["Post"]>, TenantServiceError>;
 }
 
 function readQueue(tx: PublishingQueueTransaction, id: string, brandProfileId?: string) {
@@ -92,6 +108,47 @@ export function createPublishingQueueApiService({
 }: {
   repository?: PublishingQueueRepositoryProvider;
 } = {}): PublishingQueueApiService {
+  const runMutation = <Value>(
+    env: ApiWorkerEnv,
+    session: SessionClaims,
+    action: "create" | "update" | "delete",
+    id: string | undefined,
+    input: QueueMutationInput,
+    key: string,
+    execute: (
+      tx: PublishingQueueTransaction,
+      organizationId: string,
+    ) => Effect.Effect<Value, TenantServiceError>,
+  ): Effect.Effect<IdempotentResult<Value>, TenantServiceError> =>
+    Effect.gen(function* () {
+      const hash = yield* hashIdempotencyRequestEffect(JSON.stringify({ action, id, input }));
+      return yield* repository(env).transaction(session, (tx) =>
+        Effect.gen(function* () {
+          const organizationId = yield* tx.activeOrganizationId();
+          const rejection = queueConfigurationRoleError(yield* tx.activeRole());
+          if (rejection) return yield* Effect.fail(rejection);
+          const status = action === "create" ? 201 : action === "delete" ? 204 : 200;
+          return yield* idempotentMutation<Value, TenantServiceError>(
+            tx,
+            organizationId,
+            `queue-${action}`,
+            key,
+            hash,
+            status,
+            () =>
+              Effect.gen(function* () {
+                yield* tx.lockOrganization(organizationId);
+                yield* tx.requireActiveBrandProfile(organizationId, input.brand_profile_id);
+                if (input.timezone !== undefined) {
+                  yield* requireSupportedTimezone(tx, input.timezone);
+                }
+                return yield* execute(tx, organizationId);
+              }),
+          );
+        }),
+      );
+    });
+
   return {
     list(env, session, brandProfileId, limit, cursor) {
       return repository(env).transaction(session, (tx) =>
@@ -108,43 +165,22 @@ export function createPublishingQueueApiService({
         readQueue(tx, id).pipe(Effect.map(mapQueue)),
       );
     },
-    mutate(env, session, action, id, input, key) {
-      return Effect.gen(function* () {
-        const hash = yield* hashIdempotencyRequestEffect(JSON.stringify({ action, id, input }));
-        return yield* repository(env).transaction(session, (tx) =>
-          Effect.gen(function* () {
-            const organizationId = yield* tx.activeOrganizationId();
-            const rejection = queueConfigurationRoleError(yield* tx.activeRole());
-            if (rejection) return yield* Effect.fail(rejection);
-            const scope = `queue-${action}`;
-            const status = action === "create" ? 201 : action === "delete" ? 204 : 200;
-            return yield* idempotentMutation<PublishingQueue | null, PostServiceError>(
-              tx,
-              organizationId,
-              scope,
-              key,
-              hash,
-              status,
-              () =>
-                Effect.gen(function* () {
-                  yield* tx.lockOrganization(organizationId);
-                  yield* tx.requireActiveBrandProfile(organizationId, input.brand_profile_id);
-                  if (input.timezone !== undefined) {
-                    yield* requireSupportedTimezone(tx, input.timezone);
-                  }
-                  if (action === "create") {
-                    return yield* tx.insertQueue(organizationId, input);
-                  }
-                  if (action === "delete") {
-                    return yield* retireQueue(tx, id!, input.brand_profile_id);
-                  }
-                  const current = yield* readQueue(tx, id!, input.brand_profile_id);
-                  return yield* tx.updateQueue(id!, queueChanges(current, input));
-                }),
-            );
-          }),
-        );
-      });
+    createQueue(env, session, input, key) {
+      return runMutation(env, session, "create", undefined, input, key, (tx, organizationId) =>
+        tx.insertQueue(organizationId, input),
+      );
+    },
+    updateQueue(env, session, id, input, key) {
+      return runMutation(env, session, "update", id, input, key, (tx) =>
+        Effect.flatMap(readQueue(tx, id, input.brand_profile_id), (current) =>
+          tx.updateQueue(id, queueChanges(current, input)),
+        ),
+      );
+    },
+    deleteQueue(env, session, id, input, key) {
+      return runMutation(env, session, "delete", id, input, key, (tx) =>
+        retireQueue(tx, id, input.brand_profile_id),
+      );
     },
     removePost(env, session, queueId, postId, brandProfileId, key) {
       return Effect.gen(function* () {
@@ -156,7 +192,7 @@ export function createPublishingQueueApiService({
             const organizationId = yield* tx.activeOrganizationId();
             const rejection = queueRemovalRoleError(yield* tx.activeRole());
             if (rejection) return yield* Effect.fail(rejection);
-            return yield* idempotentMutation<Schemas["Post"], PostServiceError>(
+            return yield* idempotentMutation<Schemas["Post"], TenantServiceError>(
               tx,
               organizationId,
               "queue-remove-post",

@@ -14,7 +14,7 @@ const database = vi.hoisted(() => ({
 vi.mock("../src/database", () => database);
 
 import { createAssetApiService } from "../src/asset-service";
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
 import { createDistributionMethods } from "../src/distribution-service";
 import { createPostApiService } from "../src/post-service";
 

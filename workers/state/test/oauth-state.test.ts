@@ -1,13 +1,9 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import type {
-  OAuthSelectionCandidate,
-  OAuthSelectionRecord,
-  OAuthStateRecord,
-} from "@meltiply/contracts";
+import type { OAuthSelectionCandidate, OAuthStateRecord } from "@meltiply/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import stateWorker, { type OAuthStateCoordinator } from "../src/index";
+import stateWorker, { type OAuthSelectionRecord, type OAuthStateCoordinator } from "../src/index";
 
 const candidate = (id: string, encryptedConnection = `sealed-${id}`): OAuthSelectionCandidate => ({
   account: {

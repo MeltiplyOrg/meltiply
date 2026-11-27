@@ -3,7 +3,7 @@ import type { DatabaseError } from "@meltiply/domain";
 import { ProviderService, type ProviderBroadcastInfo } from "@meltiply/providers";
 import { Effect } from "effect";
 
-import { CoreApiError } from "./core-types";
+import { CoreApiError } from "./api-errors";
 import type { ApiWorkerEnv } from "./env";
 import { hashIdempotencyRequestEffect } from "./idempotency";
 import {
@@ -140,4 +140,38 @@ export function broadcastControlEffect(
     });
     return { ended: true as const };
   });
+}
+
+export function readBroadcastEffect(
+  env: ApiWorkerEnv,
+  session: SessionClaims,
+  distributionId: string,
+  requestId: string,
+  options: BroadcastControlOptions = {},
+): Effect.Effect<ProviderBroadcastInfo, CoreApiError | DatabaseError, ProviderService> {
+  return broadcastControlEffect(
+    env,
+    session,
+    distributionId,
+    requestId,
+    { kind: "read" },
+    options,
+  ).pipe(Effect.map((result) => result as ProviderBroadcastInfo));
+}
+
+export function endBroadcastEffect(
+  env: ApiWorkerEnv,
+  session: SessionClaims,
+  distributionId: string,
+  requestId: string,
+  options: BroadcastControlOptions = {},
+): Effect.Effect<{ ended: true }, CoreApiError | DatabaseError, ProviderService> {
+  return broadcastControlEffect(
+    env,
+    session,
+    distributionId,
+    requestId,
+    { key: distributionId, kind: "end" },
+    options,
+  ).pipe(Effect.map((result) => result as { ended: true }));
 }

@@ -13,7 +13,7 @@ import type { Context } from "hono";
 
 import { runBackgroundContinuation } from "./background-continuation";
 import type { ApiWorkerEnvironment } from "./env";
-import { reportingLayer, type ReportingDependencies } from "./reporting-layer";
+import { reportingLayer } from "./reporting-layer";
 
 const operationPrefixes: readonly (readonly [string, OperationCategory])[] = [
   ["/api/v1/installation/reporting", "reporting"],
@@ -28,6 +28,7 @@ const operationPrefixes: readonly (readonly [string, OperationCategory])[] = [
   ["/api/v1/assets", "assets"],
   ["/api/v1/asset-upload-sessions", "assets"],
   ["/api/v1/queues", "publish"],
+  ["/api/v1/publishing-preferences", "publish"],
   ["/api/v1/posts", "publish"],
   ["/api/v1/distributions", "publish"],
   ["/api/v1/calendar", "publish"],
@@ -60,16 +61,11 @@ export function apiBoundaryReport(cause: unknown, path: string): DiagnosticRepor
   });
 }
 
-function scheduleDiagnostic(
-  c: Context<ApiWorkerEnvironment>,
-  input: DiagnosticReportInput,
-  dependencies: ReportingDependencies,
-  event: string,
-): void {
+function scheduleDiagnostic(c: Context<ApiWorkerEnvironment>, input: DiagnosticReportInput): void {
   if (input.operation === "reporting") return;
   runBackgroundContinuation<{ accepted: boolean; decision: string }>(c, {
     errorCode: "diagnostic_report_failed",
-    event,
+    event: "diagnostic_invocation_failure",
     perform: () =>
       Effect.runPromise(
         Effect.flatMap(ReportingService, (service: ReportingServiceShape) =>
@@ -79,7 +75,7 @@ function scheduleDiagnostic(
             yield* service.deliverPending({ limit: REPORTING_MAX_DELIVERY_BATCH });
             return { accepted: true, decision };
           }),
-        ).pipe(Effect.provide(reportingLayer(c.env, dependencies))),
+        ).pipe(Effect.provide(reportingLayer(c.env))),
       ),
     onSuccess: (result) => ({
       diagnostic_accepted: result.accepted,
@@ -100,7 +96,7 @@ export function scheduleInvocationFailureDiagnostic(
   const provider = extractProviderFailureClass(failure) !== undefined;
   if (status < 500 && !provider) return;
   try {
-    scheduleDiagnostic(c, apiBoundaryReport(failure, path), {}, "diagnostic_invocation_failure");
+    scheduleDiagnostic(c, apiBoundaryReport(failure, path));
   } catch (reportingCause) {
     log(
       "warn",

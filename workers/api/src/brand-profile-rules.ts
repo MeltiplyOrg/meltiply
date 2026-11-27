@@ -1,7 +1,7 @@
 import type { components } from "@meltiply/contracts/schema";
 import { isoDateTime, type DatabaseError } from "@meltiply/domain";
 
-import { CoreApiError } from "./core-types";
+import { CoreApiError } from "./api-errors";
 
 export type BrandProfile = components["schemas"]["BrandProfile"];
 

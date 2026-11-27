@@ -1,4 +1,4 @@
-import { isHttp404, malformed, rejected } from "../failures";
+import { isHttp404, malformed, rejected, requiredIdentifier } from "../failures";
 import type { ProviderHttpClient } from "../http";
 import { failedWriteResult, type ConfirmedSuccess } from "../results";
 import type {
@@ -20,7 +20,6 @@ import {
   providerIdentifier,
   record,
   required,
-  requiredIdentifier,
   requireIdempotencyKey,
 } from "../values";
 import { resolveFacebookPostType } from "./options";
@@ -38,7 +37,6 @@ import {
   facebookAccountId,
   facebookNativeDraft,
   facebookOperationId,
-  facebookPublishedPost,
   facebookPublishedVideo,
   graphUrl,
   nodeUrl,
@@ -442,7 +440,7 @@ export function createFacebookPublish(http: ProviderHttpClient) {
           );
           const id = providerIdentifier(body?.id);
           if (!id || !id.startsWith(`${pageId}_`)) throw malformed(true);
-          return draft ? facebookNativeDraft("post_draft", id) : facebookPublishedPost(id);
+          return draft ? facebookNativeDraft("post_draft", id) : facebookPublishedVideo("post", id);
         }
         case "video":
         case "slideshow":

@@ -3,8 +3,13 @@ import type { EffectTransactionClient } from "@meltiply/database";
 import type { ActiveOrganizationRequiredError, DatabaseError } from "@meltiply/domain";
 import { Effect } from "effect";
 
-import type { CoreApiError, IdempotentResult } from "./core-types";
-import { activeOrganizationIdEffect, withTenantTransactionEffect } from "./database";
+import type { CoreApiError } from "./api-errors";
+import type { IdempotentResult } from "./core-types";
+import {
+  activeOrganizationIdEffect,
+  withSystemTransactionEffect,
+  withTenantTransactionEffect,
+} from "./database";
 import type { ApiWorkerEnv } from "./env";
 import {
   clientIdempotencyLedger,
@@ -42,13 +47,14 @@ export function withTenantIdempotentMutation<T, E = CoreApiError | DatabaseError
   requestPayload: string,
   status: number,
   run: (client: EffectTransactionClient, organizationId: string) => Effect.Effect<T, E>,
+  tenantTransaction = withTenantTransactionEffect,
 ): Effect.Effect<
   IdempotentResult<T>,
   E | ActiveOrganizationRequiredError | CoreApiError | DatabaseError
 > {
   return Effect.gen(function* () {
     const requestHash = yield* hashIdempotencyRequestEffect(requestPayload);
-    return yield* withTenantTransactionEffect(env, session, (client) =>
+    return yield* tenantTransaction(env, session, (client) =>
       Effect.gen(function* () {
         const organizationId = yield* activeOrganizationIdEffect(client);
         return yield* withIdempotentMutation(
@@ -65,7 +71,13 @@ export function withTenantIdempotentMutation<T, E = CoreApiError | DatabaseError
   });
 }
 
-export function withIdempotentMutationStatus(
+type IdempotentMutationOutcome<Extra extends Record<string, unknown> = Record<never, never>> =
+  | { body: unknown; replayed: true; status: number }
+  | ({ body: unknown; replayed: false; status: number } & Extra);
+
+export function withIdempotentMutationStatus<
+  Extra extends Record<string, unknown> = Record<never, never>,
+>(
   client: EffectTransactionClient,
   organizationId: string,
   operation: string,
@@ -73,11 +85,8 @@ export function withIdempotentMutationStatus(
   requestHash: string,
   run: (
     client: EffectTransactionClient,
-  ) => Effect.Effect<{ body: unknown; status: number }, CoreApiError | DatabaseError>,
-): Effect.Effect<
-  { body: unknown; replayed: boolean; status: number },
-  CoreApiError | DatabaseError
-> {
+  ) => Effect.Effect<{ body: unknown; status: number } & Extra, CoreApiError | DatabaseError>,
+): Effect.Effect<IdempotentMutationOutcome<Extra>, CoreApiError | DatabaseError> {
   return Effect.gen(function* () {
     const prior = yield* reserveIdempotencyEffect(
       client,
@@ -89,7 +98,7 @@ export function withIdempotentMutationStatus(
     if (prior) {
       return {
         body: prior.response_body,
-        replayed: true,
+        replayed: true as const,
         status: prior.response_status ?? 200,
       };
     }
@@ -102,6 +111,23 @@ export function withIdempotentMutationStatus(
       produced.status,
       produced.body,
     );
-    return { ...produced, replayed: false };
+    return { ...produced, replayed: false as const };
   });
+}
+
+export function idempotentInstallationMutation<
+  Extra extends Record<string, unknown> = Record<never, never>,
+>(
+  env: ApiWorkerEnv,
+  organizationId: string,
+  operation: string,
+  key: string,
+  requestHash: string,
+  run: (
+    client: EffectTransactionClient,
+  ) => Effect.Effect<{ body: unknown; status: number } & Extra, CoreApiError | DatabaseError>,
+): Effect.Effect<IdempotentMutationOutcome<Extra>, CoreApiError | DatabaseError> {
+  return withSystemTransactionEffect(env, (client) =>
+    withIdempotentMutationStatus(client, organizationId, operation, key, requestHash, run),
+  );
 }

@@ -30,11 +30,6 @@ export function unknownResult(code: string, providerOperationId?: string): Unkno
   };
 }
 
-/**
- * Projects a failed remote write: uncertain failures become `unknown` under
- * `uncertainOperationId`, the rest confirmed failures under `confirmedOperationId`.
- * Rethrows anything that is not a ProviderAdapterError.
- */
 export function failedWriteResult(
   cause: unknown,
   uncertainOperationId?: string,

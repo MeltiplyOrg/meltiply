@@ -1,8 +1,41 @@
-import { can } from "@meltiply/domain";
+import { Effect } from "effect";
+import { can, isWorkspaceRole, type WorkspaceRole } from "@meltiply/domain";
 import type { Context } from "hono";
 
+import type { ResolvedActor } from "./actor-types";
+import { CoreApiError } from "./api-errors";
 import type { ApiWorkerEnvironment } from "./env";
 import { errorResponse } from "./responses";
+
+export function normalizeWorkspaceRole(role: string): WorkspaceRole {
+  return isWorkspaceRole(role) ? role : "viewer";
+}
+
+export function requireActor(c: Context<ApiWorkerEnvironment>): ResolvedActor {
+  const actor = c.get("actor");
+  if (!actor) {
+    throw new CoreApiError(401, "authentication_required", "Authentication is required.");
+  }
+  return actor;
+}
+
+export function requireInstallationOwnerEffect(
+  actor: ResolvedActor,
+  message = "The installation owner role is required.",
+): Effect.Effect<void, CoreApiError> {
+  return actor.isInstallationOwner
+    ? Effect.void
+    : Effect.fail(new CoreApiError(403, "installation_owner_required", message));
+}
+
+export function requireWorkspaceAdminEffect(
+  actor: ResolvedActor,
+  message = "The workspace admin role is required.",
+): Effect.Effect<void, CoreApiError> {
+  return actor.role === "admin" || actor.isInstallationOwner
+    ? Effect.void
+    : Effect.fail(new CoreApiError(403, "workspace_admin_required", message));
+}
 
 const queueMembershipPathPattern = /^\/api\/v1\/queues\/[^/]+\/posts\/[^/]+$/;
 

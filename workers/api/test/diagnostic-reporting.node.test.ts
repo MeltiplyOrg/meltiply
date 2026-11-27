@@ -3,7 +3,7 @@ import { diagnosticProperties, payloadViolation } from "@meltiply/reporting";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
 import { apiBoundaryReport, operationForPath } from "../src/diagnostic-reporting";
 import { runWorkerEffect } from "../src/effect/runtime";
 import { fakeHonoContext } from "../test-support/fakes";

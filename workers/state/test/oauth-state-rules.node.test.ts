@@ -2,7 +2,6 @@ import type {
   OAuthSelectionAccount,
   OAuthSelectionCandidate,
   OAuthSelectionInit,
-  OAuthSelectionRecord,
   OAuthStateRecord,
 } from "@meltiply/contracts";
 import { Effect } from "effect";
@@ -22,6 +21,7 @@ import {
   selectionEvidenceExpiry,
   validateOAuthSelectionCreateEffect,
   validateOAuthStateCreateEffect,
+  type OAuthSelectionRecord,
 } from "../src/oauth-state-rules";
 
 const NOW = 1_700_000_000_000;

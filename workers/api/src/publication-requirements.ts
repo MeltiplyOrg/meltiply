@@ -1,5 +1,5 @@
 import type { SessionClaims } from "@meltiply/auth";
-import type { DatabaseError, Platform } from "@meltiply/domain";
+import { isAccountUsable, type DatabaseError, type Platform } from "@meltiply/domain";
 import { Effect, Exit } from "effect";
 import {
   ProviderAdapterError,
@@ -8,9 +8,10 @@ import {
   type ProviderRegistry,
 } from "@meltiply/providers";
 
-import { CoreApiError } from "./core-types";
+import { CoreApiError } from "./api-errors";
 import { withTenantTransactionEffect } from "./database";
 import type { ApiWorkerEnv } from "./env";
+import { SingleFlightGroup, type SingleFlight } from "./single-flight";
 import { tokenCipherFor } from "./token-credentials";
 
 export interface PublicationAccountRow extends Record<string, unknown> {
@@ -59,33 +60,15 @@ function providerFailure(cause: ProviderAdapterError): CoreApiError {
   }
 }
 
-function isUnavailable(account: PublicationAccountRow, now: Date): boolean {
-  if (account.revoked_at || !["connected", "expiring"].includes(account.connection_status)) {
-    return true;
-  }
-  if (!account.token_expires_at) return false;
-  const expiresAt = new Date(account.token_expires_at);
-  return !Number.isFinite(expiresAt.getTime()) || expiresAt <= now;
-}
-
 const maxPendingRequirementReads = 32;
 
 type RequirementReadExit = Exit.Exit<ProviderPublicationRequirements, CoreApiError>;
-
-interface PendingRequirementRead {
-  readonly promise: Promise<RequirementReadExit>;
-  readonly settle: (exit: RequirementReadExit) => void;
-}
+type RequirementReadFlight = SingleFlight<RequirementReadExit>;
 
 interface RequirementReadOwner {
   readonly namespace: string;
   readonly dataSource: string | undefined;
-  readonly pending: Map<string, PendingRequirementRead>;
-}
-
-interface RequirementReadFlight extends PendingRequirementRead {
-  readonly leader: boolean;
-  readonly release: () => void;
+  readonly flights: SingleFlightGroup<RequirementReadExit>;
 }
 
 const requirementRegistryIds = new WeakMap<ProviderRegistry, number>();
@@ -149,26 +132,15 @@ function acquireRequirementRead(
 ): RequirementReadFlight | undefined {
   let owner = requirementReadOwner;
   if (owner?.namespace !== namespace || owner.dataSource !== dataSource) {
-    owner?.pending.clear();
-    owner = { namespace, dataSource, pending: new Map() };
+    owner?.flights.clear();
+    owner = {
+      namespace,
+      dataSource,
+      flights: new SingleFlightGroup<RequirementReadExit>(maxPendingRequirementReads),
+    };
     requirementReadOwner = owner;
   }
-  const existing = owner.pending.get(key);
-  if (existing) return { ...existing, leader: false, release: () => undefined };
-  if (owner.pending.size >= maxPendingRequirementReads) return undefined;
-  let settle!: PendingRequirementRead["settle"];
-  const promise = new Promise<RequirementReadExit>((resolve) => {
-    settle = resolve;
-  });
-  const entry: PendingRequirementRead = { promise, settle };
-  owner.pending.set(key, entry);
-  return {
-    ...entry,
-    leader: true,
-    release: () => {
-      if (owner.pending.get(key) === entry) owner.pending.delete(key);
-    },
-  };
+  return owner.flights.acquire(key);
 }
 
 function leadRequirementRead(
@@ -257,7 +229,7 @@ export function getPublicationRequirementsEffect(
         new CoreApiError(404, "not_found", "The platform account was not found."),
       );
     }
-    if (isUnavailable(account, now)) {
+    if (!isAccountUsable(account, now.getTime())) {
       return yield* Effect.fail(
         new CoreApiError(409, "invalid_state", "The platform account must be reconnected."),
       );

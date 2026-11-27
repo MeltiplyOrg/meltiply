@@ -11,12 +11,11 @@ import type { AutomationEnv } from "./env";
 
 export { flowDatabaseAvailable, flowExplorerEnabled };
 
-export type AutomationFlowRecorder = FlowLedgerRecorder;
+const recorderCache = new WeakMap<object, FlowLedgerRecorder>();
 
-const recorderCache = new WeakMap<AutomationEnv, AutomationFlowRecorder>();
-
-export function flowRecorderFor(env: AutomationEnv): AutomationFlowRecorder {
-  const cached = recorderCache.get(env);
+export function flowRecorderFor(env: AutomationEnv): FlowLedgerRecorder {
+  const cacheKey: object = env.DB_SYSTEM ?? env;
+  const cached = recorderCache.get(cacheKey);
   if (cached) return cached;
   const recorder = createFlowLedgerRecorder({
     env,
@@ -28,6 +27,6 @@ export function flowRecorderFor(env: AutomationEnv): AutomationFlowRecorder {
     },
     service: "automation",
   });
-  recorderCache.set(env, recorder);
+  recorderCache.set(cacheKey, recorder);
   return recorder;
 }

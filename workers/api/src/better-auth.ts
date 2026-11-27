@@ -1,4 +1,5 @@
 import { createBetterAuth, type BetterAuthInstance } from "@meltiply/auth";
+import { isDevelopmentEnvironment, isRequestScopedDatabasePool } from "@meltiply/domain";
 import {
   DEVICE_CLIENT_ID,
   DEVICE_CODE_EXPIRES_IN,
@@ -40,8 +41,8 @@ interface RateLimitHitRow extends Record<string, unknown> {
 }
 
 export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstance> {
-  const isLocalOrTest = env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test";
-  const requestOwnedPool = env.ENVIRONMENT === "local" || env.DATABASE_POOL_MODE === "request";
+  const isLocalOrTest = isDevelopmentEnvironment(env.ENVIRONMENT);
+  const requestOwnedPool = isRequestScopedDatabasePool(env);
   const secret =
     env.BETTER_AUTH_SECRET?.trim() ||
     (isLocalOrTest ? "meltiply-local-auth-secret-32-chars-long" : undefined);
@@ -138,7 +139,7 @@ interface AuthRateLimitRule {
   windowSeconds: number;
 }
 
-const AUTH_RATE_LIMITS: Record<string, AuthRateLimitRule> = {
+const AUTH_RATE_LIMITS = {
   generic: { maxAttempts: 120, windowSeconds: 60 },
   "request-password-reset": { maxAttempts: 5, windowSeconds: 3600 },
   "reset-password": { maxAttempts: 10, windowSeconds: 600 },
@@ -152,7 +153,9 @@ const AUTH_RATE_LIMITS: Record<string, AuthRateLimitRule> = {
   "device-verify": { maxAttempts: 30, windowSeconds: 600 },
   "device-approval": { maxAttempts: 20, windowSeconds: 600 },
   "device-token": { maxAttempts: 1, windowSeconds: 5 },
-};
+} as const satisfies Record<string, AuthRateLimitRule>;
+
+export type AuthRateLimitAction = keyof typeof AUTH_RATE_LIMITS;
 
 interface AuthRateLimitSubject {
   rule: AuthRateLimitRule;
@@ -196,10 +199,10 @@ function clientIp(request: Request): string | undefined {
 
 export async function checkAuthRateLimit(
   env: ApiWorkerEnv,
-  action: string,
+  action: AuthRateLimitAction,
   request: Request,
 ): Promise<AuthRateLimitResult> {
-  const rule = AUTH_RATE_LIMITS[action] ?? AUTH_RATE_LIMITS.generic!;
+  const rule = AUTH_RATE_LIMITS[action];
   const ip = clientIp(request);
   const ipSubject = `ip:${await sha256Hex(ip ?? "unknown")}`;
 

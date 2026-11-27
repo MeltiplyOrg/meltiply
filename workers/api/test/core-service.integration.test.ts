@@ -7,6 +7,7 @@ import {
   type Platform,
   type PlatformCapability,
   COMMUNITY_LIMITS,
+  isoPeriodKey,
 } from "@meltiply/domain";
 import {
   classifyProviderFailure,
@@ -64,7 +65,6 @@ import { revokeOAuthConnectionEffect } from "../src/oauth-revoke";
 import { getPublicationRequirementsEffect } from "../src/publication-requirements";
 import { createOperatorReconciliationService } from "../src/operator-reconciliation";
 import { tokenCipherFor } from "../src/token-credentials";
-import { isoPeriodKey } from "../src/time";
 
 function saveOAuthConnection(...args: Parameters<typeof saveOAuthConnectionEffect>): Promise<void> {
   return Effect.runPromise(saveOAuthConnectionEffect(...args));

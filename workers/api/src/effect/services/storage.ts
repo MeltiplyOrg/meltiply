@@ -6,7 +6,7 @@ import {
   createStorageServiceLive,
   type ConfiguredObjectStore,
   type ObjectUrlSigner,
-  StorageService,
+  type StorageService,
 } from "@meltiply/storage";
 
 import type { ApiWorkerEnv } from "../../env";
@@ -38,5 +38,3 @@ export function createStorageServiceLiveFromEnv(
     }),
   });
 }
-
-export { StorageService };

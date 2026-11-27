@@ -12,7 +12,8 @@ import {
   type CreateBrandProfileInput,
   type UpdateBrandProfileInput,
 } from "./brand-profile-rules";
-import { CoreApiError, type IdempotentResult } from "./core-types";
+import { CoreApiError } from "./api-errors";
+import { type IdempotentResult } from "./core-types";
 import type { ApiWorkerEnv } from "./env";
 import type {
   BrandProfileRepositoryProvider,

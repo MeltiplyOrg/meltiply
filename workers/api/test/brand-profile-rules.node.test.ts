@@ -10,7 +10,7 @@ import {
   updateBrandProfilePayload,
   workspaceAdminError,
 } from "../src/brand-profile-rules";
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
 
 describe("mapBrandProfile", () => {
   it("an active profile with every optional field empty", () => {

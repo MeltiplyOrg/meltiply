@@ -3,7 +3,7 @@ import type { Platform } from "@meltiply/domain";
 import type { OAuthConnection } from "@meltiply/providers";
 import { Effect } from "effect";
 
-import { CoreApiError } from "./core-types";
+import { CoreApiError } from "./api-errors";
 import type { ApiWorkerEnv } from "./env";
 import {
   createPostgresOAuthConnectionRepository,

@@ -1,9 +1,11 @@
 import { Data, Effect } from "effect";
 import type { DatabaseError } from "@meltiply/domain";
+import { errorDiagnostic, log } from "@meltiply/observability";
 import { createObjectStoreFromEnv, type ConfiguredObjectStore } from "@meltiply/storage";
 
 import { classifyJobError, type AutomationJobError } from "./effect/index";
 import type { AutomationEnv } from "./env";
+import { deleteStorageObjectsEffect } from "./object-cleanup";
 import {
   createPostgresRetentionRepository,
   type RetentionRepository,
@@ -41,8 +43,6 @@ const purgeDueBrandProfiles: RetentionCleanup = (env, repository, batchSize) =>
     }
 
     const claimed = yield* repository.claimBrandProfileObjects(profileIds);
-    const reclaimedObjectIds: string[] = [];
-    let failure: RetentionStorageError | undefined;
     if (claimed.length > 0) {
       let store: ConfiguredObjectStore;
       try {
@@ -55,53 +55,53 @@ const purgeDueBrandProfiles: RetentionCleanup = (env, repository, batchSize) =>
           }),
         );
       }
-      const outcomes = yield* Effect.forEach(
-        claimed,
-        (object) =>
-          Effect.match(
-            Effect.tryPromise({
-              catch: (cause) =>
-                new RetentionStorageError({
-                  cause,
-                  message: `unable to delete brand profile object ${object.r2_key}`,
-                }),
-              try: () => store.delete(object.r2_key),
-            }),
-            {
-              onFailure: (error) => ({ error, id: null as string | null }),
-              onSuccess: () => ({
-                error: undefined as RetentionStorageError | undefined,
-                id: object.id,
-              }),
-            },
-          ),
-        { concurrency: 8 },
-      );
-      for (const outcome of outcomes) {
-        if (outcome.id !== null) reclaimedObjectIds.push(outcome.id);
-        else failure ??= outcome.error;
+      const cleanup = yield* deleteStorageObjectsEffect(store, claimed);
+      if (cleanup.deletedIds.length > 0) {
+        yield* repository.settleDeletedObjects(cleanup.deletedIds);
       }
-    }
-
-    if (reclaimedObjectIds.length > 0) {
-      yield* repository.settleDeletedObjects(reclaimedObjectIds.map((id) => ({ id })));
-    }
-    if (failure) {
-      return yield* Effect.fail(failure);
+      if (cleanup.firstError) {
+        return yield* Effect.fail(
+          new RetentionStorageError({
+            cause: cleanup.firstError,
+            message: cleanup.firstError.message,
+          }),
+        );
+      }
     }
 
     return yield* repository.deletePurgedBrandProfiles(profileIds);
   });
 
-const cleanups: readonly RetentionCleanup[] = [
-  (_env, repository, batchSize) => repository.deleteExpiredIdempotencyKeys(batchSize),
-  (_env, repository, batchSize) => repository.deleteProcessedWebhookEvents(batchSize),
-  (_env, repository, batchSize) => repository.deleteTerminalOutboxEvents(batchSize),
-  (_env, repository, batchSize) => repository.deleteCompletedAsyncJobEvents(batchSize),
-  (_env, repository, batchSize) => repository.deleteOldUsageCorrections(batchSize),
-  (_env, repository, batchSize) => repository.deleteOldAnalyticsSnapshots(batchSize),
-  (_env, repository, batchSize) => repository.deleteStaleUsageBuckets(batchSize),
-  purgeDueBrandProfiles,
+const cleanups: readonly { name: string; run: RetentionCleanup }[] = [
+  {
+    name: "expired_idempotency_keys",
+    run: (_env, repository, batchSize) => repository.deleteExpiredIdempotencyKeys(batchSize),
+  },
+  {
+    name: "processed_webhook_events",
+    run: (_env, repository, batchSize) => repository.deleteProcessedWebhookEvents(batchSize),
+  },
+  {
+    name: "terminal_outbox_events",
+    run: (_env, repository, batchSize) => repository.deleteTerminalOutboxEvents(batchSize),
+  },
+  {
+    name: "completed_async_job_events",
+    run: (_env, repository, batchSize) => repository.deleteCompletedAsyncJobEvents(batchSize),
+  },
+  {
+    name: "old_usage_corrections",
+    run: (_env, repository, batchSize) => repository.deleteOldUsageCorrections(batchSize),
+  },
+  {
+    name: "old_analytics_snapshots",
+    run: (_env, repository, batchSize) => repository.deleteOldAnalyticsSnapshots(batchSize),
+  },
+  {
+    name: "stale_usage_buckets",
+    run: (_env, repository, batchSize) => repository.deleteStaleUsageBuckets(batchSize),
+  },
+  { name: "due_brand_profiles", run: purgeDueBrandProfiles },
 ];
 
 export function runRetention(
@@ -123,9 +123,29 @@ export function runRetention(
     let errors = 0;
     for (const cleanup of cleanups) {
       const outcome = yield* Effect.match(
-        cleanup(env, repository, batchSize).pipe(Effect.mapError(classifyJobError)),
+        cleanup.run(env, repository, batchSize).pipe(Effect.mapError(classifyJobError)),
         {
-          onFailure: () => ({ deleted: 0, errors: 1 }),
+          onFailure: (cause) => {
+            log(
+              "warn",
+              {
+                environment: env.ENVIRONMENT,
+                job_id: cleanup.name,
+                service: "automation",
+                trace_id: cleanup.name,
+                version: env.VERSION,
+              },
+              {
+                ...errorDiagnostic(cause),
+                cleanup: cleanup.name,
+                event: "retention_cleanup_failed",
+                job: "retention",
+                outcome: "failed",
+                retry_class: "platform_retry",
+              },
+            );
+            return { deleted: 0, errors: 1 };
+          },
           onSuccess: (count) => ({ deleted: count, errors: 0 }),
         },
       );

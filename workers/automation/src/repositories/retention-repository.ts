@@ -1,7 +1,7 @@
 import type { DatabaseError } from "@meltiply/domain";
 import { Effect } from "effect";
 
-import { claimObjectsForDeletion, settleDeletedObjects } from "../assets";
+import { claimObjectsForDeletion, settleDeletedObjects } from "../object-cleanup";
 import { withSystemTransactionEffect } from "../database";
 import type { AutomationEnv } from "../env";
 

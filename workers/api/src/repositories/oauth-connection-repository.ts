@@ -2,7 +2,7 @@ import type { DatabaseError, Platform } from "@meltiply/domain";
 import { Effect } from "effect";
 
 import { requireActiveBrandProfileEffect } from "../brand-profile-guard";
-import { CoreApiError } from "../core-types";
+import { CoreApiError } from "../api-errors";
 import { withSystemTransactionEffect } from "../database";
 import type { ApiWorkerEnv } from "../env";
 import { lockOrganizationEffect } from "../organization-lock";

@@ -16,7 +16,7 @@ import { createJwtVerifier, jwtClaims, type JwtIdentity } from "@meltiply/auth";
 import { activeIdentity } from "../src/auth-policy";
 import { createApiApp } from "../src/app";
 import { betterAuthFor } from "../src/better-auth";
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
 import { systemPoolFor } from "../src/database";
 import { applicationOrigin, type ApiWorkerEnv } from "../src/env";
 import { logRecords } from "./log-records";

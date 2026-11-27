@@ -2,7 +2,8 @@ import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
 import { Effect } from "effect";
 
-import { CoreApiError, type IdempotentResult } from "./core-types";
+import { CoreApiError } from "./api-errors";
+import { type IdempotentResult } from "./core-types";
 import type { ApiWorkerEnv } from "./env";
 import { hashIdempotencyRequestEffect, idempotentMutation } from "./idempotency";
 import type { PostServiceError } from "./post-types";

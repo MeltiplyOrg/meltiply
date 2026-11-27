@@ -193,7 +193,7 @@ describe("S3ObjectStore", () => {
     it("an answer without a body", async () => {
       const { store } = setup(status(204));
 
-      await expect(store.read(KEY)).rejects.toThrow(new TypeError("object body is unavailable"));
+      await expect(store.read(KEY)).rejects.toThrow(new Error("object body is unavailable"));
     });
   });
 
@@ -471,7 +471,9 @@ describe("S3SigV4Signer", () => {
 
   it("a plain-http endpoint outside development", () => {
     expect(() => new S3SigV4Signer({ ...options, endpoint: "http://objects.example.com" })).toThrow(
-      new TypeError("S3 endpoint must use HTTPS outside local or test environments"),
+      new TypeError(
+        "endpoint must use HTTPS unless it is loopback-only or insecure endpoints are explicitly allowed",
+      ),
     );
   });
 

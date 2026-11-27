@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 
-import type { Platform } from "@meltiply/domain";
+import type { DatabaseError, Platform } from "@meltiply/domain";
 
 import type { ReportingConfiguration } from "./configuration";
 import { categoryStatus } from "./policy";
@@ -51,66 +51,72 @@ export function recordPublicationUsage(
     readonly now?: () => Date;
     readonly repository?: PublicationUsageRepository;
   } = {},
-): Effect.Effect<PublicationMeasurementOutcome, never> {
+): Effect.Effect<PublicationMeasurementOutcome, DatabaseError> {
   const repository = options.repository ?? createPostgresPublicationUsageRepository(client);
-  return Effect.gen(function* () {
-    yield* repository.beginSavepoint();
-    yield* repository.lockMeasurement();
-    const observedAt = options.now ? options.now() : yield* repository.currentTime();
-    if (Number.isNaN(observedAt.getTime())) {
-      yield* repository.releaseSavepoint();
-      return "not_counted" as const;
-    }
-    const observedInstant = observedAt.toISOString();
-    const observedDay = observedInstant.slice(0, 10);
-    const marked = yield* repository.markDistribution(
-      confirmation.distributionId,
-      confirmation.platform,
-      observedInstant,
-    );
-    if (!marked) {
-      yield* repository.releaseSavepoint();
-      return "already_counted" as const;
-    }
-    const policy = categoryStatus(yield* repository.loadPreferences(), "usage", configuration);
-    const intervalStartedAt = policy.intervalStartedAt;
-    const insideEnabledInterval =
-      policy.effective &&
-      intervalStartedAt !== null &&
-      observedAt.getTime() >= new Date(intervalStartedAt).getTime();
-    const postMarked = yield* repository.hasPostMark(confirmation.postId);
-    if (!postMarked) {
-      const prior = yield* repository.findPriorPublishedDistribution(
-        confirmation.postId,
+  return Effect.suspend(() => {
+    let savepointActive = false;
+    return Effect.gen(function* () {
+      yield* repository.beginSavepoint();
+      savepointActive = true;
+      yield* repository.lockMeasurement();
+      const observedAt = options.now ? options.now() : yield* repository.currentTime();
+      if (Number.isNaN(observedAt.getTime())) {
+        yield* repository.releaseSavepoint();
+        savepointActive = false;
+        return "not_counted" as const;
+      }
+      const observedInstant = observedAt.toISOString();
+      const observedDay = observedInstant.slice(0, 10);
+      const marked = yield* repository.markDistribution(
         confirmation.distributionId,
+        confirmation.platform,
+        observedInstant,
       );
-      const firstConfirmedAt =
-        !prior.found || prior.publishedAt === null
-          ? observedInstant
-          : new Date(prior.publishedAt).toISOString();
-      yield* repository.insertPostMark(
-        confirmation.postId,
-        firstConfirmedAt,
-        !prior.found && insideEnabledInterval,
+      if (!marked) {
+        yield* repository.releaseSavepoint();
+        savepointActive = false;
+        return "already_counted" as const;
+      }
+      const policy = categoryStatus(yield* repository.loadPreferences(), "usage", configuration);
+      const intervalStartedAt = policy.intervalStartedAt;
+      const insideEnabledInterval =
+        policy.effective &&
+        intervalStartedAt !== null &&
+        observedAt.getTime() >= new Date(intervalStartedAt).getTime();
+      const postMarked = yield* repository.hasPostMark(confirmation.postId);
+      if (!postMarked) {
+        const prior = yield* repository.findPriorPublishedDistribution(
+          confirmation.postId,
+          confirmation.distributionId,
+        );
+        const firstConfirmedAt =
+          !prior.found || prior.publishedAt === null
+            ? observedInstant
+            : new Date(prior.publishedAt).toISOString();
+        yield* repository.insertPostMark(
+          confirmation.postId,
+          firstConfirmedAt,
+          !prior.found && insideEnabledInterval,
+        );
+      }
+      if (!insideEnabledInterval) {
+        yield* repository.releaseSavepoint();
+        savepointActive = false;
+        return "not_counted" as const;
+      }
+      yield* repository.incrementDailyDistribution(
+        intervalStartedAt,
+        observedDay,
+        confirmation.platform,
       );
-    }
-    if (!insideEnabledInterval) {
       yield* repository.releaseSavepoint();
-      return "not_counted" as const;
-    }
-    yield* repository.incrementDailyDistribution(
-      intervalStartedAt,
-      observedDay,
-      confirmation.platform,
+      savepointActive = false;
+      return "counted" as const;
+    }).pipe(
+      Effect.catch((measurementError) => {
+        if (!savepointActive) return Effect.fail(measurementError);
+        return Effect.as(repository.rollbackSavepoint(), "unavailable" as const);
+      }),
     );
-    yield* repository.releaseSavepoint();
-    return "counted" as const;
-  }).pipe(
-    Effect.catch(() =>
-      Effect.as(
-        Effect.catch(repository.rollbackSavepoint(), () => Effect.succeed(undefined)),
-        "unavailable" as const,
-      ),
-    ),
-  );
+  });
 }

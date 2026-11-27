@@ -1,3 +1,4 @@
+import { PROVIDER_LIMITS } from "../limits";
 import {
   assertConfiguredRedirectUri,
   authorizationCodeUrl,
@@ -18,7 +19,6 @@ import {
   YOUTUBE_API_ORIGIN,
   YOUTUBE_AUTHORIZATION_ORIGIN,
   YOUTUBE_CONFIGURED_SCOPES,
-  YOUTUBE_LIMITS,
   YOUTUBE_TOKEN_ORIGIN,
   type GoogleRequest,
 } from "./types";
@@ -83,7 +83,7 @@ export function createYouTubeOAuth(runtime: AdapterRuntime, googleRequest: Googl
       const currentRefreshToken = required(
         "refreshToken",
         refreshToken,
-        YOUTUBE_LIMITS.tokenMaxChars,
+        PROVIDER_LIMITS.youtube.tokenMaxChars,
       );
       const body = await postForm(http, context, `${YOUTUBE_TOKEN_ORIGIN}/token`, {
         client_id: clientId,

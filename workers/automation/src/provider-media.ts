@@ -2,6 +2,7 @@ import {
   createObjectStoreFromEnv,
   createObjectUrlSignerFromEnv,
   signProviderMediaUrl,
+  validateProviderMediaKey,
   type ConfiguredObjectStore,
   type ObjectUrlSigner,
 } from "@meltiply/storage";
@@ -10,7 +11,6 @@ import type { DistributionProviderDependencies } from "./distribution-provider";
 import type { AutomationEnv } from "./env";
 
 const contentTypePattern = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
-const unsafeObjectKeyPattern = /[\u0000-\u001f\u007f\\]/;
 
 export const providerMediaRetrievalLeaseSeconds = 24 * 60 * 60;
 
@@ -29,15 +29,8 @@ function verifiedRemoteIngestUrl(env: AutomationEnv, key: string): Promise<strin
 }
 
 function validateObjectKey(assetId: string, key: string): void {
-  const segments = key.split("/");
-  if (
-    segments.length < 3 ||
-    segments[1] !== assetId ||
-    segments.some(
-      (segment) =>
-        !segment || segment === "." || segment === ".." || unsafeObjectKeyPattern.test(segment),
-    )
-  ) {
+  const normalized = validateProviderMediaKey(key);
+  if (normalized !== key || normalized.split("/")[1] !== assetId) {
     throw new TypeError("provider media object key is invalid");
   }
 }
@@ -69,8 +62,8 @@ export function createProviderMediaResolver(
     if (!resolvedStore) {
       try {
         resolvedStore = createObjectStoreFromEnv(env);
-      } catch {
-        throw new TypeError("provider media object storage is unavailable");
+      } catch (cause) {
+        throw new TypeError("provider media object storage is unavailable", { cause });
       }
     }
     const store = resolvedStore;

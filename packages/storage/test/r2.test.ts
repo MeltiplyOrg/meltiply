@@ -102,7 +102,7 @@ describe("R2ObjectStore", () => {
       await store.copyObject(source, KEY);
 
       expect(bucket.calls).toEqual([
-        ["get", source, { onlyIf: { etagMatches: undefined } }],
+        ["get", source],
         ["put", KEY, body, {}],
       ]);
     });
@@ -158,7 +158,7 @@ describe("R2ObjectStore", () => {
       const { bucket, store } = setup();
       bucket.object = r2Body();
 
-      await expect(store.read(KEY)).rejects.toThrow(new TypeError("object body is unavailable"));
+      await expect(store.read(KEY)).rejects.toThrow(new Error("object body is unavailable"));
     });
   });
 

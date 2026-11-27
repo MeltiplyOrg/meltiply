@@ -1,6 +1,6 @@
 import { Exit, Layer, Option, Tracer } from "effect";
 
-import type { LogContext } from "./log";
+import { isLocalOrTestEnvironment, type LogContext } from "./log";
 import { exportOtlpSpan, type OtlpSpanInput } from "./otlp";
 
 export interface EffectTracerOptions {
@@ -18,10 +18,7 @@ export function effectTracerLayer(
   options: EffectTracerOptions = {},
 ): Layer.Layer<never> {
   const exporter = options.exporter ?? exportOtlpSpan;
-  const exports =
-    options.exporter !== undefined ||
-    context.environment === "local" ||
-    context.environment === "test";
+  const exports = options.exporter !== undefined || isLocalOrTestEnvironment(context.environment);
   const tracer = Tracer.make({
     span(spanOptions) {
       const span = new Tracer.NativeSpan(spanOptions);

@@ -10,10 +10,36 @@ import type {
   StorageUnavailableError,
 } from "@meltiply/domain";
 
-import type { CoreApiError } from "./core-types";
+import type { CoreApiError } from "./api-errors";
 import type { ApiWorkerEnv } from "./env";
 
 type Schemas = components["schemas"];
+
+const ASSET_COLUMN_NAMES = [
+  "id",
+  "org_id",
+  "brand_profile_id",
+  "uploaded_by",
+  "asset_type",
+  "title",
+  "duration_sec",
+  "file_size",
+  "mime_type",
+  "width",
+  "height",
+  "status",
+  "failure_code",
+  "failure_message",
+  "failure_retryable",
+  "failure_at",
+  "created_at",
+  "updated_at",
+] as const;
+
+export function assetSelectColumns(alias?: string): string {
+  const prefix = alias ? `${alias}.` : "";
+  return ASSET_COLUMN_NAMES.map((column) => `${prefix}${column}`).join(", ");
+}
 
 export interface AssetRow extends Record<string, unknown> {
   asset_type: Schemas["AssetType"];

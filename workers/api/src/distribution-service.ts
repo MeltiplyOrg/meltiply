@@ -1,23 +1,26 @@
 import { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
-import { facebookOptionsToWire, type ProviderPublishOptions } from "@meltiply/providers";
+import { toWireProviderOptions, type ProviderPublishOptions } from "@meltiply/providers";
 import {
   type DatabaseError,
   isoDateTime,
+  isoDateTimeOrNull,
+  isoPeriodKey,
   COMMUNITY_LIMITS,
   maximumDelayedDeliverySeconds,
 } from "@meltiply/domain";
 
+import { CoreApiError, toCoreApiErrorOrRethrow } from "./api-errors";
 import {
   activeBrandProfilePredicate,
   requireActiveBrandProfileEffect,
 } from "./brand-profile-guard";
-import {
-  CoreApiError,
-  toCoreApiErrorOrRethrow,
-  type CoreServiceError,
-  type IdempotentResult,
+import type {
+  CoreServiceError,
+  DistributionFilters,
+  DistributionPatch,
+  IdempotentResult,
 } from "./core-types";
 import {
   activeOrganizationIdEffect,
@@ -28,7 +31,6 @@ import type { ApiWorkerEnv } from "./env";
 import { hashIdempotencyRequestEffect } from "./idempotency";
 import { withIdempotentMutationStatus, withTenantIdempotentMutation } from "./idempotent-mutation";
 import { lockOrganizationEffect } from "./organization-lock";
-import type { PostProviderOptions } from "./post-types";
 import { requireNoQueueMembershipEffect } from "./publishing-queue-store";
 
 type Schemas = components["schemas"];
@@ -66,22 +68,41 @@ export function isPendingDistribution(status: DistributionStatus): boolean {
   return distributionPhase[status] === "pending";
 }
 
-export interface DistributionFilters {
-  brandProfileId?: string;
-  end?: Date;
-  limit: number;
-  offset: number;
-  platform?: Platform;
-  postId?: string;
-  start?: Date;
-  status?: DistributionStatus;
+export function providerOwnedDistributionSql(alias: string, includeLeasedOutbox = false): string {
+  const leasedCheck = includeLeasedOutbox
+    ? ` OR EXISTS (
+        SELECT 1 FROM outbox_events e
+         WHERE e.aggregate_id = ${alias}.id
+           AND e.topic = 'distribution.publish.requested'
+           AND e.state = 'leased'
+      )`
+    : "";
+  return `(${alias}.attempt_count > 0
+    OR ${alias}.last_attempt_at IS NOT NULL
+    OR ${alias}.provider_operation_id IS NOT NULL
+    OR ${alias}.published_at IS NOT NULL
+    OR ${alias}.platform_post_id IS NOT NULL
+    OR ${alias}.cancel_requested_at IS NOT NULL
+    OR EXISTS (
+      SELECT 1 FROM provider_operations AS operation
+       WHERE operation.distribution_id = ${alias}.id
+    )${leasedCheck})`;
 }
 
-export interface DistributionPatch {
-  descriptionOverride?: string | null;
-  hashtags?: string[];
-  scheduledAt?: Date | null;
-  titleOverride?: string | null;
+export function deletePendingDistributionOutboxEffect(
+  client: EffectTransactionClient,
+  distributionIds: readonly string[],
+): Effect.Effect<void, DatabaseError> {
+  if (distributionIds.length === 0) return Effect.void;
+  return client
+    .query(
+      `DELETE FROM outbox_events
+        WHERE aggregate_id = ANY($1::uuid[])
+          AND topic = 'distribution.publish.requested'
+          AND state IN ('pending', 'failed')`,
+      [distributionIds],
+    )
+    .pipe(Effect.asVoid);
 }
 
 interface DistributionRow extends Record<string, unknown> {
@@ -169,102 +190,6 @@ function frozenPublicationEffect(
     .pipe(Effect.map((result) => result.rows[0]?.publication_snapshot ?? null));
 }
 
-function mapInstagramOptionsToWire(
-  instagram: NonNullable<PostProviderOptions["instagram"]>,
-): NonNullable<Schemas["PostProviderOptions"]["instagram"]> {
-  return {
-    ...(instagram.content ? { content: instagram.content } : {}),
-    ...(instagram.mediaOptions ? { media_options: instagram.mediaOptions } : {}),
-    ...(instagram.postType !== undefined ? { post_type: instagram.postType } : {}),
-    ...(instagram.trialReel !== undefined ? { trial_reel: instagram.trialReel } : {}),
-    ...(instagram.trialGraduation !== undefined
-      ? { trial_graduation: instagram.trialGraduation }
-      : {}),
-  };
-}
-
-function mapTikTokBaseOptionsToWire(tiktok: NonNullable<PostProviderOptions["tiktok"]>) {
-  return {
-    ...(tiktok.postMode !== undefined ? { post_mode: tiktok.postMode } : {}),
-    allow_comment: tiktok.allowComment,
-    allow_duet: tiktok.allowDuet,
-    allow_stitch: tiktok.allowStitch,
-    brand_content: tiktok.brandContent,
-    brand_organic: tiktok.brandOrganic,
-    is_ai_generated: tiktok.isAiGenerated,
-    music_usage_confirmed: tiktok.musicUsageConfirmed,
-    ...(tiktok.autoAddMusic !== undefined ? { auto_add_music: tiktok.autoAddMusic } : {}),
-  };
-}
-
-function mapYouTubeBaseOptionsToWire(youtube: NonNullable<PostProviderOptions["youtube"]>) {
-  return {
-    ...(youtube.postType ? { post_type: youtube.postType } : {}),
-    ...(youtube.privacyStatus ? { privacy_status: youtube.privacyStatus } : {}),
-  };
-}
-
-function toWireProviderOptions(
-  options: ProviderPublishOptions | null,
-): Schemas["ProviderPublishOptions"] | null {
-  if (!options) return null;
-  const { facebook, instagram, threads, tiktok, youtube } = options;
-  if (!tiktok && !youtube && !instagram && !facebook && !threads) return null;
-  return {
-    ...(threads ? { threads } : {}),
-    ...(facebook ? { facebook: facebookOptionsToWire(facebook) } : {}),
-    ...(instagram ? { instagram: mapInstagramOptionsToWire(instagram) } : {}),
-    ...(tiktok
-      ? {
-          tiktok: {
-            ...mapTikTokBaseOptionsToWire(tiktok),
-            privacy_level: tiktok.privacyLevel,
-          },
-        }
-      : {}),
-    ...(youtube
-      ? {
-          youtube: {
-            ...mapYouTubeBaseOptionsToWire(youtube),
-            made_for_kids: youtube.madeForKids,
-          },
-        }
-      : {}),
-  };
-}
-
-export function toWirePostProviderOptions(
-  options: PostProviderOptions | null,
-): Schemas["PostProviderOptions"] | null {
-  if (!options) return null;
-  const { facebook, instagram, threads, tiktok, youtube } = options;
-  if (!tiktok && !youtube && !instagram && !facebook && !threads) return null;
-  return {
-    ...(threads ? { threads } : {}),
-    ...(facebook ? { facebook: facebookOptionsToWire(facebook) } : {}),
-    ...(instagram ? { instagram: mapInstagramOptionsToWire(instagram) } : {}),
-    ...(tiktok
-      ? {
-          tiktok: {
-            ...mapTikTokBaseOptionsToWire(tiktok),
-            ...(tiktok.discloseCommercialContent !== undefined
-              ? { disclose_commercial_content: tiktok.discloseCommercialContent }
-              : {}),
-            ...(tiktok.privacyLevel !== undefined ? { privacy_level: tiktok.privacyLevel } : {}),
-          },
-        }
-      : {}),
-    ...(youtube
-      ? {
-          youtube: {
-            ...mapYouTubeBaseOptionsToWire(youtube),
-            ...(youtube.madeForKids !== undefined ? { made_for_kids: youtube.madeForKids } : {}),
-          },
-        }
-      : {}),
-  };
-}
-
 function mapPublicationSnapshot(
   snapshot: StoredPublicationSnapshot,
 ): Schemas["DistributionPublication"] {
@@ -289,10 +214,6 @@ function mapPublicationSnapshot(
   };
 }
 
-function optionalDate(value: Date | string | null): string | null {
-  return value === null ? null : isoDateTime(value);
-}
-
 export function mapDistribution(row: DistributionRow): Distribution {
   return {
     attempt_count: Number(row.attempt_count),
@@ -309,8 +230,8 @@ export function mapDistribution(row: DistributionRow): Distribution {
       : null,
     hashtags: row.hashtags ?? [],
     id: row.id,
-    last_attempt_at: optionalDate(row.last_attempt_at),
-    next_attempt_at: optionalDate(row.next_attempt_at),
+    last_attempt_at: isoDateTimeOrNull(row.last_attempt_at),
+    next_attempt_at: isoDateTimeOrNull(row.next_attempt_at),
     org_id: row.org_id,
     platform: row.platform,
     platform_account_id: row.platform_account_id,
@@ -323,8 +244,8 @@ export function mapDistribution(row: DistributionRow): Distribution {
       : {}),
     ...(row.provider_warnings?.length ? { provider_warnings: row.provider_warnings } : {}),
     publication: row.publication_snapshot ? mapPublicationSnapshot(row.publication_snapshot) : null,
-    published_at: optionalDate(row.published_at),
-    scheduled_at: optionalDate(row.scheduled_at),
+    published_at: isoDateTimeOrNull(row.published_at),
+    scheduled_at: isoDateTimeOrNull(row.scheduled_at),
     status: row.status,
     title_override: row.title_override,
     updated_at: isoDateTime(row.updated_at),
@@ -394,7 +315,7 @@ export function usageGuardEffect(
 ): Effect.Effect<void, CoreApiError | DatabaseError> {
   return Effect.gen(function* () {
     const limits = COMMUNITY_LIMITS;
-    const period = new Date().toISOString().slice(0, 7);
+    const period = isoPeriodKey(new Date());
     const usage = yield* client.query<{ distributions: number | string }>(
       `WITH candidate AS (
          SELECT $1::uuid AS org_id, $2::text AS period, $3::integer AS increment
@@ -483,8 +404,63 @@ export function insertOutboxBatchEffect(
     .pipe(Effect.asVoid);
 }
 
-export function createDistributionMethods() {
+interface CalendarRow extends Record<string, unknown> {
+  brand_profile_id: string;
+  id: string;
+  platform: Platform;
+  platform_account_id: string | null;
+  post_id: string;
+  post_title: string;
+  published_at: Date | string | null;
+  scheduled_at: Date | string | null;
+  status: Schemas["DistributionStatus"];
+  updated_at: Date | string;
+}
+
+export function createDistributionMethods(
+  withTenantTransactionEffectOverride = withTenantTransactionEffect,
+) {
   return {
+    calendar(
+      env: ApiWorkerEnv,
+      session: SessionClaims,
+      start: Date,
+      end: Date,
+      limit = 500,
+      brandProfileId?: string,
+    ): Effect.Effect<Schemas["CalendarEvent"][], CoreServiceError> {
+      return withTenantTransactionEffectOverride(env, session, (client) =>
+        Effect.gen(function* () {
+          const result = yield* client.query<CalendarRow>(
+            `SELECT
+               d.id, d.post_id, p.title AS post_title, d.platform,
+               d.platform_account_id, d.status, d.scheduled_at, d.published_at,
+               d.updated_at, d.brand_profile_id
+             FROM distributions d
+             JOIN posts p ON p.id = d.post_id AND p.org_id = d.org_id
+             WHERE d.event_at >= $1 AND d.event_at <= $2
+               AND p.deleted_at IS NULL
+               AND ($4::uuid IS NULL OR d.brand_profile_id = $4)
+               AND ${activeBrandProfilePredicate("d.brand_profile_id")}
+             ORDER BY d.event_at ASC, d.id ASC
+             LIMIT $3`,
+            [start, end, limit, brandProfileId ?? null],
+          );
+          return result.rows.map((row) => ({
+            post_id: row.post_id,
+            post_title: row.post_title,
+            brand_profile_id: row.brand_profile_id,
+            id: row.id,
+            platform: row.platform,
+            platform_account_id: row.platform_account_id,
+            published_at: isoDateTimeOrNull(row.published_at),
+            scheduled_at: isoDateTimeOrNull(row.scheduled_at),
+            status: row.status,
+            updated_at: isoDateTime(row.updated_at),
+          }));
+        }),
+      );
+    },
     listDistributions(
       env: ApiWorkerEnv,
       session: SessionClaims,
@@ -498,7 +474,7 @@ export function createDistributionMethods() {
       },
       CoreServiceError
     > {
-      return withTenantTransactionEffect(env, session, (client) =>
+      return withTenantTransactionEffectOverride(env, session, (client) =>
         Effect.gen(function* () {
           const values: unknown[] = [];
           const conditions: string[] = [
@@ -552,7 +528,7 @@ export function createDistributionMethods() {
       session: SessionClaims,
       id: string,
     ): Effect.Effect<Distribution, CoreServiceError> {
-      return withTenantTransactionEffect(env, session, (client) =>
+      return withTenantTransactionEffectOverride(env, session, (client) =>
         Effect.gen(function* () {
           const result = yield* client.query<DistributionRow>(
             `SELECT ${distributionColumns},
@@ -640,6 +616,7 @@ export function createDistributionMethods() {
             }
             return value;
           }),
+        withTenantTransactionEffectOverride,
       );
     },
 
@@ -652,7 +629,7 @@ export function createDistributionMethods() {
     ): Effect.Effect<IdempotentResult<Distribution> & { status: 202 | 204 }, CoreServiceError> {
       return Effect.gen(function* () {
         const requestHash = yield* hashIdempotencyRequestEffect(id);
-        const outcome = yield* withTenantTransactionEffect(env, session, (client) =>
+        const outcome = yield* withTenantTransactionEffectOverride(env, session, (client) =>
           Effect.gen(function* () {
             const organizationId = yield* activeOrganizationIdEffect(client);
             return yield* withIdempotentMutationStatus(
@@ -702,13 +679,7 @@ export function createDistributionMethods() {
                       topic: "distribution.cancel.requested",
                     });
                   } else {
-                    yield* tx.query(
-                      `DELETE FROM outbox_events
-                       WHERE aggregate_id = $1
-                         AND topic = 'distribution.publish.requested'
-                         AND state IN ('pending', 'failed')`,
-                      [id],
-                    );
+                    yield* deletePendingDistributionOutboxEffect(tx, [id]);
                   }
                   const status: 202 | 204 = inFlight ? 202 : 204;
                   return { body: inFlight ? value : null, status };
@@ -781,6 +752,7 @@ export function createDistributionMethods() {
               });
               return value;
             }),
+          withTenantTransactionEffectOverride,
         );
       });
     },

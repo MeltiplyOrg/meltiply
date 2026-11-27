@@ -1,6 +1,13 @@
 import type { PlatformCapability } from "@meltiply/domain";
 
-import { isHttp404, malformed, rejection } from "../failures";
+import {
+  isHttp404,
+  malformed,
+  rejection,
+  requiredIdentifier,
+  validatePageInput,
+  validateSnapshotPage,
+} from "../failures";
 import { PROVIDER_LIMITS } from "../limits";
 import {
   containerOperationId,
@@ -34,10 +41,7 @@ import {
   providerIdentifier,
   record,
   required,
-  requiredIdentifier,
   requireIdempotencyKey,
-  validatePageInput,
-  validateSnapshotPage,
 } from "../values";
 import { applyThreadsOptions } from "./options";
 import {

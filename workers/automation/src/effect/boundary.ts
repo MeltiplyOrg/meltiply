@@ -1,8 +1,7 @@
 import { Cause, Effect, Exit, Option } from "effect";
-import { configureLogSampling, errorDiagnostic, log } from "@meltiply/observability";
+import { configureLogSampling, errorDiagnostic } from "@meltiply/observability";
 import type { AutomationEnv } from "../env";
 import { nextDelaySeconds, QUEUE_RETRY_POLICY } from "../retry-policy";
-import type { JobScope } from "./scope";
 import {
   AmbiguousJobError,
   classifyJobError,
@@ -93,32 +92,4 @@ export function queueBackoffDelaySeconds(attempts: number): number {
 
 export function configureJobLogging(env: AutomationEnv): void {
   configureLogSampling(env.LOG_SAMPLE_RATE);
-}
-
-export function logJobOutcome(
-  scope: JobScope,
-  outcome: JobOutcome,
-  fields: {
-    attempts?: number;
-    diagnostic?: Record<string, unknown>;
-    event: string;
-    job: string;
-    latencyMs: number;
-    messageId?: string;
-    queue?: string;
-  },
-): void {
-  const level = outcome === "processed" ? "info" : outcome === "rejected" ? "warn" : "error";
-  log(level, scope.logContext, {
-    ...(fields.attempts !== undefined ? { attempts: fields.attempts } : {}),
-    ...(fields.diagnostic ?? {}),
-    event: fields.event,
-    job: fields.job,
-    latency_ms: fields.latencyMs,
-    ...(fields.messageId ? { message_id: fields.messageId } : {}),
-    outcome: outcome === "processed" ? "succeeded" : outcome,
-    ...(fields.queue ? { queue: fields.queue } : {}),
-    retry_class:
-      outcome === "retry" ? "queue_backoff" : outcome === "ambiguous" ? "reconciliation" : "none",
-  });
 }

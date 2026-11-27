@@ -1,19 +1,19 @@
-import { malformed } from "../failures";
-import { PROVIDER_LIMITS } from "../limits";
+import { malformed, requiredIdentifier } from "../failures";
+import type { ProviderHttpClient } from "../http";
 import { META_GRAPH_API_VERSION } from "../meta";
-import type { ProviderCredentials } from "../types";
+import type { ProviderCredentials, ProviderRequestContext } from "../types";
 import type { ConfirmedSuccess } from "../results";
 import {
+  bearer,
   boundedString,
   providerIdentifier,
   record,
-  requiredIdentifier,
   secureUrl,
+  STANDARD_VIDEO_MIME_TYPES,
 } from "../values";
 
 export const FACEBOOK_GRAPH_ORIGIN = "https://graph.facebook.com";
 export const FACEBOOK_UPLOAD_ORIGIN = "https://rupload.facebook.com";
-export const FACEBOOK_LIMITS = PROVIDER_LIMITS.facebook;
 export const FACEBOOK_IMAGE_TYPES = [
   "image/jpeg",
   "image/png",
@@ -21,7 +21,7 @@ export const FACEBOOK_IMAGE_TYPES = [
   "image/bmp",
   "image/tiff",
 ];
-export const FACEBOOK_VIDEO_TYPES = ["video/mp4", "video/quicktime"];
+export const FACEBOOK_VIDEO_TYPES = STANDARD_VIDEO_MIME_TYPES;
 
 export const FACEBOOK_PUBLISHING_SCOPES = [
   "pages_show_list",
@@ -29,11 +29,10 @@ export const FACEBOOK_PUBLISHING_SCOPES = [
   "pages_manage_posts",
 ] as const;
 
-const analyticsScopes = ["pages_manage_engagement", "read_insights"] as const;
-
 export const FACEBOOK_CONFIGURED_SCOPES = [
   ...FACEBOOK_PUBLISHING_SCOPES,
-  ...analyticsScopes,
+  "pages_manage_engagement",
+  "read_insights",
   "pages_read_user_content",
 ] as const;
 
@@ -82,6 +81,23 @@ export function graphUrl(path: string): URL {
   return new URL(`/${META_GRAPH_API_VERSION}/${path}`, FACEBOOK_GRAPH_ORIGIN);
 }
 
+export async function graphGet(
+  http: ProviderHttpClient,
+  context: ProviderRequestContext,
+  accessToken: string,
+  url: URL,
+): Promise<Record<string, unknown> | undefined> {
+  return record(
+    (
+      await http.request(context, {
+        headers: bearer(accessToken),
+        method: "GET",
+        url: url.toString(),
+      })
+    ).body,
+  );
+}
+
 export function nodeUrl(id: string, fields?: string): URL {
   const url = graphUrl(encodeURIComponent(id));
   if (fields) url.searchParams.set("fields", fields);
@@ -96,7 +112,6 @@ export function facebookAccountId(credentials: ProviderCredentials): string {
   return requiredIdentifier(credentials.accountId, "facebook_page_account_required");
 }
 
-/** The phase distinguishes feed posts from asynchronous video lifecycles during reconciliation. */
 export function facebookOperationId(phase: FacebookOperationPhase, id: string): string {
   return `${phase}:${id}`;
 }
@@ -111,15 +126,6 @@ export function parseFacebookOperationId(value: unknown): FacebookOperation | un
   const id = providerIdentifier(match?.[2]);
   if (!phase || !id || !isFacebookOperationPhase(phase)) return undefined;
   return { id, phase };
-}
-
-export function facebookPublishedPost(id: string): ConfirmedSuccess {
-  return {
-    outcome: "confirmed_success",
-    providerOperationId: facebookOperationId("post", id),
-    providerPostId: id,
-    providerUrl: facebookPermalink(id),
-  };
 }
 
 export function facebookPublishedVideo(

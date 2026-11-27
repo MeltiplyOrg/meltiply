@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { requiredIdentifier, validatePageInput, validateSnapshotPage } from "../src/failures";
+
 import {
   assertHttpsOrLoopbackUrl,
   bearer,
@@ -17,12 +19,9 @@ import {
   providerIdentifier,
   record,
   required,
-  requiredIdentifier,
   requireIdempotencyKey,
   secureUrl,
   timestamp,
-  validatePageInput,
-  validateSnapshotPage,
   validFileSize,
 } from "../src/values";
 import { failureThrownBy, refused, thrownBy } from "./support";

@@ -4,7 +4,7 @@ import {
   type TokenCipher,
 } from "@meltiply/secrets";
 
-import { CoreApiError } from "./core-types";
+import { CoreApiError } from "./api-errors";
 import type { ApiWorkerEnv } from "./env";
 
 const resolveTokenCipher = createIsolateTokenCipherCache();

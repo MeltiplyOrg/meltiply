@@ -13,11 +13,9 @@
   "dependencies": {
     "@meltiply/domain": "workspace:*",
     "better-auth": "^1.7.5",
-    "jose": "6.2.3",
-    "pg": "8.22.0"
+    "jose": "6.2.3"
   },
   "devDependencies": {
-    "@types/pg": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:",

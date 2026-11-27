@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 
-import { log } from "./log";
+import { isLocalOrTestEnvironment, log } from "./log";
 import { errorDiagnostic } from "./sanitize";
 
 export interface FlowLedgerQueryResult<Row> {
@@ -59,6 +59,7 @@ export interface FlowLedgerRecorder {
   }): Promise<string | null>;
   startRunForRequest(input: {
     entrypoint: string;
+    metadata?: Record<string, unknown>;
     orgId?: string;
     requestId: string;
     traceId: string;
@@ -82,17 +83,14 @@ const FLOW_NODE_KINDS: Readonly<Record<string, string>> = {
   workflow: "workflow",
 };
 
-/** Maps a flow node key to its canonical architectural category. */
 export function flowNodeTypeFor(nodeKey: string): string {
   return FLOW_NODE_KINDS[nodeKey] ?? "service";
 }
 
-/** Flow explorer ledger recording is enabled only in local and test environments. */
 export function flowExplorerEnabled(env: FlowLedgerEnvironment): boolean {
-  return env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test";
+  return isLocalOrTestEnvironment(env.ENVIRONMENT);
 }
 
-/** Reports whether the system database binding carries a connection string. */
 export function flowDatabaseAvailable(env: FlowLedgerEnvironment): boolean {
   return Boolean(env.DB_SYSTEM?.connectionString);
 }
@@ -189,25 +187,32 @@ export function createFlowLedgerRecorder(options: {
       return id ?? null;
     },
     async startRunForRequest(input) {
-      const id = await bestEffort((client) =>
-        client
-          .query<{ id: string }>(
-            `INSERT INTO flow_runs
+      const hasMetadata = input.metadata !== undefined;
+      const sql = hasMetadata
+        ? `INSERT INTO flow_runs
+             (environment, trace_id, request_id, org_id, entrypoint, status, metadata)
+           VALUES ($1, $2, $3, $4, $5, 'running', $6)
+           ON CONFLICT (environment, request_id) DO UPDATE
+             SET entrypoint = EXCLUDED.entrypoint, metadata = EXCLUDED.metadata
+           WHERE flow_runs.org_id IS NOT DISTINCT FROM EXCLUDED.org_id
+           RETURNING id`
+        : `INSERT INTO flow_runs
              (environment, trace_id, request_id, org_id, entrypoint, status, metadata)
            VALUES ($1, $2, $3, $4, $5, 'running', $6)
            ON CONFLICT (environment, request_id) DO UPDATE
              SET started_at = flow_runs.started_at
            WHERE flow_runs.org_id IS NOT DISTINCT FROM EXCLUDED.org_id
-           RETURNING id`,
-            [
-              env.ENVIRONMENT ?? "unknown",
-              input.traceId,
-              input.requestId,
-              input.orgId ?? null,
-              input.entrypoint,
-              {},
-            ],
-          )
+           RETURNING id`;
+      const id = await bestEffort((client) =>
+        client
+          .query<{ id: string }>(sql, [
+            env.ENVIRONMENT ?? "unknown",
+            input.traceId,
+            input.requestId,
+            input.orgId ?? null,
+            input.entrypoint,
+            input.metadata ?? {},
+          ])
           .pipe(Effect.map((result) => result.rows[0]?.id ?? null)),
       );
       return id ?? null;

@@ -7,6 +7,7 @@ import type {
   TikTokPublishOptions,
 } from "../types";
 import {
+  codePointLength,
   firstNonEmptyLine,
   mediaKind,
   normalizeContentType,
@@ -163,7 +164,7 @@ export function tiktokPublishRequest(
   if (isVideo) {
     if (
       media.length !== 1 ||
-      (!inbox && caption.length > limits.maxVideoCaptionCodePoints) ||
+      (!inbox && codePointLength(caption) > limits.maxVideoCaptionCodePoints) ||
       videoInvalid(first, requirements?.maxVideoDurationSeconds ?? limits.maxVideoDurationSeconds)
     ) {
       throw rejected("tiktok_video_invalid");
@@ -188,8 +189,8 @@ export function tiktokPublishRequest(
   const title = firstNonEmptyLine(caption);
   if (
     !title ||
-    title.length > limits.maxPhotoTitleChars ||
-    caption.length > limits.maxCaptionCodePoints ||
+    codePointLength(title) > limits.maxPhotoTitleChars ||
+    codePointLength(caption) > limits.maxCaptionCodePoints ||
     (!inbox && (choices.allowDuet || choices.allowStitch)) ||
     media.length > limits.maxPhotoImages ||
     media.some(photoInvalid)

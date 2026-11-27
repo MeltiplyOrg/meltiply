@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
 import type { ApiWorkerEnv } from "../src/env";
 import { tokenCipherFor } from "../src/token-credentials";
 

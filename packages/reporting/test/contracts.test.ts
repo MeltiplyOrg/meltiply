@@ -5,7 +5,6 @@ import {
   isDiscoverySource,
   isOperationCategory,
   isProviderFailureClass,
-  ReportingInputError,
 } from "../src/contracts";
 
 describe.each([
@@ -26,17 +25,5 @@ describe.each([
     ["a list of members", members],
   ])("%s", (_example, value) => {
     expect(guard(value)).toEqual(false);
-  });
-});
-
-describe("ReportingInputError", () => {
-  it("a rejected field", () => {
-    const error = new ReportingInputError({ field: "posts", message: "must be a count" });
-
-    expect({ tag: error._tag, field: error.field, message: error.message }).toEqual({
-      tag: "ReportingInputError",
-      field: "posts",
-      message: "must be a count",
-    });
   });
 });

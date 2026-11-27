@@ -2,7 +2,7 @@ import { ProviderHttpClient, ProviderRegistry } from "@meltiply/providers";
 import { z } from "zod";
 import type { Hono } from "hono";
 import { createApiApp } from "../src/app";
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
 import type { ApiWorkerEnv, ApiWorkerEnvironment } from "../src/env";
 
 interface RequirementsSmokeEnv extends ApiWorkerEnv {

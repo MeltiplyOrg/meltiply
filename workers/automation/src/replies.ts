@@ -5,7 +5,6 @@ import type { EffectTransactionClient } from "@meltiply/database";
 import {
   cachedProviderRegistryFromEnvironment,
   createProviderServiceLive,
-  type ProviderAdapterError,
   type ProviderFailure,
   type ProviderOperationResult,
   type ProviderRegistry,
@@ -670,7 +669,7 @@ export function processReplyMessage(
   env: AutomationEnv,
   message: ReplyMessage,
   dependencies: ReplyProcessingDependencies = {},
-): Effect.Effect<"processed" | "skipped", AutomationJobError | ProviderAdapterError> {
+): Effect.Effect<"processed" | "skipped", AutomationJobError> {
   return Effect.gen(function* () {
     if (!isOutboxMessage(message) || message.topic !== "comment.reply.requested") {
       return "skipped" as const;

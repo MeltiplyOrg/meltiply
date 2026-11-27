@@ -6,9 +6,32 @@ import type {
   OAuthSelectionCandidate,
   OAuthSelectionInit,
   OAuthSelectionPublic,
-  OAuthSelectionRecord,
   OAuthStateRecord,
 } from "@meltiply/contracts";
+
+export interface OAuthSelectionRecord {
+  readonly account_ids: ReadonlyArray<string>;
+  claim?: {
+    readonly brand_profile_id: string;
+    readonly claimed_at: number;
+    readonly expires_at: number;
+    readonly idempotency_key: string;
+    readonly token: string;
+  };
+  completed_account_id?: string;
+  completed_brand_profile_id?: string;
+  completed_idempotency_key?: string;
+  cancelled_idempotency_key?: string;
+  evidence_expires_at?: number;
+  expires_at: number;
+  readonly id: string;
+  readonly organization_id: string;
+  pinned_account_id?: string;
+  readonly platform: string;
+  ready: boolean;
+  status: "pending" | "completed" | "cancelled";
+  readonly user_id: string;
+}
 
 export const SELECTION_EVIDENCE_RETENTION_MS = 10 * 60 * 1_000;
 export const MAX_SELECTION_CANDIDATES = 1_000;

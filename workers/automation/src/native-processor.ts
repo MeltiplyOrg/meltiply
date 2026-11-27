@@ -3,6 +3,21 @@ import { Effect } from "effect";
 import { createObjectUrlSignerFromEnv } from "@meltiply/storage";
 
 import type { AutomationEnv } from "./env";
+import type {
+  MediaProcessorRpcOutcome,
+  NativeProcessorFailure,
+  NativeProcessorJob,
+  NativeProcessorProfile,
+  NativeProcessorSuccess,
+} from "./native-processor-types";
+
+export type {
+  MediaProcessorRpcOutcome,
+  NativeProcessorFailure,
+  NativeProcessorJob,
+  NativeProcessorProfile,
+  NativeProcessorSuccess,
+};
 
 const sha256Pattern = /^[0-9a-f]{64}$/i;
 const profileNamePattern = /^[a-z0-9_]{1,64}$/;
@@ -19,80 +34,7 @@ export const PROCESSOR_CAPABILITY_TTL_SECONDS = 900;
 
 export const PROCESSOR_TOKEN_KEY = "processor:job-token";
 
-export interface NativeProcessorProfile {
-  allowed_content_types: string[];
-  effort: number | null;
-  kind: "image" | "video";
-  max_duration_seconds: number | null;
-  max_height: number | null;
-  max_width: number | null;
-  name: string;
-  quality: number | null;
-}
-
-export interface NativeProcessorJob {
-  asset_id: string;
-  declared_content_type: string;
-  deadline_seconds?: number | null;
-  expected_checksum?: string | null;
-  expected_size: number;
-  input_url: string;
-  job_id: string;
-  maximum_output_bytes: number;
-  output_url: string;
-  profile: NativeProcessorProfile;
-}
-
-interface NativeProcessorInput {
-  bytes: number;
-  sha256: string;
-}
-
-interface NativeProcessorOutput {
-  bytes: number;
-  content_type: string;
-  etag: string | null;
-  sha256: string;
-}
-
-interface NativeProcessorMedia {
-  animated: boolean;
-  content_type: string;
-  duration_seconds: number | null;
-  frame_count: number | null;
-  has_audio: boolean;
-  height: number | null;
-  width: number | null;
-}
-
-interface NativeProcessorEngineInfo {
-  duration_ms: number;
-  ffmpeg: string;
-  vips: string;
-}
-
-export interface NativeProcessorSuccess {
-  engine: NativeProcessorEngineInfo;
-  input: NativeProcessorInput;
-  job_id: string;
-  media: NativeProcessorMedia;
-  output: NativeProcessorOutput | null;
-  replayed?: boolean;
-  result: "optimized" | "original_compatible";
-  status: "succeeded";
-}
-
-export type MediaProcessorRpcOutcome =
-  | { error: NativeProcessorFailure; ok: false }
-  | { ok: true; result: NativeProcessorSuccess };
-
-export interface NativeProcessorFailure {
-  code: string;
-  message: string;
-  retryable: boolean;
-}
-
-export interface ProcessorJobUrls {
+interface ProcessorJobUrls {
   input_url: string;
   output_url: string;
 }
@@ -149,7 +91,7 @@ export function processorJobUrlsEffect(
         signer.signObjectWrite({
           ...(request.outputContentType ? { contentType: request.outputContentType } : {}),
           expiresAt: request.outputExpiresAt,
-          expiresInSeconds: PROCESSOR_CAPABILITY_TTL_SECONDS,
+          expiresInSeconds,
           key: request.outputKey,
           requiredHeaders: { "if-none-match": "*" },
         }),

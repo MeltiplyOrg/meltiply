@@ -2,7 +2,8 @@ import type { SessionClaims } from "@meltiply/auth";
 import type { ActiveOrganizationRequiredError, DatabaseError } from "@meltiply/domain";
 import { Effect } from "effect";
 
-import { CoreApiError, type IdempotentResult } from "../core-types";
+import { CoreApiError } from "../api-errors";
+import { type IdempotentResult } from "../core-types";
 import type { ApiWorkerEnv } from "../env";
 import {
   hashIdempotencyRequestEffect,

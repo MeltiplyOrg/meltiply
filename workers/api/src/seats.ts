@@ -3,9 +3,9 @@ import type { EffectTransactionClient } from "@meltiply/database";
 import type { DatabaseError } from "@meltiply/domain";
 import { INSTALLATION_SEAT_LIMIT } from "@meltiply/domain";
 
-import { CoreApiError } from "./core-types";
+import { CoreApiError } from "./api-errors";
 
-export interface SeatUsage {
+interface SeatUsage {
   activeMembers: number;
   pendingInvitations: number;
   used: number;

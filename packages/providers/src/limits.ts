@@ -1,6 +1,6 @@
-import type { Platform } from "@meltiply/domain";
+import { ASSET_VIDEO_MAX_BYTES, type Platform } from "@meltiply/domain";
 
-const assetVideoMaxBytes = 500 * 1024 * 1024;
+const assetVideoMaxBytes = ASSET_VIDEO_MAX_BYTES;
 const metaTokenLifetimeMaxSeconds = 90 * 24 * 60 * 60;
 const tiktokTokenLifetimeMaxSeconds = 2 * 24 * 60 * 60;
 const googleTokenLifetimeMaxSeconds = 24 * 60 * 60;

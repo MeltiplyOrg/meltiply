@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import type { DatabaseError } from "@meltiply/domain";
 
 import { requireActiveBrandProfileEffect } from "./brand-profile-guard";
-import { CoreApiError } from "./core-types";
+import { CoreApiError } from "./api-errors";
 import type { EffectTransactionClient } from "./database";
 import {
   isQueueInScope,

@@ -64,18 +64,9 @@ describe("SigV4Signer", () => {
     it.each([
       ["plain http on localhost", "http://localhost:9000"],
       ["plain http on the IPv4 loopback", "http://127.0.0.1:9000"],
+      ["plain http on the IPv6 loopback", "http://[::1]:9000"],
     ])("%s", (_example, endpoint) => {
       expect(() => new SigV4Signer({ ...options, endpoint })).not.toThrow();
-    });
-
-    it("plain http on the IPv6 loopback (today: rejected)", () => {
-      expect(() => new SigV4Signer({ ...options, endpoint: "http://[::1]:9000" })).toThrow(
-        "endpoint must use HTTPS",
-      );
-    });
-
-    it.skip("plain http on the IPv6 loopback (bug: should be accepted as loopback)", () => {
-      expect(() => new SigV4Signer({ ...options, endpoint: "http://[::1]:9000" })).not.toThrow();
     });
 
     it("plain http on a remote host", () => {

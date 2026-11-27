@@ -12,7 +12,7 @@ import {
   resolveActor as resolveActorWithRequestId,
   type ResolvedActor,
 } from "../src/actor-resolution";
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
 import type { ApiWorkerEnv } from "../src/env";
 
 const env = {

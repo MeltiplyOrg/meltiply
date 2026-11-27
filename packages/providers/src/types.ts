@@ -1,17 +1,13 @@
-import type { components, PlatformCapability } from "@meltiply/contracts";
-import type { ThreadsPublishOptions } from "./threads/options";
-import type { InstagramContentOptions } from "./instagram/options";
+import type { components } from "@meltiply/contracts/schema";
+import type { EngagementMetric, PlatformCapability, ProviderFailureClass } from "@meltiply/domain";
 
-import type { RateLimitBudget } from "./rate-limit";
+export type { ProviderFailureClass };
 
-export type ProviderFailureClass =
-  | "ambiguous"
-  | "auth"
-  | "deterministic"
-  | "quota"
-  | "rate_limit"
-  | "timeout"
-  | "transient";
+export interface RateLimitBudget {
+  percentUsed: number | null;
+  remaining: number | null;
+  resetsInSeconds: number | null;
+}
 
 export type ProviderTransferMode = "byte_upload" | "remote_ingest" | "resumable_upload";
 
@@ -42,7 +38,7 @@ export interface ProviderFailure {
 export type ProviderOperationResult =
   | {
       metadata?: ProviderOperationMetadata;
-      /** Terminal remote handoff, not a published Post (native draft/inbox/experiment). */
+      /** Terminal remote handoff, not a published Post (draft, inbox, experiment, or broadcast). */
       delivery?: "draft" | "inbox" | "experiment" | "broadcast";
       outcome: "confirmed_success";
       warnings?: components["schemas"]["Distribution"]["provider_warnings"];
@@ -65,12 +61,10 @@ export type ProviderOperationResult =
 
 export type ProviderPublicationStatus = (
   | {
-      metadata?: ProviderOperationMetadata;
       providerOperationId: string;
       state: "processing";
     }
   | {
-      metadata?: ProviderOperationMetadata;
       result: Extract<ProviderOperationResult, { outcome: "confirmed_success" }>;
       state: "published";
     }
@@ -93,12 +87,6 @@ export type ProviderPublicationStatus = (
   metadata?: ProviderOperationMetadata;
 };
 
-/**
- * Remote-ingest attachment: the provider fetches the media from a public HTTPS
- * URL. `metadata` carries the verified duration/dimensions resolved from the
- * stored rendition so capability duration and dimension checks apply per
- * attachment; it is absent when processing could not establish those facts.
- */
 export interface ProviderRemoteMedia {
   contentType: string;
   fileSize: number;
@@ -107,11 +95,6 @@ export interface ProviderRemoteMedia {
   url: string;
 }
 
-/**
- * Byte or resumable-stream attachment: bytes are pushed to the provider from a
- * Worker stream. `metadata` matches {@link ProviderRemoteMedia.metadata} so
- * every attachment kind carries its own verified facts.
- */
 export interface ProviderStreamMedia {
   body: ReadableStream<Uint8Array>;
   contentType: string;
@@ -134,6 +117,13 @@ export type TikTokPrivacyLevel =
   | "FOLLOWER_OF_CREATOR"
   | "SELF_ONLY";
 
+export const TIKTOK_PRIVACY_LEVELS: ReadonlySet<TikTokPrivacyLevel> = new Set([
+  "PUBLIC_TO_EVERYONE",
+  "MUTUAL_FOLLOW_FRIENDS",
+  "FOLLOWER_OF_CREATOR",
+  "SELF_ONLY",
+]);
+
 export interface TikTokPublishOptions {
   postMode?: "direct" | "inbox";
   allowComment: boolean;
@@ -151,14 +141,9 @@ export type InstagramPostType = "feed" | "reel" | "story";
 
 export type InstagramTrialGraduation = "manual" | "performance";
 
-/**
- * Creator-selected Instagram publication shape. `postType` defaults to `feed`
- * for images and `reel` for videos; `trialReel` is valid only for a single
- * video Reel and asks Instagram to test it with non-followers first.
- */
 export interface InstagramPublishOptions {
-  content?: InstagramContentOptions;
-  mediaOptions?: InstagramContentOptions[];
+  content?: components["schemas"]["InstagramContentOptions"];
+  mediaOptions?: components["schemas"]["InstagramContentOptions"][];
   postType?: InstagramPostType;
   trialGraduation?: InstagramTrialGraduation;
   trialReel?: boolean;
@@ -166,11 +151,13 @@ export interface InstagramPublishOptions {
 
 export type YouTubePrivacyStatus = "public" | "unlisted" | "private";
 
-/**
- * Creator-selected YouTube publication options mapped to `videos.insert` status fields.
- * `madeForKids` is a required COPPA declaration; `privacyStatus` is optional and the
- * adapter applies the established public default when it is omitted.
- */
+export const YOUTUBE_PRIVACY_STATUSES: ReadonlySet<YouTubePrivacyStatus> = new Set([
+  "private",
+  "public",
+  "unlisted",
+]);
+
+/** `madeForKids` is a required COPPA declaration; omitted `privacyStatus` defaults to `"public"`. */
 export interface YouTubePublishOptions {
   postType?: "video" | "live";
   madeForKids: boolean;
@@ -215,11 +202,6 @@ export interface FacebookABTestOptions {
   durationSeconds?: number;
 }
 
-/**
- * Page publication intent. Omitted type uses a Reel for one video and a feed
- * post otherwise. Links and link carousels apply only to media-free feed
- * posts. Live broadcasts use an external encoder rather than Asset uploads.
- */
 export interface FacebookPublishOptions {
   postType?: FacebookPostType;
   deliveryMode?: "publish" | "draft";
@@ -231,7 +213,7 @@ export interface FacebookPublishOptions {
 
 export interface ProviderPublishOptions {
   facebook?: FacebookPublishOptions;
-  threads?: ThreadsPublishOptions;
+  threads?: components["schemas"]["ThreadsPublishOptions"];
   instagram?: InstagramPublishOptions;
   tiktok?: TikTokPublishOptions;
   youtube?: YouTubePublishOptions;
@@ -251,15 +233,6 @@ export interface TikTokPublicationRequirements {
 
 export type ProviderPublicationRequirements = TikTokPublicationRequirements;
 
-/**
- * One resolved publish request: the composed caption plus the Post's ordered
- * attachments as ProviderMedia items, where the array index is the attachment
- * position the creator arranged. `media` is required so every caller decides
- * explicitly: an empty array is a text-only publish, which stays valid only
- * where the platform capability permits it. Per-attachment kind derives from
- * each item's `contentType`; per-attachment verified duration and dimensions
- * ride on {@link ProviderMedia.metadata} rather than a sibling field.
- */
 export interface PublishInput {
   caption: string;
   hashtags: string[];
@@ -269,13 +242,7 @@ export interface PublishInput {
 }
 
 export interface ProviderPublicationLookup {
-  /**
-   * Replayable media supplied only for adapters that declare
-   * `continuesResumableUpload`: reconciliation re-opens the original Asset
-   * stream so a persisted resumable session can resume from the provider's
-   * acknowledged byte offset instead of stalling until the session expires.
-   * Adapters without the capability never receive it and ignore the field.
-   */
+  /** Supplied only for adapters whose `continuesResumableUpload` accepts the retained operation ID. */
   media?: ProviderMedia;
   providerOperationId?: string;
   providerPostId?: string;
@@ -291,8 +258,7 @@ export interface ProviderPage<T> {
   nextCursor?: string;
 }
 
-/** Engagement metrics a distribution's stored snapshot can carry. */
-export type ProviderAnalyticsMetric = "comments" | "reactions" | "shares" | "views";
+export type ProviderAnalyticsMetric = EngagementMetric;
 
 export interface ProviderAnalyticsRecord {
   /** Nullable counters are Provider metrics that may be unavailable, never zero by default. */
@@ -309,7 +275,6 @@ export interface ProviderAnalyticsRecord {
   watchTimeSeconds: number;
 }
 
-/** Account-level counters captured on a slower cadence than per-Post snapshots. */
 export interface ProviderAccountAnalytics {
   followers: number;
   following?: number;
@@ -402,7 +367,6 @@ export interface ProviderAdapter {
     lookup: ProviderPublicationLookup,
   ): Promise<ProviderOperationResult>;
   authorizationUrl?(input: OAuthAuthorizationInput): string;
-  extractRateLimitBudget?(headers: Headers): RateLimitBudget | null;
   cancelPublication?(
     context: ProviderRequestContext,
     credentials: ProviderCredentials,
@@ -433,13 +397,7 @@ export interface ProviderAdapter {
     lookup: ProviderPublicationLookup,
     page: ProviderPageInput,
   ): Promise<ProviderPage<ProviderCommentRecord>>;
-  /**
-   * Narrow opt-in continuation seam: returns true when the retained
-   * providerOperationId names an open resumable upload session this adapter
-   * can continue inside `lookupPublication` once `lookup.media` replays the
-   * original Asset bytes. Generic callers resolve media only when this
-   * predicate accepts; adapters that omit it keep the read-only status lookup.
-   */
+  /** Returns true when `providerOperationId` names an open resumable upload this adapter can continue in `lookupPublication`. */
   continuesResumableUpload?(providerOperationId: string): boolean;
   lookupPublication?(
     context: ProviderRequestContext,

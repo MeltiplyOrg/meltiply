@@ -1,3 +1,4 @@
+import { requiredIdentifier, validateSnapshotPage } from "../failures";
 import type {
   ProviderAccountAnalytics,
   ProviderAnalyticsRecord,
@@ -7,7 +8,7 @@ import type {
   ProviderPublicationLookup,
   ProviderRequestContext,
 } from "../types";
-import { bearer, requiredIdentifier, validateSnapshotPage } from "../values";
+import { bearer } from "../values";
 import { youtubeAccountStatistics, youtubeAnalyticsReport } from "./responses";
 import {
   YOUTUBE_ANALYTICS_ORIGIN,

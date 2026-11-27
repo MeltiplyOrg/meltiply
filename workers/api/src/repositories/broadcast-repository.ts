@@ -3,7 +3,7 @@ import type { DatabaseError, Platform } from "@meltiply/domain";
 import { Effect } from "effect";
 
 import { activeBrandProfilePredicate } from "../brand-profile-guard";
-import { CoreApiError } from "../core-types";
+import { CoreApiError } from "../api-errors";
 import { withTenantTransactionEffect } from "../database";
 import type { ApiWorkerEnv } from "../env";
 import {

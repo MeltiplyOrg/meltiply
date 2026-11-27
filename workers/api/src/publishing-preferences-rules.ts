@@ -1,8 +1,8 @@
 import type { components } from "@meltiply/contracts/schema";
 import { isMailSenderAddress, mailSenderConfiguration } from "@meltiply/domain/mail-content";
 
-import { CoreApiError } from "./core-types";
-import { RFC4122_UUID_PATTERN } from "./crypto";
+import { RFC4122_UUID_PATTERN } from "@meltiply/domain";
+import { CoreApiError } from "./api-errors";
 import type { ApiWorkerEnv } from "./env";
 
 type Schemas = components["schemas"];

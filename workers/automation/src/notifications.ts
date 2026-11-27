@@ -1,3 +1,4 @@
+import { MAXIMUM_NOTIFICATION_RECIPIENTS } from "@meltiply/domain";
 import { escapeMailHtml, mailSenderConfiguration } from "@meltiply/domain/mail-content";
 import { Cause, Effect } from "effect";
 
@@ -5,22 +6,7 @@ import { withSystemTransactionEffect } from "./database";
 import type { AutomationEnv } from "./env";
 import { RetryableJobError, TerminalJobError, type AutomationJobError } from "./effect/index";
 import { safeErrorMessage } from "./errors";
-import type { OutboxMessage } from "./messages";
-
-type NotificationKind = "publication_failed" | "channel_disconnected";
-
-interface NotificationPayload {
-  aggregate_id: string;
-  brand_profile_id?: string;
-  channel_name?: string | null;
-  connection_status?: string;
-  delivery_key: string;
-  distribution_id?: string;
-  kind: NotificationKind;
-  platform: string;
-  post_id?: string;
-  version: 1;
-}
+import { parseNotificationPayload, type NotificationKind, type OutboxMessage } from "./messages";
 
 interface DeliveryRow extends Record<string, unknown> {
   attempt_count: number;
@@ -50,45 +36,6 @@ interface PublicationFailureRow extends Record<string, unknown> {
 
 const maximumDeliveryAttempts = 5;
 const sendingLeaseSeconds = 300;
-const maximumNotificationRecipients = 20;
-
-function notificationPayload(value: Record<string, unknown>): NotificationPayload | null {
-  const kind = value.kind;
-  const deliveryKey = value.delivery_key;
-  const aggregateId = value.aggregate_id;
-  const platform = value.platform;
-  if (
-    value.version !== 1 ||
-    (kind !== "publication_failed" && kind !== "channel_disconnected") ||
-    typeof deliveryKey !== "string" ||
-    deliveryKey.length === 0 ||
-    deliveryKey.length > 300 ||
-    typeof aggregateId !== "string" ||
-    typeof platform !== "string"
-  ) {
-    return null;
-  }
-  return {
-    aggregate_id: aggregateId,
-    delivery_key: deliveryKey,
-    kind,
-    platform,
-    version: 1,
-    ...(typeof value.brand_profile_id === "string"
-      ? { brand_profile_id: value.brand_profile_id }
-      : {}),
-    ...(typeof value.channel_name === "string" || value.channel_name === null
-      ? { channel_name: value.channel_name }
-      : {}),
-    ...(typeof value.connection_status === "string"
-      ? { connection_status: value.connection_status }
-      : {}),
-    ...(typeof value.distribution_id === "string"
-      ? { distribution_id: value.distribution_id }
-      : {}),
-    ...(typeof value.post_id === "string" ? { post_id: value.post_id } : {}),
-  };
-}
 
 function notificationPreferencesEffect(env: AutomationEnv, organizationId: string) {
   return withSystemTransactionEffect(env, (client) =>
@@ -238,7 +185,7 @@ export function processNotificationMessage(
   message: OutboxMessage,
 ): Effect.Effect<"processed" | "skipped", AutomationJobError> {
   return Effect.gen(function* () {
-    const payload = notificationPayload(message.payload);
+    const payload = parseNotificationPayload(message.payload);
     if (!payload) {
       return yield* Effect.fail(
         new TerminalJobError({
@@ -297,7 +244,7 @@ export function processNotificationMessage(
             ? "The email channel is disabled."
             : recipients.length === 0
               ? "No email recipients are configured."
-              : recipients.length > maximumNotificationRecipients
+              : recipients.length > MAXIMUM_NOTIFICATION_RECIPIENTS
                 ? "The email recipient list is larger than supported."
                 : null;
         const nextState = disabledReason

@@ -4,21 +4,15 @@ import {
   type WorkflowEvent,
   type WorkflowStep,
 } from "cloudflare:workers";
-import {
-  createTraceId,
-  errorDiagnostic,
-  elapsedMilliseconds,
-  log,
-  type RetryClass,
-} from "@meltiply/observability";
+import { PLATFORM_IDS } from "@meltiply/domain";
+import { createTraceId, errorDiagnostic, elapsedMilliseconds, log } from "@meltiply/observability";
 
 import { Cause, Effect, Exit } from "effect";
-import type { ProviderAdapterError, ProviderRegistry } from "@meltiply/providers";
+import type { ProviderRegistry } from "@meltiply/providers";
 import {
   classifyJobError,
   configureJobLogging,
   exitToJobOutcome,
-  logJobOutcome,
   jobScope,
   makeJobContext,
   queueBackoffDelaySeconds,
@@ -49,7 +43,6 @@ import {
   queueDiagnosticReport,
   registerDiagnostic,
   scheduledDiagnosticReport,
-  workflowDiagnosticReport,
 } from "./diagnostic-reporting";
 import type { OutboxRelayResult } from "./outbox";
 import type { ProviderDueResult } from "./provider-sync";
@@ -57,7 +50,7 @@ import type { DeliverySummary } from "@meltiply/reporting";
 import type { RetentionResult } from "./retention";
 import type { UsageReportResult } from "./usage-reporting";
 
-const publishQueuePattern = /publish-(facebook|instagram|threads|tiktok|youtube)(?:-|$)/;
+const publishQueuePattern = new RegExp(`publish-(${PLATFORM_IDS.join("|")})(?:-|$)`);
 
 const EAGER_RELAY_BATCH_SIZE = 50;
 
@@ -99,93 +92,57 @@ export class ReplyWorkflow extends WorkflowEntrypoint<AutomationEnv, ReplyWorkfl
         if (mapped.outcome === "processed") {
           const outcome =
             Exit.isSuccess(exit) && typeof exit.value === "string" ? exit.value : "processed";
-          log(
-            "info",
-            context(this.env, traceId, {
-              jobId: event.payload.event_id,
-              requestId: event.payload.request_id ?? undefined,
-              workflowId: event.instanceId,
-            }),
-            {
-              event: "reply_workflow_step",
-              job: "reply_delivery",
-              latency_ms: elapsedMilliseconds(startedAt),
-              outcome,
-              retry_class: "none",
-            },
-          );
+          log("info", scope.logContext, {
+            event: "reply_workflow_step",
+            job: "reply_delivery",
+            latency_ms: elapsedMilliseconds(startedAt),
+            outcome,
+            retry_class: "none",
+          });
           return { outcome };
         }
         if (mapped.outcome === "ambiguous") {
-          log(
-            "warn",
-            context(this.env, traceId, {
-              jobId: event.payload.event_id,
-              requestId: event.payload.request_id ?? undefined,
-              workflowId: event.instanceId,
-            }),
-            {
-              ...(mapped.diagnostic ?? {}),
-              error_code: "reply_workflow_step_ambiguous",
-              event: "reply_workflow_step",
-              job: "reply_delivery",
-              latency_ms: elapsedMilliseconds(startedAt),
-              outcome: "ambiguous",
-              retry_class: "reconciliation",
-            },
-          );
+          log("warn", scope.logContext, {
+            ...(mapped.diagnostic ?? {}),
+            error_code: "reply_workflow_step_ambiguous",
+            event: "reply_workflow_step",
+            job: "reply_delivery",
+            latency_ms: elapsedMilliseconds(startedAt),
+            outcome: "ambiguous",
+            retry_class: "reconciliation",
+          });
           return { outcome: "ambiguous" as const };
         }
         const cause = Exit.isSuccess(exit)
           ? new Error("reply workflow step failed")
           : Cause.squash(exit.cause);
         if (mapped.outcome === "rejected") {
-          log(
-            "warn",
-            context(this.env, traceId, {
-              jobId: event.payload.event_id,
-              requestId: event.payload.request_id ?? undefined,
-              workflowId: event.instanceId,
-            }),
-            {
-              ...(mapped.diagnostic ?? {}),
-              error_code: "reply_workflow_step_rejected",
-              event: "reply_workflow_step",
-              job: "reply_delivery",
-              latency_ms: elapsedMilliseconds(startedAt),
-              outcome: "rejected",
-              retry_class: "none",
-            },
-          );
+          log("warn", scope.logContext, {
+            ...(mapped.diagnostic ?? {}),
+            error_code: "reply_workflow_step_rejected",
+            event: "reply_workflow_step",
+            job: "reply_delivery",
+            latency_ms: elapsedMilliseconds(startedAt),
+            outcome: "rejected",
+            retry_class: "none",
+          });
           return { outcome: "rejected" as const };
         }
         registerDiagnostic(
           this.ctx,
           env,
-          workflowDiagnosticReport(cause, { outcome: "retry" }),
-          context(this.env, traceId, {
-            jobId: event.payload.event_id,
-            requestId: event.payload.request_id ?? undefined,
-            workflowId: event.instanceId,
-          }),
+          queueDiagnosticReport(cause, { outcome: "retry", topic: "comment.reply.requested" }),
+          scope.logContext,
         );
-        log(
-          "error",
-          context(this.env, traceId, {
-            jobId: event.payload.event_id,
-            requestId: event.payload.request_id ?? undefined,
-            workflowId: event.instanceId,
-          }),
-          {
-            error_code: "reply_workflow_step_failed",
-            event: "reply_workflow_step",
-            job: "reply_delivery",
-            latency_ms: elapsedMilliseconds(startedAt),
-            outcome: "retry",
-            ...errorDiagnostic(cause),
-            retry_class: "workflow_backoff",
-          },
-        );
+        log("error", scope.logContext, {
+          error_code: "reply_workflow_step_failed",
+          event: "reply_workflow_step",
+          job: "reply_delivery",
+          latency_ms: elapsedMilliseconds(startedAt),
+          outcome: "retry",
+          ...errorDiagnostic(cause),
+          retry_class: "workflow_backoff",
+        });
         throw cause;
       },
     );
@@ -247,30 +204,23 @@ interface ScheduledWorkUnit {
   name: ScheduledWorkName;
   run: (
     env: AutomationEnv,
-  ) => Effect.Effect<
-    unknown,
-    AutomationJobError | ProviderAdapterError,
-    QueuePublisher | PublishQueueResolver
-  >;
+  ) => Effect.Effect<unknown, AutomationJobError, QueuePublisher | PublishQueueResolver>;
   tier: ScheduledTier;
 }
 
-interface CorrelationIds {
-  jobId?: string;
-  requestId?: string;
-  workflowId?: string;
-}
-
-function context(env: AutomationEnv, traceId: string, correlation: CorrelationIds = {}) {
-  return {
-    environment: env.ENVIRONMENT,
-    ...(correlation.jobId ? { job_id: correlation.jobId } : {}),
-    ...(correlation.requestId ? { request_id: correlation.requestId } : {}),
-    service: "automation",
-    trace_id: traceId,
-    version: env.VERSION,
-    ...(correlation.workflowId ? { workflow_id: correlation.workflowId } : {}),
-  };
+function withLazyModule<M, Args extends unknown[], A, R = never>(
+  override: ((...args: Args) => Effect.Effect<A, unknown>) | undefined,
+  load: () => Promise<M>,
+  invoke: (module: M, ...args: Args) => Effect.Effect<A, AutomationJobError, R>,
+): (...args: Args) => Effect.Effect<A, AutomationJobError, R> {
+  if (override) {
+    return (...args) =>
+      Effect.suspend(() => override(...args)).pipe(Effect.mapError(classifyJobError));
+  }
+  return (...args) =>
+    Effect.flatMap(Effect.tryPromise({ catch: classifyJobError, try: load }), (module) =>
+      invoke(module, ...args),
+    );
 }
 
 function queueCorrelation(body: unknown, messageId: string) {
@@ -314,36 +264,6 @@ function queueJob(body: unknown): string {
 
 function queueProvider(queue: string): string | undefined {
   return publishQueuePattern.exec(queue)?.[1];
-}
-
-function logQueueOutcome(
-  env: AutomationEnv,
-  correlation: { jobId?: string; requestId?: string; traceId: string },
-  opts: {
-    attempts: number;
-    event: string;
-    workload?: string;
-    job: string;
-    latencyMs: number;
-    messageId: string;
-    outcome: string;
-    provider?: string;
-    queue: string;
-    retryClass?: RetryClass;
-  },
-): void {
-  log("info", context(env, correlation.traceId, correlation), {
-    attempts: opts.attempts,
-    event: opts.event,
-    job: opts.job,
-    latency_ms: opts.latencyMs,
-    message_id: opts.messageId,
-    outcome: opts.outcome,
-    ...(opts.provider ? { provider: opts.provider } : {}),
-    queue: opts.queue,
-    retry_class: opts.retryClass ?? "none",
-    ...(opts.workload ? { workload: opts.workload } : {}),
-  });
 }
 
 async function beginQueueFlow(
@@ -426,15 +346,11 @@ interface QueueDispatchInput {
   processProviderSync: (
     env: AutomationEnv,
     message: ProviderSyncMessage,
-  ) => Effect.Effect<
-    "processed" | "skipped",
-    AutomationJobError | ProviderAdapterError,
-    QueuePublisher
-  >;
+  ) => Effect.Effect<"processed" | "skipped", AutomationJobError, QueuePublisher>;
   processChannelRevocation: (
     env: AutomationEnv,
     message: OutboxMessage,
-  ) => Effect.Effect<"processed" | "skipped", unknown>;
+  ) => Effect.Effect<"processed" | "skipped", AutomationJobError>;
   processorFor: () => Promise<AssetJobProcessor>;
 }
 
@@ -444,28 +360,22 @@ function dispatchQueueMessage(
 ): Effect.Effect<string, AutomationJobError, ReplyWorkflowDispatcher | QueuePublisher> {
   const { body } = input;
   if (isProviderSyncMessage(body)) {
-    return Effect.mapError(input.processProviderSync(env, body), (cause) =>
-      classifyJobError(cause),
-    );
+    return input.processProviderSync(env, body);
   }
   if (isOutboxMessage(body) && body.topic.startsWith("distribution.")) {
     return Effect.flatMap(
       Effect.tryPromise({
-        catch: (cause) => classifyJobError(cause),
+        catch: classifyJobError,
         try: () => import("./distribution"),
       }),
       (module) =>
-        module
-          .processDistributionMessage(env, body, {
-            providerRegistry: input.providerRegistry,
-          })
-          .pipe(Effect.mapError((cause) => classifyJobError(cause))),
+        module.processDistributionMessage(env, body, {
+          providerRegistry: input.providerRegistry,
+        }),
     );
   }
   if (isOutboxMessage(body) && body.topic === "channel.revocation.requested") {
-    return Effect.mapError(input.processChannelRevocation(env, body), (cause) =>
-      classifyJobError(cause),
-    );
+    return input.processChannelRevocation(env, body);
   }
   if (isOutboxMessage(body) && body.topic === "comment.reply.requested") {
     return input.enqueueReplyWorkflow(env, body);
@@ -517,38 +427,22 @@ export function createAutomationHandler(
       empty: 0,
       field: "due_distributions",
       name: "due-distribution-scan",
-      run: dependencies.enqueueDue
-        ? (env) =>
-            Effect.suspend(() => dependencies.enqueueDue!(env)).pipe(
-              Effect.mapError((cause) => classifyJobError(cause)),
-            )
-        : (env) =>
-            Effect.flatMap(
-              Effect.tryPromise({
-                catch: (cause) => classifyJobError(cause),
-                try: () => import("./distribution"),
-              }),
-              (module) => module.enqueueDueDistributions(env),
-            ),
+      run: withLazyModule(
+        dependencies.enqueueDue,
+        () => import("./distribution"),
+        (module, env) => module.enqueueDueDistributions(env),
+      ),
       tier: "hourly",
     },
     {
       empty: { claimed: 0, dead: 0, failed: 0, published: 0 },
       field: "outbox",
       name: "outbox-relay",
-      run: dependencies.relay
-        ? (env) =>
-            Effect.suspend(() => dependencies.relay!(env)).pipe(
-              Effect.mapError((cause) => classifyJobError(cause)),
-            )
-        : (env) =>
-            Effect.flatMap(
-              Effect.tryPromise({
-                catch: (cause) => classifyJobError(cause),
-                try: () => import("./outbox"),
-              }),
-              (module) => module.relayOutbox(env),
-            ),
+      run: withLazyModule(
+        dependencies.relay,
+        () => import("./outbox"),
+        (module, env) => module.relayOutbox(env),
+      ),
       tier: "hourly",
     },
     {
@@ -558,7 +452,7 @@ export function createAutomationHandler(
       run: (env) =>
         Effect.flatMap(
           Effect.tryPromise({
-            catch: (cause) => classifyJobError(cause),
+            catch: classifyJobError,
             try: () => Promise.resolve(processorFor(env)),
           }),
           (processor) => processor.runMaintenance(),
@@ -569,176 +463,101 @@ export function createAutomationHandler(
       empty: 0,
       field: "distribution_sweep",
       name: "distribution-sweep",
-      run: dependencies.sweepDue
-        ? (env) =>
-            Effect.suspend(() => dependencies.sweepDue!(env)).pipe(
-              Effect.mapError((cause) => classifyJobError(cause)),
-            )
-        : (env) =>
-            Effect.flatMap(
-              Effect.tryPromise({
-                catch: (cause) => classifyJobError(cause),
-                try: () => import("./distribution"),
-              }),
-              (module) => module.sweepDueDistributions(env),
-            ),
+      run: withLazyModule(
+        dependencies.sweepDue,
+        () => import("./distribution"),
+        (module, env) => module.sweepDueDistributions(env),
+      ),
       tier: "hourly",
     },
     {
       empty: { analytics: 0, comments: 0, token_refresh: 0 },
       field: "provider_sync_sweep",
       name: "provider-sync-sweep",
-      run: dependencies.sweepProviderDue
-        ? (env) =>
-            Effect.suspend(() => dependencies.sweepProviderDue!(env)).pipe(
-              Effect.mapError((cause) => classifyJobError(cause)),
-            )
-        : (env) =>
-            Effect.flatMap(
-              Effect.tryPromise({
-                catch: (cause) => classifyJobError(cause),
-                try: () => import("./provider-sync"),
-              }),
-              (module) => module.sweepDueProviderJobs(env),
-            ),
+      run: withLazyModule(
+        dependencies.sweepProviderDue,
+        () => import("./provider-sync"),
+        (module, env) => module.sweepDueProviderJobs(env),
+      ),
       tier: "hourly",
     },
     {
       empty: undefined,
       field: "reply_reconciliations",
       name: "reply-reconciliation",
-      run: dependencies.enqueueDueReplyReconciliations
-        ? (env) =>
-            Effect.suspend(() => dependencies.enqueueDueReplyReconciliations!(env)).pipe(
-              Effect.mapError((cause) => classifyJobError(cause)),
-            )
-        : (env) =>
-            Effect.flatMap(
-              Effect.tryPromise({
-                catch: (cause) => classifyJobError(cause),
-                try: () => import("./reply-reconciliation"),
-              }),
-              (module) => module.enqueueDueReplyReconciliations(env),
-            ),
+      run: withLazyModule(
+        dependencies.enqueueDueReplyReconciliations,
+        () => import("./reply-reconciliation"),
+        (module, env) => module.enqueueDueReplyReconciliations(env),
+      ),
       tier: "hourly",
     },
     {
       empty: { failed: 0, recorded: 0, scanned: 0 },
       field: "account_analytics",
       name: "account-analytics-sweep",
-      run: dependencies.sweepAccountAnalytics
-        ? (env) =>
-            Effect.suspend(() => dependencies.sweepAccountAnalytics!(env)).pipe(
-              Effect.mapError((cause) => classifyJobError(cause)),
-            )
-        : (env) =>
-            Effect.flatMap(
-              Effect.tryPromise({
-                catch: (cause) => classifyJobError(cause),
-                try: () => import("./account-analytics"),
-              }),
-              (module) => module.sweepAccountAnalytics(env),
-            ),
+      run: withLazyModule(
+        dependencies.sweepAccountAnalytics,
+        () => import("./account-analytics"),
+        (module, env) => module.sweepAccountAnalytics(env),
+      ),
       tier: "hourly",
     },
     {
       empty: undefined,
       field: "retention",
       name: "retention",
-      run: dependencies.runRetention
-        ? (env) =>
-            Effect.suspend(() => dependencies.runRetention!(env)).pipe(
-              Effect.mapError((cause) => classifyJobError(cause)),
-            )
-        : (env) =>
-            Effect.flatMap(
-              Effect.tryPromise({
-                catch: (cause) => classifyJobError(cause),
-                try: () => import("./retention"),
-              }),
-              (module) => module.runRetention(env),
-            ),
+      run: withLazyModule(
+        dependencies.runRetention,
+        () => import("./retention"),
+        (module, env) => module.runRetention(env),
+      ),
       tier: "daily",
     },
     {
       empty: { considered: 0, queued: 0 },
       field: "usage",
       name: "usage-reporting",
-      run: dependencies.enqueueDailyUsageReport
-        ? (env) =>
-            Effect.suspend(() => dependencies.enqueueDailyUsageReport!(env)).pipe(
-              Effect.mapError((cause) => classifyJobError(cause)),
-            )
-        : (env) =>
-            Effect.flatMap(
-              Effect.tryPromise({
-                catch: (cause) => classifyJobError(cause),
-                try: () => import("./usage-reporting"),
-              }),
-              (module) => module.enqueueDailyUsageReport(env),
-            ),
+      run: withLazyModule(
+        dependencies.enqueueDailyUsageReport,
+        () => import("./usage-reporting"),
+        (module, env) => module.enqueueDailyUsageReport(env),
+      ),
       tier: "daily",
     },
     {
       empty: { claimed: 0, delivered: 0, discarded: 0, failed: 0, released: 0, skipped: 0 },
       field: "reporting",
       name: "improvement-reporting-delivery",
-      run: dependencies.deliverImprovementReports
-        ? (env) =>
-            Effect.suspend(() => dependencies.deliverImprovementReports!(env)).pipe(
-              Effect.mapError((cause) => classifyJobError(cause)),
-            )
-        : (env) =>
-            Effect.flatMap(
-              Effect.tryPromise({
-                catch: (cause) => classifyJobError(cause),
-                try: () => import("./improvement-reporting"),
-              }),
-              (module) => module.deliverImprovementReports(env),
-            ),
+      run: withLazyModule(
+        dependencies.deliverImprovementReports,
+        () => import("./reporting"),
+        (module, env) => module.deliverImprovementReports(env),
+      ),
       tier: "daily",
     },
   ];
-  const providerSyncOverride = dependencies.providerSyncProcessor;
-  const processProviderSync: QueueDispatchInput["processProviderSync"] = providerSyncOverride
-    ? (env, message) =>
-        Effect.suspend(() => providerSyncOverride(env, message)).pipe(
-          Effect.mapError((cause) => classifyJobError(cause)),
-        )
-    : (env, message) =>
-        Effect.flatMap(
-          Effect.tryPromise({
-            catch: (cause) => classifyJobError(cause),
-            try: () => import("./provider-sync"),
-          }),
-          (module) => module.processProviderSyncMessage(env, message),
-        );
+  const processProviderSync: QueueDispatchInput["processProviderSync"] = withLazyModule(
+    dependencies.providerSyncProcessor,
+    () => import("./provider-sync"),
+    (module, env, message) => module.processProviderSyncMessage(env, message),
+  );
   const replyEnqueueOverride = dependencies.replyWorkflowEnqueue;
   const enqueueReplyWorkflow: QueueDispatchInput["enqueueReplyWorkflow"] = replyEnqueueOverride
     ? (env, message) =>
         Effect.suspend(() => replyEnqueueOverride(env, message)).pipe(
-          Effect.mapError((cause) => classifyJobError(cause)),
+          Effect.mapError(classifyJobError),
         )
     : (_env, message) =>
         Effect.gen(function* () {
           const dispatcher = yield* ReplyWorkflowDispatcher;
           return yield* dispatcher.enqueue(message);
-        }).pipe(Effect.mapError((cause) => classifyJobError(cause)));
-  const channelRevocationOverride = dependencies.channelRevocationProcessor;
-  const processChannelRevocation: QueueDispatchInput["processChannelRevocation"] =
-    channelRevocationOverride
-      ? (env, message) =>
-          Effect.suspend(() => channelRevocationOverride(env, message)).pipe(
-            Effect.mapError((cause) => classifyJobError(cause)),
-          )
-      : (env, message) =>
-          Effect.flatMap(
-            Effect.tryPromise({
-              catch: (cause) => classifyJobError(cause),
-              try: () => import("./channel-revocation"),
-            }),
-            (module) => module.processChannelRevocationMessage(env, message),
-          );
+        }).pipe(Effect.mapError(classifyJobError));
+  const processChannelRevocation: QueueDispatchInput["processChannelRevocation"] = withLazyModule(
+    dependencies.channelRevocationProcessor,
+    () => import("./channel-revocation"),
+    (module, env, message) => module.processChannelRevocationMessage(env, message),
+  );
 
   return {
     fetch(_request, env) {
@@ -807,23 +626,24 @@ export function createAutomationHandler(
           await flow?.finish("succeeded");
           const processorOutcome =
             Exit.isSuccess(exit) && typeof exit.value === "string" ? exit.value : "processed";
-          logQueueOutcome(env, correlation, {
+          log("info", scope.logContext, {
             attempts: message.attempts,
             event,
-            ...(isProviderSyncMessage(body) ? { workload: body.workload } : {}),
             job,
-            latencyMs,
-            messageId: message.id,
+            latency_ms: latencyMs,
+            message_id: message.id,
             outcome: processorOutcome,
             ...(provider ? { provider } : {}),
             queue: batch.queue,
+            retry_class: "none",
+            ...(isProviderSyncMessage(body) ? { workload: body.workload } : {}),
           });
           return;
         }
         if (outcome === "rejected") {
           message.ack();
           await flow?.finish("failed");
-          log("warn", context(env, correlation.traceId, correlation), {
+          log("warn", scope.logContext, {
             attempts: message.attempts,
             ...(diagnostic ?? {}),
             event,
@@ -841,16 +661,20 @@ export function createAutomationHandler(
             queueDiagnosticReport(failure, {
               outcome: "rejected",
               ...(provider ? { provider } : {}),
-              ...(isOutboxMessage(body) ? { topic: body.topic } : {}),
+              ...(isOutboxMessage(body)
+                ? { topic: body.topic }
+                : isProviderSyncMessage(body)
+                  ? { topic: body.type }
+                  : {}),
             }),
-            context(env, correlation.traceId, correlation),
+            scope.logContext,
           );
           return;
         }
         if (outcome === "ambiguous") {
           message.ack();
           await flow?.finish("succeeded");
-          log("warn", context(env, correlation.traceId, correlation), {
+          log("warn", scope.logContext, {
             attempts: message.attempts,
             ...(diagnostic ?? {}),
             event,
@@ -868,9 +692,13 @@ export function createAutomationHandler(
             queueDiagnosticReport(failure, {
               outcome: "ambiguous",
               ...(provider ? { provider } : {}),
-              ...(isOutboxMessage(body) ? { topic: body.topic } : {}),
+              ...(isOutboxMessage(body)
+                ? { topic: body.topic }
+                : isProviderSyncMessage(body)
+                  ? { topic: body.type }
+                  : {}),
             }),
-            context(env, correlation.traceId, correlation),
+            scope.logContext,
           );
           return;
         }
@@ -878,7 +706,7 @@ export function createAutomationHandler(
         message.retry({
           delaySeconds: queueBackoffDelaySeconds(message.attempts),
         });
-        log("error", context(env, correlation.traceId, correlation), {
+        log("error", scope.logContext, {
           attempts: message.attempts,
           ...(diagnostic ?? { error_code: "queue_job_failed" }),
           event,
@@ -896,9 +724,13 @@ export function createAutomationHandler(
           queueDiagnosticReport(failure, {
             outcome: "retry",
             ...(provider ? { provider } : {}),
-            ...(isOutboxMessage(body) ? { topic: body.topic } : {}),
+            ...(isOutboxMessage(body)
+              ? { topic: body.topic }
+              : isProviderSyncMessage(body)
+                ? { topic: body.type }
+                : {}),
           }),
-          context(env, correlation.traceId, correlation),
+          scope.logContext,
         );
       };
       if (provider && env.PUBLISH_BATCH_CONCURRENCY === "2") {
@@ -915,7 +747,11 @@ export function createAutomationHandler(
       configureJobLogging(env);
       const startedAt = performance.now();
       const jobId = crypto.randomUUID();
-      const scheduledContext = context(env, jobId, { jobId });
+      const scheduledScope: JobScope = jobScope(
+        env,
+        makeJobContext({ jobId, source: "scheduled", traceId: jobId }),
+      );
+      const scheduledContext = scheduledScope.logContext;
       const cron = _controller?.cron;
       const tierRuns: Record<ScheduledTier, boolean> = {
         daily: !cron || cron === SCHEDULED_TIERS.daily,
@@ -927,18 +763,19 @@ export function createAutomationHandler(
       );
       const failures: Array<{ cause: unknown; unit: ScheduledWorkName }> = [];
       for (const unit of dueWork) {
-        const unitScope: JobScope = jobScope(
-          env,
-          makeJobContext({ jobId, source: "scheduled", traceId: jobId }),
-        );
+        const unitStartedAt = performance.now();
         const program = Effect.suspend(() => unit.run(env));
-        const programExit = await runJobProgram(Effect.provide(program, unitScope.runtimeLayer));
+        const programExit = await runJobProgram(
+          Effect.provide(program, scheduledScope.runtimeLayer),
+        );
         if (programExit._tag === "Success") {
           results[unit.field] = programExit.value;
-          logJobOutcome(unitScope, "processed", {
+          log("info", scheduledContext, {
             event: "automation_scheduled",
             job: unit.name,
-            latencyMs: elapsedMilliseconds(startedAt),
+            latency_ms: elapsedMilliseconds(unitStartedAt),
+            outcome: "succeeded",
+            retry_class: "none",
           });
           continue;
         }
@@ -972,18 +809,11 @@ export function createAutomationHandler(
       const partial =
         relayResult.failed > 0 || relayResult.dead > 0 || (retention?.errors ?? 0) > 0;
       log("info", scheduledContext, {
+        ...results,
         event: "automation_scheduled",
-        account_analytics: results.account_analytics,
-        distribution_sweep: results.distribution_sweep,
-        due_distributions: results.due_distributions,
         job: "scheduled_maintenance",
         latency_ms: elapsedMilliseconds(startedAt),
-        maintenance: results.maintenance,
-        outbox: relayResult,
         outcome: partial ? "partial" : "ok",
-        provider_sync_sweep: results.provider_sync_sweep,
-        reply_reconciliations: results.reply_reconciliations,
-        retention,
         retry_class: partial ? "platform_retry" : "none",
       });
     },

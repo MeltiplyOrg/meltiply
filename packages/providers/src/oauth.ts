@@ -5,7 +5,6 @@ import { exactRedirectUri, formHeaders, required } from "./values";
 
 const oauthStateMaxChars = 1_024;
 
-/** OAuth token lifetime: a positive integer number of seconds no greater than `maxSeconds`. */
 export function addSeconds(now: Date, value: unknown, maxSeconds: number): string {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > maxSeconds) {
     throw malformed();
@@ -19,7 +18,6 @@ export function assertConfiguredRedirectUri(attempted: string, configured: strin
   }
 }
 
-/** Builds a `response_type=code` authorization URL pinned to the configured callback. */
 export function authorizationCodeUrl(
   endpoint: string,
   input: OAuthAuthorizationInput,
@@ -60,7 +58,6 @@ export interface AuthorizationCodeExchangeRequest {
   tokenUrl: string;
 }
 
-/** Posts an `authorization_code` grant and returns the unparsed token body. */
 export function exchangeAuthorizationCodeForm(
   http: ProviderHttpClient,
   context: ProviderRequestContext,

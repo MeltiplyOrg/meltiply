@@ -1,46 +1,18 @@
 import type { EffectTransactionClient } from "@meltiply/database";
-import type { DatabaseError } from "@meltiply/domain";
 import { Effect } from "effect";
 
 import {
-  channelRevocationEvent,
   mapBrandProfile,
   type BrandProfileRetention,
   type BrandProfileRow,
   type DisconnectableAccountRow,
 } from "../brand-profile-rules";
+import { disconnectPlatformAccountsEffect } from "../platform-service";
 import type { BrandProfileQueries } from "./brand-profile-repository";
 import { postgresTenantRepository } from "./postgres-tenant-repository";
 
 const brandProfileColumns = `id, org_id, name, description, color, deleted_at, purge_at,
                     created_at, updated_at`;
-
-export function disconnectPlatformAccountEffect(
-  client: EffectTransactionClient,
-  organizationId: string,
-  account: DisconnectableAccountRow,
-): Effect.Effect<void, DatabaseError> {
-  return Effect.gen(function* () {
-    yield* client.query(
-      `UPDATE distributions
-       SET status = 'cancelled',
-           error_message = 'Platform account disconnected before publication.',
-           updated_at = now()
-       WHERE platform_account_id = $1
-         AND status IN ('scheduled', 'queued')`,
-      [account.id],
-    );
-    yield* client.query("DELETE FROM platform_accounts WHERE id = $1", [account.id]);
-    const event = channelRevocationEvent(account);
-    yield* client.query(
-      `INSERT INTO outbox_events
-         (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-       VALUES ($1, 'channel.revocation.requested', 'platform_account', $2, $3, $4)
-       ON CONFLICT (org_id, topic, dedupe_key) DO NOTHING`,
-      [organizationId, account.id, event.dedupeKey, event.payload],
-    );
-  });
-}
 
 function brandProfileQueries(client: EffectTransactionClient): BrandProfileQueries {
   const selected = (sql: string, values?: readonly unknown[]) =>
@@ -127,7 +99,7 @@ function brandProfileQueries(client: EffectTransactionClient): BrandProfileQueri
         )
         .pipe(Effect.map((result) => result.rows)),
     disconnectChannel: (organizationId, account) =>
-      disconnectPlatformAccountEffect(client, organizationId, account),
+      disconnectPlatformAccountsEffect(client, organizationId, [account]),
     deleteBrandProfile: (profileId, organizationId) =>
       written(
         `DELETE FROM brand_profiles

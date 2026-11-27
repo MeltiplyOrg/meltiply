@@ -25,7 +25,8 @@ import type { ResolvedActor } from "../src/actor-resolution";
 import { createApiApp, type ApiDependencies } from "../src/app";
 import type { AssetApiService } from "../src/asset-types";
 import type { BrandProfileApiService } from "../src/brand-profile-service";
-import { CoreApiError, type CoreApiService } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
+import { type CoreApiService } from "../src/core-types";
 import type { ApiWorkerEnv } from "../src/env";
 import {
   fakeBrandProfileService,
@@ -109,7 +110,6 @@ function unavailableCapabilities(): ReturnType<ProviderRegistry["capabilities"]>
 function service(overrides: Partial<CoreApiService> = {}): CoreApiService {
   const notImplemented = () => Effect.die(new Error("unexpected service call"));
   return {
-    activeOrganization: notImplemented,
     analyticsPosts: notImplemented,
     calendar: notImplemented,
     cancelDistribution: notImplemented,
@@ -2168,8 +2168,11 @@ describe("core API routes", () => {
   });
 
   it.each([
-    { ENVIRONMENT: "staging", origin: "http://localhost:3000", status: 503 },
-    { ENVIRONMENT: "production", origin: "http://localhost:3000", status: 503 },
+    { ENVIRONMENT: "staging", origin: "http://localhost:3000", status: 307 },
+    { ENVIRONMENT: "production", origin: "http://localhost:3000", status: 307 },
+    { ENVIRONMENT: "production", origin: "http://127.0.0.1:3000", status: 307 },
+    { ENVIRONMENT: "production", origin: "http://app.example.test", status: 503 },
+    { ENVIRONMENT: "local", origin: "http://app.example.test", status: 503 },
     { ENVIRONMENT: "staging", origin: "https://app.example.test", status: 307 },
     { ENVIRONMENT: "production", origin: "https://app.example.test", status: 307 },
     { ENVIRONMENT: "local", origin: "http://localhost:3000", status: 307 },

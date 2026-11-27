@@ -4,7 +4,7 @@ import { DatabaseError } from "@meltiply/domain";
 import { Effect } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
 import { createPublishingQueueApiService } from "../src/publishing-queue-service";
 import {
   FakePublishingQueueRepository,
@@ -200,7 +200,7 @@ describe("PublishingQueueService", () => {
       session = admin,
       input = configuration,
       key = "key-1",
-    ) => service.mutate(env, session, "create", undefined, input, key);
+    ) => service.createQueue(env, session, input, key);
 
     it("an Admin", async () => {
       const { service, store } = setup();
@@ -288,7 +288,7 @@ describe("PublishingQueueService", () => {
 
   describe("mutate update", () => {
     const update = (service: ReturnType<typeof setup>["service"], id: string, input: object) =>
-      service.mutate(env, admin, "update", id, { ...scope, ...input }, "key-1");
+      service.updateQueue(env, admin, id, { ...scope, ...input }, "key-1");
 
     it("a new name", async () => {
       const { service, store } = setup();
@@ -316,7 +316,7 @@ describe("PublishingQueueService", () => {
 
   describe("mutate delete", () => {
     const retire = (service: ReturnType<typeof setup>["service"], id = "queue-1") =>
-      service.mutate(env, admin, "delete", id, scope, "key-1");
+      service.deleteQueue(env, admin, id, scope, "key-1");
 
     it("a Queue without pending Posts", async () => {
       const { service, store } = setup();

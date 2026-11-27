@@ -91,7 +91,7 @@ describe("createObjectStoreFromEnv", () => {
     ],
     ["a region with a space", { S3_REGION: "us east-1" }, "S3_REGION must contain only"],
     ["a region in capitals", { S3_REGION: "US-EAST-1" }, "S3_REGION must contain only"],
-    ["a plain-http endpoint", { S3_ENDPOINT: "http://minio:9000" }, "S3 endpoint must use HTTPS"],
+    ["a plain-http endpoint", { S3_ENDPOINT: "http://minio:9000" }, "endpoint must use HTTPS"],
     [
       "an endpoint with a path",
       { S3_ENDPOINT: "https://objects.example.com/prefix" },

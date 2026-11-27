@@ -36,7 +36,6 @@ describe("EffectObjectStore", () => {
       [["head", KEY]],
     ],
     ["deleteEffect", (s: FakeObjectStore) => s.deleteEffect(KEY), undefined, [["delete", KEY]]],
-    ["readEffect", (s: FakeObjectStore) => s.readEffect(KEY), null, [["read", KEY]]],
     [
       "readRangeEffect",
       (s: FakeObjectStore) => s.readRangeEffect(KEY, 4, 8),
@@ -72,7 +71,6 @@ describe("EffectObjectStore", () => {
       (s: FakeObjectStore) => s.deleteEffect(KEY),
       "Failed to delete storage object",
     ],
-    ["readEffect", (s: FakeObjectStore) => s.readEffect(KEY), "Failed to read storage object"],
     [
       "readRangeEffect",
       (s: FakeObjectStore) => s.readRangeEffect(KEY, 0, 1),

@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  reportedAppVersion,
-  reportingConfiguration,
-  reportingDestination,
-} from "../src/configuration";
+import { reportedAppVersion, reportingConfiguration } from "../src/configuration";
 
 const TOKEN = "phc_acceptanceTokenValue123";
+
+const reportingDestination = (host: string | undefined, token: string | undefined) =>
+  reportingConfiguration({
+    REPORTING_POSTHOG_HOST: host,
+    REPORTING_POSTHOG_PROJECT_TOKEN: token,
+  }).destination;
 
 describe("reportingDestination", () => {
   it.each([

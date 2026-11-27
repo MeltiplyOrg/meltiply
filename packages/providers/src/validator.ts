@@ -1,24 +1,21 @@
-import type { PlatformCapability, ValidationIssue } from "@meltiply/contracts";
+import type { ValidationIssue } from "@meltiply/contracts";
+import type { Platform, PlatformCapability } from "@meltiply/domain";
 
 import { resolveFacebookPostType } from "./facebook/options";
-import { resolveInstagramOptions } from "./instagram/options";
+import { defaultInstagramPostType, resolveInstagramOptions } from "./instagram/options";
 import { PROVIDER_LIMITS } from "./limits";
 import { parseThreadsOptions, threadsOptionsIssue } from "./threads/options";
-import type { PublishInput } from "./types";
+import type { ProviderPublishOptions, PublishInput } from "./types";
 import { codePointLength, mediaKind, normalizeContentType } from "./values";
+import type { ParsedPostProviderOptions } from "./wire-options";
 
 export type { ValidationIssue } from "@meltiply/contracts";
 
-/** Counts Unicode codepoints in a post caption without allocating an intermediate array. */
 export function captionLength(text: string): number {
   return codePointLength(text);
 }
 
-/**
- * Post and per-target content a caption is composed from. `descriptionOverride`
- * is a target's saved body override and wins over the Post's `defaultText`, so
- * one Post can carry channel-specific captions without a second identity.
- */
+/** `descriptionOverride` overrides `defaultText` for channel-specific captions on one Post. */
 export interface CaptionSource {
   defaultText: string | null;
   descriptionOverride: string | null;
@@ -28,10 +25,6 @@ export interface CaptionSource {
   titleOverride: string | null;
 }
 
-/**
- * Composes the normalized caption sent to a provider from Post title/body,
- * target overrides, signature snapshot, and hashtags.
- */
 export function composeCaption(source: CaptionSource): string {
   const title = (source.titleOverride ?? source.title).trim();
   const body = (source.descriptionOverride ?? source.defaultText ?? "").trim();
@@ -161,13 +154,28 @@ function attachmentSetIssues(
   return issues;
 }
 
-/**
- * Checks a publish payload against platform capabilities and returns every unmet constraint.
- * Pure: no I/O, no provider calls, and no mutation; runs identically in API checks, queue jobs, and UI preview.
- * Validates the ordered attachment set (count bounds, combination rules, per-attachment
- * MIME type, kind, file size, and video duration), codepoint caption length, hashtag
- * count, an empty-publication guard, and provider-option platform compatibility.
- */
+export function hasProviderHostedContent(
+  options: ProviderPublishOptions | ParsedPostProviderOptions | null | undefined,
+  platform?: Platform,
+): boolean {
+  if (!options) return false;
+  const facebook = options.facebook;
+  const hasFacebook =
+    (!platform || platform === "facebook") &&
+    Boolean(
+      facebook?.link?.trim() || ["crosspost", "ab_test", "live"].includes(facebook?.postType ?? ""),
+    );
+  const hasYouTube = (!platform || platform === "youtube") && options.youtube?.postType === "live";
+  const hasThreads =
+    (!platform || platform === "threads") &&
+    Boolean(
+      options.threads?.repost_id?.trim() ||
+      options.threads?.gif_attachment?.gif_id?.trim() ||
+      options.threads?.text_attachment?.plaintext?.trim(),
+    );
+  return hasFacebook || hasYouTube || hasThreads;
+}
+
 export function validatePublishInput(
   capability: PlatformCapability,
   input: PublishInput,
@@ -195,21 +203,11 @@ export function validatePublishInput(
     });
   }
   const facebook = input.providerOptions?.facebook;
-  const externalContent =
-    (capability.platform === "facebook" &&
-      (facebook?.link || ["crosspost", "ab_test", "live"].includes(facebook?.postType ?? ""))) ||
-    (capability.platform === "youtube" && input.providerOptions?.youtube?.postType === "live") ||
-    (capability.platform === "threads" &&
-      !!(
-        input.providerOptions?.threads?.repost_id ||
-        input.providerOptions?.threads?.gif_attachment?.gif_id ||
-        input.providerOptions?.threads?.text_attachment?.plaintext
-      ));
   if (
     input.media.length === 0 &&
     !input.caption.trim() &&
     input.hashtags.length === 0 &&
-    !externalContent
+    !hasProviderHostedContent(input.providerOptions, capability.platform)
   ) {
     issues.push({
       constraint: "provider_empty_publish",
@@ -355,12 +353,8 @@ export function validatePublishInput(
       });
   }
   if (capability.platform === "instagram") {
-    const [firstMedia] = input.media;
-    const method =
-      input.providerOptions?.instagram?.postType ??
-      (input.media.length === 1 && firstMedia && mediaKind(firstMedia.contentType) === "video"
-        ? "reel"
-        : "feed");
+    const kinds = input.media.map((media) => mediaKind(normalizeContentType(media.contentType)));
+    const method = input.providerOptions?.instagram?.postType ?? defaultInstagramPostType(kinds);
     const {
       maxImageBytes,
       maxReelBytes,
@@ -409,7 +403,6 @@ export function validatePublishInput(
     }
     const options = input.providerOptions?.instagram;
     if (options) {
-      const kinds = input.media.map((media) => mediaKind(normalizeContentType(media.contentType)));
       if (!resolveInstagramOptions(options, kinds)) {
         issues.push({
           constraint: "instagram_post_options_invalid",

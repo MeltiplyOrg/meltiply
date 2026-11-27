@@ -1,4 +1,3 @@
-import { Effect } from "effect";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import {
@@ -490,33 +489,33 @@ describe("ProviderHttpClient", () => {
       });
     });
 
-    it("rate-limit headers without a configured platform", async () => {
+    it("preserves prior rate-limit metadata when a later response has no rate-limit headers", async () => {
       const { client } = setup(
         answering(Response.json({}, { headers: { "x-ratelimit-remaining": "3" } })),
       );
-      const context = newContext({ metadata: {} });
+      const prior = { rateLimitBudget: { percentUsed: null, remaining: 0, resetsInSeconds: 20 } };
+      const context = newContext({ metadata: prior });
 
       await client.request(context, get());
 
-      expect(context.metadata).toEqual(undefined);
-    });
-  });
-
-  describe("requestEffect", () => {
-    it("a JSON read", async () => {
-      const { client } = setup();
-
-      const response = await Effect.runPromise(client.requestEffect(newContext(), get()));
-
-      expect(response.body).toEqual({ ok: 1 });
+      expect(context.metadata).toEqual(prior);
     });
 
-    it("a refused request", async () => {
-      const { client } = setup(answering(Response.json({}, { status: 401 })));
+    it("propagates a throwing classifyErrorBody as the thrown error cause", async () => {
+      const bug = new Error("sanitizer bug");
+      const { client } = setup(answering(Response.json({ error: "denied" }, { status: 403 })));
 
-      const attempt = Effect.runPromise(client.requestEffect(newContext(), get()));
-
-      expect(await failureOf(attempt)).toEqual(providerFailure("auth", "provider_http_401"));
+      await expect(
+        client.request(newContext(), {
+          ...get(),
+          classifyErrorBody: () => {
+            throw bug;
+          },
+        }),
+      ).rejects.toMatchObject({
+        cause: bug,
+        failure: { classification: "auth", code: "provider_http_403" },
+      });
     });
   });
 });

@@ -10,7 +10,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { createApiApp } from "../src/app";
 import { broadcastControlEffect } from "../src/broadcast-service";
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
 import type { ApiWorkerEnv } from "../src/env";
 import {
   createFakeBroadcastRepository,

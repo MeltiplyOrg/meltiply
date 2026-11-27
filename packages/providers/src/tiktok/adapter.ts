@@ -1,6 +1,6 @@
 import type { PlatformCapability } from "@meltiply/domain";
 
-import { malformed, rejected } from "../failures";
+import { malformed, rejected, requiredIdentifier, validateSnapshotPage } from "../failures";
 import { PROVIDER_LIMITS } from "../limits";
 import {
   assertConfiguredRedirectUri,
@@ -19,15 +19,7 @@ import type {
   ProviderTokenSet,
   TikTokPublicationRequirements,
 } from "../types";
-import {
-  bearer,
-  formHeaders,
-  record,
-  required,
-  requiredIdentifier,
-  requireIdempotencyKey,
-  validateSnapshotPage,
-} from "../values";
+import { bearer, formHeaders, record, required, requireIdempotencyKey } from "../values";
 import {
   tiktokPublishPlan,
   tiktokPublishRequest,

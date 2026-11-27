@@ -1,4 +1,4 @@
-import { rejected } from "../failures";
+import { rejected, requiredIdentifier, validateSnapshotPage } from "../failures";
 import type { ProviderHttpClient } from "../http";
 import { parseMetaInsightsMap } from "../meta";
 import { engagementSnapshot } from "../results";
@@ -11,10 +11,10 @@ import type {
   ProviderPublicationLookup,
   ProviderRequestContext,
 } from "../types";
-import { bearer, record, requiredIdentifier, validateSnapshotPage } from "../values";
 import { facebookAccountFollowers, facebookReelEngagement } from "./responses";
 import {
   facebookAccountId,
+  graphGet,
   graphUrl,
   nodeUrl,
   parseFacebookOperationId,
@@ -33,23 +33,13 @@ const nonReelPhases: ReadonlySet<FacebookOperationPhase> = new Set([
 ]);
 
 export function createFacebookAnalytics(http: ProviderHttpClient, now: () => Date) {
-  const get = async (context: ProviderRequestContext, accessToken: string, url: URL) =>
-    record(
-      (
-        await http.request(context, {
-          headers: bearer(accessToken),
-          method: "GET",
-          url: url.toString(),
-        })
-      ).body,
-    );
-
   return {
     async getAccountAnalytics(
       context: ProviderRequestContext,
       credentials: ProviderCredentials,
     ): Promise<ProviderAccountAnalytics> {
-      const body = await get(
+      const body = await graphGet(
+        http,
         context,
         credentials.accessToken,
         nodeUrl(facebookAccountId(credentials), "followers_count"),
@@ -76,10 +66,11 @@ export function createFacebookAnalytics(http: ProviderHttpClient, now: () => Dat
       insightsUrl.searchParams.set("metric", "blue_reels_play_count,post_video_social_actions");
       insightsUrl.searchParams.set("period", "lifetime");
       const metrics = parseMetaInsightsMap(
-        await get(context, credentials.accessToken, insightsUrl),
+        await graphGet(http, context, credentials.accessToken, insightsUrl),
         { singleValue: true },
       );
-      const video = await get(
+      const video = await graphGet(
+        http,
         context,
         credentials.accessToken,
         nodeUrl(providerPostId, "likes.summary(true).limit(0),comments.summary(true).limit(0)"),

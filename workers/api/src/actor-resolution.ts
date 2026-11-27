@@ -1,29 +1,17 @@
 import { Effect } from "effect";
-import type { JwtIdentity, SessionClaims } from "@meltiply/auth";
+import type { JwtIdentity } from "@meltiply/auth";
 import type { EffectTransactionClient } from "@meltiply/database";
-import { isWorkspaceRole, type DatabaseError, type WorkspaceRole } from "@meltiply/domain";
+import { isWorkspaceRole, RFC4122_UUID_PATTERN, type DatabaseError } from "@meltiply/domain";
 
+import type { ResolvedActor } from "./actor-types";
+import { CoreApiError } from "./api-errors";
 import { auditActorFrom, recordWorkspaceAuditEffect } from "./audit";
-import { CoreApiError } from "./core-types";
-import { RFC4122_UUID_PATTERN } from "./crypto";
+import { normalizeWorkspaceRole } from "./authorization";
 import { lazyWithSystemTransactionEffect } from "./database-module";
 import type { ApiWorkerEnv } from "./env";
 import { requireSeatCapacityEffect } from "./seats";
 
-export interface ResolvedActor {
-  authUserId: string;
-  claims: SessionClaims;
-  displayName: string | null;
-  email: string;
-  isInstallationOwner: boolean;
-  role: WorkspaceRole;
-  userId: string;
-  workspace: {
-    id: string;
-    name: string;
-    slug: string;
-  };
-}
+export type { ResolvedActor } from "./actor-types";
 
 interface InternalUserRow extends Record<string, unknown> {
   auth_user_id: string;
@@ -302,11 +290,7 @@ function resolveWorkspace(
 }
 
 function resolvedActor(user: InternalUserRow, workspace: WorkspaceRow): ResolvedActor {
-  const role = user.installation_owner
-    ? "admin"
-    : isWorkspaceRole(workspace.role)
-      ? workspace.role
-      : "viewer";
+  const role = user.installation_owner ? "admin" : normalizeWorkspaceRole(workspace.role);
   return {
     authUserId: user.auth_user_id,
     claims: {
@@ -408,7 +392,7 @@ export async function resolveActor(
             ),
           );
         }
-        const resolvedRole = isWorkspaceRole(workspace.role) ? workspace.role : "viewer";
+        const resolvedRole = normalizeWorkspaceRole(workspace.role);
         if (isInstallationOwner && resolvedRole !== "admin") {
           yield* client.query(
             `UPDATE org_members SET role = 'admin', updated_at = now()

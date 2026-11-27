@@ -17,7 +17,6 @@ export type {
   OAuthSelectionCandidate,
   OAuthSelectionInit,
   OAuthSelectionPublic,
-  OAuthSelectionRecord,
   OAuthStateCoordinatorStub,
   OAuthStateRecord,
   Platform,

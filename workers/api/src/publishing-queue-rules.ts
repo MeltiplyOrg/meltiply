@@ -1,7 +1,7 @@
 import type { components } from "@meltiply/contracts/schema";
 import { isoDateTime } from "@meltiply/domain";
 
-import { CoreApiError } from "./core-types";
+import { CoreApiError } from "./api-errors";
 import type { QueueConfiguration } from "./validation";
 
 type Schemas = components["schemas"];

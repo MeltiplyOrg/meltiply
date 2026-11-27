@@ -10,7 +10,8 @@ import { ProviderAdapterError } from "@meltiply/providers";
 import { Effect } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 
-import { CoreApiError, toCoreApiErrorOrRethrow } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
+import { toCoreApiErrorOrRethrow } from "../src/core-types";
 import { runWorkerEffect } from "../src/effect/runtime";
 import { reserveIdempotencyEffect, type IdempotencyRecord } from "../src/idempotency";
 import { fakeHonoContext, fakeTransactionClient } from "../test-support/fakes";

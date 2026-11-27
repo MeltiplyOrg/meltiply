@@ -41,6 +41,10 @@ export interface LogFields extends Record<string, unknown> {
   retry_class: RetryClass;
 }
 
+export function isLocalOrTestEnvironment(environment: string | undefined): boolean {
+  return environment === "local" || environment === "test";
+}
+
 function deriveMessage(fields: LogFields): string {
   const explicit = fields.message;
   if (typeof explicit === "string" && explicit !== "") {

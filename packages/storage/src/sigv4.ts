@@ -1,4 +1,4 @@
-import { errorMessage, InvalidRequestError } from "@meltiply/domain";
+import { errorMessage, InvalidRequestError, isLoopbackHostname } from "@meltiply/domain";
 import { Effect } from "effect";
 
 import { bytesToHex } from "./encoding";
@@ -59,8 +59,8 @@ async function sha256Bytes(value: ArrayBuffer | Uint8Array<ArrayBuffer>): Promis
   return bytesToHex(await crypto.subtle.digest("SHA-256", value));
 }
 
-async function sha256(value: string): Promise<string> {
-  return bytesToHex(await crypto.subtle.digest("SHA-256", encoder.encode(value)));
+function sha256(value: string): Promise<string> {
+  return sha256Bytes(encoder.encode(value));
 }
 
 async function importHmacKey(key: ArrayBuffer | Uint8Array): Promise<CryptoKey> {
@@ -133,22 +133,12 @@ function normalizeEndpointPathPrefix(name: string, value: string | undefined): s
   return `/${segments.join("/")}`;
 }
 
-function resolveTarget(options: {
-  addressing: BucketAddressing;
-  allowInsecureEndpoint?: boolean;
-  bucket: string;
-  endpoint: string;
-  endpointPathPrefix?: string;
-}): SigV4Target {
-  const bucket = normalizeSegment("bucket", options.bucket);
-  const endpoint = new URL(options.endpoint);
-  const loopbackHttpEndpoint =
-    endpoint.protocol === "http:" && ["127.0.0.1", "::1", "localhost"].includes(endpoint.hostname);
-  if (
-    endpoint.protocol !== "https:" &&
-    !loopbackHttpEndpoint &&
-    options.allowInsecureEndpoint !== true
-  ) {
+export function validateSigV4Endpoint(rawEndpoint: string, allowInsecureEndpoint?: boolean): URL {
+  const endpoint = new URL(rawEndpoint);
+  const allowedHttpEndpoint =
+    endpoint.protocol === "http:" &&
+    (allowInsecureEndpoint === true || isLoopbackHostname(endpoint.hostname));
+  if (endpoint.protocol !== "https:" && !allowedHttpEndpoint) {
     throw new TypeError(
       "endpoint must use HTTPS unless it is loopback-only or insecure endpoints are explicitly allowed",
     );
@@ -162,6 +152,18 @@ function resolveTarget(options: {
   ) {
     throw new TypeError("endpoint must not include credentials, a path, query, or fragment");
   }
+  return endpoint;
+}
+
+function resolveTarget(options: {
+  addressing: BucketAddressing;
+  allowInsecureEndpoint?: boolean;
+  bucket: string;
+  endpoint: string;
+  endpointPathPrefix?: string;
+}): SigV4Target {
+  const bucket = normalizeSegment("bucket", options.bucket);
+  const endpoint = validateSigV4Endpoint(options.endpoint, options.allowInsecureEndpoint);
   const host = options.addressing === "virtual" ? `${bucket}.${endpoint.host}` : endpoint.host;
   return {
     addressing: options.addressing,
@@ -190,16 +192,6 @@ export interface SignedRequest {
   url: URL;
 }
 
-/**
- * AWS SigV4 signer for one resolved origin.
- *
- * Serves both directions Meltiply needs:
- * 1. `presign*` — presigned URLs handed to browsers and the native processor,
- *    where the credential travels in the query string.
- * 2. `prepareRequest` — header-signed requests the worker itself issues
- *    against an S3-compatible API (metadata reads, ranged reads, deletes,
- *    server-side copies, and multipart lifecycle calls).
- */
 export class SigV4Signer {
   readonly #accessKeyId: string;
   readonly #now: () => Date;
@@ -428,14 +420,6 @@ function downloadDisposition(filename: string): string {
   return `attachment; filename="${normalized}"`;
 }
 
-/**
- * Shared {@link ObjectUrlSigner} implementation over a {@link SigV4Signer}.
- *
- * Subclasses only fix the endpoint, region, and addressing style; every
- * presigned capability (download, single-part upload, multipart part, and the
- * create-only exact-object write) is derived here so providers cannot drift
- * apart in what they grant.
- */
 export abstract class SigV4UrlSigner implements ObjectUrlSigner {
   protected readonly signer: SigV4Signer;
 

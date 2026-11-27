@@ -6,7 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus
 
 import { integrationDatabaseUrl } from "../../../scripts/lib/integration-database";
 import type { AutomationEnv } from "../src/env";
-import { deliverImprovementReports } from "../src/improvement-reporting";
+import { deliverImprovementReports } from "../src/reporting";
 import { recordDiagnostic } from "../src/diagnostic-reporting";
 import { runSystemTransaction } from "./system-transaction";
 

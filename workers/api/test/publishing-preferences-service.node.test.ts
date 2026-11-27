@@ -3,7 +3,7 @@ import { ActiveOrganizationRequiredError, DatabaseError } from "@meltiply/domain
 import { Effect } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
 import { createPublishingPreferencesApiService } from "../src/publishing-preferences-service";
 import {
   FakePublishingPreferencesRepository,

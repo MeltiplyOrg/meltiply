@@ -1,6 +1,13 @@
 import type { PlatformCapability } from "@meltiply/domain";
 
-import { malformed, rejected, rejection } from "../failures";
+import {
+  malformed,
+  rejected,
+  rejection,
+  requiredIdentifier,
+  validatePageInput,
+  validateSnapshotPage,
+} from "../failures";
 import { PROVIDER_LIMITS } from "../limits";
 import {
   containerOperationId,
@@ -36,10 +43,7 @@ import {
   providerIdentifier,
   record,
   required,
-  requiredIdentifier,
   requireIdempotencyKey,
-  validatePageInput,
-  validateSnapshotPage,
 } from "../values";
 import { applyInstagramContent } from "./options";
 import { instagramAccount, instagramGrantedPermissions, instagramLoginRecord } from "./login";

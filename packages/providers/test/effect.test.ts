@@ -4,21 +4,12 @@ import { TestClock } from "effect/testing";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import {
-  cancelPublicationEffect,
   createProviderServiceLive,
   createProviderServiceTest,
-  exchangeAuthorizationCodeEffect,
-  getAccountAnalyticsEffect,
-  getPublicationRequirementsEffect,
-  isRetryableFailure,
   listAnalyticsEffect,
-  listCommentsEffect,
-  lookupPublicationEffect,
   providerCallEffect,
   ProviderService,
   publishEffect,
-  refreshAccessTokenEffect,
-  replyEffect,
   revokeEffect,
   withReadRetry,
   type ProviderServiceShape,
@@ -255,21 +246,7 @@ describe("providerCallEffect", () => {
 describe("provider operation effects", () => {
   const direct: [string, (a: ProviderAdapter) => Effect.Effect<unknown, ProviderAdapterError>][] = [
     ["publish", (a) => publishEffect(a, newContext(), credentials, input)],
-    ["lookupPublication", (a) => lookupPublicationEffect(a, newContext(), credentials, lookup)],
-    ["cancelPublication", (a) => cancelPublicationEffect(a, newContext(), credentials, lookup)],
-    ["reply", (a) => replyEffect(a, newContext(), credentials, reply)],
-    ["getAccountAnalytics", (a) => getAccountAnalyticsEffect(a, newContext(), credentials)],
     ["listAnalytics", (a) => listAnalyticsEffect(a, newContext(), credentials, lookup, page)],
-    ["listComments", (a) => listCommentsEffect(a, newContext(), credentials, lookup, page)],
-    [
-      "getPublicationRequirements",
-      (a) => getPublicationRequirementsEffect(a, newContext(), credentials),
-    ],
-    [
-      "exchangeAuthorizationCode",
-      (a) => exchangeAuthorizationCodeEffect(a, newContext(), exchange),
-    ],
-    ["refreshAccessToken", (a) => refreshAccessTokenEffect(a, newContext(), "refresh")],
     ["revoke", (a) => revokeEffect(a, "access")],
   ];
 
@@ -372,19 +349,6 @@ describe("ProviderService", () => {
   });
 });
 
-describe("isRetryableFailure", () => {
-  it.each([
-    ["a transient failure", fail(503), true],
-    ["a timeout", fail(408), true],
-    ["a rate limit", fail(429), false],
-    ["a deterministic failure", fail(400), false],
-    ["an auth failure", fail(401), false],
-    ["a plain error", new Error("x"), false],
-  ])("%s", (_example, error, retryable) => {
-    expect(isRetryableFailure(error)).toEqual(retryable);
-  });
-});
-
 describe("withReadRetry", () => {
   async function attempts(failures: ProviderAdapterError[], elapsed: Duration.Input) {
     let calls = 0;
@@ -414,8 +378,13 @@ describe("withReadRetry", () => {
     expect(await attempts(always, elapsed)).toEqual(calls);
   });
 
+  it("a timeout is retried", async () => {
+    expect(await attempts([fail(408), fail(408)], "1 second")).toEqual(2);
+  });
+
   it.each([
     ["a deterministic failure", fail(400)],
+    ["an auth failure", fail(401)],
     ["a rate limit left to the due-work scheduler", fail(429, 42)],
   ])("%s is not retried", async (_example, error) => {
     expect(await attempts([error, error], "1 hour")).toEqual(1);

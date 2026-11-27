@@ -15,20 +15,24 @@ import {
   exportOtlpSpan,
   log,
 } from "@meltiply/observability";
+import { PROVIDER_MEDIA_ROUTE_PREFIX } from "@meltiply/storage";
 import { Hono, type Context } from "hono";
 import { matchedRoutes } from "hono/route";
 import { bodyLimit } from "hono/body-limit";
 
-import { resolveActor, type ResolvedActor } from "./actor-resolution";
-import { enforceWorkspaceCapabilities } from "./authorization";
+import { resolveActor } from "./actor-resolution";
+import type { ResolvedActor } from "./actor-types";
+import { CoreApiError } from "./api-errors";
+import { enforceWorkspaceCapabilities, requireActor } from "./authorization";
 import { activeIdentity } from "./auth-policy";
-import { betterAuthFor, checkAuthRateLimit, type AuthRateLimitResult } from "./better-auth";
+import { scheduleBackgroundWork } from "./background-continuation";
 import {
-  providerMediaRoutePrefix,
-  registerCoreRoutes,
-  type CoreRouteDependencies,
-} from "./core-routes";
-import { CoreApiError } from "./core-types";
+  betterAuthFor,
+  checkAuthRateLimit,
+  type AuthRateLimitAction,
+  type AuthRateLimitResult,
+} from "./better-auth";
+import { registerCoreRoutes, type CoreRouteDependencies } from "./core-routes";
 import { lazyAuthenticatedPoolFor, lazySystemPoolFor } from "./database-module";
 import {
   bindingStatuses,
@@ -63,7 +67,7 @@ type UserProfile = components["schemas"]["UserProfile"];
 export interface ApiDependencies extends CoreRouteDependencies, OperatorRouteDependencies {
   authRateLimiter?: (
     env: ApiWorkerEnv,
-    action: string,
+    action: AuthRateLimitAction,
     request: Request,
   ) => Promise<AuthRateLimitResult>;
   betterAuth?: BetterAuthInstance | ((env: ApiWorkerEnv) => BetterAuthInstance);
@@ -192,7 +196,7 @@ function requestAuthFields(c: Context<ApiWorkerEnvironment>) {
   };
 }
 
-function authRateLimitAction(path: string): string {
+function authRateLimitAction(path: string): AuthRateLimitAction {
   if (path === "/api/auth/device/code") return "device-code";
   if (path === "/api/auth/device/token") return "device-token";
   if (path === "/api/auth/device") return "device-verify";
@@ -211,11 +215,6 @@ function authRateLimitAction(path: string): string {
     return "send-verification-email";
   }
   return "generic";
-}
-
-function authRateLimitAvailable(env: ApiWorkerEnv): boolean {
-  const binding = env.DB_SYSTEM as { connectionString?: string } | undefined;
-  return Boolean(binding?.connectionString);
 }
 
 export function createApiApp(dependencies: ApiDependencies = {}) {
@@ -292,11 +291,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         traceId,
       },
     );
-    try {
-      c.executionCtx.waitUntil(spanExport);
-    } catch {
-      void spanExport;
-    }
+    scheduleBackgroundWork(c, spanExport);
   });
   const corsMiddlewareFor = (allowCredentials: boolean) => {
     const exposedHeaders = allowCredentials
@@ -355,7 +350,6 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     }
     try {
       c.set("operator", await verifyAccessToken(c.env, token));
-      await next();
     } catch {
       return errorResponse(
         c.get("requestId"),
@@ -364,10 +358,11 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         "Cloudflare Access operator authentication is required.",
       );
     }
+    await next();
   });
 
   app.all("/api/auth/*", async (c) => {
-    if (authRateLimitAvailable(c.env)) {
+    if (hasConnectionString(c.env.DB_SYSTEM)) {
       const action = authRateLimitAction(c.req.path);
       const result = await authRateLimiter(c.env, action, c.req.raw);
       if (result.status === "limited") {
@@ -408,7 +403,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     if (
       c.req.method === "POST" &&
       c.req.path.endsWith("/accept") &&
-      authRateLimitAvailable(c.env)
+      hasConnectionString(c.env.DB_SYSTEM)
     ) {
       const result = await authRateLimiter(c.env, "invitation-accept", c.req.raw);
       if (result.status === "limited") {
@@ -432,7 +427,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
       c.req.path === "/api/v1/health" ||
       c.req.path === "/api/v1/ready" ||
       (c.req.method === "GET" && invitationPathPattern.test(c.req.path)) ||
-      c.req.path.startsWith(providerMediaRoutePrefix) ||
+      c.req.path.startsWith(PROVIDER_MEDIA_ROUTE_PREFIX) ||
       oauthCallbackPathPattern.test(c.req.path);
     if (publicPath || c.req.method === "OPTIONS") {
       await next();
@@ -549,7 +544,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     if (
       c.req.path === "/api/v1/health" ||
       c.req.path === "/api/v1/ready" ||
-      c.req.path.startsWith(providerMediaRoutePrefix)
+      c.req.path.startsWith(PROVIDER_MEDIA_ROUTE_PREFIX)
     ) {
       await next();
       return;
@@ -623,11 +618,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
       if (c.env.ENVIRONMENT === "test") {
         await flowObserveChain;
       } else {
-        try {
-          c.executionCtx.waitUntil(flowObserveChain);
-        } catch {
-          void flowObserveChain;
-        }
+        scheduleBackgroundWork(c, flowObserveChain);
       }
     }
   });
@@ -641,7 +632,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     scheduleEagerOutboxRelay(c);
   });
   app.get("/api/v1/users/me", async (c) => {
-    const actor = c.get("actor");
+    const actor = requireActor(c);
     const layer =
       dependencies.currentUserServiceLayer ??
       createCurrentUserServiceLive(c.env, actor.claims, dependencies.loadCurrentUser);

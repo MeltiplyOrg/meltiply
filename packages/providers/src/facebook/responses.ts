@@ -5,7 +5,7 @@ import {
   rejected,
   rejection,
 } from "../failures";
-import { OAUTH_TOKEN_MAX_CHARS } from "../limits";
+import { OAUTH_TOKEN_MAX_CHARS, PROVIDER_LIMITS } from "../limits";
 import { addSeconds } from "../oauth";
 import { confirmedFailure, unknownResult } from "../results";
 import type {
@@ -26,18 +26,17 @@ import {
   providerIdentifier,
   record,
   required,
+  rtmpsUrl,
   secureUrl,
   validFileSize,
 } from "../values";
 import {
   FACEBOOK_GRAPH_ORIGIN,
   FACEBOOK_IMAGE_TYPES,
-  FACEBOOK_LIMITS,
   FACEBOOK_VIDEO_TYPES,
   facebookNativeDraft,
   facebookOperationId,
   facebookPermalink,
-  facebookPublishedPost,
   facebookPublishedVideo,
   isFacebookReelStatusFailed,
   isFacebookReelStatusPublished,
@@ -116,7 +115,7 @@ export function expiryDiagnostic(
       return `${name}=${shown}`;
     });
   return new Error(
-    `Facebook OAuth expiry rejected: ${[`source=${source}`, ...rendered, `maximum_seconds=${FACEBOOK_LIMITS.tokenLifetimeMaxSeconds}`].join(", ")}`,
+    `Facebook OAuth expiry rejected: ${[`source=${source}`, ...rendered, `maximum_seconds=${PROVIDER_LIMITS.facebook.tokenLifetimeMaxSeconds}`].join(", ")}`,
   );
 }
 
@@ -130,7 +129,10 @@ export function decodeRefreshSecret(value: string): FacebookRefreshSecret {
   }
   const body = record(parsed);
   const pageId = providerIdentifier(body?.pageId);
-  const userAccessToken = boundedString(body?.userAccessToken, FACEBOOK_LIMITS.tokenMaxChars);
+  const userAccessToken = boundedString(
+    body?.userAccessToken,
+    PROVIDER_LIMITS.facebook.tokenMaxChars,
+  );
   if (!body || Object.keys(body).length !== 2 || !pageId || !userAccessToken) {
     throw rejected("facebook_refresh_secret_invalid");
   }
@@ -243,7 +245,7 @@ export function facebookInspectedExpiry(
     return addSeconds(
       new Date(exchangedSeconds * 1_000),
       lifetime,
-      FACEBOOK_LIMITS.tokenLifetimeMaxSeconds,
+      PROVIDER_LIMITS.facebook.tokenLifetimeMaxSeconds,
     );
   } catch {
     throw oauthMalformed(
@@ -261,7 +263,7 @@ export function facebookPageConnection(
   const page = record(value);
   const id = providerIdentifier(page?.id);
   const displayName = boundedText(page?.name, 500);
-  const accessToken = boundedString(page?.access_token, FACEBOOK_LIMITS.tokenMaxChars);
+  const accessToken = boundedString(page?.access_token, PROVIDER_LIMITS.facebook.tokenMaxChars);
   if (!id || !displayName) throw oauthMalformed("page_identity");
   if (!accessToken) throw oauthMalformed("page_access_token");
   const tasks = parsePageTasks(page?.tasks);
@@ -323,7 +325,7 @@ export function remoteVideoUrl(input: PublishInput): string {
   const mediaUrl = secureUrl(media.url)?.href;
   if (
     !FACEBOOK_VIDEO_TYPES.includes(normalizeContentType(media.contentType)) ||
-    !validFileSize(media.fileSize, FACEBOOK_LIMITS.maxVideoBytes) ||
+    !validFileSize(media.fileSize, PROVIDER_LIMITS.facebook.maxVideoBytes) ||
     !mediaUrl
   ) {
     throw rejected("facebook_reel_media_invalid");
@@ -336,7 +338,7 @@ export function photoUrl(media: ProviderMedia): string {
   if (
     !url ||
     !FACEBOOK_IMAGE_TYPES.includes(normalizeContentType(media.contentType)) ||
-    !validFileSize(media.fileSize, FACEBOOK_LIMITS.maxImageBytes)
+    !validFileSize(media.fileSize, PROVIDER_LIMITS.facebook.maxImageBytes)
   ) {
     throw rejected("facebook_photo_invalid");
   }
@@ -366,8 +368,8 @@ export function facebookBroadcastInfo(
     return { state: "ended", providerPostId: id, providerUrl: facebookPermalink(id) };
   }
   if (status === "SCHEDULED_CANCELED") return { state: "ended" };
-  const stream = boundedString(body?.secure_stream_url, maxStreamUrlChars);
-  if (!stream || !URL.canParse(stream) || new URL(stream).protocol !== "rtmps:") {
+  const stream = rtmpsUrl(body?.secure_stream_url, maxStreamUrlChars);
+  if (!stream) {
     throw malformed();
   }
   const state = broadcastState(status);
@@ -437,7 +439,8 @@ export function facebookPostStatus(
   phase: "post" | "post_draft",
 ): ProviderPublicationStatus {
   if (post?.id !== postId || typeof post.is_published !== "boolean") throw malformed();
-  if (post.is_published) return { result: facebookPublishedPost(postId), state: "published" };
+  if (post.is_published)
+    return { result: facebookPublishedVideo("post", postId), state: "published" };
   if (phase === "post_draft") {
     return { state: "delivered", result: facebookNativeDraft("post_draft", postId) };
   }

@@ -5,7 +5,6 @@ import {
   facebookNativeDraft,
   facebookOperationId,
   facebookPermalink,
-  facebookPublishedPost,
   facebookPublishedVideo,
   graphUrl,
   isFacebookReelStatusFailed,
@@ -88,18 +87,16 @@ describe("facebookOperationId and parseFacebookOperationId", () => {
   });
 });
 
-describe("facebookPublishedPost", () => {
+describe("facebookPublishedVideo", () => {
   it("builds a confirmed published post result", () => {
-    expect(facebookPublishedPost("page-1_post-1")).toEqual({
+    expect(facebookPublishedVideo("post", "page-1_post-1")).toEqual({
       outcome: "confirmed_success",
       providerOperationId: "post:page-1_post-1",
       providerPostId: "page-1_post-1",
       providerUrl: "https://www.facebook.com/page-1_post-1",
     });
   });
-});
 
-describe("facebookPublishedVideo", () => {
   it("builds a confirmed published video result", () => {
     expect(facebookPublishedVideo("ended_live", "live-1")).toEqual({
       outcome: "confirmed_success",

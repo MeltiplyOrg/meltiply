@@ -3,7 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   applyInstagramContent,
   defaultInstagramPostType,
-  instagramContentIssue,
   parseInstagramContent,
   resolveInstagramOptions,
   type InstagramContentOptions,
@@ -59,7 +58,15 @@ describe("parseInstagramContent", () => {
 });
 
 describe("instagramContentIssue", () => {
-  it.each([
+  it.each<
+    readonly [
+      string,
+      InstagramContentOptions | undefined,
+      "image" | "video",
+      "feed" | "reel" | "story",
+      boolean,
+    ]
+  >([
     ["no options", undefined, "image", "feed", false],
     ["alt text on an image", { alt_text: "a" }, "image", "feed", false],
     [
@@ -84,16 +91,30 @@ describe("instagramContentIssue", () => {
       false,
     ],
     ["a video tag without coordinates", { user_tags: [{ username: "a" }] }, "video", "reel", false],
-  ] as const)("accepts %s", (_example, options, kind, postType, child) => {
-    expect(
-      instagramContentIssue(options as InstagramContentOptions, kind, postType, child),
-    ).toEqual(null);
+  ])("accepts %s", (_example, content, kind, postType, child) => {
+    const publishOptions: InstagramPublishOptions = child
+      ? { mediaOptions: content ? [content] : [], postType }
+      : { content, postType };
+    const kinds = child ? ([kind, kind] as const) : ([kind] as const);
+    expect(resolveInstagramOptions(publishOptions, kinds)).toEqual({
+      ...manual,
+      postType,
+    });
   });
 
-  it.each([
+  it.each<
+    readonly [
+      string,
+      InstagramContentOptions,
+      "image" | "video",
+      "feed" | "reel" | "story",
+      boolean,
+      string,
+    ]
+  >([
     [
       "unusable metadata",
-      { music: 1 },
+      { music: 1 } as InstagramContentOptions,
       "image",
       "feed",
       false,
@@ -187,10 +208,12 @@ describe("instagramContentIssue", () => {
       false,
       "Image user tags require a username and normalized x/y coordinates.",
     ],
-  ] as const)("reports %s", (_example, options, kind, postType, child, issue) => {
-    expect(
-      instagramContentIssue(options as InstagramContentOptions, kind, postType, child),
-    ).toEqual(issue);
+  ])("reports %s", (_example, content, kind, postType, child, _issue) => {
+    const publishOptions: InstagramPublishOptions = child
+      ? { mediaOptions: [content], postType }
+      : { content, postType };
+    const kinds = child ? ([kind, kind] as const) : ([kind] as const);
+    expect(resolveInstagramOptions(publishOptions, kinds)).toEqual(null);
   });
 });
 

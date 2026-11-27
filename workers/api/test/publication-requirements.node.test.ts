@@ -10,7 +10,7 @@ import {
 import { Effect } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 
-import { CoreApiError } from "../src/core-types";
+import { CoreApiError } from "../src/api-errors";
 import {
   getPublicationRequirementsEffect,
   type PublicationAccountRow,

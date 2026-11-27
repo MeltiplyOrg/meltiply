@@ -1,3 +1,4 @@
+import { PROVIDER_LIMITS } from "../limits";
 import {
   classifyProviderFailure,
   malformed,
@@ -21,14 +22,16 @@ import {
   codePointLength,
   firstNonEmptyLine,
   metricValue,
+  nonNegativeIntegerStringOrNumber,
   normalizeContentType,
   providerIdentifier,
   record,
   required,
   requireIdempotencyKey,
+  rtmpsUrl,
   secureUrl,
 } from "../values";
-import { YOUTUBE_LIMITS, YOUTUBE_PUBLISHING_SCOPES, youtubeWatchUrl } from "./types";
+import { YOUTUBE_PUBLISHING_SCOPES, youtubeWatchUrl } from "./types";
 
 const pkcePattern = /^[A-Za-z0-9_-]{43,128}$/;
 const whitespacePattern = /\s+/;
@@ -114,8 +117,8 @@ export function parseGoogleTokenResponse(
   requireRefreshToken: boolean,
 ): GoogleTokenResponse<boolean> {
   const body = record(value);
-  const accessToken = boundedString(body?.access_token, YOUTUBE_LIMITS.tokenMaxChars);
-  const refreshToken = boundedString(body?.refresh_token, YOUTUBE_LIMITS.tokenMaxChars);
+  const accessToken = boundedString(body?.access_token, PROVIDER_LIMITS.youtube.tokenMaxChars);
+  const refreshToken = boundedString(body?.refresh_token, PROVIDER_LIMITS.youtube.tokenMaxChars);
   const tokenType = boundedString(body?.token_type, 32)?.toLowerCase();
   const scopes = scopeSet(body?.scope);
   if (
@@ -129,7 +132,7 @@ export function parseGoogleTokenResponse(
   }
   return {
     accessToken,
-    expiresAt: addSeconds(now, body?.expires_in, YOUTUBE_LIMITS.tokenLifetimeMaxSeconds),
+    expiresAt: addSeconds(now, body?.expires_in, PROVIDER_LIMITS.youtube.tokenLifetimeMaxSeconds),
     refreshToken,
     ...(scopes ? { scopes: [...scopes] } : {}),
   };
@@ -174,12 +177,12 @@ export function youtubeAccountStatistics(value: unknown): { followers: number; p
   if (!Array.isArray(items) || items.length !== 1) throw malformed();
   const statistics = record(record(items[0])?.statistics);
   if (statistics?.hiddenSubscriberCount === true) throw malformed();
-  const followers = Number(statistics?.subscriberCount);
-  const posts = Number(statistics?.videoCount);
-  if (!Number.isSafeInteger(followers) || followers < 0) throw malformed();
+  const followers = nonNegativeIntegerStringOrNumber(statistics?.subscriberCount);
+  const posts = nonNegativeIntegerStringOrNumber(statistics?.videoCount);
+  if (followers === undefined) throw malformed();
   return {
     followers,
-    ...(Number.isSafeInteger(posts) && posts >= 0 ? { posts } : {}),
+    ...(posts !== undefined ? { posts } : {}),
   };
 }
 
@@ -241,7 +244,7 @@ export function youtubeLivePlan(input: PublishInput): YouTubeLivePlan {
   const title = required(
     "title",
     firstNonEmptyLine(description) ?? "",
-    YOUTUBE_LIMITS.maxTitleCodePoints,
+    PROVIDER_LIMITS.youtube.maxTitleCodePoints,
   );
   return {
     description,
@@ -268,14 +271,9 @@ export function youtubeStreamIngest(
   streamId: string,
 ): { ingestUrl: string; streamKey: string } {
   const ingest = record(record(onlyResource(value, streamId).cdn)?.ingestionInfo);
-  const ingestUrl = boundedString(ingest?.rtmpsIngestionAddress, maxIngestChars);
+  const ingestUrl = rtmpsUrl(ingest?.rtmpsIngestionAddress, maxIngestChars);
   const streamKey = boundedString(ingest?.streamName, maxIngestChars);
-  if (
-    !ingestUrl ||
-    !URL.canParse(ingestUrl) ||
-    new URL(ingestUrl).protocol !== "rtmps:" ||
-    !streamKey
-  ) {
+  if (!ingestUrl || !streamKey) {
     throw malformed();
   }
   return { ingestUrl, streamKey };
@@ -295,16 +293,16 @@ export function parseYouTubeUploadInput(input: PublishInput): UploadInput {
     !media ||
     media.mode !== "resumable_upload" ||
     !title ||
-    codePointLength(title) > YOUTUBE_LIMITS.maxTitleCodePoints ||
-    utf8Encoder.encode(description).byteLength > YOUTUBE_LIMITS.maxCaptionCodePoints ||
+    codePointLength(title) > PROVIDER_LIMITS.youtube.maxTitleCodePoints ||
+    utf8Encoder.encode(description).byteLength > PROVIDER_LIMITS.youtube.maxCaptionCodePoints ||
     angleBracketsPattern.test(title) ||
     angleBracketsPattern.test(description) ||
-    input.hashtags.length > YOUTUBE_LIMITS.maxHashtags ||
-    input.hashtags.join(",").length > YOUTUBE_LIMITS.maxHashtagsJoinedChars ||
+    input.hashtags.length > PROVIDER_LIMITS.youtube.maxHashtags ||
+    input.hashtags.join(",").length > PROVIDER_LIMITS.youtube.maxHashtagsJoinedChars ||
     duration === undefined ||
     !Number.isFinite(duration) ||
     duration <= 0 ||
-    duration > YOUTUBE_LIMITS.maxVideoDurationSeconds ||
+    duration > PROVIDER_LIMITS.youtube.maxVideoDurationSeconds ||
     width === undefined ||
     !Number.isSafeInteger(width) ||
     width < 1 ||
@@ -324,7 +322,7 @@ export function parseYouTubeUploadInput(input: PublishInput): UploadInput {
     !["video/mp4", "video/quicktime"].includes(contentType) ||
     !Number.isSafeInteger(media.fileSize) ||
     media.fileSize < 1 ||
-    media.fileSize > YOUTUBE_LIMITS.maxVideoBytes
+    media.fileSize > PROVIDER_LIMITS.youtube.maxVideoBytes
   ) {
     throw new ProviderAdapterError(
       classifyProviderFailure({

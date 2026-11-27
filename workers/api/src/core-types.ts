@@ -1,15 +1,17 @@
 import type { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
-import type { DatabaseError, ActiveOrganizationRequiredError } from "@meltiply/domain";
 import type { components } from "@meltiply/contracts/schema";
 
+import { CoreApiError, toCoreApiErrorOrRethrow, type TenantServiceError } from "./api-errors";
 import type { ApiWorkerEnv } from "./env";
-import type { DistributionFilters, DistributionPatch } from "./distribution-service";
+
+export { CoreApiError, toCoreApiErrorOrRethrow };
 
 type Schemas = components["schemas"];
 type AnalyticsSnapshot = Schemas["AnalyticsSnapshot"];
 type AnalyticsSummary = Schemas["AnalyticsSummary"];
 type CalendarEvent = Schemas["CalendarEvent"];
+type DistributionStatus = Schemas["DistributionStatus"];
 type InboxComment = Schemas["InboxComment"];
 type InboxResponse = Schemas["InboxResponse"];
 type Platform = Schemas["Platform"];
@@ -17,25 +19,25 @@ type PlatformAccount = Schemas["PlatformAccount"];
 type PlatformCapability = Schemas["PlatformCapability"];
 type ReplyStatus = Schemas["ReplyStatus"];
 
-export class CoreApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-    readonly retryAfterSeconds?: number,
-    readonly details: readonly Schemas["ErrorDetail"][] = [],
-  ) {
-    super(message);
-    this.name = "CoreApiError";
-  }
+export interface DistributionFilters {
+  brandProfileId?: string;
+  end?: Date;
+  limit: number;
+  offset: number;
+  platform?: Platform;
+  postId?: string;
+  start?: Date;
+  status?: DistributionStatus;
 }
 
-export function toCoreApiErrorOrRethrow(cause: unknown): CoreApiError {
-  if (cause instanceof CoreApiError) return cause;
-  throw cause;
+export interface DistributionPatch {
+  descriptionOverride?: string | null;
+  hashtags?: string[];
+  scheduledAt?: Date | null;
+  titleOverride?: string | null;
 }
 
-interface InboxFilters {
+export interface InboxFilters {
   brandProfileId?: string;
   distributionId?: string;
   limit: number;
@@ -45,7 +47,7 @@ interface InboxFilters {
   unreplied?: boolean;
 }
 
-interface AnalyticsFilters {
+export interface AnalyticsFilters {
   accountId?: string;
   brandProfileId?: string;
   end: Date;
@@ -54,13 +56,13 @@ interface AnalyticsFilters {
   start: Date;
 }
 
-interface AnalyticsPostsFilters extends AnalyticsFilters {
+export interface AnalyticsPostsFilters extends AnalyticsFilters {
   limit: number;
   metric: Schemas["AnalyticsMetric"];
   offset: number;
 }
 
-interface SnapshotFilters {
+export interface SnapshotFilters {
   end?: Date;
   limit: number;
   start?: Date;
@@ -71,13 +73,9 @@ export interface IdempotentResult<T> {
   value: T;
 }
 
-export type CoreServiceError = CoreApiError | ActiveOrganizationRequiredError | DatabaseError;
+export type CoreServiceError = TenantServiceError;
 
 export interface CoreApiService {
-  activeOrganization(
-    env: ApiWorkerEnv,
-    session: SessionClaims,
-  ): Effect.Effect<string, CoreServiceError>;
   analyticsPosts(
     env: ApiWorkerEnv,
     session: SessionClaims,

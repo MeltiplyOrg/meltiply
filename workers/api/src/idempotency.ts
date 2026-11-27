@@ -2,7 +2,8 @@ import { Effect } from "effect";
 import type { DatabaseError } from "@meltiply/domain";
 import type { EffectTransactionClient } from "@meltiply/database";
 
-import { CoreApiError, type IdempotentResult } from "./core-types";
+import { CoreApiError } from "./api-errors";
+import { type IdempotentResult } from "./core-types";
 import { sha256Hex } from "./crypto";
 
 export interface IdempotencyRecord extends Record<string, unknown> {

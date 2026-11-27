@@ -1,192 +1,142 @@
-# Untangling decisions
+# Backend Untangling Decision Log
 
-The goal is behavior-preserving structural cleanup with selective anti-slop checks.
-Comments and test-quality cleanup are included. Problems below describe the
-baseline; the fixes describe the current ownership.
+Scope: backend only (`packages/*`, `workers/*`). Additions selected: **Comments** (remove comments that only restate code). **Tests** cleanup is excluded. `STATE.md` is `stabilizing`, so all public HTTP routes, status codes, response shapes, OpenAPI contracts, database migrations, queue message schemas, Durable Object RPC contracts, and frontend-imported package exports remain backward-compatible.
 
 ## Problem list and fixes
 
-- Keep guardrails in the existing Vite+ lint path. Enable reviewed rules rather
-  than importing overlapping presets. Verify diagnostics through the actual linter.
-  - `vite.config.ts` enables strict types but not floating-promise checks or
-    accumulating-spread checks. These mistakes can pass the current gate.
-  - `lint/codebase-plugin.mjs` only rejects adjacent `as unknown as` assertions.
-    Angle-bracket and other assertion chains bypass the same policy.
-  - Abort-signal isolation and strict MSW setup rely on convention rather than
-    an executable policy.
-  - The researched Cloudflare preset requires a newer toolchain. Installing it
-    here would tie this cleanup to an unrelated upgrade.
-  - The first-principles review found that landmines exempts a whole test file
-    when any fake-timer call appears. Date-only mocking can therefore hide a
-    real Promise sleep in another test.
-  - Add a focused raw-timer Promise guard for the cache tests. Exercise each
-    configured rule through real positive and negative Vite+ diagnostics.
+- Break all 19 backend import cycles and separate leaf contracts from runtime modules so every dependency points toward what changes less.
+  - `packages/providers/src/types.ts:2-5` imports downward into `threads/options.ts`, `instagram/options.ts`, and `rate-limit.ts`, creating 7 circular import chains through `values.ts` and `failures.ts`.
+  - `packages/providers/src/values.ts:3-4` mixes pure value parsers with failure-throwing validators, pulling `failures.ts` and `types.ts` into every pure helper.
+  - `packages/providers/src/http.ts:4,369-374` imports `effect.ts` solely for unused `ProviderHttpClient.requestEffect`, dragging the `effect` runtime into the Promise HTTP client and all adapters.
+  - `packages/providers/src/index.ts` mixes barrel exports with `ProviderRegistry` and env caching, forcing `effect.ts:461-463` to declare a cycle-avoiding `ProviderAdapterSource` interface.
+  - `workers/api/src/env.ts:5` imports `ResolvedActor` from `actor-resolution.ts`, creating 9 circular import chains across `audit.ts`, `database.ts`, `core-types.ts`, and `distribution-service.ts`.
+  - `workers/api/src/core-types.ts:7` imports `DistributionFilters` and `DistributionPatch` from `distribution-service.ts`, creating 6 circular import chains across `brand-profile-guard.ts`, `idempotency.ts`, `idempotent-mutation.ts`, `post-types.ts`, and `publishing-queue-store.ts`.
+  - `workers/api/src/env.ts:260` types `Variables.actor` as non-nullable `ResolvedActor` even though public `/api/v1/*`, `/api/auth/*`, and `/operator/v1/*` routes run without an actor.
+  - `workers/automation/src/env.ts:1` imports types from `native-processor.ts`, which imports `AutomationEnv` from `env.ts`.
+  - `workers/automation/src/assets.ts:25-29` and `asset-processing.ts:20` mutually import each other, and `retention.ts:5` reaches into `assets.ts` for object deletion settlement.
 
-- Scope spelling vocabulary to its owning localization tests and regenerate managed
-  skills from the pinned pack rather than changing the checker or pin.
-  - The English spelling checker rejects the German month names asserted by two
-    localization regressions. Keep those assertions and recognize each month only
-    in its owning test file. Its type globs match basenames, not paths; verify the
-    real checker accepts those names while rejecting unrelated misspellings.
-  - Several pack-managed skills are missing or differ from the pinned source.
-    Restore them through `skills:sync`, retaining repository-owned adaptations.
-  - Include managed-skill verification in the focused guardrail lane.
-  - The history scanner reports only a finding count. Enable redacted finding
-    details so the source, rule, and commit can be investigated without exposing
-    the matched credential.
-  - Its finding is the sequential 16-character processor config fixture, not a
-    credential. Match only that exact value, source path, and detector rule;
-    preserve history scanning and the detection canary. Prove the boundary with
-    real-scanner controls for different values, paths, and a prefixed value.
+- Centralize shared environment, loopback-origin, UUID, date-period, and database-pool predicates in `@meltiply/domain` and `@meltiply/database` so cross-package and cross-worker policy checks cannot drift.
+  - `packages/storage/src/sigv4.ts:145-146` checks `"::1"` instead of `"[::1]"`, failing to recognize IPv6 loopback URLs while `packages/reporting/src/configuration.ts:72-77` and `workers/api/src/env.ts:105-141` check `"[::1]"`.
+  - `packages/storage/src/s3.ts:109-112` duplicates protocol validation and diverges from `SigV4Signer` on loopback HTTP.
+  - `ENVIRONMENT === "local" || ENVIRONMENT === "test"` is repeated across `packages/storage/src/{provider,r2}.ts`, `packages/observability/src/{otlp,effect-tracer,flow-ledger}.ts`, and `workers/api/src/{index,env,better-auth,flow-observability,core-routes,workspace-lifecycle}.ts`.
+  - `workers/api/src/workspace-lifecycle.ts:1009-1010` hardcodes `local || test` instead of calling `requiresEmailVerification(c.env)`, bypassing self-host configuration.
+  - `workers/api/src/core-routes.ts:714-729` (`oauthCallbackUrl`) reimplements a narrower loopback check than `applicationOrigin(env)`.
+  - `workers/api/src/better-auth.ts:44` duplicates `packages/database/src/index.ts:76` (`request`-scoped pool detection).
+  - UUID validation regexes are defined 3 different ways across `workers/api/src/crypto.ts`, `workers/automation/src/messages.ts:1`, and `workers/automation/src/publish-batch.ts:6`.
+  - `isoDateTime` / `isoDateTimeOrNull` and `isoPeriodKey` are reimplemented across `packages/reporting/src/{sanitize,service,policy}.ts`, `workers/api/src/{time,core-service,distribution-service,workspace-lifecycle,flow-observability,installation-routes,operator-reconciliation}.ts`.
+  - `maximumNotificationRecipients = 20` is duplicated across `workers/automation/src/notifications.ts:53`, `workers/api/src/publishing-preferences-service.ts:121`, and `workers/api/src/core-routes.ts:680`.
 
-- Control polling time and wait for request completion instead of guessing delays.
-  Preserve the same observable cache and refresh assertions.
-  - `frontend/app/src/lib/browser-cache.test.tsx` waits real polling intervals
-    inside `act` and raises the test budget to accommodate them.
-  - `frontend/app/e2e/cache-smoke.mjs` sleeps before refreshing an analytics cohort
-    and polls request counters rather than awaiting the requests.
-  - `frontend/app/e2e/posts-composer.spec.ts` polls a mutation recorder even though
-    the mutation has an observable response.
-  - Register capability completion before the Channels action that starts its
-    request. Waiting on Posts for a request only Channels makes blocks the action
-    that can satisfy the wait.
+- Consolidate Flow Ledger persistence into `@meltiply/observability` and fix the API isolate recorder cache.
+  - `workers/api/src/flow-observability.ts:20-26,56-71,131-135,362-542` reimplements `FLOW_NODE_KINDS`, `flowNodeTypeFor`, `flowExplorerEnabled`, `flowDatabaseAvailable`, and `flow_runs`/`flow_steps` SQL already owned by `packages/observability/src/flow-ledger.ts`.
+  - `workers/api/src/index.ts:60` shallow-clones `{ ...env }` per request, causing `WeakMap<ApiWorkerEnv, FlowRecorder>` in `workers/api/src/flow-observability.ts:325` to miss on every request in production.
 
-- Make `@meltiply/domain` the owner of Platform recognition. Migrate callers and
-  delete the duplicate reporting export rather than retaining an alias.
-  - `packages/reporting/src/contracts.ts` implements a second `isPlatform` guard.
-  - API reporting and automation usage callers import that duplicate guard.
-  - `workers/api/src/validation.ts` and
-    `workers/automation/src/channel-revocation.ts` repeat membership checks and
-    assert the result back to `Platform` instead of using the existing guard.
+- Fix `@meltiply/storage` error classification, binding validation, and shared provider-media key validation, and remove unused package dependencies and dead storage methods.
+  - `packages/storage/src/r2.ts:135` and `s3.ts:210` throw `TypeError("object body is unavailable")` on missing upstream response bodies, which `toStorageError` (`object-store.ts:137-146`) misclassifies as HTTP 400 `InvalidRequestError` instead of 503 `StorageUnavailableError`.
+  - `packages/storage/src/provider.ts:151-166` validates S3 bindings by constructing a dummy `S3SigV4Signer` inside `try/catch` while only checking truthiness on R2 bindings.
+  - `packages/storage/src/r2.ts:115-124` passes `onlyIf: { etagMatches: undefined }` unconditionally when `ifSourceEtagMatches` is omitted.
+  - `packages/storage/src/sigv4.ts:62-64` duplicates `sha256Bytes` inside `sha256`.
+  - Provider-media object key validation is duplicated with divergent regexes across `packages/storage/src/provider-media.ts:108-111`, `workers/automation/src/provider-media.ts:13,31-43`, and `workers/api/src/core-routes.ts:100,753-770`.
+  - `packages/storage/src/object-store.ts:99-101,244-251` retains dead `ObjectWriteUrlSigner` and `EffectObjectStore.readEffect`.
+  - `packages/auth/package.json` declares unused `pg` and `@types/pg` dependencies.
 
-- Preserve account-analytics infrastructure failures on the job error channel.
-  Keep per-account failure counts for partial Provider failures.
-  - `workers/automation/src/account-analytics.ts` catches a failed candidate query
-    and returns the same empty success result as a sweep with no eligible accounts.
-  - The scheduler cannot distinguish a database failure from successful work.
+- Align `@meltiply/reporting` allowlists, deduplicate pending-report writes and worker layer wiring, and stop swallowing savepoint rollback failures.
+  - `packages/reporting/src/sanitize.ts:227-277` lists nonexistent `packages/ui`, dead `ReportingInputError`, and nonexistent `ValidationError` while omitting `workers/state`, `frontend/`, and active runtime error classes (`InvalidRequestError`, `NotFoundError`, `ForbiddenError`, `AssetPolicyError`, `TokenCiphertextError`, `TokenCipherUnavailableError`).
+  - `packages/reporting/src/sanitize.ts:149` hardcodes `["views", "reactions", "comments", "shares"]` instead of using imported `USAGE_ENGAGEMENT_METRICS`.
+  - `packages/reporting/src/contracts.ts:131-134` exports dead `ReportingInputError`.
+  - `packages/reporting/src/policy.ts:27-29` (`isoOrNull`) is a pass-through wrapper around `isoDateTimeOrNull`.
+  - `packages/reporting/src/service.ts:293-305` (`sendCapture`) widens `CaptureResult`, forcing `?? "delivery_failed"` fallbacks; `L772-839` duplicates `INSERT INTO reporting_pending_reports` between `insertPending` and `enqueuePending`.
+  - `packages/reporting/src/usage.ts:142-149` catches errors across `ROLLBACK TO SAVEPOINT`, silently masking a broken transaction state if rollback fails.
+  - `workers/automation/src/{improvement-reporting,diagnostic-reporting,usage-reporting}.ts` duplicate `reportingConfiguration` + `ReportingTransactionRunner` + `createReportingServiceLive` wiring 3 times, and `diagnostic-reporting.ts:132-135` has an unreachable `Exit.isFailure` branch.
 
-- Represent a Post row's caption as a string. Keep attachment metadata in the
-  existing attachment projection and remove unused preview-image allocations.
-  - `frontend/app/src/components/posts/post-row.ts` builds a single-element
-    `PostContentItem[]` with preview images that no consumer reads.
-  - `frontend/app/src/components/posts/posts-helpers.ts` only reads the first
-    item's caption. `PostDetailItem` exposes more states than the UI supports.
-  - `frontend/app/src/api/types.ts` also retains unread posting-time, additional
-    settings, and YouTube thumbnail members. The thumbnail member is the last
-    reference to the unused `MediaItem` type.
+- Consolidate provider rules, option parsing, metadata preservation, and adapter helpers inside `@meltiply/providers`.
+  - `workers/api/src/core-routes.ts:207-521` and `workers/api/src/validation.ts:214-219` duplicate platform-specific Facebook, Instagram, TikTok, and YouTube option parsing outside `packages/providers`, overlapping with `workers/api/src/post-service.ts:732-901`.
+  - `packages/providers/src/http.ts:306` unconditionally overwrites `context.metadata = undefined` when a request lacks rate-limit headers, wiping budgets recorded earlier in multi-step operations.
+  - `packages/providers/src/http.ts:393-395` swallows all exceptions thrown by `classifyErrorBody`.
+  - `packages/providers/src/index.ts:207-255` manually lists `registryConfigKeys` without exhaustiveness checking against `ProviderRegistryEnvironment`, and `L332-367` wraps adapter methods in closures with unreachable `"adapter method was removed"` throws.
+  - `packages/providers/src/meta.ts:177` checks `token_type !== "bearer"` case-sensitively unlike the other 3 OAuth adapters.
+  - `packages/providers/src/youtube/analytics.ts:104-118` hand-builds engagement snapshots instead of calling `engagementSnapshot` (`results.ts`), and `youtube/adapter.ts:114` hardcodes `` `ended_live:${broadcast.id}` `` instead of `broadcastOperationId`.
+  - `packages/providers/src/threads/adapter.ts:407-411` reimplements `parseMetaInsightsMap` inline.
+  - `packages/providers/src/facebook/oauth.ts:345-389` multiplexes two unrelated endpoints in `discover(path)` via magic-string `path === businessUsersPath`.
+  - `packages/providers/src/facebook/publish.ts:182-224,364-402` threads a meaningless `draft` boolean through story uploads and branches on `kind` 6 times.
+  - `packages/providers/src/validator.ts:359-363` duplicates `defaultInstagramPostType`; `["video/mp4", "video/quicktime"]`, `["private", "public", "unlisted"]`, `86_400`, `lookup.providerPostId` guards, `rejected(code)`, and RTMPS validation are duplicated across adapters.
+  - `packages/providers/src/types.ts:405` declares dead `ProviderAdapter.extractRateLimitBudget?` and `L68,73` duplicate `metadata?` already intersected at `L92-94`.
+  - `packages/providers/src/{facebook/types,youtube/types,facebook/adapter,facebook/oauth,validator,values,index}.ts` carry pass-through aliases (`FACEBOOK_LIMITS`, `YOUTUBE_LIMITS`, `FacebookAdapterOptions`, `encodeRefreshSecret`, `facebookPublishedPost`, `captionLimits`).
 
-- Queue composer attachment-ownership writes and make explicit Save follow that
-  queue. Show failures through the existing form state rather than silently
-  discarding them or blindly repeating writes.
-  - `frontend/app/src/components/composer/composer.tsx` marks asset IDs as
-    persisted before an asynchronous write and discards its rejection.
-  - `useUpdatePost` does not own error presentation for this caller.
-  - A late ownership rejection can mark a newer successful Save as failed.
-    Suppressing that message alone would still permit older writes to overwrite
-    newer attachment state. One composer-owned queue orders the actual writes.
+- Decompose `workers/api` monoliths (`core-routes.ts`, `core-service.ts`) by domain and unify shared route, auth, audit, idempotency, and SQL primitives.
+  - `workers/api/src/app.ts:356-366` wraps `await next()` inside the operator-auth `try/catch`, swallowing downstream `/operator/v1/*` errors as `403 operator_authentication_required`.
+  - `workers/api/src/core-routes.ts:2295-2305` hardcodes a distribution status `Set` that omits `"delivered"`, drifting from `distribution-service.ts`.
+  - `workers/api/src/post-service.ts:1264,1390,1458,1704` ignores `requestId` declared on `PostApiService` and passed by `core-routes.ts`, dropping request correlation on post outbox events.
+  - `workers/api/src/diagnostic-reporting.ts:18-36` omits `/api/v1/publishing-preferences` from `operationPrefixes`.
+  - `workers/api/src/core-routes.ts` (2,763 lines) mixes 9 unrelated domains, provider validators, OAuth crypto, and lazy loaders, and registers workspace-lifecycle and publishing-queue routes instead of `app.ts`.
+  - `workers/api/src/core-service.ts` (1,585 lines) mixes platform accounts, calendar, analytics (with 3× duplicated `candidates` CTE and 2× `totals` reducer), inbox, and spread-in distribution methods, plus dead `activeOrganization` and unused `JOIN organizations` (`L1483`, also `post-service.ts:682`).
+  - `workers/api/src/brand-profile-service.ts:138-173` owns `disconnectPlatformAccountEffect` (imported by `core-service.ts`) and calls it in an N+1 loop at `L361-363`.
+  - Distribution cancellation SQL and pending publish outbox deletion SQL are duplicated 5 times across `brand-profile-service.ts`, `distribution-service.ts`, `post-service.ts`, and `publishing-queue-service.ts`; the provider-owned distribution predicate is duplicated with 7-vs-8 condition drift between `post-service.ts:1528-1538` and `publishing-queue-service.ts:245-250`.
+  - Outbox insertion SQL is duplicated across `distribution-service.ts`, `brand-profile-service.ts`, `asset-service.ts`, and `core-service.ts`.
+  - Workspace-admin SQL checks, installation-owner guards, `isWorkspaceRole` fallbacks, IANA timezone DB checks, Hyperdrive availability checks, `requestId(c)`, 204 responses, `waitUntil` wrappers, OAuth selection checks, analytics query parsing, and 16× `auditActorFrom` conversions are copy-pasted across routes and services.
+  - `workers/api/src/publishing-queue-service.ts:43-50,91-197` multiplexes create/update/delete behind an `action` flag requiring `id!` assertions, and `publishing-queue-store.ts:57-74` (`requireQueueEffect`) duplicates `readQueueEffect`; `publishing-preferences-service.ts`, `publishing-queue-service.ts`, `core-service.ts`, and `workspace-lifecycle.ts` duplicate idempotent-transaction boilerplate instead of sharing `idempotent-mutation.ts`.
+  - `workers/api/src/broadcast-service.ts:28-180` multiplexes `read`/`end` behind a single function and ignores `action.key` from the `Idempotency-Key` header (passing `distributionId` instead).
+  - `workers/api/src/post-service.ts:1720-1734` duplicates `lockPostEffect`, `post-service.ts:65-70` duplicates `assetColumns` from `asset-service.ts:96-100`, and `asset-service.ts:217-244,323-390` duplicates upload-session expiry transitions.
+  - `workers/api/src/workspace-lifecycle.ts` duplicates pending-invitation SQL (4× with `auth-policy.ts`, `seats.ts`, `actor-resolution.ts`), `InvitationStatus` derivation, invitation token generation + mail dispatch, double `requireAssignableRole` calls, and last-admin counts; `oauth-connection.ts:83-90,120-128` queries `organizations` twice back-to-back.
+  - `workers/api/src/current-user.ts` -> `effect/services/current-user.ts` does an Effect -> Promise -> Effect round-trip; `workers/api/src/reporting-routes.ts:286` has a dead `c.get("actor");` statement; `publication-requirements.ts` and `analytics-summary-cache.ts` duplicate single-flight coalescing and FNV-1a hashing.
+  - Shallow micro-files (`time.ts`, `idempotent-response.ts`, `organization-lock.ts`, `installation-mutation.ts`, `inbox-comment-sync.ts`, `database-module.ts` if no test isolates require it) scatter tiny 1-function helpers across the worker.
 
-- Use the active application language for invitation expiry dates.
-  - `frontend/app/src/app/(dashboard)/settings/page.tsx` formats these dates with
-    the browser locale while other settings tables use the selected language.
+- Untangle `workers/automation`, `workers/automation/processor/engine/server.mjs`, and `workers/state` by eliminating duplicated workflows, hidden links, silent error drops, and shallow wrappers.
+  - `workers/automation/src/native-processor.ts:152` ignores caller-provided `request.expiresInSeconds` for `outputUrl` signing and hardcodes `PROCESSOR_CAPABILITY_TTL_SECONDS`.
+  - `workers/automation/src/index.ts:974-988` omits `results.usage` and `results.reporting` from the `automation_scheduled` summary log, ignores `scope.logContext` to recompute `context(...)` 4 times, and leaves `logJobOutcome` (`effect/boundary.ts:98-124`) mostly dead behind a parallel `logQueueOutcome`.
+  - `workers/automation/src/assets.ts`, `asset-processing.ts`, and `retention.ts` duplicate concurrent-8 object deletion + partial settlement 4 times; `assets.ts` duplicates upload-session expiry + staging reclamation CTEs 3 times (and `orphanClock` SQL with `asset-processing.ts`).
+  - `workers/automation/src/distribution.ts:222-252` and `distribution-provider.ts:199-248` duplicate candidate media selection with divergent tie-breaking (first valid vs smallest `fileSize`).
+  - `workers/automation/src/distribution.ts:888-1028,1323-1435` duplicates published-distribution settlement; `distribution.ts:1437-1490` and `provider-sync.ts:948-998` duplicate OAuth token rotation persistence; `distribution.ts:771-815` bypasses `QueuePublisher` with direct `queue.sendBatch`.
+  - `workers/automation/src/distribution-provider.ts` and `provider-sync-provider.ts` duplicate credential readiness checks (4×) and `safeProviderUrl`, and `executeProviderAccountAnalyticsEffect` fabricates a fake `ProviderReadTarget` to reuse `credentials()`.
+  - `workers/automation/src/outbox.ts:148-172` and `notifications.ts:55-91` duplicate the notification payload schema; `RECURRING_COMMENTS_ENABLED === "true"` is scattered across 7 sites in 3 files.
+  - `workers/automation/src/{account-analytics,retention,assets,provider-sync,usage,provider-media}.ts` silently drop underlying error causes without structured logs.
+  - `workers/automation/src/due-work.ts` holds single-owner constants (`assetLeaseSeconds`, `maximumProviderPollAttempts`, `providerAttemptLeaseSeconds`) and an identity `dueWorkTables` map; `workers/automation/src/{validation,errors,publish-queues,reply-reconciliation,improvement-reporting}.ts` are 9–37 line single-caller wrappers; `assets.ts`/`asset-processing.ts` duplicate trivial `asError` and `processorCapabilityTtlSeconds` aliases; `usage-reporting.ts:24,26` and `flow-observability.ts:14` and `native-processor.ts:95` and `effect/job-context.ts:3` retain unused symbols/fields.
+  - `workers/automation/processor/engine/server.mjs:1051-1053` catches `engine_timeout` inside `produceCandidate` as a discarded candidate instead of aborting remaining plans; `L259` calls `JSON.parse` without `try/catch`; `L21-92` duplicates `run`/`runStreaming`; `L518-529` re-parses `vipsheader` with 4 ad-hoc regexes instead of `parseVipsHeader`; `L1384-1396,1430-1442` duplicates replay-cache checks; `L1247-1267` uses a numeric `active` counter for a strictly boolean lock.
+  - `workers/state/src/index.ts:633-634` duplicates `selectionEvidenceExpiry` and hardcodes storage key prefixes across 12+ sites with manual `.slice(...)`.
 
-- Give runtime acceptance its own disposable database fixture after integration.
-  - `test:integration` leaves signing keys encrypted with its fixture secret in
-    the shared local database. The development runtime uses a separately
-    generated local secret; the combined cache lane then fails token minting.
-  - The fresh-database control reaches token minting successfully. Keep phase
-    isolation in the hosted workflow, not a key-deletion workaround in auth or
-    an unsafe database reset inside the reusable local smoke script.
+- Remove implementation-restating comments across backend source files while preserving license headers, tool directives, concise exported `packages/*` contract docs, and external protocol/vendor/platform constraints.
+  - `packages/providers/src/effect.ts` (146 comment lines) and `packages/providers/src/types.ts` (74 comment lines) narrate wrapper implementations, repeat identical retry explanations 3×, include migration prose, and drift (`types.ts:45` omits `"broadcast"`).
+  - Internal non-exported modules in `packages/providers/src/` and `packages/storage/src/` carry JSDoc comments that restate short helpers or narrate code (`values.ts`, `oauth.ts`, `runtime.ts`, `results.ts`, `meta.ts`, `failures.ts`, `encoding.ts`, `keys.ts`, `object-store.ts`, `sigv4.ts`).
+  - `packages/providers/src/instagram/options.ts:139-143` makes a stale claim ("Shared by the composer...").
+  - `packages/reporting/src/{contracts,configuration,diagnostics,policy,sanitize,service,transport,usage}.ts`, `packages/storage/src/{provider,provider-media,r2,s3}.ts`, `packages/domain/src/index.ts`, `packages/observability/src/flow-ledger.ts`, and `packages/contracts/src/oauth-state.ts` carry trivial name-restating JSDocs and multi-paragraph implementation essays.
 
-- Derive media job deadlines from container lifetime, not signed-URL lifetime.
-  - `workers/automation/src/asset-processing.ts` sends 840 seconds because it
-    derives the deadline from the longer-lived storage capabilities. The engine
-    protocol accepts only 5 through 540 seconds and rejects every such job.
-  - Use the existing container timeout with completion headroom. Keep storage
-    URL expiry separate so transfers remain authorized through job completion.
-  - Assert the actual emitted deadline is within the engine's accepted range in
-    the existing staged-upload integration test.
+- Tighten shared domain constants, provider wire serialization, and package public barrels so internal helpers cannot leak across package boundaries and cross-package invariants stay in one place.
+  - `packages/domain/src/index.ts` and `packages/storage/src/provider-media.ts:3` and `packages/providers/src/registry.ts:379` duplicate `"/api/v1/provider-media/"`; `packages/providers/src/types.ts:10` and `packages/reporting/src/contracts.ts:69` duplicate `ProviderFailureClass`; `packages/providers/src/limits.ts:3` hardcodes `500 * 1024 * 1024` instead of deriving it from `@meltiply/domain`.
+  - `packages/storage/src/provider-media.ts:93-116` (`signProviderMediaUrl`) skips `validateProviderMediaKey`, allowing keys to be signed that the route verifier rejects, and its JSDoc references stale `appOrigin`.
+  - `packages/providers/src/tiktok/adapter.ts:655,681-682` checks UTF-16 `.length` on captions and titles instead of `codePointLength`, diverging from `validator.ts` on surrogate pairs/emoji.
+  - `packages/providers/src/facebook/{analytics,publish,oauth}.ts` each define identical `graphGet` wrappers.
+  - `workers/api/src/post-service.ts:1046-1070` duplicates provider-hosted content detection from `packages/providers/src/validator.ts:182-192`, and `workers/api/src/distribution-service.ts:197-291` duplicates snake_case option serialization separately from `packages/providers/src/wire-options.ts`.
+  - `packages/providers/src/effect.ts` exports 8 unused pass-through `*Effect` wrappers and 2 internal retry helpers; `packages/providers/src/index.ts`, `packages/reporting/src/index.ts`, `packages/storage/src/index.ts`, `packages/domain/src/index.ts`, and `packages/database/src/index.ts` re-export internal-only helpers and constants (`WORKSPACE_ROLES`, `isRequestScopedDatabasePool`, `providerMediaPayload`, `PROVIDER_LIMITS`, `REPORTING_EVENTS`, etc.).
+  - `packages/reporting/src/sanitize.ts:224` retains nonexistent `ProviderError` in `approvedExceptionTypes`.
+  - `packages/observability/src/{otlp,effect-tracer,flow-ledger}.ts` repeat `ENVIRONMENT === "local" || ENVIRONMENT === "test"` instead of sharing one internal predicate in `log.ts`.
 
-- Name the channel-caption field in its browser regression.
-  - The Threads editor has multiple textboxes. An unnamed textbox locator fails
-    without a product regression and never reaches the save assertion.
+- Fix automation container edge-case bugs, eliminate phantom error channels and dead wrappers, and unify shared error conversion across `workers/automation`.
+  - `workers/automation/processor/engine/server.mjs:1277-1283` compares string UTF-16 lengths before converting to `Buffer` for `timingSafeEqual`, which throws `RangeError` on multi-byte bearer tokens; `L1336-1353` lacks an early `if (oversized) return;` guard on `"data"` events; `spawnProcess`/`run`/`runStreaming` and `json()` add boilerplate across all 11 response branches.
+  - `workers/automation/src/diagnostic-reporting.ts:103,113-125` catches all causes inside `recordDiagnostic`, making `recordDiagnosticSafely`'s failure warning unreachable, and `workflowDiagnosticReport` duplicates `queueDiagnosticReport`.
+  - `workers/automation/src/index.ts` repeats lazy-import + dependency-override wiring 11 times, rebuilds `jobScope` on every scheduled unit iteration, keeps dead `context()`/`CorrelationIds` and single-caller `logJobOutcome` (`effect/boundary.ts`).
+  - `workers/automation/src/{distribution,provider-sync,replies,index}.ts` declare phantom `ProviderAdapterError` in Effect error channels that are already caught and classified; `distribution-provider.ts:744-843` nests 3 `Effect.catch/map` layers instead of one `Effect.mapError` + `lookupFailure` helper.
+  - `workers/automation/src/{object-cleanup,assets,asset-processing}.ts` define 3 copies of `toError`/`asError`; `ObjectCleanupOutcome.settlementError` and `AssetEventDescriptor.requestId` are never read; `due-work.ts:337` selects an unused `inserted_count` subquery and `provider-sync.ts`/`distribution.ts` place `./due-work` imports mid-file.
 
-- Remove implementation-restating comments and review tests after the structural
-  fixes. Keep tests that distinguish a real regression from an internal rename.
-  - Remove the obsolete doc comment with the duplicate reporting guard. The
-    comment review found no other redundant comments in the delivered changes.
-  - Keep the reviewed regression tests. Fix async test callbacks and middleware
-    setup so tests assert behavior rather than incidental synchronous execution.
+- Unify `workers/api` error types, typed idempotent mutation outcomes, transaction injection, and route helpers while removing redundant checks and unused exports.
+  - `workers/api/src/{core-types,post-types,brand-profile-service}.ts` duplicate `CoreApiError | ActiveOrganizationRequiredError | DatabaseError`, forcing `publishing-preferences-service.ts` and `publishing-queue-service.ts` to import `PostServiceError` from `post-types.ts`.
+  - `workers/api/src/distribution-service.ts:520-858` only wires `withTenantTransactionEffectOverride` into `calendar()`, ignoring it in the other 5 distribution methods.
+  - `workers/api/src/workspace-lifecycle.ts:264-277` duplicates `idempotentInstallationMutation` and loses extra fields (`token`, `workspaceName`) in untyped results, causing `?? ""` / `?? "your team"` fallbacks and dead `replayed: false` returns across `workspace-lifecycle.ts`, `onboarding.ts`, `reporting-routes.ts`, and `installation-routes.ts`.
+  - `workers/api/src/app.ts:363,404` gates auth rate limiting on `flowDatabaseAvailable` (an observability helper) instead of `hasConnectionString(c.env.DB_SYSTEM)`.
+  - `workers/api/src/post-service.ts:826-832` contains an unreachable duplicate Instagram check and `L494-504` carries a dead optional `previousIds` fallback query; `asset-service.ts:565` carries a dead `lock = false` branch and duplicates active-profile query variants.
+  - `workers/api/src/effect/runtime.ts:288-331` duplicates the Effect execution/error/diagnostic pipeline between `runWorkerEffect` and `runRouteEffect`; `diagnostic-reporting.ts:64-104` and `validation.ts:379-416,491` carry single-caller parameters and a repeated control-character regex.
+  - `workers/api/src/{routes/shared,workspace-lifecycle,onboarding,reporting-routes,installation-routes}.ts` define 5 copies of trivial `requestId(c)`; `core-routes.ts:36` (`providerMediaRoutePrefix`), `effect/services/storage.ts:42` (`StorageService`), and `audit.ts:72-77` (`recordWorkspaceAudit`) are pass-through wrappers; `oauth-revoke.ts` declares unused `CoreApiError`; 18 internal-only interfaces carry unused `export` modifiers.
 
-## Required special cases and rejected changes
+- Complete Round 2 hardening across packages, automation, state, and API (fixing protocol/stream/account-status/timeout/diagnostic bugs and remaining hidden links).
+  - `packages/providers/src/{tiktok/adapter,youtube/live,youtube/resumable}.ts` imported upward from `wire-options.ts`, inverting dependency direction; moved `TIKTOK_PRIVACY_LEVELS` and `YOUTUBE_PRIVACY_STATUSES` into `types.ts`.
+  - `packages/providers/src/wire-options.ts`, `facebook/options.ts`, `facebook/publish.ts`, and `threads/options.ts` duplicated Facebook/Instagram/Threads option bounds instead of sharing `FACEBOOK_OPTION_LIMITS` and `PROVIDER_LIMITS`.
+  - `packages/providers/src/types.ts` (`ProviderAnalyticsMetric`) and `packages/reporting/src/contracts.ts` (`UsageEngagementMetric`) duplicated the engagement-metric union instead of aliasing `EngagementMetric` from `@meltiply/domain`.
+  - `packages/storage/src/sigv4.ts:136-148` accepted arbitrary non-HTTP schemes when `allowInsecureEndpoint: true`; `packages/storage/src/s3.ts:160-164` (`#expectOk`) threw on non-2xx responses without cancelling the response body stream.
+  - `packages/contracts/src/oauth-state.ts:30-52` exported Durable Object internal storage shape `OAuthSelectionRecord`; moved it into `workers/state/src/index.ts`.
+  - `workers/automation/processor/engine/server.mjs:65-72,277-279,340-345,572-577,584-589` caught `EngineError("engine_timeout" | "engine_error")` and re-wrapped them as permanent 422 `corrupt_media`/`unsupported_media` failures; also removed unreachable `videoFrameDeltas` and unread `codedWidth`/`codedHeight`/`rotation` fields.
+  - `workers/automation/src/index.ts` failed to pass `body.type` for `ProviderSyncMessage` into `queueDiagnosticReport` (making `provider.sync -> analytics` unreachable), hardcoded `publishQueuePattern` instead of deriving it from `PLATFORM_IDS`, and logged cumulative cron latency instead of per-unit duration; `messages.ts:138` coerced non-string `workload` via `String(...)`; `outbox-commands.ts` and `effect/job-errors.ts` kept unused `assetLifecycleRecovery`, `"revive"` branch, and `RetryableJobError.attempt`.
+  - `workers/api/src/platform-service.ts:57-67`, `inbox-service.ts:268-283`, `post-service.ts:911-923`, `publication-requirements.ts:56-63`, and `broadcast-service.ts:68-73` implemented 5 conflicting channel usability checks (causing `accountStatus` to report expired `"expiring"` rows as `"expiring"` and causing `replyToComment`/`schedulePost` to reject healthy channels with short-lived tokens); unified them in `@meltiply/domain` (`accountStatus` + `isAccountUsable`).
+  - `workers/api/src/post-service.ts:722-884` duplicated Instagram, TikTok, YouTube, Facebook, and Threads publish-option narrowing/validation outside `@meltiply/providers`; moved into `resolvePublishProviderOptions` in `packages/providers/src/wire-options.ts`.
+  - `workers/api/src/better-auth.ts` and `app.ts` passed untyped auth rate-limit action strings; exported `AuthRateLimitAction = keyof typeof AUTH_RATE_LIMITS`; dropped unused `export` on `BrandProfile`/`QueueMembership` and unused fields on `InternalActorRow`.
 
-- Keep bounded Provider retries, queue backoff, idempotency, and DLQ behavior.
-  They implement external delivery constraints, not accidental coupling.
-- Keep optional telemetry best-effort and stream-cancellation cleanup that
-  preserves an original failure. A discarded user mutation is different.
-- Keep distinct cryptographic encodings owned by OAuth, storage signing, and
-  token encryption. Similar byte conversion alone does not establish that these
-  wire protocols change together.
-- Keep workspace UI projections where they derive display fallbacks, connection
-  availability, or pre-workspace authentication state. Replacing them wholesale
-  with HTTP response types would move those decisions into consumers.
-- Keep Provider editor draft state separate from submitted options where the
-  editor represents incomplete input. Investigate unused members independently.
-- Keep API Promise-facing Effect adapters. The Effect guidance explicitly
-  sanctions those adapters; automation and state already have their own runners.
-- Keep Provider acceptance validation at its current owning factory. Passing
-  flags through a deployment adapter is not another policy implementation.
-- Keep the composer's ancestor container query. The shared element establishes
-  a container for descendants and queries its own ancestor.
-- Keep integration budgets and deliberate performance-test latency injection.
-  Do not enable a blanket retry/timeout ban or a global test-double ban.
-- Do not enable the evaluated conditional-assertion and imported-mutation rules.
-  The hosted probe missed an aliased test callback and flagged legitimate
-  contract branches and RuleTester setup. Keep these reviews semantic rather
-  than adding repository-wide allowances for those heuristics.
-- Apply typed promise checks to TypeScript. JavaScript Node test registration
-  returns promises owned by the test runner; linting them as application work
-  creates diagnostics without identifying unhandled application failures.
-- The settings route is live through `components/layout/workspace-settings.tsx`.
-  The suggested orphan-route deletion is rejected.
-
-## Verification and boundaries
-
-Public HTTP, queue, Worker, and persisted data contracts remain unchanged. Existing
-migrations and generated contracts are not cleanup targets. Existing untracked
-`.audit/`, `docs/research/`, and `temp.save` are not part of this change.
-
-The baseline is `4f25fb862083cd1cc1b3e873d5c23c3087958846`.
-[Baseline CI](https://github.com/MeltiplyOrg/meltiply/actions/runs/45011176944)
-passed frontend and tooling jobs but failed secret scanning, spelling, and
-self-hosted smoke. It is not a green baseline.
-
-Verification runs on GitHub-hosted runners.
-[The focused gate](https://github.com/MeltiplyOrg/meltiply/actions/runs/45383733441)
-passes real positive and negative Vite+ diagnostics for every added rule, strict
-lint, cache and composer regressions, row projections, selected-language dates,
-account-analytics failures, channel revocation, and documentation checks.
-
-The cross-cutting `bun run cloudflare:check` and real workerd cache/browser
-acceptance [pass](https://github.com/MeltiplyOrg/meltiply/actions/runs/45386271865).
-The cache smoke exercises both palettes at desktop and phone widths. Managed skills
-are regenerated from the pinned pack and checked in the focused guardrail lane. The
-[fresh-fixture control](https://github.com/MeltiplyOrg/meltiply/actions/runs/45385273363)
-separates fixture contamination from the corrected capability wait.
-The full application gate, React diagnostics command, and composer save,
-recovery, detach, ordered-attachment reopening, Provider-options, and blank-caption
-scenarios [pass without retries](https://github.com/MeltiplyOrg/meltiply/actions/runs/45401216968).
-
-Independent reviews traced the delivered fixes and identified the late-write and
-fake-timer bypass problems addressed above. The final targeted reviews found no
-further actionable defect. Review coverage remains sampled across large frontend,
-Worker, and tooling modules; this is not a claim that the entire repository has
-no other worthwhile issues.
-
-[Automatic CI](https://github.com/MeltiplyOrg/meltiply/actions/runs/45414392875)
-passes every selected lane and the final gate, including full-history secret
-scanning, real-scanner exception controls, spelling, integration tests, and
-self-hosted image smoke on both architectures.
-[The managed-skill check](https://github.com/MeltiplyOrg/meltiply/actions/runs/45413411151)
-confirms the committed skills match the pinned pack. Full-history detection and
-its live canary remain enabled. No failing rule, test, or CI check is disabled
-to make this change pass.
+- Restore the public option-validation behavior that moving it into `@meltiply/providers` had changed, verified by differential runs of the old and new functions.
+  - `parseProviderWireOptions` reworded two 400 messages (unknown field, `duration_seconds`).
+  - `resolvePublishProviderOptions` reordered publish errors and rejected foreign YouTube options and Instagram content metadata early, dropping the `details` array from `validatePublishInput` and turning some `409 asset_not_ready` responses into 422s; `resolveInstagramPlacement` now owns the placement-only rule.

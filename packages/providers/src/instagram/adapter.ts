@@ -1,6 +1,14 @@
 import type { PlatformCapability } from "@meltiply/domain";
 
-import { malformed, rejected, rejection } from "../failures";
+import {
+  malformed,
+  optionalLookupPostId,
+  rejected,
+  rejection,
+  requiredIdentifier,
+  validatePageInput,
+  validateSnapshotPage,
+} from "../failures";
 import { PROVIDER_LIMITS } from "../limits";
 import {
   containerOperationId,
@@ -43,11 +51,9 @@ import {
   providerIdentifier,
   record,
   required,
-  requiredIdentifier,
   requireIdempotencyKey,
   secureUrl,
-  validatePageInput,
-  validateSnapshotPage,
+  STANDARD_VIDEO_MIME_TYPES,
   validFileSize,
 } from "../values";
 import {
@@ -61,7 +67,7 @@ const apiOrigin = "https://graph.instagram.com";
 const exchangeOrigin = "https://api.instagram.com";
 const graphUrl = (path: string) => new URL(`/${META_GRAPH_API_VERSION}/${path}`, apiOrigin);
 const limits = PROVIDER_LIMITS.instagram;
-const videoTypes = ["video/mp4", "video/quicktime"];
+const videoTypes = STANDARD_VIDEO_MIME_TYPES;
 const professionalAccountTypes = ["BUSINESS", "MEDIA_CREATOR"];
 const maxGrantedPermissions = 32;
 
@@ -436,8 +442,7 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
     ...(engagementEnabled ? engagementMethods : {}),
 
     async lookupPublication(context, credentials, lookup) {
-      const providerPostId = providerIdentifier(lookup.providerPostId);
-      if (lookup.providerPostId && !providerPostId) throw malformed();
+      const providerPostId = optionalLookupPostId(lookup.providerPostId);
       if (providerPostId) {
         return lookupMetaPost(
           http,

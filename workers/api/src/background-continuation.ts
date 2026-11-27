@@ -9,12 +9,23 @@ import type { Context } from "hono";
 
 import type { ApiWorkerEnvironment } from "./env";
 
-export interface BackgroundContinuationOperation<T = unknown> {
+interface BackgroundContinuationOperation<T = unknown> {
   errorCode: string;
   errorRetryClass?: RetryClass;
   event: string;
   onSuccess?: (result: T) => Record<string, unknown> | void;
   perform: () => Promise<T>;
+}
+
+export function scheduleBackgroundWork(
+  c: Context<ApiWorkerEnvironment>,
+  promise: Promise<unknown>,
+): void {
+  try {
+    c.executionCtx.waitUntil(promise);
+  } catch {
+    void promise;
+  }
 }
 
 export function runBackgroundContinuation<T>(
@@ -60,9 +71,5 @@ export function runBackgroundContinuation<T>(
       },
     );
 
-  try {
-    c.executionCtx.waitUntil(handled);
-  } catch {
-    void handled;
-  }
+  scheduleBackgroundWork(c, handled);
 }

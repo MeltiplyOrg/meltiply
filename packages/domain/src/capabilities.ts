@@ -1,5 +1,4 @@
-/** Workspace roles, ordered from least to most authority. */
-export const WORKSPACE_ROLES = ["viewer", "editor", "admin"] as const;
+const WORKSPACE_ROLES = ["viewer", "editor", "admin"] as const;
 
 export type WorkspaceRole = (typeof WORKSPACE_ROLES)[number];
 

@@ -1,9 +1,8 @@
 import type { AccessClaims } from "@meltiply/auth";
 import type { Effect } from "effect";
-import type { DatabaseError } from "@meltiply/domain";
+import { isUuid, type DatabaseError } from "@meltiply/domain";
 
-import { CoreApiError } from "./core-types";
-import { RFC4122_UUID_PATTERN as uuid } from "./crypto";
+import { CoreApiError } from "./api-errors";
 import type { ApiWorkerEnv } from "./env";
 
 export type OperatorDistributionResolution = "cancelled" | "delivered" | "failed" | "published";
@@ -89,7 +88,7 @@ export function parseOperatorResolution(
   distributionId: string,
   value: unknown,
 ): OperatorResolutionInput {
-  if (!uuid.test(distributionId) || !record(value)) {
+  if (!isUuid(distributionId) || !record(value)) {
     throw new CoreApiError(
       400,
       "invalid_operator_resolution",

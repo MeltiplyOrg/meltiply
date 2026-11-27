@@ -10,7 +10,6 @@ import { codePointLength, record, secureUrl } from "../values";
 /** Instagram Login metadata; Facebook-Login-only music, shopping, and partnership APIs are absent. */
 export type InstagramContentOptions = components["schemas"]["InstagramContentOptions"];
 
-/** `null` is an attachment that is neither image nor video. */
 export type InstagramMediaKind = "image" | "video" | null;
 
 export interface ResolvedInstagramOptions {
@@ -19,8 +18,11 @@ export interface ResolvedInstagramOptions {
   trialReel: boolean;
 }
 
-const postTypes: readonly InstagramPostType[] = ["feed", "reel", "story"];
-const trialGraduations: readonly InstagramTrialGraduation[] = ["manual", "performance"];
+export const INSTAGRAM_POST_TYPES: readonly InstagramPostType[] = ["feed", "reel", "story"];
+export const INSTAGRAM_TRIAL_GRADUATIONS: readonly InstagramTrialGraduation[] = [
+  "manual",
+  "performance",
+];
 const stringFieldLimits: ReadonlyMap<string, number> = new Map([
   ["alt_text", 1000],
   ["audio_name", 255],
@@ -77,8 +79,7 @@ export function parseInstagramContent(value: unknown): InstagramContentOptions |
   return fields;
 }
 
-/** Rejects metadata the selected endpoint cannot accept rather than silently dropping it. */
-export function instagramContentIssue(
+function instagramContentIssue(
   options: InstagramContentOptions | undefined,
   kind: InstagramMediaKind,
   postType: InstagramPostType,
@@ -131,17 +132,11 @@ export function applyInstagramContent(
   }
 }
 
-/** The single image or video default is a feed post or a Reel respectively. */
 export function defaultInstagramPostType(kinds: readonly InstagramMediaKind[]): InstagramPostType {
   return kinds.length === 1 && kinds[0] === "video" ? "reel" : "feed";
 }
 
-/**
- * Resolves the publication shape against the attachment set; contradictory or
- * unknown choices return null instead of falling back to a default. Shared by
- * the composer, API pre-flight, and adapter.
- */
-export function resolveInstagramOptions(
+export function resolveInstagramPlacement(
   options: InstagramPublishOptions | undefined,
   kinds: readonly InstagramMediaKind[],
 ): ResolvedInstagramOptions | null {
@@ -150,14 +145,28 @@ export function resolveInstagramOptions(
   const trialReel = options?.trialReel ?? false;
   const trialGraduation = options?.trialGraduation ?? "manual";
   if (
-    !postTypes.includes(postType) ||
-    kinds.length === 0 ||
-    (kinds.length > 1 && postType !== "feed") ||
+    !INSTAGRAM_POST_TYPES.includes(postType) ||
     (postType === "reel" && (kinds.length !== 1 || only !== "video")) ||
     (postType === "story" && kinds.length !== 1) ||
     (trialReel && postType !== "reel") ||
     (options?.trialGraduation !== undefined && !trialReel) ||
-    !trialGraduations.includes(trialGraduation) ||
+    !INSTAGRAM_TRIAL_GRADUATIONS.includes(trialGraduation)
+  ) {
+    return null;
+  }
+  return { postType, trialGraduation, trialReel };
+}
+
+export function resolveInstagramOptions(
+  options: InstagramPublishOptions | undefined,
+  kinds: readonly InstagramMediaKind[],
+): ResolvedInstagramOptions | null {
+  const placement = resolveInstagramPlacement(options, kinds);
+  if (!placement) return null;
+  const { postType } = placement;
+  const [only] = kinds;
+  if (
+    kinds.length === 0 ||
     (options?.mediaOptions && options.mediaOptions.length > kinds.length) ||
     instagramContentIssue(options?.content, kinds.length === 1 ? (only ?? null) : null, postType) ||
     options?.mediaOptions?.some((metadata, index) =>
@@ -166,5 +175,5 @@ export function resolveInstagramOptions(
   ) {
     return null;
   }
-  return { postType, trialGraduation, trialReel };
+  return placement;
 }

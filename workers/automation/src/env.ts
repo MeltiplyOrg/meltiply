@@ -1,5 +1,9 @@
-import type { MediaProcessorRpcOutcome, NativeProcessorJob } from "./native-processor";
+import type { MediaProcessorRpcOutcome, NativeProcessorJob } from "./native-processor-types";
 import type { ReplyWorkflowPayload } from "./messages";
+
+export function recurringCommentsEnabled(env: Pick<AutomationEnv, "RECURRING_COMMENTS_ENABLED">) {
+  return env.RECURRING_COMMENTS_ENABLED === "true";
+}
 
 export interface MediaProcessorStub extends Rpc.DurableObjectBranded {
   process(job: NativeProcessorJob): Promise<MediaProcessorRpcOutcome>;

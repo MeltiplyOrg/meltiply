@@ -1,4 +1,5 @@
 import { malformed, rejected } from "../failures";
+import { PROVIDER_LIMITS } from "../limits";
 import {
   addSeconds,
   assertConfiguredRedirectUri,
@@ -18,16 +19,15 @@ import {
   bearer,
   boundedString,
   boundedText,
+  optionalSecureUrl,
   providerIdentifier,
   record,
   required,
-  secureUrl,
 } from "../values";
 import {
   YOUTUBE_API_ORIGIN,
   YOUTUBE_AUTHORIZATION_ORIGIN,
   YOUTUBE_CONFIGURED_SCOPES,
-  YOUTUBE_LIMITS,
   YOUTUBE_PUBLISHING_SCOPES,
   YOUTUBE_TOKEN_ORIGIN,
   type GoogleRequest,
@@ -84,8 +84,8 @@ function parseGoogleTokenResponse(
   requireRefreshToken: boolean,
 ): GoogleTokenResponse<boolean> {
   const body = record(value);
-  const accessToken = boundedString(body?.access_token, YOUTUBE_LIMITS.tokenMaxChars);
-  const refreshToken = boundedString(body?.refresh_token, YOUTUBE_LIMITS.tokenMaxChars);
+  const accessToken = boundedString(body?.access_token, PROVIDER_LIMITS.youtube.tokenMaxChars);
+  const refreshToken = boundedString(body?.refresh_token, PROVIDER_LIMITS.youtube.tokenMaxChars);
   const tokenType = boundedString(body?.token_type, 32)?.toLowerCase();
   const scopes = scopeSet(body?.scope);
   if (
@@ -99,7 +99,7 @@ function parseGoogleTokenResponse(
   }
   return {
     accessToken,
-    expiresAt: addSeconds(now, body?.expires_in, YOUTUBE_LIMITS.tokenLifetimeMaxSeconds),
+    expiresAt: addSeconds(now, body?.expires_in, PROVIDER_LIMITS.youtube.tokenLifetimeMaxSeconds),
     refreshToken,
     ...(scopes ? { scopes: [...scopes] } : {}),
   };
@@ -169,15 +169,15 @@ export function createYouTubeOAuth(runtime: AdapterRuntime, googleRequest: Googl
       const thumbnail = record(thumbnails?.default);
       const id = providerIdentifier(channel?.id);
       const displayName = boundedText(snippet?.title, 500);
-      const avatarUrl = thumbnail?.url === undefined ? undefined : secureUrl(thumbnail.url)?.href;
+      const avatar = optionalSecureUrl(thumbnail?.url);
       const username = youtubeHandle(snippet?.customUrl);
-      if (!id || !displayName || (thumbnail?.url !== undefined && !avatarUrl)) {
+      if (!id || !displayName || !avatar.valid) {
         throw malformed();
       }
       return {
         accessToken: tokens.accessToken,
         account: {
-          ...(avatarUrl ? { avatarUrl } : {}),
+          ...(avatar.href ? { avatarUrl: avatar.href } : {}),
           displayName,
           id,
           ...(username ? { username } : {}),
@@ -195,7 +195,7 @@ export function createYouTubeOAuth(runtime: AdapterRuntime, googleRequest: Googl
       const currentRefreshToken = required(
         "refreshToken",
         refreshToken,
-        YOUTUBE_LIMITS.tokenMaxChars,
+        PROVIDER_LIMITS.youtube.tokenMaxChars,
       );
       const body = await postForm(http, context, `${YOUTUBE_TOKEN_ORIGIN}/token`, {
         client_id: clientId,

@@ -2,24 +2,30 @@ import { Effect } from "effect";
 import {
   codePointLength,
   INSTALLATION_SEAT_LIMIT,
-  isWorkspaceRole,
   isoDateTime,
+  isoDateTimeOrNull,
 } from "@meltiply/domain";
 import type { EffectTransactionClient } from "@meltiply/database";
 import type { DatabaseError } from "@meltiply/domain";
-import type { Context, Hono } from "hono";
+import type { Hono } from "hono";
 
-import type { ResolvedActor } from "./actor-resolution";
-import { auditActorFrom, recordWorkspaceAuditEffect } from "./audit";
+import type { ResolvedActor } from "./actor-types";
+import { CoreApiError } from "./api-errors";
+import { auditActorFromResolved, recordWorkspaceAuditEffect } from "./audit";
+import {
+  normalizeWorkspaceRole,
+  requireActor,
+  requireInstallationOwnerEffect,
+  requireWorkspaceAdminEffect,
+} from "./authorization";
 import { betterAuthFor, checkAuthRateLimit } from "./better-auth";
-import { CoreApiError } from "./core-types";
 import { withSystemTransactionEffect } from "./database";
 import { fromPromise } from "./effect/route";
 import { runRouteEffect } from "./effect/runtime";
 import type { ApiWorkerEnv, ApiWorkerEnvironment } from "./env";
 import { hashIdempotencyRequestEffect } from "./idempotency";
-import { idempotencyHeaders } from "./idempotent-response";
-import { jsonResponse } from "./responses";
+import { idempotentInstallationMutation } from "./idempotent-mutation";
+import { idempotencyHeaders, jsonResponse, noContentResponse } from "./responses";
 import { requireSeatCapacityEffect, seatUsageEffect } from "./seats";
 import {
   idempotencyKey,
@@ -31,7 +37,6 @@ import {
   textParam,
   uuidParam,
 } from "./validation";
-import { idempotentInstallationMutation } from "./installation-mutation";
 
 interface AccountLifecycleBody {
   status: "active" | "suspended";
@@ -80,30 +85,6 @@ interface AuditRow extends Record<string, unknown> {
   target_type: string;
 }
 
-function requestId(c: Context<ApiWorkerEnvironment>): string {
-  return c.get("requestId");
-}
-
-function requireInstallationOwner(actor: ResolvedActor): Effect.Effect<void, CoreApiError> {
-  return actor.isInstallationOwner
-    ? Effect.void
-    : Effect.fail(
-        new CoreApiError(
-          403,
-          "installation_owner_required",
-          "The installation owner role is required.",
-        ),
-      );
-}
-
-function requireWorkspaceAdmin(actor: ResolvedActor): Effect.Effect<void, CoreApiError> {
-  return actor.role === "admin" || actor.isInstallationOwner
-    ? Effect.void
-    : Effect.fail(
-        new CoreApiError(403, "workspace_admin_required", "The workspace admin role is required."),
-      );
-}
-
 function loadMemberEffect(
   client: EffectTransactionClient,
   orgId: string,
@@ -138,12 +119,7 @@ function loadMemberEffect(
 function lifecycleBody(row: InstallationMemberRow): AccountLifecycleBody {
   return {
     status: row.suspended_at === null ? "active" : "suspended",
-    suspended_at:
-      row.suspended_at === null
-        ? null
-        : row.suspended_at instanceof Date
-          ? row.suspended_at.toISOString()
-          : new Date(row.suspended_at).toISOString(),
+    suspended_at: isoDateTimeOrNull(row.suspended_at),
     suspension_reason: row.suspension_reason,
     user_id: row.id,
   };
@@ -202,8 +178,8 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
-        yield* requireWorkspaceAdmin(actor);
+        const actor = requireActor(c);
+        yield* requireWorkspaceAdminEffect(actor);
         const body = yield* withSystemTransactionEffect(c.env, (client) =>
           Effect.gen(function* () {
             const usage = yield* seatUsageEffect(client, actor.workspace.id);
@@ -242,7 +218,7 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
             } satisfies InstallationBody;
           }),
         );
-        return jsonResponse(body, 200, requestId(c));
+        return jsonResponse(body, 200, c.get("requestId"));
       }),
     ),
   );
@@ -251,11 +227,11 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
-        yield* requireWorkspaceAdmin(actor);
+        yield* requireWorkspaceAdminEffect(actor);
         if (workspaceId !== actor.workspace.id) {
           return yield* Effect.fail(
             new CoreApiError(404, "workspace_not_found", "The workspace was not found."),
@@ -307,10 +283,7 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
               },
               after: row.after_state,
               before: row.before_state,
-              created_at:
-                row.created_at instanceof Date
-                  ? row.created_at.toISOString()
-                  : new Date(row.created_at).toISOString(),
+              created_at: isoDateTime(row.created_at),
               id: row.id,
               request_id: row.request_id,
               target_id: row.target_id,
@@ -321,7 +294,7 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
             offset,
           },
           200,
-          requestId(c),
+          c.get("requestId"),
         );
       }),
     ),
@@ -331,8 +304,8 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
-        yield* requireInstallationOwner(actor);
+        const actor = requireActor(c);
+        yield* requireInstallationOwnerEffect(actor);
         const memberId = yield* fromPromise(() => uuidParam(c.req.param("memberId"), "member_id"));
         const body = yield* fromPromise(() => jsonBody(c, true));
         yield* fromPromise(() => onlyKeys(body, ["reason"]));
@@ -384,28 +357,23 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
                 ]);
                 yield* recordWorkspaceAuditEffect(client, {
                   action: "account.suspended",
-                  actor: auditActorFrom({
-                    display_name: actor.displayName,
-                    email: actor.email,
-                    id: actor.userId,
-                  }),
+                  actor: auditActorFromResolved(actor),
                   after: { reason, status: "suspended" },
                   before: { status: "active" },
                   orgId: actor.workspace.id,
-                  requestId: requestId(c),
+                  requestId: c.get("requestId"),
                   targetId: memberId,
                   targetType: "member",
                 });
                 return {
                   body: lifecycleBody(updated.rows[0]!),
-                  replayed: false,
                   status: 200,
                 };
               }
-              return { body: lifecycleBody(member), replayed: false, status: 200 };
+              return { body: lifecycleBody(member), status: 200 };
             }),
         );
-        return jsonResponse(result.body, result.status, requestId(c), {
+        return jsonResponse(result.body, result.status, c.get("requestId"), {
           ...idempotencyHeaders(result.replayed),
         });
       }),
@@ -416,8 +384,8 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
-        yield* requireInstallationOwner(actor);
+        const actor = requireActor(c);
+        yield* requireInstallationOwnerEffect(actor);
         const memberId = yield* fromPromise(() => uuidParam(c.req.param("memberId"), "member_id"));
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ memberId }));
@@ -431,7 +399,7 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
             Effect.gen(function* () {
               const member = yield* loadMemberEffect(client, actor.workspace.id, memberId);
               if (member.suspended_at === null) {
-                return { body: lifecycleBody(member), replayed: false, status: 200 };
+                return { body: lifecycleBody(member), status: 200 };
               }
               yield* client.query("SELECT id FROM organizations WHERE id = $1 FOR UPDATE", [
                 actor.workspace.id,
@@ -448,26 +416,21 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
               );
               yield* recordWorkspaceAuditEffect(client, {
                 action: "account.reactivated",
-                actor: auditActorFrom({
-                  display_name: actor.displayName,
-                  email: actor.email,
-                  id: actor.userId,
-                }),
+                actor: auditActorFromResolved(actor),
                 after: { status: "active" },
                 before: { reason: member.suspension_reason, status: "suspended" },
                 orgId: actor.workspace.id,
-                requestId: requestId(c),
+                requestId: c.get("requestId"),
                 targetId: memberId,
                 targetType: "member",
               });
               return {
                 body: lifecycleBody(updated.rows[0]!),
-                replayed: false,
                 status: 200,
               };
             }),
         );
-        return jsonResponse(result.body, result.status, requestId(c), {
+        return jsonResponse(result.body, result.status, c.get("requestId"), {
           ...idempotencyHeaders(result.replayed),
         });
       }),
@@ -478,8 +441,8 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
-        yield* requireInstallationOwner(actor);
+        const actor = requireActor(c);
+        yield* requireInstallationOwnerEffect(actor);
         const memberId = yield* fromPromise(() => uuidParam(c.req.param("memberId"), "member_id"));
         const body = yield* fromPromise(() => jsonBody(c));
         yield* fromPromise(() => onlyKeys(body, ["confirm_email"]));
@@ -520,30 +483,20 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
               yield* client.query(`DELETE FROM "user" WHERE id = $1`, [member.auth_user_id]);
               yield* recordWorkspaceAuditEffect(client, {
                 action: "account.deleted",
-                actor: auditActorFrom({
-                  display_name: actor.displayName,
-                  email: actor.email,
-                  id: actor.userId,
-                }),
+                actor: auditActorFromResolved(actor),
                 before: {
                   email: member.email,
-                  role: isWorkspaceRole(member.role) ? member.role : "viewer",
+                  role: normalizeWorkspaceRole(member.role),
                 },
                 orgId: actor.workspace.id,
-                requestId: requestId(c),
+                requestId: c.get("requestId"),
                 targetId: memberId,
                 targetType: "member",
               });
-              return { body: null, replayed: false, status: 204 };
+              return { body: null, status: 204 };
             }),
         );
-        return new Response(null, {
-          headers: {
-            ...idempotencyHeaders(result.replayed),
-            "X-Request-ID": requestId(c),
-          },
-          status: 204,
-        });
+        return noContentResponse(c.get("requestId"), idempotencyHeaders(result.replayed));
       }),
     ),
   );
@@ -552,8 +505,8 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
-        yield* requireInstallationOwner(actor);
+        const actor = requireActor(c);
+        yield* requireInstallationOwnerEffect(actor);
         const body = yield* fromPromise(() => jsonBody(c));
         yield* fromPromise(() => onlyKeys(body, ["password", "target_user_id"]));
         const targetUserId = yield* fromPromise(() =>
@@ -619,26 +572,21 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
               );
               yield* recordWorkspaceAuditEffect(client, {
                 action: "installation.ownership_transferred",
-                actor: auditActorFrom({
-                  display_name: actor.displayName,
-                  email: actor.email,
-                  id: actor.userId,
-                }),
+                actor: auditActorFromResolved(actor),
                 after: { owner_user_id: targetUserId },
                 before: { owner_user_id: currentOwnerId },
                 orgId: actor.workspace.id,
-                requestId: requestId(c),
+                requestId: c.get("requestId"),
                 targetId: targetUserId,
                 targetType: "member",
               });
               return {
                 body: { installation_owner_user_id: targetUserId },
-                replayed: false,
                 status: 200,
               };
             }),
         );
-        return jsonResponse(result.body, result.status, requestId(c), {
+        return jsonResponse(result.body, result.status, c.get("requestId"), {
           ...idempotencyHeaders(result.replayed),
         });
       }),

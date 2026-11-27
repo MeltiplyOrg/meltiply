@@ -1,19 +1,16 @@
 import type { Platform } from "@meltiply/domain";
 
+import { MAX_RETRY_AFTER_SECONDS } from "./failures";
+import type { RateLimitBudget } from "./types";
 import { record } from "./values";
+
+export type { RateLimitBudget } from "./types";
 
 const integerHeaderPattern = /^\d{1,12}$/;
 const usageCeiling = 100;
 const usageMetrics = ["call_count", "total_cputime", "total_time"] as const;
 const maxUsageHeaderCharacters = 8_192;
 const maxRemainingCalls = 1_000_000_000;
-const maxResetSeconds = 86_400;
-
-export interface RateLimitBudget {
-  percentUsed: number | null;
-  remaining: number | null;
-  resetsInSeconds: number | null;
-}
 
 function knownBudget(budget: RateLimitBudget): RateLimitBudget | null {
   return budget.percentUsed === null && budget.remaining === null && budget.resetsInSeconds === null
@@ -82,11 +79,10 @@ function standardBudget(headers: Headers): RateLimitBudget | null {
   return knownBudget({
     percentUsed: null,
     remaining: integerHeader(headers.get("x-ratelimit-remaining"), maxRemainingCalls),
-    resetsInSeconds: integerHeader(headers.get("x-ratelimit-reset"), maxResetSeconds),
+    resetsInSeconds: integerHeader(headers.get("x-ratelimit-reset"), MAX_RETRY_AFTER_SECONDS),
   });
 }
 
-/** Extracts normalized rate-limit telemetry from provider HTTP response headers. */
 export function extractRateLimitBudget(
   platform: Platform,
   headers: Headers,

@@ -39,7 +39,6 @@ export function fakeBrandProfileService(
 
 export function fakeCoreService(overrides: Partial<CoreApiService> = {}): CoreApiService {
   return {
-    activeOrganization: unimplemented("activeOrganization"),
     analyticsPosts: unimplemented("analyticsPosts"),
     calendar: unimplemented("calendar"),
     cancelDistribution: unimplemented("cancelDistribution"),

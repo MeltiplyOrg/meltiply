@@ -1,11 +1,19 @@
 import type { PlatformCapability } from "@meltiply/domain";
 
-import { isHttp404, malformed, rejected, rejection } from "../failures";
+import {
+  isHttp404,
+  malformed,
+  optionalLookupPostId,
+  rejected,
+  rejection,
+  requiredIdentifier,
+  validatePageInput,
+  validateSnapshotPage,
+} from "../failures";
 import { PROVIDER_LIMITS } from "../limits";
 import {
   containerOperationId,
   createMetaContainer,
-  insightValue,
   lookupMetaContainer,
   lookupMetaPost,
   parseContainerOperationId,
@@ -41,11 +49,9 @@ import {
   providerIdentifier,
   record,
   required,
-  requiredIdentifier,
   requireIdempotencyKey,
   secureUrl,
-  validatePageInput,
-  validateSnapshotPage,
+  STANDARD_VIDEO_MIME_TYPES,
   validFileSize,
 } from "../values";
 import {
@@ -58,7 +64,7 @@ import {
 const apiOrigin = "https://graph.threads.com";
 const limits = PROVIDER_LIMITS.threads;
 const imageTypes = ["image/jpeg", "image/png"];
-const videoTypes = ["video/mp4", "video/quicktime"];
+const videoTypes = STANDARD_VIDEO_MIME_TYPES;
 const scopePattern = /^[a-z_]+$/;
 
 const publishingScopes = [
@@ -404,10 +410,8 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         method: "GET",
         url: url.toString(),
       });
-      const data = record(response.body)?.data;
-      if (!Array.isArray(data)) throw malformed();
-      const metric = data.map(record).find((item) => item?.name === "followers_count");
-      const followers = metric ? insightValue(metric) : undefined;
+      const metrics = parseMetaInsightsMap(response.body);
+      const followers = metrics.get("followers_count");
       if (followers === undefined) throw malformed();
       return { followers, recordedAt: now().toISOString() };
     },
@@ -415,8 +419,7 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
     ...(engagementEnabled ? engagementMethods : {}),
 
     async lookupPublication(context, credentials, lookup) {
-      const providerPostId = providerIdentifier(lookup.providerPostId);
-      if (lookup.providerPostId && !providerPostId) throw malformed();
+      const providerPostId = optionalLookupPostId(lookup.providerPostId);
       if (providerPostId) {
         return lookupMetaPost(
           http,

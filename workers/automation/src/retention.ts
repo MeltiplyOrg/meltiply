@@ -1,11 +1,16 @@
 import { Data, Effect } from "effect";
 import type { DatabaseError } from "@meltiply/domain";
+import { errorDiagnostic, log } from "@meltiply/observability";
 import { createObjectStoreFromEnv, type ConfiguredObjectStore } from "@meltiply/storage";
 
-import { claimObjectsForDeletion, settleDeletedObjects } from "./assets";
 import { withSystemTransactionEffect } from "./database";
 import { classifyJobError, type AutomationJobError } from "./effect/index";
 import type { AutomationEnv } from "./env";
+import {
+  claimObjectsForDeletion,
+  deleteStorageObjectsEffect,
+  settleDeletedObjects,
+} from "./object-cleanup";
 
 export interface RetentionResult {
   deleted: number;
@@ -236,8 +241,6 @@ const purgeDueBrandProfiles: RetentionCleanup = (env, batchSize) =>
     const claimed = yield* claimObjectsForDeletion(env, {
       brandProfileIds: profileIds,
     });
-    const reclaimedObjectIds: string[] = [];
-    let failure: RetentionStorageError | undefined;
     if (claimed.length > 0) {
       let store: ConfiguredObjectStore;
       try {
@@ -250,42 +253,18 @@ const purgeDueBrandProfiles: RetentionCleanup = (env, batchSize) =>
           }),
         );
       }
-      const outcomes = yield* Effect.forEach(
-        claimed,
-        (object) =>
-          Effect.match(
-            Effect.tryPromise({
-              catch: (cause) =>
-                new RetentionStorageError({
-                  cause,
-                  message: `unable to delete brand profile object ${object.r2_key}`,
-                }),
-              try: () => store.delete(object.r2_key),
-            }),
-            {
-              onFailure: (error) => ({ error, id: null as string | null }),
-              onSuccess: () => ({
-                error: undefined as RetentionStorageError | undefined,
-                id: object.id,
-              }),
-            },
-          ),
-        { concurrency: 8 },
-      );
-      for (const outcome of outcomes) {
-        if (outcome.id !== null) reclaimedObjectIds.push(outcome.id);
-        else failure ??= outcome.error;
+      const cleanup = yield* deleteStorageObjectsEffect(store, claimed);
+      if (cleanup.deletedIds.length > 0) {
+        yield* settleDeletedObjects(env, cleanup.deletedIds);
       }
-    }
-
-    if (reclaimedObjectIds.length > 0) {
-      yield* settleDeletedObjects(
-        env,
-        reclaimedObjectIds.map((id) => ({ id })),
-      );
-    }
-    if (failure) {
-      return yield* Effect.fail(failure);
+      if (cleanup.firstError) {
+        return yield* Effect.fail(
+          new RetentionStorageError({
+            cause: cleanup.firstError,
+            message: cleanup.firstError.message,
+          }),
+        );
+      }
     }
 
     return yield* withSystemTransactionEffect(env, (client) =>
@@ -309,15 +288,15 @@ const purgeDueBrandProfiles: RetentionCleanup = (env, batchSize) =>
     );
   });
 
-const cleanups: readonly RetentionCleanup[] = [
-  deleteExpiredIdempotencyKeys,
-  deleteProcessedWebhookEvents,
-  deleteTerminalOutboxEvents,
-  deleteCompletedAsyncJobEvents,
-  deleteOldUsageCorrections,
-  deleteOldAnalyticsSnapshots,
-  deleteStaleUsageBuckets,
-  purgeDueBrandProfiles,
+const cleanups: readonly { name: string; run: RetentionCleanup }[] = [
+  { name: "expired_idempotency_keys", run: deleteExpiredIdempotencyKeys },
+  { name: "processed_webhook_events", run: deleteProcessedWebhookEvents },
+  { name: "terminal_outbox_events", run: deleteTerminalOutboxEvents },
+  { name: "completed_async_job_events", run: deleteCompletedAsyncJobEvents },
+  { name: "old_usage_corrections", run: deleteOldUsageCorrections },
+  { name: "old_analytics_snapshots", run: deleteOldAnalyticsSnapshots },
+  { name: "stale_usage_buckets", run: deleteStaleUsageBuckets },
+  { name: "due_brand_profiles", run: purgeDueBrandProfiles },
 ];
 
 export function runRetention(
@@ -338,9 +317,29 @@ export function runRetention(
     let errors = 0;
     for (const cleanup of cleanups) {
       const outcome = yield* Effect.match(
-        cleanup(env, batchSize).pipe(Effect.mapError(classifyJobError)),
+        cleanup.run(env, batchSize).pipe(Effect.mapError(classifyJobError)),
         {
-          onFailure: () => ({ deleted: 0, errors: 1 }),
+          onFailure: (cause) => {
+            log(
+              "warn",
+              {
+                environment: env.ENVIRONMENT,
+                job_id: cleanup.name,
+                service: "automation",
+                trace_id: cleanup.name,
+                version: env.VERSION,
+              },
+              {
+                ...errorDiagnostic(cause),
+                cleanup: cleanup.name,
+                event: "retention_cleanup_failed",
+                job: "retention",
+                outcome: "failed",
+                retry_class: "platform_retry",
+              },
+            );
+            return { deleted: 0, errors: 1 };
+          },
           onSuccess: (count) => ({ deleted: count, errors: 0 }),
         },
       );

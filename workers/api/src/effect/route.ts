@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { ActiveOrganizationRequiredError, type RequestContext } from "@meltiply/domain";
 import { ProviderAdapterError } from "@meltiply/providers";
 
-import { CoreApiError } from "../core-types";
+import { CoreApiError } from "../api-errors";
 
 function classifyRouteError(
   cause: unknown,

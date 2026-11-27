@@ -1,15 +1,26 @@
+import { PROVIDER_MEDIA_ROUTE_PREFIX } from "@meltiply/domain";
+
 import { normalizeSegment } from "./keys";
 
-export const PROVIDER_MEDIA_ROUTE_PREFIX = "/api/v1/provider-media/";
+export { PROVIDER_MEDIA_ROUTE_PREFIX };
 
 const base64PaddingPattern = /=+$/;
 const base64UrlPattern = /^[A-Za-z0-9_-]{43}$/;
 const textEncoder = new TextEncoder();
 
-/**
- * Canonical signing payload bound into every provider-media URL signature.
- */
-export function providerMediaPayload(expiresAtSeconds: number, key: string): string {
+export function validateProviderMediaKey(key: string): string {
+  const trimmed = key.trim();
+  if (!trimmed || trimmed.startsWith("/") || trimmed.endsWith("/")) {
+    throw new TypeError("provider media object key is invalid");
+  }
+  const segments = trimmed.split("/");
+  if (segments.length < 3 || segments[0] === "staging") {
+    throw new TypeError("provider media object key is invalid");
+  }
+  return segments.map((segment) => normalizeSegment("key", segment)).join("/");
+}
+
+function providerMediaPayload(expiresAtSeconds: number, key: string): string {
   return `meltiply-provider-media-v1\n${expiresAtSeconds}\n${key}`;
 }
 
@@ -34,9 +45,6 @@ function base64UrlDecode(value: string): Uint8Array<ArrayBuffer> | undefined {
   }
 }
 
-/**
- * Computes the Base64url HMAC-SHA256 bearer signature for a provider-media URL.
- */
 export async function signProviderMediaSignature(
   secret: string,
   expiresAtSeconds: number,
@@ -57,9 +65,6 @@ export async function signProviderMediaSignature(
   return base64UrlEncode(new Uint8Array(digest));
 }
 
-/**
- * Verifies a provider-media HMAC-SHA256 bearer signature in constant time.
- */
 export async function verifyProviderMediaSignature(
   secret: string | undefined,
   expiresAtSeconds: number,
@@ -84,7 +89,7 @@ export async function verifyProviderMediaSignature(
 }
 
 /**
- * Builds a signed verified-domain provider-media URL on `appOrigin`, or returns
+ * Builds a signed verified-domain provider-media URL on `appUrl`, or returns
  * `undefined` when signing prerequisites (HTTPS credential-free origin, secret) are absent.
  */
 export async function signProviderMediaUrl(input: {
@@ -105,11 +110,12 @@ export async function signProviderMediaUrl(input: {
   if (origin.protocol !== "https:" || origin.username || origin.password) {
     return undefined;
   }
-  const encodedKey = input.key
+  const normalizedKey = validateProviderMediaKey(input.key);
+  const encodedKey = normalizedKey
     .split("/")
-    .map((segment) => encodeURIComponent(normalizeSegment("key", segment)))
+    .map((segment) => encodeURIComponent(segment))
     .join("/");
-  const signature = await signProviderMediaSignature(secret, input.expiresAtSeconds, input.key);
+  const signature = await signProviderMediaSignature(secret, input.expiresAtSeconds, normalizedKey);
   const url = new URL(`${PROVIDER_MEDIA_ROUTE_PREFIX}${encodedKey}`, origin);
   url.searchParams.set("expires", String(input.expiresAtSeconds));
   url.searchParams.set("signature", signature);

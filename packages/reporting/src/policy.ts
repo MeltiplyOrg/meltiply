@@ -9,7 +9,6 @@ import {
   type ReportingPolicySnapshot,
 } from "./contracts";
 
-/** The persisted preference row as the database returns it. */
 export interface PreferencesRow extends Record<string, unknown> {
   diagnostics_decided_at: Date | string | null;
   diagnostics_disclosure_version: number | null;
@@ -21,11 +20,6 @@ export interface PreferencesRow extends Record<string, unknown> {
   usage_disclosure_version: number | null;
   usage_interval_started_at: Date | string | null;
   usage_requested: boolean;
-}
-
-/** Converts a driver timestamp to an ISO string, preserving null. */
-export function isoOrNull(value: Date | string | null): string | null {
-  return isoDateTimeOrNull(value);
 }
 
 function categoryColumns(row: PreferencesRow, category: ReportingCategory) {
@@ -72,19 +66,15 @@ export function categoryStatus(
   const stored = row ? categoryColumns(row, category) : null;
   const requested = stored?.requested ?? false;
   const base = {
-    decidedAt: stored ? isoOrNull(stored.decidedAt) : null,
+    decidedAt: stored ? isoDateTimeOrNull(stored.decidedAt) : null,
     disclosureVersion: stored?.disclosureVersion ?? null,
-    intervalStartedAt: stored ? isoOrNull(stored.intervalStartedAt) : null,
+    intervalStartedAt: stored ? isoDateTimeOrNull(stored.intervalStartedAt) : null,
     requested,
   };
   const reason = categoryReason(row, requested, base.disclosureVersion, configuration);
   return { ...base, effective: reason === "enabled", reason };
 }
 
-/**
- * Projects persisted state and deployment configuration into the policy the API
- * and the delivery path both act on.
- */
 export function policySnapshot(
   row: PreferencesRow | null,
   configuration: ReportingConfiguration,
@@ -101,9 +91,6 @@ export function policySnapshot(
   };
 }
 
-/**
- * Reports whether one category may transmit under the current policy.
- */
 export function categoryEffective(
   policy: ReportingPolicySnapshot,
   category: ReportingCategory,
@@ -111,18 +98,11 @@ export function categoryEffective(
   return policy.categories[category].effective;
 }
 
-/** Reports whether the one-time feedback action may transmit right now. */
 export function feedbackEffective(configuration: ReportingConfiguration): boolean {
   return !configuration.forcedOff && configuration.destination !== null;
 }
 
-/**
- * Computes the next attempt delay for a failed delivery.
- *
- * Reuses the repository's exponential convention rather than inventing a second
- * delivery framework, and never schedules beyond the row's expiry: a pending
- * report that would retry after it expired is discarded instead.
- */
+/** Returns null when the next retry would land at or past `expiresAt`. */
 export function retryDelaySeconds(attempts: number, expiresAt: Date, now: Date): number | null {
   const delay = Math.min(3_600, 300 * 2 ** Math.max(0, attempts - 1));
   const nextAttempt = now.getTime() + delay * 1_000;

@@ -84,7 +84,6 @@ function metadataFromHeaders(key: string, headers: Headers): ObjectMetadata {
   };
 }
 
-/** Configuration for the S3-compatible SigV4 signer. */
 export interface S3SigV4SignerOptions {
   accessKeyId: string;
   allowInsecureEndpoint?: boolean;
@@ -97,19 +96,8 @@ export interface S3SigV4SignerOptions {
   secretAccessKey: string;
 }
 
-/**
- * Presigned URL signer for any S3-compatible origin.
- *
- * Shares the SigV4 core with the R2 signer, so an upload, download, multipart
- * part, or create-only write capability is byte-compatible with what the
- * provider actually verifies.
- */
 export class S3SigV4Signer extends SigV4UrlSigner {
   constructor(options: S3SigV4SignerOptions) {
-    const protocol = new URL(options.endpoint).protocol;
-    if (protocol !== "https:" && !(options.allowInsecureEndpoint && protocol === "http:")) {
-      throw new TypeError("S3 endpoint must use HTTPS outside local or test environments");
-    }
     super({
       accessKeyId: options.accessKeyId,
       ...(options.allowInsecureEndpoint ? { allowInsecureEndpoint: true } : {}),
@@ -128,20 +116,10 @@ export class S3SigV4Signer extends SigV4UrlSigner {
   }
 }
 
-/** Configuration for {@link S3ObjectStore}; identical to the signer options. */
 export type S3ObjectStoreOptions = S3SigV4SignerOptions & {
   fetch?: typeof fetch;
 };
 
-/**
- * Object store backed by an S3-compatible REST API.
- *
- * Each operation mirrors the R2 adapter's contract exactly, including the two
- * conditions promotion depends on: the source copy is pinned to a known ETag and
- * the destination is only written when absent, so a rewritten staging object can
- * never be promoted and a replayed copy adopts the bytes an interrupted attempt
- * already wrote.
- */
 export class S3ObjectStore extends EffectObjectStore {
   readonly #fetch: typeof fetch;
   readonly #signer: S3SigV4Signer;
@@ -179,8 +157,9 @@ export class S3ObjectStore extends EffectObjectStore {
     }
   }
 
-  #expectOk(response: Response, action: string): void {
+  async #expectOk(response: Response, action: string): Promise<void> {
     if (!response.ok) {
+      await this.#discard(response);
       throw new Error(`${action} failed with status ${response.status}`);
     }
   }
@@ -195,7 +174,7 @@ export class S3ObjectStore extends EffectObjectStore {
       await this.#discard(response);
       return null;
     }
-    this.#expectOk(response, "object metadata request");
+    await this.#expectOk(response, "object metadata request");
     return metadataFromHeaders(key, response.headers);
   }
 
@@ -205,9 +184,9 @@ export class S3ObjectStore extends EffectObjectStore {
       await this.#discard(response);
       return null;
     }
-    this.#expectOk(response, "object read");
+    await this.#expectOk(response, "object read");
     if (!response.body) {
-      throw new TypeError("object body is unavailable");
+      throw new Error("object body is unavailable");
     }
     return {
       body: response.body,
@@ -227,7 +206,7 @@ export class S3ObjectStore extends EffectObjectStore {
       await this.#discard(response);
       return null;
     }
-    this.#expectOk(response, "object range read");
+    await this.#expectOk(response, "object range read");
     return new Uint8Array(await response.arrayBuffer());
   }
 
@@ -237,7 +216,7 @@ export class S3ObjectStore extends EffectObjectStore {
       await this.#discard(response);
       return;
     }
-    this.#expectOk(response, "object delete");
+    await this.#expectOk(response, "object delete");
     await this.#discard(response);
   }
 
@@ -285,7 +264,7 @@ export class S3ObjectStore extends EffectObjectStore {
       method: "POST",
       query: { uploads: "" },
     });
-    this.#expectOk(response, "multipart upload creation");
+    await this.#expectOk(response, "multipart upload creation");
     const uploadId = xmlText(await response.text(), "UploadId");
     if (!uploadId) {
       throw new Error("multipart upload creation returned no UploadId");
@@ -309,7 +288,7 @@ export class S3ObjectStore extends EffectObjectStore {
           await this.#discard(response);
           return;
         }
-        this.#expectOk(response, "multipart upload abort");
+        await this.#expectOk(response, "multipart upload abort");
         await this.#discard(response);
       },
       complete: async (parts) => {
@@ -328,7 +307,7 @@ export class S3ObjectStore extends EffectObjectStore {
           method: "POST",
           query: { uploadId },
         });
-        this.#expectOk(response, "multipart upload completion");
+        await this.#expectOk(response, "multipart upload completion");
         const result = await response.text();
         if (!result.includes("<CompleteMultipartUploadResult") || xmlText(result, "Code")) {
           throw new Error("multipart upload completion returned an S3 error or malformed result");
@@ -347,7 +326,7 @@ export class S3ObjectStore extends EffectObjectStore {
           method: "PUT",
           query: { partNumber: String(partNumber), uploadId },
         });
-        this.#expectOk(response, "multipart part upload");
+        await this.#expectOk(response, "multipart part upload");
         const etag = unquoteEtag(response.headers.get("etag"));
         await this.#discard(response);
         if (!etag) {

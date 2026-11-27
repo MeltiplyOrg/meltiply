@@ -7,10 +7,33 @@ import type {
   OAuthSelectionCandidate,
   OAuthSelectionInit,
   OAuthSelectionPublic,
-  OAuthSelectionRecord,
   OAuthStateCoordinatorStub,
   OAuthStateRecord,
 } from "@meltiply/contracts";
+
+export interface OAuthSelectionRecord {
+  readonly account_ids: ReadonlyArray<string>;
+  claim?: {
+    readonly brand_profile_id: string;
+    readonly claimed_at: number;
+    readonly expires_at: number;
+    readonly idempotency_key: string;
+    readonly token: string;
+  };
+  completed_account_id?: string;
+  completed_brand_profile_id?: string;
+  completed_idempotency_key?: string;
+  cancelled_idempotency_key?: string;
+  evidence_expires_at?: number;
+  expires_at: number;
+  readonly id: string;
+  readonly organization_id: string;
+  pinned_account_id?: string;
+  readonly platform: string;
+  ready: boolean;
+  status: "pending" | "completed" | "cancelled";
+  readonly user_id: string;
+}
 
 interface StateWorkerEnv {
   OAUTH_STATE: DurableObjectNamespace<OAuthStateCoordinator>;
@@ -94,6 +117,38 @@ function storageEffect<A>(
 }
 
 const SELECTION_EVIDENCE_RETENTION_MS = 10 * 60 * 1_000;
+const OAUTH_KEY_PREFIX = "oauth:";
+const SELECTION_KEY_PREFIX = "selection:";
+const SELECTION_ACCOUNT_KEY_PREFIX = "selection-account:";
+const SELECTION_CREDENTIAL_KEY_PREFIX = "selection-credential:";
+
+function oauthKey(state: string): string {
+  return `${OAUTH_KEY_PREFIX}${state}`;
+}
+
+function selectionKey(selectionId: string): string {
+  return `${SELECTION_KEY_PREFIX}${selectionId}`;
+}
+
+function selectionAccountPrefix(selectionId: string): string {
+  return `${SELECTION_ACCOUNT_KEY_PREFIX}${selectionId}:`;
+}
+
+function selectionAccountKey(selectionId: string, accountId: string): string {
+  return `${SELECTION_ACCOUNT_KEY_PREFIX}${selectionId}:${accountId}`;
+}
+
+function selectionCredentialKey(selectionId: string, accountId: string): string {
+  return `${SELECTION_CREDENTIAL_KEY_PREFIX}${selectionId}:${accountId}`;
+}
+
+function selectionCredentialKeyFromAccountKey(accountKey: string): string {
+  return `${SELECTION_CREDENTIAL_KEY_PREFIX}${accountKey.slice(SELECTION_ACCOUNT_KEY_PREFIX.length)}`;
+}
+
+function selectionIdFromKey(key: string): string {
+  return key.slice(SELECTION_KEY_PREFIX.length);
+}
 
 function selectionEvidenceExpiry(record: OAuthSelectionRecord): number {
   return record.evidence_expires_at ?? record.expires_at + SELECTION_EVIDENCE_RETENTION_MS;
@@ -149,7 +204,7 @@ function deleteSelectionCandidatesEffect(
   selectionId: string,
 ): Effect.Effect<void, OAuthStateStorageError> {
   return Effect.gen(function* () {
-    const prefix = `selection-account:${selectionId}:`;
+    const prefix = selectionAccountPrefix(selectionId);
     let startAfter: string | undefined;
     for (;;) {
       const page = yield* storageEffect("Failed to list candidate entries for cleanup.", () =>
@@ -165,7 +220,7 @@ function deleteSelectionCandidatesEffect(
       for (const metadataKey of page.keys()) {
         lastKey = metadataKey;
         keys.push(metadataKey);
-        keys.push(`selection-credential:${metadataKey.slice("selection-account:".length)}`);
+        keys.push(selectionCredentialKeyFromAccountKey(metadataKey));
       }
       yield* deleteStorageKeysEffect(storage, keys, "Failed to delete candidate entries.");
       if (page.size < STORAGE_DELETE_BATCH || lastKey === undefined) break;
@@ -196,7 +251,7 @@ export class OAuthStateCoordinator
     const program = Effect.gen(function* () {
       yield* validateOAuthStateCreateEffect(state, record);
       yield* storageEffect("Failed to persist OAuth state.", () =>
-        storage.put(`oauth:${state}`, record),
+        storage.put(oauthKey(state), record),
       );
       yield* armExpiryAlarmEffect(storage, record.expires_at);
     });
@@ -205,7 +260,7 @@ export class OAuthStateCoordinator
 
   async consume(state: string): Promise<OAuthStateRecord | null> {
     const storage = this.ctx.storage;
-    const key = `oauth:${state}`;
+    const key = oauthKey(state);
     const program = Effect.gen(function* () {
       const record = yield* storageEffect("Failed to read OAuth state.", () =>
         storage.get<OAuthStateRecord>(key),
@@ -232,7 +287,7 @@ export class OAuthStateCoordinator
         user_id: init.user_id,
       };
       yield* storageEffect("Failed to persist OAuth selection.", () =>
-        storage.put(`selection:${selectionId}`, record),
+        storage.put(selectionKey(selectionId), record),
       );
       yield* armExpiryAlarmEffect(storage, record.expires_at);
     });
@@ -245,7 +300,7 @@ export class OAuthStateCoordinator
   ): Promise<void> {
     const storage = this.ctx.storage;
     const program = Effect.gen(function* () {
-      const key = `selection:${selectionId}`;
+      const key = selectionKey(selectionId);
       const record = yield* storageEffect(
         "Failed to read OAuth selection for appending candidates.",
         () => storage.get<OAuthSelectionRecord>(key),
@@ -277,9 +332,8 @@ export class OAuthStateCoordinator
         }
         seenAccountIds.add(candidate.account.id);
         newAccountIds.push(candidate.account.id);
-        entriesToPut[`selection-account:${selectionId}:${candidate.account.id}`] =
-          candidate.account;
-        entriesToPut[`selection-credential:${selectionId}:${candidate.account.id}`] = {
+        entriesToPut[selectionAccountKey(selectionId, candidate.account.id)] = candidate.account;
+        entriesToPut[selectionCredentialKey(selectionId, candidate.account.id)] = {
           encrypted_connection: candidate.encryptedConnection,
         };
       }
@@ -309,7 +363,7 @@ export class OAuthStateCoordinator
   async finalizeSelection(selectionId: string): Promise<void> {
     const storage = this.ctx.storage;
     const program = Effect.gen(function* () {
-      const key = `selection:${selectionId}`;
+      const key = selectionKey(selectionId);
       const record = yield* storageEffect("Failed to read OAuth selection for finalization.", () =>
         storage.get<OAuthSelectionRecord>(key),
       );
@@ -335,7 +389,7 @@ export class OAuthStateCoordinator
     actor: { organizationId: string; userId: string },
   ): Promise<OAuthSelectionPublic | null> {
     const storage = this.ctx.storage;
-    const key = `selection:${selectionId}`;
+    const key = selectionKey(selectionId);
     const program = Effect.gen(function* () {
       const record = yield* storageEffect("Failed to read OAuth selection.", () =>
         storage.get<OAuthSelectionRecord>(key),
@@ -350,7 +404,7 @@ export class OAuthStateCoordinator
         "Failed to list candidate accounts for selection.",
         () =>
           storage.list<OAuthSelectionAccount>({
-            prefix: `selection-account:${selectionId}:`,
+            prefix: selectionAccountPrefix(selectionId),
           }),
       );
       const byId = new Map<string, OAuthSelectionAccount>();
@@ -380,7 +434,7 @@ export class OAuthStateCoordinator
     leaseMs: number = 30_000,
   ): Promise<ClaimSelectionResult> {
     const storage = this.ctx.storage;
-    const key = `selection:${selectionId}`;
+    const key = selectionKey(selectionId);
     const program = Effect.gen(function* () {
       const record = yield* storageEffect("Failed to read OAuth selection for claim.", () =>
         storage.get<OAuthSelectionRecord>(key),
@@ -449,7 +503,7 @@ export class OAuthStateCoordinator
         "Failed to read candidate OAuth connection.",
         () =>
           storage.get<{ encrypted_connection: string }>(
-            `selection-credential:${selectionId}:${accountId}`,
+            selectionCredentialKey(selectionId, accountId),
           ),
       );
       if (!candidateEntry?.encrypted_connection) {
@@ -492,7 +546,7 @@ export class OAuthStateCoordinator
     idempotencyKey: string,
   ): Promise<boolean> {
     const storage = this.ctx.storage;
-    const key = `selection:${selectionId}`;
+    const key = selectionKey(selectionId);
     const program = Effect.gen(function* () {
       const record = yield* storageEffect("Failed to read OAuth selection for completion.", () =>
         storage.get<OAuthSelectionRecord>(key),
@@ -528,7 +582,7 @@ export class OAuthStateCoordinator
 
   async releaseSelectionClaim(selectionId: string, claimToken: string): Promise<boolean> {
     const storage = this.ctx.storage;
-    const key = `selection:${selectionId}`;
+    const key = selectionKey(selectionId);
     const program = Effect.gen(function* () {
       const record = yield* storageEffect("Failed to read OAuth selection for release.", () =>
         storage.get<OAuthSelectionRecord>(key),
@@ -553,7 +607,7 @@ export class OAuthStateCoordinator
     idempotencyKey: string,
   ): Promise<CancelSelectionResult> {
     const storage = this.ctx.storage;
-    const key = `selection:${selectionId}`;
+    const key = selectionKey(selectionId);
     const program = Effect.gen(function* () {
       const record = yield* storageEffect("Failed to read OAuth selection for cancellation.", () =>
         storage.get<OAuthSelectionRecord>(key),
@@ -602,10 +656,10 @@ export class OAuthStateCoordinator
     const program = Effect.gen(function* () {
       const now = Date.now();
       const oauthEntries = yield* storageEffect("Failed to list OAuth state entries.", () =>
-        storage.list<OAuthStateRecord>({ prefix: "oauth:" }),
+        storage.list<OAuthStateRecord>({ prefix: OAUTH_KEY_PREFIX }),
       );
       const selectionEntries = yield* storageEffect("Failed to list OAuth selection entries.", () =>
-        storage.list<OAuthSelectionRecord>({ prefix: "selection:" }),
+        storage.list<OAuthSelectionRecord>({ prefix: SELECTION_KEY_PREFIX }),
       );
 
       const expiredKeys: string[] = [];
@@ -628,10 +682,9 @@ export class OAuthStateCoordinator
           scheduleAt(record.expires_at);
           continue;
         }
-        yield* deleteSelectionCandidatesEffect(storage, key.slice("selection:".length));
+        yield* deleteSelectionCandidatesEffect(storage, selectionIdFromKey(key));
         const retainEvidence = record.status !== "pending" || record.claim !== undefined;
-        const evidenceExpiry =
-          record.evidence_expires_at ?? record.expires_at + SELECTION_EVIDENCE_RETENTION_MS;
+        const evidenceExpiry = selectionEvidenceExpiry(record);
         if (!retainEvidence || now >= evidenceExpiry) {
           expiredKeys.push(key);
         } else {

@@ -1,5 +1,13 @@
-import { isHttp404, malformed, rejected, rejection } from "../failures";
+import {
+  isHttp404,
+  malformed,
+  optionalLookupPostId,
+  rejected,
+  rejection,
+  requiredIdentifier,
+} from "../failures";
 import type { ProviderHttpClient } from "../http";
+import { PROVIDER_LIMITS } from "../limits";
 import {
   confirmedFailure,
   failedWriteResult,
@@ -18,7 +26,6 @@ import type {
 } from "../types";
 import {
   bearer,
-  boundedString,
   firstNonEmptyLine,
   jsonHeaders,
   mediaKind,
@@ -27,22 +34,21 @@ import {
   providerIdentifier,
   record,
   required,
-  requiredIdentifier,
   requireIdempotencyKey,
+  rtmpsUrl,
   secureUrl,
   validFileSize,
 } from "../values";
-import { resolveFacebookPostType } from "./options";
+import { FACEBOOK_OPTION_LIMITS, resolveFacebookPostType } from "./options";
 import {
   FACEBOOK_IMAGE_TYPES,
-  FACEBOOK_LIMITS,
   FACEBOOK_VIDEO_TYPES,
   facebookAccountId,
   facebookNativeDraft,
   facebookOperationId,
   facebookPermalink,
-  facebookPublishedPost,
   facebookPublishedVideo,
+  graphGet,
   graphUrl,
   isFacebookReelStatusFailed,
   isFacebookReelStatusPublished,
@@ -78,7 +84,7 @@ function remoteVideoUrl(input: PublishInput): string {
   const mediaUrl = secureUrl(media.url)?.href;
   if (
     !FACEBOOK_VIDEO_TYPES.includes(normalizeContentType(media.contentType)) ||
-    !validFileSize(media.fileSize, FACEBOOK_LIMITS.maxVideoBytes) ||
+    !validFileSize(media.fileSize, PROVIDER_LIMITS.facebook.maxVideoBytes) ||
     !mediaUrl
   ) {
     throw rejected("facebook_reel_media_invalid");
@@ -91,7 +97,7 @@ function photoUrl(media: ProviderMedia): string {
   if (
     !url ||
     !FACEBOOK_IMAGE_TYPES.includes(normalizeContentType(media.contentType)) ||
-    !validFileSize(media.fileSize, FACEBOOK_LIMITS.maxImageBytes)
+    !validFileSize(media.fileSize, PROVIDER_LIMITS.facebook.maxImageBytes)
   ) {
     throw rejected("facebook_photo_invalid");
   }
@@ -111,16 +117,8 @@ function liveOperation(lookup: ProviderPublicationLookup): FacebookOperation {
 }
 
 export function createFacebookPublish(http: ProviderHttpClient) {
-  const get = async (context: ProviderRequestContext, accessToken: string, url: URL) =>
-    record(
-      (
-        await http.request(context, {
-          headers: bearer(accessToken),
-          method: "GET",
-          url: url.toString(),
-        })
-      ).body,
-    );
+  const get = (context: ProviderRequestContext, accessToken: string, url: URL) =>
+    graphGet(http, context, accessToken, url);
 
   const post = async (
     context: ProviderRequestContext,
@@ -179,47 +177,114 @@ export function createFacebookPublish(http: ProviderHttpClient) {
     }
   };
 
-  const submitFinish = async (
+  const startRemoteVideoUpload = async (
     context: ProviderRequestContext,
     credentials: ProviderCredentials,
-    videoId: string,
-    description: string,
-    kind: "reel" | "story",
+    pageId: string,
+    edge: "video_reels" | "video_stories",
+    input: PublishInput,
+  ): Promise<{ ok: true; videoId: string } | { ok: false; result: ProviderOperationResult }> => {
+    const mediaUrl = remoteVideoUrl(input);
+    const createUrl = graphUrl(`${encodeURIComponent(pageId)}/${edge}`);
+    createUrl.searchParams.set("upload_phase", "start");
+    const created = await post(context, credentials.accessToken, createUrl, undefined, true);
+    const videoId = providerIdentifier(created?.video_id);
+    if (!videoId) throw malformed(true);
+    const uploadUrl = validateFacebookUploadUrl(created?.upload_url, videoId);
+    try {
+      const uploaded = await http.request(context, {
+        headers: {
+          Authorization: `OAuth ${required("accessToken", credentials.accessToken)}`,
+          file_url: mediaUrl,
+        },
+        method: "POST",
+        sideEffectPossible: true,
+        url: uploadUrl,
+      });
+      if (record(uploaded.body)?.success !== true) throw malformed(true);
+      return { ok: true, videoId };
+    } catch (cause) {
+      return {
+        ok: false,
+        result:
+          edge === "video_stories"
+            ? failedWriteResult(cause, facebookOperationId("story", videoId))
+            : failedWriteResult(
+                cause,
+                facebookOperationId("upload_submitted", videoId),
+                facebookOperationId("uploaded", videoId),
+              ),
+      };
+    }
+  };
+
+  const publishReel = async (
+    context: ProviderRequestContext,
+    credentials: ProviderCredentials,
+    pageId: string,
+    input: PublishInput,
     draft: boolean,
   ): Promise<ProviderOperationResult> => {
-    const url = graphUrl(
-      `${encodeURIComponent(facebookAccountId(credentials))}/${kind === "story" ? "video_stories" : "video_reels"}`,
+    const started = await startRemoteVideoUpload(
+      context,
+      credentials,
+      pageId,
+      "video_reels",
+      input,
     );
+    if (!started.ok) return started.result;
+    const { videoId } = started;
+    const url = graphUrl(`${encodeURIComponent(pageId)}/video_reels`);
     url.searchParams.set("video_id", videoId);
     url.searchParams.set("upload_phase", "finish");
-    if (kind === "reel") {
-      url.searchParams.set("video_state", draft ? "DRAFT" : "PUBLISHED");
-      if (description) url.searchParams.set("description", description);
-    }
+    url.searchParams.set("video_state", draft ? "DRAFT" : "PUBLISHED");
+    const description = input.caption.trim();
+    if (description) url.searchParams.set("description", description);
     try {
       const body = await post(context, credentials.accessToken, url, undefined, true);
       if (body?.success !== true) throw malformed(true);
-      if (kind === "reel") {
-        return {
-          outcome: "confirmed_success",
-          providerOperationId: facebookOperationId(draft ? "reel_draft" : "finishing", videoId),
-        };
-      }
-      const id = numericOrStringIdentifier(body.post_id);
-      if (!id) throw malformed(true);
+      return {
+        outcome: "confirmed_success",
+        providerOperationId: facebookOperationId(draft ? "reel_draft" : "finishing", videoId),
+      };
+    } catch (cause) {
+      return failedWriteResult(
+        cause,
+        facebookOperationId("finish_submitted", videoId),
+        facebookOperationId("uploaded", videoId),
+      );
+    }
+  };
+
+  const publishVideoStory = async (
+    context: ProviderRequestContext,
+    credentials: ProviderCredentials,
+    pageId: string,
+    input: PublishInput,
+  ): Promise<ProviderOperationResult> => {
+    const started = await startRemoteVideoUpload(
+      context,
+      credentials,
+      pageId,
+      "video_stories",
+      input,
+    );
+    if (!started.ok) return started.result;
+    const { videoId } = started;
+    const url = graphUrl(`${encodeURIComponent(pageId)}/video_stories`);
+    url.searchParams.set("video_id", videoId);
+    url.searchParams.set("upload_phase", "finish");
+    try {
+      const body = await post(context, credentials.accessToken, url, undefined, true);
+      const id = numericOrStringIdentifier(body?.post_id);
+      if (body?.success !== true || !id) throw malformed(true);
       return {
         outcome: "confirmed_success",
         providerOperationId: facebookOperationId("story", videoId),
         providerPostId: id,
       };
     } catch (cause) {
-      return kind === "story"
-        ? failedWriteResult(cause, facebookOperationId("story", videoId))
-        : failedWriteResult(
-            cause,
-            facebookOperationId("finish_submitted", videoId),
-            facebookOperationId("uploaded", videoId),
-          );
+      return failedWriteResult(cause, facebookOperationId("story", videoId));
     }
   };
 
@@ -304,7 +369,9 @@ export function createFacebookPublish(http: ProviderHttpClient) {
       throw cause;
     }
     if (post?.id !== postId || typeof post.is_published !== "boolean") throw malformed();
-    if (post.is_published) return { result: facebookPublishedPost(postId), state: "published" };
+    if (post.is_published) {
+      return { result: facebookPublishedVideo("post", postId), state: "published" };
+    }
     if (phase === "post_draft") {
       return { state: "delivered", result: facebookNativeDraft("post_draft", postId) };
     }
@@ -361,46 +428,6 @@ export function createFacebookPublish(http: ProviderHttpClient) {
     return { providerOperationId: retainedOperationId, state: "processing" };
   };
 
-  const publishVideoUpload = async (
-    context: ProviderRequestContext,
-    credentials: ProviderCredentials,
-    pageId: string,
-    input: PublishInput,
-    kind: "reel" | "story",
-    draft: boolean,
-  ): Promise<ProviderOperationResult> => {
-    const mediaUrl = remoteVideoUrl(input);
-    const createUrl = graphUrl(
-      `${encodeURIComponent(pageId)}/${kind === "story" ? "video_stories" : "video_reels"}`,
-    );
-    createUrl.searchParams.set("upload_phase", "start");
-    const created = await post(context, credentials.accessToken, createUrl, undefined, true);
-    const videoId = providerIdentifier(created?.video_id);
-    if (!videoId) throw malformed(true);
-    const uploadUrl = validateFacebookUploadUrl(created?.upload_url, videoId);
-    try {
-      const uploaded = await http.request(context, {
-        headers: {
-          Authorization: `OAuth ${required("accessToken", credentials.accessToken)}`,
-          file_url: mediaUrl,
-        },
-        method: "POST",
-        sideEffectPossible: true,
-        url: uploadUrl,
-      });
-      if (record(uploaded.body)?.success !== true) throw malformed(true);
-    } catch (cause) {
-      return kind === "story"
-        ? failedWriteResult(cause, facebookOperationId("story", videoId))
-        : failedWriteResult(
-            cause,
-            facebookOperationId("upload_submitted", videoId),
-            facebookOperationId("uploaded", videoId),
-          );
-    }
-    return submitFinish(context, credentials, videoId, input.caption.trim(), kind, draft);
-  };
-
   return {
     async getBroadcastInfo(
       context: ProviderRequestContext,
@@ -421,10 +448,8 @@ export function createFacebookPublish(http: ProviderHttpClient) {
         return { state: "ended", providerPostId: id, providerUrl: facebookPermalink(id) };
       }
       if (status === "SCHEDULED_CANCELED") return { state: "ended" };
-      const stream = boundedString(body?.secure_stream_url, maxStreamUrlChars);
-      if (!stream || !URL.canParse(stream) || new URL(stream).protocol !== "rtmps:") {
-        throw malformed();
-      }
+      const stream = rtmpsUrl(body?.secure_stream_url, maxStreamUrlChars);
+      if (!stream) throw malformed();
       const state = broadcastState(status);
       return {
         state,
@@ -462,8 +487,7 @@ export function createFacebookPublish(http: ProviderHttpClient) {
       lookup: ProviderPublicationLookup,
     ): Promise<ProviderPublicationStatus> {
       const pageId = facebookAccountId(credentials);
-      const providerPostId = providerIdentifier(lookup.providerPostId);
-      if (lookup.providerPostId && !providerPostId) throw malformed();
+      const providerPostId = optionalLookupPostId(lookup.providerPostId);
       const operation = parseFacebookOperationId(lookup.providerOperationId);
       if (lookup.providerOperationId && !operation) throw malformed();
       switch (operation?.phase) {
@@ -554,7 +578,11 @@ export function createFacebookPublish(http: ProviderHttpClient) {
             token,
             pageEdge("ab_tests"),
             {
-              name: required("experimentName", test?.name ?? "", 200),
+              name: required(
+                "experimentName",
+                test?.name ?? "",
+                FACEBOOK_OPTION_LIMITS.maxAbTestNameChars,
+              ),
               description: caption,
               control_video_id: requiredIdentifier(
                 test?.controlVideoId,
@@ -600,7 +628,7 @@ export function createFacebookPublish(http: ProviderHttpClient) {
           );
           const id = providerIdentifier(body?.id);
           if (!id || !id.startsWith(`${pageId}_`)) throw malformed(true);
-          return draft ? facebookNativeDraft("post_draft", id) : facebookPublishedPost(id);
+          return draft ? facebookNativeDraft("post_draft", id) : facebookPublishedVideo("post", id);
         }
         case "video":
         case "slideshow":
@@ -663,10 +691,10 @@ export function createFacebookPublish(http: ProviderHttpClient) {
               return failedWriteResult(cause, retainedId);
             }
           }
-          return publishVideoUpload(context, credentials, pageId, input, "story", draft);
+          return publishVideoStory(context, credentials, pageId, input);
         }
         case "reel":
-          return publishVideoUpload(context, credentials, pageId, input, "reel", draft);
+          return publishReel(context, credentials, pageId, input, draft);
       }
     },
   };

@@ -11,20 +11,16 @@ const config = readConfig(process.env);
 
 const metadataLinePattern = /^([a-z0-9-]+):\s*(.*)$/i;
 const whitespacePattern = /\s+/;
-const bandsPattern = /^bands:\s*(\d+)/m;
-const interpretationPattern = /^interpretation:\s*(\S+)/m;
-const pageCountPattern = /^n-pages:\s*(\d+)/m;
-const formatPattern = /^format:\s*(\S+)/m;
 
 const ENGINE_ID = "meltiply-media-processor/1";
 
-function run(argv, timeoutMs) {
+function run(argv, timeoutMs, onStdoutChunk) {
   const { promise, reject, resolve } = Promise.withResolvers();
   const child = spawn(argv[0], argv.slice(1), {
     shell: false,
     stdio: ["ignore", "pipe", "pipe"],
   });
-  const stdout = [];
+  const stdout = onStdoutChunk ? null : [];
   let stderr = "";
   let settled = false;
   const finish = (error) => {
@@ -32,7 +28,7 @@ function run(argv, timeoutMs) {
     settled = true;
     clearTimeout(timer);
     if (error) reject(error);
-    else resolve({ stderr, stdout: Buffer.concat(stdout).toString("utf8") });
+    else resolve(stdout ? { stderr, stdout: Buffer.concat(stdout).toString("utf8") } : { stderr });
   };
   const timer = setTimeout(() => {
     child.kill("SIGKILL");
@@ -41,43 +37,10 @@ function run(argv, timeoutMs) {
     );
   }, timeoutMs);
   timer.unref?.();
-  child.stdout.on("data", (chunk) => stdout.push(chunk));
-  child.stderr.on("data", (chunk) => {
-    if (stderr.length < 32 * 1024) stderr += chunk.toString("utf8");
+  child.stdout.on("data", (chunk) => {
+    if (onStdoutChunk) onStdoutChunk(chunk);
+    else stdout.push(chunk);
   });
-  child.on("error", (error) =>
-    finish(new EngineError("engine_error", `${argv[0]} could not be executed: ${error.message}`)),
-  );
-  child.on("close", (code) => {
-    if (code === 0) finish();
-    else finish(new Error(`${argv[0]} exited ${code}: ${stderr.trim().slice(0, 400)}`));
-  });
-  return promise;
-}
-
-function runStreaming(argv, onChunk, timeoutMs) {
-  const { promise, reject, resolve } = Promise.withResolvers();
-  const child = spawn(argv[0], argv.slice(1), {
-    shell: false,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let stderr = "";
-  let settled = false;
-  const finish = (error) => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(timer);
-    if (error) reject(error);
-    else resolve({ stderr });
-  };
-  const timer = setTimeout(() => {
-    child.kill("SIGKILL");
-    finish(
-      new EngineError("engine_timeout", `${argv[0]} exceeded its ${timeoutMs}ms step budget.`),
-    );
-  }, timeoutMs);
-  timer.unref?.();
-  child.stdout.on("data", (chunk) => onChunk(chunk));
   child.stderr.on("data", (chunk) => {
     if (stderr.length < 32 * 1024) stderr += chunk.toString("utf8");
   });
@@ -99,6 +62,7 @@ async function probe(file, { countFrames = false, timeoutMs }) {
   try {
     ({ stdout } = await run(argv, timeoutMs));
   } catch (cause) {
+    if (cause instanceof EngineError) throw cause;
     throw new EngineError(
       "corrupt_media",
       `The uploaded object could not be read: ${cause.message}`,
@@ -143,8 +107,6 @@ function summarize(parsed, counted) {
   return {
     animated: isAnimatedContainer(formatName),
     audioChannels: audio ? Number(audio.channels ?? 0) : 0,
-    codedHeight,
-    codedWidth,
     contentType: contentTypeFor(
       formatName,
       String(video.codec_name ?? ""),
@@ -161,7 +123,6 @@ function summarize(parsed, counted) {
     pixelFormat: String(video.pix_fmt ?? ""),
     hasAudio: Boolean(audio) && Number(audio.channels ?? 0) > 0,
     height,
-    rotation: rotationOf(video),
     sampleAspect,
     videoCodec: String(video.codec_name ?? ""),
     width,
@@ -256,7 +217,13 @@ async function apngFrameDelays(file, timeoutMs) {
     ],
     timeoutMs,
   );
-  const frames = JSON.parse(stdout).frames ?? [];
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new EngineError("corrupt_media", "The APNG produced unreadable frame timing metadata.");
+  }
+  const frames = parsed.frames ?? [];
   const durations = frames.map((frame) => Number(frame.duration_time ?? frame.pkt_duration_time));
   if (frames.length > 0 && durations.every((value) => Number.isFinite(value) && value > 0)) {
     return durations.map((value) => Math.round(value * 1000));
@@ -275,7 +242,7 @@ async function apngHasAlpha(file, timeoutMs) {
   let minimum = 0xffff;
   let carry = null;
   try {
-    await runStreaming(
+    await run(
       [
         "ffmpeg",
         "-v",
@@ -292,6 +259,7 @@ async function apngHasAlpha(file, timeoutMs) {
         "gray16le",
         "-",
       ],
+      timeoutMs,
       (chunk) => {
         const bytes = carry === null ? chunk : Buffer.concat([carry, chunk]);
         for (let offset = 0; offset + 1 < bytes.length; offset += 2) {
@@ -300,9 +268,9 @@ async function apngHasAlpha(file, timeoutMs) {
         }
         carry = bytes.length % 2 === 1 ? bytes.subarray(bytes.length - 1) : null;
       },
-      timeoutMs,
     );
   } catch (cause) {
+    if (cause instanceof EngineError) throw cause;
     throw new EngineError("corrupt_media", `The APNG could not be fully decoded: ${cause.message}`);
   }
   return minimum < 0xffff;
@@ -348,7 +316,6 @@ async function probeApng(file, timeoutMs, plays) {
     hasAlpha: alpha,
     loop: plays,
     orientation: 1,
-    rotation: media.rotation,
   };
 }
 
@@ -366,6 +333,7 @@ async function readImageFields(file, timeoutMs) {
   try {
     ({ stdout } = await run(["vipsheader", "-a", file], timeoutMs));
   } catch (cause) {
+    if (cause instanceof EngineError) throw cause;
     throw new EngineError(
       "unsupported_media",
       `The stored object is not a readable image of an accepted format: ${cause.message}`,
@@ -430,8 +398,6 @@ async function probeImage(file, timeoutMs) {
   return {
     animated: frameCount > 1,
     audioChannels: 0,
-    codedHeight,
-    codedWidth,
     contentType: IMAGE_CONTENT_TYPES.get(fields.get("vips-loader")),
     displayAspect: width / height,
     durationSeconds:
@@ -444,7 +410,6 @@ async function probeImage(file, timeoutMs) {
     hasAudio: false,
     height,
     orientation,
-    rotation: 0,
     sampleAspect: 1,
     videoCodec: "",
     width,
@@ -517,16 +482,17 @@ async function downloadInput(url, file, { expectedChecksum, expectedSize, signal
 
 async function hasAlpha(file, timeoutMs) {
   const { stdout: header } = await run(["vipsheader", "-a", file], timeoutMs);
-  const bands = Number(bandsPattern.exec(header)?.[1]);
-  const interpretation = interpretationPattern.exec(header)?.[1];
+  const fields = parseVipsHeader(header);
+  const bands = Number(fields.get("bands"));
+  const interpretation = fields.get("interpretation");
   const colourBands =
     interpretation === "cmyk" ? 4 : interpretation === "b-w" || interpretation === "grey16" ? 1 : 3;
   if (!Number.isInteger(bands) || bands < colourBands) {
     throw new EngineError("corrupt_media", "The decoded image has an invalid colour-band layout.");
   }
   if (bands === colourBands) return false;
-  const pages = Number(pageCountPattern.exec(header)?.[1] ?? 1);
-  const format = formatPattern.exec(header)?.[1];
+  const pages = Number(fields.get("n-pages") ?? 1);
+  const format = fields.get("format");
   const opaque = format === "ushort" ? 65535 : format === "float" || format === "double" ? 1 : 255;
   const alphaFile = `${file}.alpha.v`;
   try {
@@ -543,29 +509,6 @@ async function hasAlpha(file, timeoutMs) {
   } finally {
     await rm(alphaFile, { force: true });
   }
-}
-
-async function videoFrameDeltas(file, timeoutMs) {
-  const { stdout } = await run(
-    [
-      "ffprobe",
-      "-v",
-      "error",
-      "-select_streams",
-      "v:0",
-      "-show_entries",
-      "frame=pts_time",
-      "-of",
-      "csv=p=0",
-      file,
-    ],
-    timeoutMs,
-  );
-  const times = stdout
-    .split("\n")
-    .map((line) => Number(line.replaceAll(",", "").trim()))
-    .filter((value) => Number.isFinite(value));
-  return times.slice(1).map((value, index) => Math.round((value - (times[index] ?? value)) * 1000));
 }
 
 function sameFrameTiming(source, candidate) {
@@ -597,6 +540,7 @@ async function verifyVideoFullDecode(file, timeoutMs) {
       timeoutMs,
     );
   } catch (cause) {
+    if (cause instanceof EngineError) throw cause;
     throw new EngineError(
       "corrupt_media",
       `The media could not be fully decoded: ${cause.message}`,
@@ -609,6 +553,7 @@ async function verifyImageFullDecode(file, timeoutMs, allFrames) {
   try {
     await run(["vips", "copy", allFrames ? `${file}[n=-1]` : file, target], timeoutMs);
   } catch (cause) {
+    if (cause instanceof EngineError) throw cause;
     throw new EngineError(
       "corrupt_media",
       `The image could not be fully decoded: ${cause.message}`,
@@ -1049,17 +994,16 @@ async function produceCandidate(plan, sourceMedia, profile, stepBudget, sourceFa
       ? await probe(plan.file, { timeoutMs: stepBudget() })
       : await probeImage(plan.file, stepBudget());
   } catch (cause) {
+    if (cause instanceof EngineError && cause.code === "engine_timeout") {
+      await rm(plan.file, { force: true });
+      throw cause;
+    }
     return discard(`encode or probe failed: ${cause.message}`);
   }
   const rejection = profileRejection(media, profile, sourceMedia);
   if (rejection !== null) return discard(rejection);
   if (sourceMedia.animated || media.animated) {
-    const timings =
-      media.frameDelays ??
-      (isVideo
-        ? await videoFrameDeltas(plan.file, stepBudget()).catch(() => undefined)
-        : undefined);
-    if (!sameFrameTiming(sourceFacts.timings, timings))
+    if (!sameFrameTiming(sourceFacts.timings, media.frameDelays))
       return discard("measured frame pacing does not match the source delays");
   }
   if (
@@ -1123,11 +1067,7 @@ async function processJob(job, signal) {
         : sourceMedia.apng
           ? sourceMedia.hasAlpha
           : await hasAlpha(inputFile, stepBudget()),
-      timings: isVideo
-        ? sourceMedia.animated && sourceMedia.frameCount !== null && sourceMedia.frameCount <= 2_000
-          ? await videoFrameDeltas(inputFile, stepBudget()).catch(() => undefined)
-          : undefined
-        : (sourceMedia.frameDelays ?? undefined),
+      timings: isVideo ? undefined : (sourceMedia.frameDelays ?? undefined),
     };
     sourceMedia.hasAlpha = sourceFacts.hasAlpha;
     if (sourceMedia.hasAudio && sourceMedia.audioChannels > 6) {
@@ -1244,11 +1184,11 @@ const hasLibwebpAnim = /libwebp_anim/.test(
   ).stdout,
 );
 
-const queue = { active: 0, waiting: [] };
+const queue = { busy: false, waiting: [] };
 
 function admit() {
-  if (queue.active === 0) {
-    queue.active += 1;
+  if (!queue.busy) {
+    queue.busy = true;
     return true;
   }
   if (queue.waiting.length < config.maxPendingJobs) {
@@ -1263,7 +1203,7 @@ function release() {
     next();
     return;
   }
-  queue.active = Math.max(0, queue.active - 1);
+  queue.busy = false;
 }
 
 const JOB_CACHE_LIMIT = 256;
@@ -1291,76 +1231,69 @@ function rememberFor(jobId, value) {
 
 function authorized(request) {
   const header = request.headers.authorization ?? "";
-  const presented = header.startsWith("Bearer ") ? header.slice(7) : "";
-  const expected = config.token;
+  const presented = Buffer.from(header.startsWith("Bearer ") ? header.slice(7) : "");
+  const expected = Buffer.from(config.token);
   if (presented.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(presented), Buffer.from(expected));
+  return timingSafeEqual(presented, expected);
 }
 
-function json(status, payload) {
+function sendJson(response, status, payload, extraHeaders) {
   const body = JSON.stringify(payload);
-  return {
-    body,
-    headers: {
-      "cache-control": "no-store",
-      "content-length": String(Buffer.byteLength(body)),
-      "content-type": "application/json; charset=utf-8",
-    },
-    status,
-  };
+  response.writeHead(status, {
+    "cache-control": "no-store",
+    "content-length": String(Buffer.byteLength(body)),
+    "content-type": "application/json; charset=utf-8",
+    ...extraHeaders,
+  });
+  response.end(body);
 }
 
 const server = createServer((request, response) => {
   const url = new URL(request.url ?? "/", "http://engine.local");
   if (request.method === "GET" && url.pathname === "/healthz") {
-    const reply = json(200, { engine: ENGINE_ID, ...toolVersions });
-    response.writeHead(reply.status, reply.headers);
-    response.end(reply.body);
+    sendJson(response, 200, { engine: ENGINE_ID, ...toolVersions });
     return;
   }
   if (request.method !== "POST" || url.pathname !== "/process") {
-    const reply = json(404, {
+    sendJson(response, 404, {
       error: {
         code: "invalid_request",
         message: "Unknown route.",
         retryable: false,
       },
     });
-    response.writeHead(reply.status, reply.headers);
-    response.end(reply.body);
     return;
   }
   if (!authorized(request)) {
-    const reply = json(401, {
-      error: {
-        code: "unauthorized",
-        message: "A valid per-instance job token is required.",
-        retryable: false,
+    sendJson(
+      response,
+      401,
+      {
+        error: {
+          code: "unauthorized",
+          message: "A valid per-instance job token is required.",
+          retryable: false,
+        },
       },
-    });
-    response.writeHead(reply.status, {
-      ...reply.headers,
-      "www-authenticate": "Bearer",
-    });
-    response.end(reply.body);
+      { "www-authenticate": "Bearer" },
+    );
     return;
   }
   const chunks = [];
   let received = 0;
   let oversized = false;
   request.on("data", (chunk) => {
+    if (oversized) return;
     received += chunk.length;
     if (received > 64 * 1024) {
       oversized = true;
-      const reply = json(413, {
+      sendJson(response, 413, {
         error: {
           code: "invalid_request",
           message: "The job payload exceeds 64 KiB.",
           retryable: false,
         },
       });
-      response.writeHead(reply.status, reply.headers);
-      response.end(reply.body);
       request.destroy();
       return;
     }
@@ -1374,71 +1307,64 @@ const server = createServer((request, response) => {
     } catch (cause) {
       const code = cause instanceof EngineError ? cause.code : "invalid_request";
       const spec = ERRORS[code];
-      const reply = json(spec.status, {
+      sendJson(response, spec.status, {
         error: { code, message: cause.message, retryable: spec.retryable },
       });
-      response.writeHead(reply.status, reply.headers);
-      response.end(reply.body);
       return;
     }
-    const replay = replayFor(job.job_id);
-    let distrusted;
-    if (replay) {
+    const checkReplay = () => {
+      const replay = replayFor(job.job_id);
+      if (!replay) return { distrusted: undefined, replayed: false };
       if (replay.value?.result === "optimized" && replay.value.output) {
-        distrusted = replay.value;
         jobCache.delete(job.job_id);
-      } else {
-        const reply = json(200, { ...replay.value, replayed: true });
-        response.writeHead(reply.status, reply.headers);
-        response.end(reply.body);
-        return;
+        return { distrusted: replay.value, replayed: false };
       }
-    }
+      sendJson(response, 200, { ...replay.value, replayed: true });
+      return { distrusted: undefined, replayed: true };
+    };
+    const initialReplay = checkReplay();
+    if (initialReplay.replayed) return;
+    let distrusted = initialReplay.distrusted;
     if (inflightJobs.has(job.job_id)) {
-      const reply = json(429, {
-        error: {
-          code: "busy",
-          message: "This job is already running on this processor instance.",
-          retryable: true,
+      sendJson(
+        response,
+        429,
+        {
+          error: {
+            code: "busy",
+            message: "This job is already running on this processor instance.",
+            retryable: true,
+          },
         },
-      });
-      response.writeHead(reply.status, {
-        ...reply.headers,
-        "retry-after": "30",
-      });
-      response.end(reply.body);
+        { "retry-after": "30" },
+      );
       return;
     }
     const slot = admit();
     if (slot === false) {
-      const reply = json(429, {
-        error: {
-          code: "busy",
-          message: "The processor instance is saturated; retry shortly.",
-          retryable: true,
+      sendJson(
+        response,
+        429,
+        {
+          error: {
+            code: "busy",
+            message: "The processor instance is saturated; retry shortly.",
+            retryable: true,
+          },
         },
-      });
-      response.writeHead(reply.status, {
-        ...reply.headers,
-        "retry-after": "30",
-      });
-      response.end(reply.body);
+        { "retry-after": "30" },
+      );
       return;
     }
     if (slot !== true) {
       await slot;
-      const settled = replayFor(job.job_id);
-      if (settled) {
-        if (settled.value?.result === "optimized" && settled.value.output) {
-          distrusted = settled.value;
-          jobCache.delete(job.job_id);
-        } else {
-          release();
-          const reply = json(200, { ...settled.value, replayed: true });
-          response.writeHead(reply.status, reply.headers);
-          response.end(reply.body);
-          return;
-        }
+      const settledReplay = checkReplay();
+      if (settledReplay.replayed) {
+        release();
+        return;
+      }
+      if (settledReplay.distrusted !== undefined) {
+        distrusted = settledReplay.distrusted;
       }
     }
     inflightJobs.add(job.job_id);
@@ -1448,9 +1374,7 @@ const server = createServer((request, response) => {
     try {
       const value = await processJob(job, controller.signal);
       rememberFor(job.job_id, value);
-      const reply = json(200, value);
-      response.writeHead(reply.status, reply.headers);
-      response.end(reply.body);
+      sendJson(response, 200, value);
     } catch (cause) {
       if (
         cause instanceof EngineError &&
@@ -1459,9 +1383,7 @@ const server = createServer((request, response) => {
         distrusted.output.sha256 === cause.outputSha256
       ) {
         rememberFor(job.job_id, distrusted);
-        const reply = json(200, { ...distrusted, replayed: true });
-        response.writeHead(reply.status, reply.headers);
-        response.end(reply.body);
+        sendJson(response, 200, { ...distrusted, replayed: true });
         return;
       }
       const code =
@@ -1471,7 +1393,7 @@ const server = createServer((request, response) => {
             ? "engine_timeout"
             : "engine_error";
       const spec = ERRORS[code] ?? ERRORS.engine_error;
-      const reply = json(spec.status, {
+      sendJson(response, spec.status, {
         error: {
           code,
           message: cause instanceof Error ? cause.message : "The processor failed unexpectedly.",
@@ -1479,8 +1401,6 @@ const server = createServer((request, response) => {
         },
         job_id: job.job_id,
       });
-      response.writeHead(reply.status, reply.headers);
-      response.end(reply.body);
     } finally {
       clearTimeout(timer);
       inflightJobs.delete(job.job_id);

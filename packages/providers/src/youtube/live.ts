@@ -1,12 +1,14 @@
 import { malformed, ProviderAdapterError, rejected } from "../failures";
+import { PROVIDER_LIMITS } from "../limits";
 import { unknownResult } from "../results";
-import type {
-  ProviderBroadcastInfo,
-  ProviderCredentials,
-  ProviderOperationResult,
-  ProviderPublicationLookup,
-  ProviderRequestContext,
-  PublishInput,
+import {
+  YOUTUBE_PRIVACY_STATUSES,
+  type ProviderBroadcastInfo,
+  type ProviderCredentials,
+  type ProviderOperationResult,
+  type ProviderPublicationLookup,
+  type ProviderRequestContext,
+  type PublishInput,
 } from "../types";
 import {
   bearer,
@@ -16,12 +18,12 @@ import {
   providerIdentifier,
   record,
   required,
+  rtmpsUrl,
 } from "../values";
 import {
   broadcastOperationId,
   parseBroadcastOperationId,
   YOUTUBE_API_ORIGIN,
-  YOUTUBE_LIMITS,
   youtubeWatchUrl,
   type GoogleRequest,
 } from "./types";
@@ -36,7 +38,6 @@ const lifecycleStatuses = new Set([
   "testStarting",
   "liveStarting",
 ]);
-const privacyStatuses = ["public", "private", "unlisted"];
 const maxIngestChars = 2048;
 const scheduledStartLeadMilliseconds = 60_000;
 
@@ -98,7 +99,7 @@ export function createYouTubeLive(request: GoogleRequest, now: () => Date) {
         input.media.length ||
         typeof options?.madeForKids !== "boolean" ||
         !options.privacyStatus ||
-        !privacyStatuses.includes(options.privacyStatus)
+        !YOUTUBE_PRIVACY_STATUSES.has(options.privacyStatus)
       ) {
         throw rejected("youtube_live_options_invalid");
       }
@@ -106,7 +107,7 @@ export function createYouTubeLive(request: GoogleRequest, now: () => Date) {
       const title = required(
         "title",
         firstNonEmptyLine(description) ?? "",
-        YOUTUBE_LIMITS.maxTitleCodePoints,
+        PROVIDER_LIMITS.youtube.maxTitleCodePoints,
       );
       const headers = jsonHeaders(credentials.accessToken);
       const created = await request(context, {
@@ -202,14 +203,9 @@ export function createYouTubeLive(request: GoogleRequest, now: () => Date) {
         url: `${YOUTUBE_API_ORIGIN}/youtube/v3/liveStreams?part=cdn&id=${encodeURIComponent(streamId)}`,
       });
       const ingest = record(record(onlyResource(streamResponse.body, streamId).cdn)?.ingestionInfo);
-      const ingestUrl = boundedString(ingest?.rtmpsIngestionAddress, maxIngestChars);
+      const ingestUrl = rtmpsUrl(ingest?.rtmpsIngestionAddress, maxIngestChars);
       const streamKey = boundedString(ingest?.streamName, maxIngestChars);
-      if (
-        !ingestUrl ||
-        !URL.canParse(ingestUrl) ||
-        new URL(ingestUrl).protocol !== "rtmps:" ||
-        !streamKey
-      ) {
+      if (!ingestUrl || !streamKey) {
         throw malformed();
       }
       const state = lifecycle === "live" ? "live" : lifecycle === "testing" ? "testing" : "ready";

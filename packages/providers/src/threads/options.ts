@@ -1,4 +1,5 @@
 import type { components } from "@meltiply/contracts/schema";
+import { PROVIDER_LIMITS } from "../limits";
 import { codePointLength, secureUrl } from "../values";
 
 export type ThreadsPublishOptions = components["schemas"]["ThreadsPublishOptions"];
@@ -143,7 +144,7 @@ export function parseThreadsPostOptions(value: unknown): ThreadsPostOptions | nu
           (span) =>
             !object(span, ["entity_type", "offset", "length"]) ||
             span.entity_type !== "SPOILER" ||
-            !range(span, 500),
+            !range(span, PROVIDER_LIMITS.threads.maxCaptionCodePoints),
         )
       )
         return null;

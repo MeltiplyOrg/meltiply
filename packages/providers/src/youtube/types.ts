@@ -1,25 +1,19 @@
-import { malformed } from "../failures";
+import { malformed, requiredIdentifier } from "../failures";
 import type { ProviderErrorDiagnosis, ProviderHttpRequest, ProviderHttpResponse } from "../http";
 import { PROVIDER_LIMITS } from "../limits";
 import type { ProviderCredentials, ProviderRequestContext } from "../types";
-import {
-  boundedString,
-  providerIdentifier,
-  record,
-  requiredIdentifier,
-  secureUrl,
-} from "../values";
+import { boundedString, providerIdentifier, record, secureUrl } from "../values";
 
 export const YOUTUBE_API_ORIGIN = "https://www.googleapis.com";
 export const YOUTUBE_ANALYTICS_ORIGIN = "https://youtubeanalytics.googleapis.com";
 export const YOUTUBE_TOKEN_ORIGIN = "https://oauth2.googleapis.com";
 export const YOUTUBE_AUTHORIZATION_ORIGIN = "https://accounts.google.com";
-export const YOUTUBE_LIMITS = PROVIDER_LIMITS.youtube;
 
 const maximumOperationIdLength = 512;
 const maximumSessionUriLength =
   maximumOperationIdLength -
-  `submitted:${YOUTUBE_LIMITS.maxVideoBytes}:${YOUTUBE_LIMITS.maxVideoBytes}:`.length;
+  `submitted:${PROVIDER_LIMITS.youtube.maxVideoBytes}:${PROVIDER_LIMITS.youtube.maxVideoBytes}:`
+    .length;
 
 const videoOperationPattern = /^video:(.+)$/;
 const broadcastOperationPattern = /^(live|ended_live):(.+)$/;
@@ -32,15 +26,12 @@ export const YOUTUBE_PUBLISHING_SCOPES = [
   "https://www.googleapis.com/auth/youtube.readonly",
 ] as const;
 
-const analyticsScopes = ["https://www.googleapis.com/auth/yt-analytics.readonly"] as const;
-
 export const YOUTUBE_CONFIGURED_SCOPES = [
   ...YOUTUBE_PUBLISHING_SCOPES,
-  ...analyticsScopes,
+  "https://www.googleapis.com/auth/yt-analytics.readonly",
   "https://www.googleapis.com/auth/youtube.force-ssl",
 ] as const;
 
-/** A provider request whose error bodies are diagnosed with Google's documented error reasons. */
 export type GoogleRequest = (
   context: ProviderRequestContext,
   request: Omit<ProviderHttpRequest, "classifyErrorBody">,
@@ -121,7 +112,7 @@ export function parseYouTubeOperationId(value: unknown): YouTubeOperation | unde
   const acknowledged = Number(session[3] ?? 0);
   if (
     !Number.isSafeInteger(fileSize) ||
-    fileSize > YOUTUBE_LIMITS.maxVideoBytes ||
+    fileSize > PROVIDER_LIMITS.youtube.maxVideoBytes ||
     !Number.isSafeInteger(acknowledged) ||
     acknowledged > fileSize
   ) {

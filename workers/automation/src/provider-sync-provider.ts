@@ -18,6 +18,37 @@ import {
 } from "@meltiply/providers";
 import { normalizeIdentifier } from "./validation";
 
+export function safeProviderUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = new URL(value.trim());
+    if (parsed.protocol !== "https:" || parsed.username !== "" || parsed.password !== "") {
+      return undefined;
+    }
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+export interface ProviderCredentialTarget {
+  connectionStatus: string;
+  storedAccessToken: string;
+  tokenExpiresAt: Date | null;
+}
+
+export function hasUsableProviderCredentials(
+  target: Pick<ProviderCredentialTarget, "connectionStatus" | "tokenExpiresAt">,
+  now: Date,
+): boolean {
+  return (
+    target.connectionStatus === "connected" &&
+    (target.tokenExpiresAt === null || target.tokenExpiresAt > now)
+  );
+}
+
 const controlCharactersPattern = /[\u0000-\u001f\u007f]/;
 
 export interface ProviderAccountReadTarget {
@@ -222,19 +253,10 @@ function normalizeComments(
     const commentedAt = timestamp(item?.commentedAt);
     const authorDisplayName =
       item?.authorDisplayName === undefined ? undefined : boundedText(item.authorDisplayName, 500);
-    let authorAvatarUrl: string | undefined;
-    if (item?.authorAvatarUrl !== undefined) {
-      try {
-        const parsed = new URL(item.authorAvatarUrl);
-        if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
-          return undefined;
-        }
-        parsed.search = "";
-        parsed.hash = "";
-        authorAvatarUrl = parsed.toString();
-      } catch {
-        return undefined;
-      }
+    const authorAvatarUrl =
+      item?.authorAvatarUrl === undefined ? undefined : safeProviderUrl(item.authorAvatarUrl);
+    if (item?.authorAvatarUrl !== undefined && !authorAvatarUrl) {
+      return undefined;
     }
     if (
       !providerCommentId ||
@@ -262,14 +284,11 @@ function normalizeComments(
 }
 
 async function credentials(
-  target: ProviderReadTarget,
+  target: ProviderCredentialTarget,
   dependencies: ProviderSyncDependencies,
   now: Date,
 ): Promise<string | undefined> {
-  if (
-    target.connectionStatus !== "connected" ||
-    (target.tokenExpiresAt !== null && target.tokenExpiresAt <= now)
-  ) {
+  if (!hasUsableProviderCredentials(target, now)) {
     return undefined;
   }
   const accessToken = await dependencies.decryptToken(target.storedAccessToken);
@@ -382,19 +401,7 @@ export function executeProviderAccountAnalyticsEffect(
             "provider_account_analytics_preparation_failed",
             adapter.retryPolicy,
           ),
-        try: () =>
-          credentials(
-            {
-              connectionStatus: target.connectionStatus,
-              cursor: null,
-              providerPostId: target.providerAccountId,
-              platform: target.platform,
-              storedAccessToken: target.storedAccessToken,
-              tokenExpiresAt: target.tokenExpiresAt,
-            },
-            dependencies,
-            now,
-          ),
+        try: () => credentials(target, dependencies, now),
       });
       if (!accessToken) {
         return failure("provider_reconnect_required", 401, adapter.retryPolicy);

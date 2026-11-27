@@ -1,5 +1,6 @@
 import type { PlatformCapability } from "@meltiply/domain";
 
+import { PROVIDER_LIMITS } from "../limits";
 import { adapterRuntime, type ProviderAdapterOptions } from "../runtime";
 import type { ProviderAdapter } from "../types";
 import { createFacebookAnalytics } from "./analytics";
@@ -8,7 +9,6 @@ import { createFacebookPublish } from "./publish";
 import {
   FACEBOOK_GRAPH_ORIGIN,
   FACEBOOK_IMAGE_TYPES,
-  FACEBOOK_LIMITS,
   FACEBOOK_UPLOAD_ORIGIN,
   FACEBOOK_VIDEO_TYPES,
 } from "./types";
@@ -19,10 +19,10 @@ const capability: PlatformCapability = {
   asset_types: ["image", "video"],
   comments: false,
   connect_available: true,
-  max_caption_length: FACEBOOK_LIMITS.maxCaptionCodePoints,
-  max_file_size: FACEBOOK_LIMITS.maxVideoBytes,
-  max_hashtags: FACEBOOK_LIMITS.maxHashtags,
-  max_media_count: FACEBOOK_LIMITS.maxMediaCount,
+  max_caption_length: PROVIDER_LIMITS.facebook.maxCaptionCodePoints,
+  max_file_size: PROVIDER_LIMITS.facebook.maxVideoBytes,
+  max_hashtags: PROVIDER_LIMITS.facebook.maxHashtags,
+  max_media_count: PROVIDER_LIMITS.facebook.maxMediaCount,
   max_video_duration_sec: null,
   min_media_count: 0,
   multi_asset_types: ["image"],
@@ -42,9 +42,7 @@ const capability: PlatformCapability = {
   reply: false,
 };
 
-export type FacebookAdapterOptions = ProviderAdapterOptions;
-
-export function createFacebookAdapter(options: FacebookAdapterOptions): ProviderAdapter {
+export function createFacebookAdapter(options: ProviderAdapterOptions): ProviderAdapter {
   const runtime = adapterRuntime(
     "facebook",
     [FACEBOOK_GRAPH_ORIGIN, FACEBOOK_UPLOAD_ORIGIN],

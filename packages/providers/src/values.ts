@@ -1,14 +1,12 @@
-import { codePointLength, type Platform } from "@meltiply/domain";
-
-import { rejected } from "./failures";
-import type { ProviderPageInput } from "./types";
+import { codePointLength, isLoopbackHostname } from "@meltiply/domain";
 
 export { codePointLength };
+
+export const STANDARD_VIDEO_MIME_TYPES: readonly string[] = ["video/mp4", "video/quicktime"];
 
 const controlCharactersPattern = /[\u0000-\u001f\u007f]/;
 const providerIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$/;
 const lineBreakPattern = /\r?\n/;
-const maxPageLimit = 100;
 const maxCursorChars = 2_048;
 const idempotencyKeyMaxChars = 255;
 
@@ -20,7 +18,6 @@ export function firstNonEmptyLine(text: string): string | undefined {
   return undefined;
 }
 
-/** `"Video/MP4; codecs=avc1"` becomes `"video/mp4"`. */
 export function normalizeContentType(contentType: string): string {
   const semi = contentType.indexOf(";");
   return (semi === -1 ? contentType : contentType.slice(0, semi)).trim().toLowerCase();
@@ -37,7 +34,6 @@ export function validFileSize(fileSize: number, maximum: number): boolean {
   return Number.isSafeInteger(fileSize) && fileSize >= 1 && fileSize <= maximum;
 }
 
-/** Trimmed, non-empty, bounded, control-character-free configuration or request text. */
 export function required(name: string, value: string, maximum = 4_096): string {
   const normalized = value.trim();
   if (!normalized || normalized.length > maximum || controlCharactersPattern.test(normalized)) {
@@ -46,11 +42,9 @@ export function required(name: string, value: string, maximum = 4_096): string {
   return normalized;
 }
 
-/** A scheme and credential guard only; it does not restrict the destination host. */
 export function assertHttpsOrLoopbackUrl(value: string, label = "URL"): URL {
   const url = new URL(value);
-  const loopback =
-    url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+  const loopback = url.protocol === "http:" && isLoopbackHostname(url.hostname);
   if ((url.protocol !== "https:" && !loopback) || url.username || url.password || url.hash) {
     throw new TypeError(`${label} must be HTTPS or an exact loopback HTTP URL`);
   }
@@ -67,27 +61,18 @@ export function providerIdentifier(value: unknown): string | undefined {
   return providerIdentifierPattern.test(normalized) ? normalized : undefined;
 }
 
-export function requiredIdentifier(value: unknown, code: string): string {
-  const identifier = providerIdentifier(value);
-  if (!identifier) throw rejected(code);
-  return identifier;
-}
-
-/** Accepts string IDs and positive safe-integer IDs without losing precision. */
 export function numericOrStringIdentifier(value: unknown): string | undefined {
   return providerIdentifier(
     typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? String(value) : value,
   );
 }
 
-/** Trimmed and non-empty. */
 export function boundedString(value: unknown, maximum: number): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim();
   return normalized && normalized.length <= maximum ? normalized : undefined;
 }
 
-/** Untrimmed, so inner and surrounding whitespace survive. */
 export function boundedText(
   value: unknown,
   maximum: number,
@@ -106,23 +91,6 @@ export function boundedCursor(value: unknown): string | undefined {
     : undefined;
 }
 
-export function validatePageInput(platform: Platform, input: ProviderPageInput): void {
-  if (
-    !Number.isInteger(input.limit) ||
-    input.limit < 1 ||
-    input.limit > maxPageLimit ||
-    (input.cursor !== undefined && !boundedCursor(input.cursor))
-  ) {
-    throw rejected(`${platform}_page_invalid`);
-  }
-}
-
-/** Analytics endpoints return one snapshot per Post, so a cursor can never be valid. */
-export function validateSnapshotPage(platform: Platform, input: ProviderPageInput): void {
-  validatePageInput(platform, input);
-  if (input.cursor) throw rejected(`${platform}_analytics_not_paginated`);
-}
-
 export function timestamp(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length > 64) return undefined;
   const parsed = new Date(value);
@@ -134,7 +102,6 @@ export function requireIdempotencyKey(value: string): void {
   required("idempotencyKey", value, idempotencyKeyMaxChars);
 }
 
-/** HTTPS without credentials or fragment. */
 export function secureUrl(value: unknown): URL | undefined {
   if (typeof value !== "string") return undefined;
   try {
@@ -147,7 +114,13 @@ export function secureUrl(value: unknown): URL | undefined {
   }
 }
 
-/** An absent field is acceptable; a present one must be a secure URL. */
+export function rtmpsUrl(value: unknown, maximum: number): string | undefined {
+  const raw = boundedString(value, maximum);
+  if (!raw || !URL.canParse(raw)) return undefined;
+  const url = new URL(raw);
+  return url.protocol === "rtmps:" && !url.username && !url.password && !url.hash ? raw : undefined;
+}
+
 export function optionalSecureUrl(value: unknown): { valid: boolean; href?: string } {
   if (value === undefined) return { valid: true };
   const href = secureUrl(value)?.href;
@@ -172,4 +145,13 @@ export const formHeaders = { "Content-Type": "application/x-www-form-urlencoded"
 
 export function metricValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+export function nonNegativeIntegerStringOrNumber(value: unknown): number | undefined {
+  if (typeof value === "number") return metricValue(value);
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
 }

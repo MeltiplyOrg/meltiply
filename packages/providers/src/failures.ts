@@ -1,7 +1,11 @@
-import type { ProviderFailure, ProviderFailureClass } from "./types";
+import type { Platform } from "@meltiply/domain";
+
+import type { ProviderFailure, ProviderFailureClass, ProviderPageInput } from "./types";
+import { boundedCursor, providerIdentifier } from "./values";
 
 const failureCodePattern = /^[a-z0-9][a-z0-9._-]{0,99}$/;
-const maxRetryAfterSeconds = 86_400;
+export const MAX_RETRY_AFTER_SECONDS = 86_400;
+const maxPageLimit = 100;
 
 export interface ProviderFailureInput {
   code?: string;
@@ -67,7 +71,7 @@ function canonicalFailure<C extends ProviderFailureClass>(
     retryAfterSeconds !== undefined &&
     Number.isInteger(retryAfterSeconds) &&
     retryAfterSeconds >= 0 &&
-    retryAfterSeconds <= maxRetryAfterSeconds
+    retryAfterSeconds <= MAX_RETRY_AFTER_SECONDS
       ? retryAfterSeconds
       : undefined;
   return {
@@ -82,12 +86,10 @@ function canonicalFailure<C extends ProviderFailureClass>(
   };
 }
 
-/** Failures after which a remote write may or may not have committed. */
 export function isUncertainFailure(failure: ProviderFailure): boolean {
   return uncertainClasses.has(failure.classification);
 }
 
-/** Re-derives message, retryability, code, and retry delay from the failure class. */
 export function normalizeProviderFailure(failure: ProviderFailure): ProviderFailure {
   return canonicalFailure(failure.classification, failure.code, failure.retryAfterSeconds);
 }
@@ -140,11 +142,39 @@ export function rejected(code: string, status = 400): ProviderAdapterError {
   return new ProviderAdapterError(rejection(code, status));
 }
 
-/** A response that does not match the provider's documented shape. */
 export function malformed(sideEffectPossible = false, code?: string): ProviderAdapterError {
   return new ProviderAdapterError(
     classifyProviderFailure({ code, malformedResponse: true, sideEffectPossible }),
   );
+}
+
+export function requiredIdentifier(value: unknown, code: string): string {
+  const identifier = providerIdentifier(value);
+  if (!identifier) throw rejected(code);
+  return identifier;
+}
+
+export function optionalLookupPostId(value: unknown): string | undefined {
+  const identifier = providerIdentifier(value);
+  if (value && !identifier) throw malformed();
+  return identifier;
+}
+
+export function validatePageInput(platform: Platform, input: ProviderPageInput): void {
+  if (
+    !Number.isInteger(input.limit) ||
+    input.limit < 1 ||
+    input.limit > maxPageLimit ||
+    (input.cursor !== undefined && !boundedCursor(input.cursor))
+  ) {
+    throw rejected(`${platform}_page_invalid`);
+  }
+}
+
+/** Analytics endpoints return one snapshot per Post, so a cursor can never be valid. */
+export function validateSnapshotPage(platform: Platform, input: ProviderPageInput): void {
+  validatePageInput(platform, input);
+  if (input.cursor) throw rejected(`${platform}_analytics_not_paginated`);
 }
 
 export function isHttp404(cause: unknown): boolean {

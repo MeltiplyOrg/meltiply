@@ -1,5 +1,10 @@
 import { Effect } from "effect";
-import { DatabaseError, errorMessage, InvalidRequestError } from "@meltiply/domain";
+import {
+  DatabaseError,
+  errorMessage,
+  InvalidRequestError,
+  isRequestScopedDatabasePool,
+} from "@meltiply/domain";
 import { Pool, type PoolConfig, type QueryResult } from "pg";
 
 interface AuthenticatedClaims {
@@ -73,7 +78,7 @@ export function createHyperdrivePoolCache(
     if (!binding) {
       throw new Error(`${label} Hyperdrive binding is unavailable`);
     }
-    if (env.ENVIRONMENT === "local" || env.DATABASE_POOL_MODE === "request") {
+    if (isRequestScopedDatabasePool(env)) {
       return createHyperdrivePool(binding, { maxUses: 1 });
     }
     if (!cachedPool || cachedConnectionString !== binding.connectionString) {

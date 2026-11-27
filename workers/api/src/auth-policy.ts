@@ -1,6 +1,6 @@
 import type { BetterAuthInstance, JwtIdentity } from "@meltiply/auth";
 import { Effect } from "effect";
-import { CoreApiError } from "./core-types";
+import { CoreApiError } from "./api-errors";
 import { sha256Hex } from "./crypto";
 import { lazySystemPoolFor, lazyWithSystemTransactionEffect } from "./database-module";
 import {

@@ -2,17 +2,18 @@ import { Effect } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
 import type { DatabaseError } from "@meltiply/domain";
 
+import type { ResolvedActor } from "./actor-types";
 import { withSystemTransactionEffect } from "./database";
 import { sha256Hex } from "./crypto";
 import type { ApiWorkerEnv } from "./env";
 
-export interface AuditActor {
+interface AuditActor {
   displayName: string | null;
   email: string;
   userId: string;
 }
 
-export interface WorkspaceAuditEntry {
+interface WorkspaceAuditEntry {
   action: string;
   actor: AuditActor;
   after?: unknown;
@@ -50,25 +51,18 @@ export function recordWorkspaceAuditEffect(
     .pipe(Effect.asVoid);
 }
 
-export interface InternalActorRow extends Record<string, unknown> {
+interface InternalActorRow extends Record<string, unknown> {
   display_name: string | null;
   email: string;
   id: string;
-  installation_owner: boolean;
-  suspended_at: Date | string | null;
 }
 
-export function auditActorFrom(
-  row: Pick<InternalActorRow, "display_name" | "email" | "id">,
-): AuditActor {
+export function auditActorFrom(row: InternalActorRow): AuditActor {
   return { displayName: row.display_name, email: row.email, userId: row.id };
 }
 
-function recordWorkspaceAudit(
-  env: ApiWorkerEnv,
-  entry: WorkspaceAuditEntry,
-): Effect.Effect<void, DatabaseError> {
-  return withSystemTransactionEffect(env, (client) => recordWorkspaceAuditEffect(client, entry));
+export function auditActorFromResolved(actor: ResolvedActor): AuditActor {
+  return { displayName: actor.displayName, email: actor.email, userId: actor.userId };
 }
 
 export function recordWorkspaceAuditBestEffort(
@@ -76,7 +70,7 @@ export function recordWorkspaceAuditBestEffort(
   entry: WorkspaceAuditEntry,
 ): Effect.Effect<void, DatabaseError> {
   if (!env.DB_SYSTEM?.connectionString) return Effect.void;
-  return recordWorkspaceAudit(env, entry);
+  return withSystemTransactionEffect(env, (client) => recordWorkspaceAuditEffect(client, entry));
 }
 
 export function recordWorkspaceAuditOnceBestEffort(

@@ -4,7 +4,7 @@ import type { OAuthConnection } from "@meltiply/providers";
 import { Effect } from "effect";
 
 import { requireActiveBrandProfileEffect } from "./brand-profile-guard";
-import { CoreApiError } from "./core-types";
+import { CoreApiError } from "./api-errors";
 import { withSystemTransactionEffect } from "./database";
 import type { ApiWorkerEnv } from "./env";
 import { lockOrganizationEffect } from "./organization-lock";
@@ -80,12 +80,10 @@ export function saveOAuthConnectionEffect(
 
     yield* withSystemTransactionEffect(env, (client) =>
       Effect.gen(function* () {
-        const organization = yield* client.query<{
-          id: string;
-        }>(
+        const organization = yield* client.query<{ id: string }>(
           `SELECT id
-         FROM organizations
-         WHERE id::text = $1`,
+           FROM organizations
+           WHERE id::text = $1`,
           [owner.organizationId],
         );
         let organizationRow = organization.rows[0];
@@ -100,11 +98,11 @@ export function saveOAuthConnectionEffect(
         }
         const membership = yield* client.query<{ role: string }>(
           `SELECT om.role
-         FROM org_members om
-         JOIN users u ON u.id = om.user_id
-         WHERE om.org_id = $1
-           AND (u.id::text = $2 OR u.auth_user_id = $2)
-         LIMIT 1`,
+           FROM org_members om
+           JOIN users u ON u.id = om.user_id
+           WHERE om.org_id = $1
+             AND (u.id::text = $2 OR u.auth_user_id = $2)
+           LIMIT 1`,
           [organizationRow.id, owner.userId],
         );
         if (membership.rows.length === 0) {
@@ -117,11 +115,11 @@ export function saveOAuthConnectionEffect(
           );
         }
         yield* lockOrganizationEffect(client, organizationRow.id);
-        const lockedOrganization = yield* client.query<{
-          id: string;
-        }>(
+        const lockedOrganization = yield* client.query<{ id: string }>(
           `SELECT id
-       FROM organizations WHERE id = $1 FOR UPDATE`,
+           FROM organizations
+           WHERE id = $1
+           FOR UPDATE`,
           [organizationRow.id],
         );
         organizationRow = lockedOrganization.rows[0];

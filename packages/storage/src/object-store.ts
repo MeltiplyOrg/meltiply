@@ -88,18 +88,6 @@ export interface ObjectUrlSigner {
   signUpload(request: SignedUploadRequest): Promise<string>;
 }
 
-/**
- * Signer that can also mint the create-only exact-object write grant media
- * processing depends on.
- *
- * Kept separate from {@link ObjectUrlSigner} because a caller that only issues
- * browser capabilities has no use for it, and forcing an unused method on
- * injected signers would be noise.
- */
-export interface ObjectWriteUrlSigner extends ObjectUrlSigner {
-  signObjectWrite(request: SignedObjectWriteRequest): Promise<string>;
-}
-
 export type SignedUploadRequest = Required<
   Omit<SignedObjectRequest, "downloadFilename" | "expiresAt">
 > &
@@ -110,14 +98,7 @@ export interface SignedMultipartPartRequest extends SignedUploadRequest {
   uploadId: string;
 }
 
-/**
- * Exact-object write grant for objects whose size is unknown until they exist.
- *
- * Media processing output length is only known after the native engine runs, so
- * the grant binds method, key, and expiry but omits `content-length`; the
- * consumer must therefore verify the committed object's real size and checksum
- * before trusting it.
- */
+/** Exact-object write grant omitting `content-length`; callers must verify committed size and checksum. */
 export interface SignedObjectWriteRequest {
   contentType?: string;
   expiresAt?: Date;
@@ -126,14 +107,6 @@ export interface SignedObjectWriteRequest {
   requiredHeaders?: Readonly<Record<string, string>>;
 }
 
-/**
- * Maps a store rejection onto the shared storage error taxonomy.
- *
- * `TypeError` and `RangeError` are raised by the stores themselves for
- * caller-supplied arguments (bad key segments, out-of-range reads), so they
- * are invalid requests; every other failure is infrastructure and stays
- * retryable as `StorageUnavailableError`.
- */
 export function toStorageError(
   cause: unknown,
   fallback: string,
@@ -172,14 +145,6 @@ function wrapMultipartUpload(upload: MultipartUpload): EffectMultipartUpload {
   };
 }
 
-/**
- * Shared Effect surface for every {@link ObjectStore} implementation.
- *
- * Provider adapters (R2 binding, S3 REST) only implement the Promise-based
- * `ObjectStore` contract; this base class derives the typed Effect operations
- * from it so error mapping, multipart wrapping, and NotFound semantics live in
- * exactly one place instead of being copied per provider.
- */
 export abstract class EffectObjectStore implements ObjectStore {
   abstract copyObject(
     sourceKey: string,
@@ -241,15 +206,6 @@ export abstract class EffectObjectStore implements ObjectStore {
     return this.readRangeEffect(key, 0, maximumBytes);
   }
 
-  readEffect(
-    key: string,
-  ): Effect.Effect<ObjectBody | null, StorageUnavailableError | InvalidRequestError> {
-    return Effect.tryPromise({
-      catch: (cause) => toStorageError(cause, "Failed to read storage object"),
-      try: async () => this.read(key),
-    });
-  }
-
   readRangeEffect(
     key: string,
     offset: number,
@@ -282,11 +238,4 @@ export abstract class EffectObjectStore implements ObjectStore {
   }
 }
 
-/**
- * Store the provider factory always returns.
- *
- * Both adapters implement the whole {@link EffectObjectStore} surface, so a
- * caller never has to narrow before reading metadata, streaming bytes, or
- * driving a multipart upload through Effects.
- */
 export type ConfiguredObjectStore = EffectObjectStore;

@@ -1,18 +1,15 @@
 import { Effect } from "effect";
+import { isUuid } from "@meltiply/domain";
 import { withSystemTransactionEffect } from "./database";
 import type { AutomationEnv } from "./env";
 import { isOutboxMessage } from "./messages";
-
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 export function partitionPublishBatch(env: AutomationEnv, messages: readonly Message<unknown>[]) {
   const ids = [
     ...new Set(
       messages.flatMap((message) => {
         const body = message.body;
-        return isOutboxMessage(body) && uuidPattern.test(body.aggregate_id)
-          ? [body.aggregate_id]
-          : [];
+        return isOutboxMessage(body) && isUuid(body.aggregate_id) ? [body.aggregate_id] : [];
       }),
     ),
   ];

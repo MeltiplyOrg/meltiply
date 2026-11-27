@@ -1,7 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import { MailSubmissionError, type MailSubmissionClassification } from "@meltiply/domain";
 
-export interface MailAddress {
+interface MailAddress {
   readonly email: string;
   readonly name?: string;
 }

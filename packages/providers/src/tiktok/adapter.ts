@@ -1,6 +1,13 @@
 import type { PlatformCapability } from "@meltiply/domain";
 
-import { malformed, ProviderAdapterError, rejected, rejection } from "../failures";
+import {
+  malformed,
+  ProviderAdapterError,
+  rejected,
+  rejection,
+  requiredIdentifier,
+  validateSnapshotPage,
+} from "../failures";
 import { PROVIDER_LIMITS } from "../limits";
 import {
   addSeconds,
@@ -11,23 +18,25 @@ import {
 } from "../oauth";
 import { confirmedFailure, engagementSnapshot, failedWriteResult } from "../results";
 import { adapterRuntime, type ProviderAdapterOptions } from "../runtime";
-import type {
-  OAuthConnection,
-  ProviderAdapter,
-  ProviderCredentials,
-  ProviderMedia,
-  ProviderPublicationStatus,
-  ProviderRequestContext,
-  ProviderTokenSet,
-  PublishInput,
-  TikTokPrivacyLevel,
-  TikTokPublicationRequirements,
-  TikTokPublishOptions,
+import {
+  TIKTOK_PRIVACY_LEVELS,
+  type OAuthConnection,
+  type ProviderAdapter,
+  type ProviderCredentials,
+  type ProviderMedia,
+  type ProviderPublicationStatus,
+  type ProviderRequestContext,
+  type ProviderTokenSet,
+  type PublishInput,
+  type TikTokPrivacyLevel,
+  type TikTokPublicationRequirements,
+  type TikTokPublishOptions,
 } from "../types";
 import {
   bearer,
   boundedString,
   boundedText,
+  codePointLength,
   firstNonEmptyLine,
   formHeaders,
   mediaKind,
@@ -36,10 +45,9 @@ import {
   optionalSecureUrl,
   record,
   required,
-  requiredIdentifier,
   requireIdempotencyKey,
   secureUrl,
-  validateSnapshotPage,
+  STANDARD_VIDEO_MIME_TYPES,
   validFileSize,
 } from "../values";
 
@@ -53,7 +61,7 @@ const maxScopes = 20;
 const apiOrigin = "https://open.tiktokapis.com";
 const limits = PROVIDER_LIMITS.tiktok;
 const jsonContentType = "application/json; charset=UTF-8";
-const videoTypes = ["video/mp4", "video/quicktime", "video/webm"];
+const videoTypes = [...STANDARD_VIDEO_MIME_TYPES, "video/webm"];
 const imageTypes = ["image/jpeg", "image/webp"];
 const authErrorCodes = ["access_token_invalid", "scope_not_authorized", "token_not_authorized"];
 const retryableFailReasons = ["internal", "video_pull_failed", "photo_pull_failed"];
@@ -67,15 +75,9 @@ const requestedScopes = [
   "user.info.stats",
   "video.list",
 ] as const;
-const privacyLevels: ReadonlySet<string> = new Set<TikTokPrivacyLevel>([
-  "PUBLIC_TO_EVERYONE",
-  "MUTUAL_FOLLOW_FRIENDS",
-  "FOLLOWER_OF_CREATOR",
-  "SELF_ONLY",
-]);
 
 const capability: PlatformCapability = {
-  accepted_mime_types: ["image/jpeg", "image/webp", "video/mp4", "video/quicktime"],
+  accepted_mime_types: [...imageTypes, ...STANDARD_VIDEO_MIME_TYPES],
   analytics: true,
   asset_types: ["image", "video"],
   comments: false,
@@ -128,7 +130,7 @@ interface PullMedia {
 }
 
 function isPrivacyLevel(value: unknown): value is TikTokPrivacyLevel {
-  return typeof value === "string" && privacyLevels.has(value);
+  return typeof value === "string" && TIKTOK_PRIVACY_LEVELS.has(value as TikTokPrivacyLevel);
 }
 
 function patternIdentifier(value: unknown, pattern: RegExp): string | undefined {
@@ -651,7 +653,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       if (isVideo) {
         if (
           media.length !== 1 ||
-          (!inbox && caption.length > limits.maxVideoCaptionCodePoints) ||
+          (!inbox && codePointLength(caption) > limits.maxVideoCaptionCodePoints) ||
           videoInvalid(
             first,
             requirements?.maxVideoDurationSeconds ?? limits.maxVideoDurationSeconds,
@@ -677,8 +679,8 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         const title = firstNonEmptyLine(caption);
         if (
           !title ||
-          title.length > limits.maxPhotoTitleChars ||
-          caption.length > limits.maxCaptionCodePoints ||
+          codePointLength(title) > limits.maxPhotoTitleChars ||
+          codePointLength(caption) > limits.maxCaptionCodePoints ||
           (!inbox && (choices.allowDuet || choices.allowStitch)) ||
           media.length > limits.maxPhotoImages ||
           media.some(photoInvalid)

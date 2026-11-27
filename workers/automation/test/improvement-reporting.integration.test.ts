@@ -5,7 +5,7 @@ import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import type { AutomationEnv } from "../src/env";
-import { deliverImprovementReports } from "../src/improvement-reporting";
+import { deliverImprovementReports } from "../src/reporting";
 import { recordDiagnostic } from "../src/diagnostic-reporting";
 import { runSystemTransaction } from "./system-transaction";
 

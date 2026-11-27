@@ -8,17 +8,16 @@ import {
   log,
   type LogContext,
 } from "@meltiply/observability";
-import type { ResolvedActor } from "../actor-resolution";
 import { ProviderAdapterError } from "@meltiply/providers";
 import type { components } from "@meltiply/contracts/schema";
 
-import { CoreApiError } from "../core-types";
+import { CoreApiError } from "../api-errors";
 import { scheduleInvocationFailureDiagnostic } from "../diagnostic-reporting";
 import type { ApiWorkerEnvironment } from "../env";
 import { errorResponse, jsonResponse } from "../responses";
 type Schemas = components["schemas"];
 
-export interface RunWorkerEffectOptions {
+interface RunWorkerEffectOptions {
   readonly headers?: HeadersInit;
   readonly status?: number;
 }
@@ -120,7 +119,7 @@ function requestScope(c: Context<ApiWorkerEnvironment>): RequestScope {
     crypto.randomUUID();
   const traceId =
     (c.get?.("traceId") as string | undefined) ?? c.req?.header?.("traceparent") ?? requestId;
-  const actor = c.get?.("actor") as ResolvedActor | undefined;
+  const actor = c.get?.("actor");
   const tenantId = actor?.workspace.id;
 
   const requestContextData: RequestContextData = {
@@ -285,47 +284,47 @@ function failureToResponse(
   );
 }
 
-export async function runWorkerEffect<A, E>(
+async function executeEffect<A, E>(
   c: Context<ApiWorkerEnvironment>,
   effect: Effect.Effect<A, E, RequestContext>,
-  options?: RunWorkerEffectOptions,
+  onSuccess: (value: A, scope: RequestScope) => Response,
+  headers?: HeadersInit,
 ): Promise<Response> {
   const scope = requestScope(c);
   const exit = await runRequestExit(scope, effect);
 
   if (Exit.isSuccess(exit)) {
-    return jsonResponse(exit.value, options?.status ?? 200, scope.requestId, options?.headers);
+    return onSuccess(exit.value, scope);
   }
 
   const response = failureToResponse(
     exit.cause,
     scope.requestId,
     scope.logContext,
-    options?.headers,
+    headers,
     scope.signal,
   );
   scheduleInvocationFailureDiagnostic(c, exit.cause, response.status);
   return response;
 }
 
-export async function runRouteEffect<E>(
+export function runWorkerEffect<A, E>(
+  c: Context<ApiWorkerEnvironment>,
+  effect: Effect.Effect<A, E, RequestContext>,
+  options?: RunWorkerEffectOptions,
+): Promise<Response> {
+  return executeEffect(
+    c,
+    effect,
+    (value, scope) =>
+      jsonResponse(value, options?.status ?? 200, scope.requestId, options?.headers),
+    options?.headers,
+  );
+}
+
+export function runRouteEffect<E>(
   c: Context<ApiWorkerEnvironment>,
   effect: Effect.Effect<Response, E, RequestContext>,
 ): Promise<Response> {
-  const scope = requestScope(c);
-  const exit = await runRequestExit(scope, effect);
-
-  if (Exit.isSuccess(exit)) {
-    return exit.value;
-  }
-
-  const response = failureToResponse(
-    exit.cause,
-    scope.requestId,
-    scope.logContext,
-    undefined,
-    scope.signal,
-  );
-  scheduleInvocationFailureDiagnostic(c, exit.cause, response.status);
-  return response;
+  return executeEffect(c, effect, (response) => response);
 }

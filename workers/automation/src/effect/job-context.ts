@@ -1,6 +1,5 @@
 export interface JobContextData {
   readonly jobId: string;
-  readonly organizationId?: string;
   readonly queue?: string;
   readonly requestId?: string;
   readonly source: "queue" | "scheduled" | "workflow" | "direct";
@@ -10,7 +9,6 @@ export interface JobContextData {
 
 export function makeJobContext(data: {
   readonly jobId: string;
-  readonly organizationId?: string;
   readonly queue?: string;
   readonly requestId?: string;
   readonly source: JobContextData["source"];
@@ -19,7 +17,6 @@ export function makeJobContext(data: {
 }): JobContextData {
   return {
     jobId: data.jobId,
-    ...(data.organizationId ? { organizationId: data.organizationId } : {}),
     ...(data.queue ? { queue: data.queue } : {}),
     ...(data.requestId ? { requestId: data.requestId } : {}),
     source: data.source,

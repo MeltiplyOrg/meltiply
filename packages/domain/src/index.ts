@@ -1,14 +1,20 @@
 import type { components } from "@meltiply/contracts/schema";
 
-/** Matches `.`, `..`, slashes, and control characters, which no single path segment may contain. */
 export const UNSAFE_PATH_SEGMENT_PATTERN = /(^\.{1,2}$)|[\\/\u0000-\u001f\u007f]/;
 
-/** The message of a non-empty `Error`, otherwise `fallback`. */
+export const RFC4122_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export const MAXIMUM_NOTIFICATION_RECIPIENTS = 20;
+
+export function isUuid(value: unknown): value is string {
+  return typeof value === "string" && RFC4122_UUID_PATTERN.test(value);
+}
+
 export function errorMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message.length > 0 ? cause.message : fallback;
 }
 
-/** Counts Unicode code points without allocating an intermediate character array. */
 export function codePointLength(text: string): number {
   let count = 0;
   for (let index = 0; index < text.length; index += 1) {
@@ -22,7 +28,6 @@ export function codePointLength(text: string): number {
   return count;
 }
 
-/** Valid runtime environment labels shared by API and automation Workers. */
 export type WorkerEnvironment =
   | "local"
   | "preview"
@@ -30,6 +35,24 @@ export type WorkerEnvironment =
   | "selfhost"
   | "staging"
   | "test";
+
+export function isDevelopmentEnvironment(
+  environment: string | { readonly ENVIRONMENT?: string } | undefined,
+): boolean {
+  const value = typeof environment === "string" ? environment : environment?.ENVIRONMENT;
+  return value === "local" || value === "test";
+}
+
+export function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return (
+    normalized === "localhost" ||
+    normalized.endsWith(".localhost") ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1" ||
+    normalized === "[::1]"
+  );
+}
 
 export {
   analyticsTerminalAgeSeconds,
@@ -41,7 +64,6 @@ export {
   can,
   INSTALLATION_SEAT_LIMIT,
   isWorkspaceRole,
-  WORKSPACE_ROLES,
   type WorkspaceCapability,
   type WorkspaceRole,
 } from "./capabilities";
@@ -65,12 +87,56 @@ export type PlatformCapability = components["schemas"]["PlatformCapability"];
 export type Platform = components["schemas"]["Platform"];
 export type AssetStatus = components["schemas"]["AssetStatus"];
 export type AssetType = components["schemas"]["AssetType"];
+export type ConnectionStatus = components["schemas"]["ConnectionStatus"];
 export type DistributionStatus = components["schemas"]["DistributionStatus"];
+export type EngagementMetric = "comments" | "reactions" | "shares" | "views";
 export type Post = components["schemas"]["Post"];
 export type PostStatus = components["schemas"]["PostStatus"];
 export type PostAttachment = components["schemas"]["PostAttachment"];
 export type PostTarget = components["schemas"]["PostTarget"];
 export type ReplyStatus = components["schemas"]["ReplyStatus"];
+
+const accountExpiringWindowMilliseconds = 7 * 24 * 60 * 60 * 1_000;
+
+export function accountStatus(
+  account: {
+    readonly connection_status: ConnectionStatus;
+    readonly revoked_at?: Date | string | null;
+    readonly token_expires_at?: Date | string | null;
+  },
+  now = Date.now(),
+): ConnectionStatus {
+  if (account.revoked_at || account.connection_status === "revoked") return "revoked";
+  if (account.connection_status !== "connected" && account.connection_status !== "expiring") {
+    return account.connection_status;
+  }
+  if (!account.token_expires_at) return account.connection_status;
+  const expiresAt = new Date(account.token_expires_at).getTime();
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) return "expired";
+  return account.connection_status === "expiring" ||
+    expiresAt - now <= accountExpiringWindowMilliseconds
+    ? "expiring"
+    : "connected";
+}
+
+export function isAccountUsable(
+  account: {
+    readonly connection_status: string | null | undefined;
+    readonly revoked_at?: Date | string | null;
+    readonly token_expires_at?: Date | string | null;
+  },
+  now = Date.now(),
+): boolean {
+  if (
+    account.revoked_at ||
+    (account.connection_status !== "connected" && account.connection_status !== "expiring")
+  ) {
+    return false;
+  }
+  if (!account.token_expires_at) return true;
+  const expiresAt = new Date(account.token_expires_at).getTime();
+  return Number.isFinite(expiresAt) && expiresAt > now;
+}
 
 export const PLATFORM_IDS: readonly Platform[] = [
   "tiktok",
@@ -86,12 +152,26 @@ export function isPlatform(value: unknown): value is Platform {
   return typeof value === "string" && PLATFORM_ID_SET.has(value);
 }
 
-/** OAuth callback path shared by Provider redirect URIs and route registration. */
+export const PROVIDER_MEDIA_ROUTE_PREFIX = "/api/v1/provider-media/";
+
+export const PROVIDER_FAILURE_CLASSES = [
+  "ambiguous",
+  "auth",
+  "deterministic",
+  "quota",
+  "rate_limit",
+  "timeout",
+  "transient",
+] as const;
+
+export type ProviderFailureClass = (typeof PROVIDER_FAILURE_CLASSES)[number];
+
+export const ASSET_VIDEO_MAX_BYTES = 500 * 1024 * 1024;
+
 export function oauthCallbackPath(platform: Platform): string {
   return `/api/v1/platforms/${platform}/callback`;
 }
 
-/** One fully disabled capability row per Platform, reported while a Provider is unconfigured. */
 export function unavailableCapabilities(): PlatformCapability[] {
   return PLATFORM_IDS.map((platform) => ({
     accepted_mime_types: [],
@@ -153,6 +233,17 @@ export function isoDateTime(value: Date | string): string {
   return (value instanceof Date ? value : new Date(value)).toISOString();
 }
 
+export function isoPeriodKey(date = new Date()): string {
+  return date.toISOString().slice(0, 7);
+}
+
+export function isRequestScopedDatabasePool(env: {
+  readonly DATABASE_POOL_MODE?: string;
+  readonly ENVIRONMENT?: string;
+}): boolean {
+  return env.ENVIRONMENT === "local" || env.DATABASE_POOL_MODE === "request";
+}
+
 const mediaRules = {
   "image/gif": {
     assetType: "image",
@@ -177,12 +268,12 @@ const mediaRules = {
   "video/mp4": {
     assetType: "video",
     extensions: ["mp4"],
-    maximum: 500 * 1024 * 1024,
+    maximum: ASSET_VIDEO_MAX_BYTES,
   },
   "video/quicktime": {
     assetType: "video",
     extensions: ["mov"],
-    maximum: 500 * 1024 * 1024,
+    maximum: ASSET_VIDEO_MAX_BYTES,
   },
 } as const;
 

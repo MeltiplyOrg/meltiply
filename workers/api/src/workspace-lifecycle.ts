@@ -1,27 +1,34 @@
 import { Effect, type Layer } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
-import { can, isWorkspaceRole, type DatabaseError, type WorkspaceRole } from "@meltiply/domain";
+import {
+  can,
+  isoDateTime,
+  isoDateTimeOrNull,
+  isWorkspaceRole,
+  type DatabaseError,
+  type WorkspaceRole,
+} from "@meltiply/domain";
 import { escapeMailHtml, mailSenderConfiguration } from "@meltiply/domain/mail-content";
-import type { Context, Hono } from "hono";
+import type { Hono } from "hono";
 
-import type { ResolvedActor } from "./actor-resolution";
-import { auditActorFrom, recordWorkspaceAuditEffect } from "./audit";
-import { CoreApiError } from "./core-types";
+import type { ResolvedActor } from "./actor-types";
+import { CoreApiError } from "./api-errors";
+import { auditActorFrom, auditActorFromResolved, recordWorkspaceAuditEffect } from "./audit";
+import { normalizeWorkspaceRole, requireActor } from "./authorization";
 import { sha256Hex } from "./crypto";
 import { withSystemTransactionEffect } from "./database";
 import { fromPromise } from "./effect/route";
 import { runRouteEffect } from "./effect/runtime";
-import type { ApiWorkerEnv, ApiWorkerEnvironment } from "./env";
+import { requiresEmailVerification, type ApiWorkerEnv, type ApiWorkerEnvironment } from "./env";
 import { hashIdempotencyRequestEffect } from "./idempotency";
-import { withIdempotentMutationStatus } from "./idempotent-mutation";
-import { idempotencyHeaders } from "./idempotent-response";
+import { idempotentInstallationMutation } from "./idempotent-mutation";
 import {
   createCloudflareMailSender,
   createMailServiceLive,
   MailService,
   type MailMessage,
 } from "./mail";
-import { jsonResponse } from "./responses";
+import { idempotencyHeaders, jsonResponse, noContentResponse } from "./responses";
 import { requireSeatCapacityEffect } from "./seats";
 import {
   idempotencyKey,
@@ -108,32 +115,20 @@ interface InvitationRow extends Record<string, unknown> {
   updated_at: Date | string;
 }
 
-interface IdempotentResponse {
-  body: unknown;
-  replayed: boolean;
-  status: number;
-  workspaceName?: string;
-  token?: string;
-}
-
 export interface WorkspaceLifecycleDependencies {
   mailServiceLayer?:
     | Layer.Layer<MailService, never, never>
     | ((env: ApiWorkerEnv) => Layer.Layer<MailService, never, never>);
 }
 
-function isoTimestamp(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-}
-
 function workspaceBody(row: OrganizationRow, role: WorkspaceRole): WorkspaceBody {
   return {
-    created_at: isoTimestamp(row.created_at),
+    created_at: isoDateTime(row.created_at),
     id: row.id,
     name: row.name,
     role,
     slug: row.slug,
-    updated_at: isoTimestamp(row.updated_at),
+    updated_at: isoDateTime(row.updated_at),
   };
 }
 
@@ -141,36 +136,36 @@ function memberBody(row: MemberRow): WorkspaceMemberBody {
   const suspended = row.suspended_at !== null;
   return {
     avatar_url: row.avatar_url,
-    created_at: isoTimestamp(row.created_at),
+    created_at: isoDateTime(row.created_at),
     display_name: row.display_name,
     email: row.email,
     is_installation_owner: row.installation_owner,
-    role: isWorkspaceRole(row.role) ? row.role : "viewer",
+    role: normalizeWorkspaceRole(row.role),
     status: suspended ? "suspended" : "active",
-    suspended_at: suspended ? isoTimestamp(row.suspended_at as Date | string) : null,
-    updated_at: isoTimestamp(row.updated_at ?? row.created_at),
+    suspended_at: isoDateTimeOrNull(row.suspended_at),
+    updated_at: isoDateTime(row.updated_at ?? row.created_at),
     user_id: row.user_id,
   };
 }
 
+function invitationStatus(
+  row: Pick<InvitationRow, "accepted_at" | "expires_at" | "revoked_at">,
+): InvitationStatus {
+  if (row.accepted_at !== null) return "accepted";
+  if (row.revoked_at !== null) return "revoked";
+  return new Date(row.expires_at).getTime() <= Date.now() ? "expired" : "pending";
+}
+
 function invitationBody(row: InvitationRow): WorkspaceInvitationBody {
-  const status: InvitationStatus =
-    row.accepted_at !== null
-      ? "accepted"
-      : row.revoked_at !== null
-        ? "revoked"
-        : new Date(row.expires_at).getTime() <= Date.now()
-          ? "expired"
-          : "pending";
   return {
-    created_at: isoTimestamp(row.created_at),
+    created_at: isoDateTime(row.created_at),
     email: row.email,
-    expires_at: isoTimestamp(row.expires_at),
+    expires_at: isoDateTime(row.expires_at),
     id: row.id,
     org_id: row.org_id,
-    role: isWorkspaceRole(row.role) ? row.role : "viewer",
-    status,
-    updated_at: isoTimestamp(row.updated_at),
+    role: normalizeWorkspaceRole(row.role),
+    status: invitationStatus(row),
+    updated_at: isoDateTime(row.updated_at),
   };
 }
 
@@ -256,21 +251,6 @@ function forbidAdminPeerMutation(
         ),
       )
     : Effect.void;
-}
-
-function idempotentMutation(
-  env: ApiWorkerEnv,
-  organizationId: string,
-  operation: string,
-  key: string,
-  requestHash: string,
-  run: (
-    client: EffectTransactionClient,
-  ) => Effect.Effect<IdempotentResponse, CoreApiError | DatabaseError>,
-): Effect.Effect<IdempotentResponse, CoreApiError | DatabaseError> {
-  return withSystemTransactionEffect(env, (client) =>
-    withIdempotentMutationStatus(client, organizationId, operation, key, requestHash, run),
-  );
 }
 
 function resolveMailServiceLayer(
@@ -383,7 +363,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
@@ -413,7 +393,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
@@ -443,7 +423,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
@@ -478,7 +458,7 @@ export function registerWorkspaceLifecycleRoutes(
         const requestHash = yield* hashIdempotencyRequestEffect(
           JSON.stringify({ name: nextName ?? null, slug: nextSlug ?? null }),
         );
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           workspaceId,
           "workspace.update",
@@ -505,26 +485,21 @@ export function registerWorkspaceLifecycleRoutes(
               }
               yield* recordWorkspaceAuditEffect(client, {
                 action: "workspace.renamed",
-                actor: auditActorFrom({
-                  display_name: actor.displayName,
-                  email: actor.email,
-                  id: actor.userId,
-                }),
+                actor: auditActorFromResolved(actor),
                 after: { name: row.name, slug: row.slug },
                 before: { name: workspace.name, slug: workspace.slug },
                 orgId: workspaceId,
-                requestId: requestId(c),
+                requestId: c.get("requestId"),
                 targetId: workspaceId,
                 targetType: "workspace",
               });
               return {
                 body: workspaceBody(row, role),
-                replayed: false,
                 status: 200,
               };
             }),
         );
-        return jsonResponse(result.body, result.status, requestId(c), {
+        return jsonResponse(result.body, result.status, c.get("requestId"), {
           ...idempotencyHeaders(result.replayed),
         });
       }),
@@ -535,7 +510,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
@@ -549,7 +524,7 @@ export function registerWorkspaceLifecycleRoutes(
         const rawToken =
           crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
         const tokenHash = yield* Effect.promise(() => sha256Hex(rawToken));
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           workspaceId,
           "workspace.invitation.create",
@@ -563,7 +538,6 @@ export function registerWorkspaceLifecycleRoutes(
                 actor,
               );
               yield* requireAdmin(callerRole);
-              yield* requireAssignableRole(actor, role);
               yield* client.query("SELECT id FROM organizations WHERE id = $1 FOR UPDATE", [
                 workspaceId,
               ]);
@@ -615,20 +589,15 @@ export function registerWorkspaceLifecycleRoutes(
               }
               yield* recordWorkspaceAuditEffect(client, {
                 action: "invitation.created",
-                actor: auditActorFrom({
-                  display_name: actor.displayName,
-                  email: actor.email,
-                  id: actor.userId,
-                }),
+                actor: auditActorFromResolved(actor),
                 after: { email, role },
                 orgId: workspaceId,
-                requestId: requestId(c),
+                requestId: c.get("requestId"),
                 targetId: invitation.id,
                 targetType: "invitation",
               });
               return {
                 body: invitationBody(invitation),
-                replayed: false,
                 status: 201,
                 token: rawToken,
                 workspaceName: workspace.name,
@@ -636,18 +605,18 @@ export function registerWorkspaceLifecycleRoutes(
             }),
         );
         if (!result.replayed) {
-          const link = yield* fromPromise(() => invitationLink(c.env, result.token ?? ""));
+          const link = yield* fromPromise(() => invitationLink(c.env, result.token));
           yield* submitInvitationEffect(
             c.env,
-            result.body as WorkspaceInvitationBody,
+            result.body,
             link,
-            result.workspaceName ?? "your team",
+            result.workspaceName,
             "workspace.invitation.create",
             key,
             true,
           );
         }
-        return jsonResponse(result.body, result.status, requestId(c), {
+        return jsonResponse(result.body, result.status, c.get("requestId"), {
           ...idempotencyHeaders(result.replayed),
         });
       }).pipe(Effect.provide(resolveMailServiceLayer(c.env, dependencies))),
@@ -658,7 +627,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
@@ -670,7 +639,7 @@ export function registerWorkspaceLifecycleRoutes(
         const rawToken =
           crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
         const tokenHash = yield* Effect.promise(() => sha256Hex(rawToken));
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           workspaceId,
           "workspace.invitation.resend",
@@ -722,20 +691,15 @@ export function registerWorkspaceLifecycleRoutes(
               );
               yield* recordWorkspaceAuditEffect(client, {
                 action: "invitation.resent",
-                actor: auditActorFrom({
-                  display_name: actor.displayName,
-                  email: actor.email,
-                  id: actor.userId,
-                }),
+                actor: auditActorFromResolved(actor),
                 after: { email: invitation.email, role: invitation.role },
                 orgId: workspaceId,
-                requestId: requestId(c),
+                requestId: c.get("requestId"),
                 targetId: invitationId,
                 targetType: "invitation",
               });
               return {
                 body: invitationBody(updated.rows[0]!),
-                replayed: false,
                 status: 200,
                 token: rawToken,
                 workspaceName: workspace.name,
@@ -743,18 +707,18 @@ export function registerWorkspaceLifecycleRoutes(
             }),
         );
         if (!result.replayed) {
-          const link = yield* fromPromise(() => invitationLink(c.env, result.token ?? ""));
+          const link = yield* fromPromise(() => invitationLink(c.env, result.token));
           yield* submitInvitationEffect(
             c.env,
-            result.body as WorkspaceInvitationBody,
+            result.body,
             link,
-            result.workspaceName ?? "your team",
+            result.workspaceName,
             "workspace.invitation.resend",
             key,
             false,
           );
         }
-        return jsonResponse(result.body, result.status, requestId(c), {
+        return jsonResponse(result.body, result.status, c.get("requestId"), {
           ...idempotencyHeaders(result.replayed),
         });
       }).pipe(Effect.provide(resolveMailServiceLayer(c.env, dependencies))),
@@ -765,7 +729,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
@@ -774,7 +738,7 @@ export function registerWorkspaceLifecycleRoutes(
         );
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ invitationId }));
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           workspaceId,
           "workspace.invitation.revoke",
@@ -811,27 +775,17 @@ export function registerWorkspaceLifecycleRoutes(
               );
               yield* recordWorkspaceAuditEffect(client, {
                 action: "invitation.revoked",
-                actor: auditActorFrom({
-                  display_name: actor.displayName,
-                  email: actor.email,
-                  id: actor.userId,
-                }),
+                actor: auditActorFromResolved(actor),
                 after: { email: invitation.email, role: invitation.role },
                 orgId: workspaceId,
-                requestId: requestId(c),
+                requestId: c.get("requestId"),
                 targetId: invitationId,
                 targetType: "invitation",
               });
-              return { body: null, replayed: false, status: 204 };
+              return { body: null, status: 204 };
             }),
         );
-        return new Response(null, {
-          headers: {
-            ...idempotencyHeaders(result.replayed),
-            "X-Request-ID": requestId(c),
-          },
-          status: 204,
-        });
+        return noContentResponse(c.get("requestId"), idempotencyHeaders(result.replayed));
       }),
     ),
   );
@@ -871,24 +825,16 @@ export function registerWorkspaceLifecycleRoutes(
             new CoreApiError(404, "invitation_not_found", "The invitation was not found."),
           );
         }
-        const status =
-          row.accepted_at !== null
-            ? "accepted"
-            : row.revoked_at !== null
-              ? "revoked"
-              : new Date(row.expires_at).getTime() <= Date.now()
-                ? "expired"
-                : "pending";
         return jsonResponse(
           {
             email: row.email,
-            expires_at: isoTimestamp(row.expires_at),
-            role: isWorkspaceRole(row.role) ? row.role : "viewer",
-            status,
+            expires_at: isoDateTime(row.expires_at),
+            role: normalizeWorkspaceRole(row.role),
+            status: invitationStatus(row),
             workspace_name: row.workspace_name,
           },
           200,
-          requestId(c),
+          c.get("requestId"),
         );
       }),
     ),
@@ -898,7 +844,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const token = c.req.param("token") ?? "";
         if (token.length < 16 || token.length > 255) {
           return yield* Effect.fail(
@@ -953,10 +899,7 @@ export function registerWorkspaceLifecycleRoutes(
                 if (workspace) {
                   return {
                     member: memberBody(member),
-                    workspace: workspaceBody(
-                      workspace,
-                      isWorkspaceRole(member.role) ? member.role : "viewer",
-                    ),
+                    workspace: workspaceBody(workspace, normalizeWorkspaceRole(member.role)),
                   };
                 }
               }
@@ -1006,8 +949,7 @@ export function registerWorkspaceLifecycleRoutes(
                FROM "user" u WHERE u.id = $1`,
               [actor.authUserId],
             );
-            const localOrTest = c.env.ENVIRONMENT === "local" || c.env.ENVIRONMENT === "test";
-            if (!verified.rows[0]?.email_verified && !localOrTest) {
+            if (!verified.rows[0]?.email_verified && requiresEmailVerification(c.env)) {
               return yield* Effect.fail(
                 new CoreApiError(
                   403,
@@ -1048,7 +990,7 @@ export function registerWorkspaceLifecycleRoutes(
               actor: auditActorFrom(account),
               after: { email: account.email, role: member.role },
               orgId: row.org_id,
-              requestId: requestId(c),
+              requestId: c.get("requestId"),
               targetId: row.id,
               targetType: "invitation",
             });
@@ -1069,14 +1011,11 @@ export function registerWorkspaceLifecycleRoutes(
             }
             return {
               member: memberBody(member),
-              workspace: workspaceBody(
-                workspace,
-                isWorkspaceRole(member.role) ? member.role : "viewer",
-              ),
+              workspace: workspaceBody(workspace, normalizeWorkspaceRole(member.role)),
             };
           }),
         );
-        return jsonResponse(outcome, 200, requestId(c));
+        return jsonResponse(outcome, 200, c.get("requestId"));
       }),
     ),
   );
@@ -1085,7 +1024,7 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
@@ -1096,7 +1035,7 @@ export function registerWorkspaceLifecycleRoutes(
         yield* requireAssignableRole(actor, role);
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ memberId, role }));
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           workspaceId,
           "workspace.member.update",
@@ -1106,7 +1045,6 @@ export function registerWorkspaceLifecycleRoutes(
             Effect.gen(function* () {
               const { role: callerRole } = yield* requireMembership(client, workspaceId, actor);
               yield* requireAdmin(callerRole);
-              yield* requireAssignableRole(actor, role);
               const target = yield* client.query<MemberRow>(
                 `SELECT om.user_id, om.role, om.created_at, om.updated_at,
                         u.email, u.display_name, u.avatar_url, u.suspended_at,
@@ -1127,7 +1065,7 @@ export function registerWorkspaceLifecycleRoutes(
                   ),
                 );
               }
-              const currentRole = isWorkspaceRole(member.role) ? member.role : "viewer";
+              const currentRole = normalizeWorkspaceRole(member.role);
               yield* forbidAdminPeerMutation(actor, currentRole);
               if (member.installation_owner && !actor.isInstallationOwner) {
                 return yield* Effect.fail(
@@ -1176,26 +1114,21 @@ export function registerWorkspaceLifecycleRoutes(
               );
               yield* recordWorkspaceAuditEffect(client, {
                 action: "member.role_changed",
-                actor: auditActorFrom({
-                  display_name: actor.displayName,
-                  email: actor.email,
-                  id: actor.userId,
-                }),
+                actor: auditActorFromResolved(actor),
                 after: { role },
                 before: { role: currentRole },
                 orgId: workspaceId,
-                requestId: requestId(c),
+                requestId: c.get("requestId"),
                 targetId: memberId,
                 targetType: "member",
               });
               return {
                 body: memberBody(updated.rows[0]!),
-                replayed: false,
                 status: 200,
               };
             }),
         );
-        return jsonResponse(result.body, result.status, requestId(c), {
+        return jsonResponse(result.body, result.status, c.get("requestId"), {
           ...idempotencyHeaders(result.replayed),
         });
       }),
@@ -1206,14 +1139,14 @@ export function registerWorkspaceLifecycleRoutes(
     runRouteEffect(
       c,
       Effect.gen(function* () {
-        const actor = c.get("actor");
+        const actor = requireActor(c);
         const workspaceId = yield* fromPromise(() =>
           uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
         const memberId = yield* fromPromise(() => uuidParam(c.req.param("memberId"), "member_id"));
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ memberId }));
-        const result = yield* idempotentMutation(
+        const result = yield* idempotentInstallationMutation(
           c.env,
           workspaceId,
           "workspace.member.remove",
@@ -1245,10 +1178,7 @@ export function registerWorkspaceLifecycleRoutes(
               const selfRemoval = memberId === actor.userId;
               if (!selfRemoval) {
                 yield* requireAdmin(callerRole);
-                yield* forbidAdminPeerMutation(
-                  actor,
-                  isWorkspaceRole(member.role) ? member.role : "viewer",
-                );
+                yield* forbidAdminPeerMutation(actor, normalizeWorkspaceRole(member.role));
               }
               if (member.installation_owner) {
                 return yield* Effect.fail(
@@ -1283,32 +1213,18 @@ export function registerWorkspaceLifecycleRoutes(
               );
               yield* recordWorkspaceAuditEffect(client, {
                 action: "member.removed",
-                actor: auditActorFrom({
-                  display_name: actor.displayName,
-                  email: actor.email,
-                  id: actor.userId,
-                }),
+                actor: auditActorFromResolved(actor),
                 before: { role: member.role },
                 orgId: workspaceId,
-                requestId: requestId(c),
+                requestId: c.get("requestId"),
                 targetId: memberId,
                 targetType: "member",
               });
-              return { body: null, replayed: false, status: 204 };
+              return { body: null, status: 204 };
             }),
         );
-        return new Response(null, {
-          headers: {
-            ...idempotencyHeaders(result.replayed),
-            "X-Request-ID": requestId(c),
-          },
-          status: 204,
-        });
+        return noContentResponse(c.get("requestId"), idempotencyHeaders(result.replayed));
       }),
     ),
   );
-}
-
-function requestId(c: Context<ApiWorkerEnvironment>): string {
-  return c.get("requestId");
 }

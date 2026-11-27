@@ -1,21 +1,22 @@
 import { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
-import {
-  isoDateTime,
-  type DatabaseError,
-  type ActiveOrganizationRequiredError,
-} from "@meltiply/domain";
+import { isoDateTime, isoDateTimeOrNull, type DatabaseError } from "@meltiply/domain";
 import type { components } from "@meltiply/contracts/schema";
-import type { EffectTransactionClient } from "@meltiply/database";
 
-import { CoreApiError, type IdempotentResult } from "./core-types";
+import { CoreApiError, type TenantServiceError } from "./api-errors";
+import { requireActiveWorkspaceAdminEffect } from "./authorization";
+import type { IdempotentResult } from "./core-types";
 import { withTenantTransactionEffect } from "./database";
 import type { ApiWorkerEnv } from "./env";
 import { withTenantIdempotentMutation } from "./idempotent-mutation";
 import { lockOrganizationEffect } from "./organization-lock";
+import {
+  disconnectPlatformAccountsEffect,
+  type DisconnectableAccountRow,
+} from "./platform-service";
 
 type Schemas = components["schemas"];
-export type BrandProfile = Schemas["BrandProfile"];
+type BrandProfile = Schemas["BrandProfile"];
 
 interface BrandProfileRow extends Record<string, unknown> {
   color: string;
@@ -29,29 +30,19 @@ interface BrandProfileRow extends Record<string, unknown> {
   updated_at: Date | string;
 }
 
-interface DisconnectableAccountRow extends Record<string, unknown> {
-  access_token: string;
-  brand_profile_id: string;
-  id: string;
-  platform: string;
-}
-
-export interface CreateBrandProfileInput {
+interface CreateBrandProfileInput {
   color: string;
   description?: string | null;
   name: string;
 }
 
-export interface UpdateBrandProfileInput {
+interface UpdateBrandProfileInput {
   color?: string;
   description?: string | null;
   name?: string;
 }
 
-export type BrandProfileServiceError =
-  | CoreApiError
-  | ActiveOrganizationRequiredError
-  | DatabaseError;
+type BrandProfileServiceError = TenantServiceError;
 
 export interface BrandProfileApiService {
   listBrandProfiles(
@@ -98,78 +89,19 @@ function mapBrandProfile(row: BrandProfileRow): BrandProfile {
   return {
     color: row.color as BrandProfile["color"],
     created_at: isoDateTime(row.created_at),
-    deleted_at: row.deleted_at === null ? null : isoDateTime(row.deleted_at),
+    deleted_at: isoDateTimeOrNull(row.deleted_at),
     description: row.description,
     id: row.id,
     name: row.name,
     org_id: row.org_id,
-    purge_at: row.purge_at === null ? null : isoDateTime(row.purge_at),
+    purge_at: isoDateTimeOrNull(row.purge_at),
     updated_at: isoDateTime(row.updated_at),
   };
-}
-
-function requireWorkspaceAdminEffect(
-  client: EffectTransactionClient,
-): Effect.Effect<void, CoreApiError | DatabaseError> {
-  return client
-    .query<{
-      role: string | null;
-    }>("SELECT public.auth_active_org_role() AS role")
-    .pipe(
-      Effect.flatMap((result) =>
-        result.rows[0]?.role === "admin"
-          ? Effect.void
-          : Effect.fail(
-              new CoreApiError(
-                403,
-                "workspace_admin_required",
-                "The workspace admin role is required.",
-              ),
-            ),
-      ),
-    );
 }
 
 function isUniqueViolation(error: DatabaseError): boolean {
   const cause = error.cause;
   return typeof cause === "object" && cause !== null && "code" in cause && cause.code === "23505";
-}
-
-export function disconnectPlatformAccountEffect(
-  client: EffectTransactionClient,
-  organizationId: string,
-  account: DisconnectableAccountRow,
-): Effect.Effect<void, DatabaseError> {
-  return Effect.gen(function* () {
-    yield* client.query(
-      `UPDATE distributions
-       SET status = 'cancelled',
-           error_message = 'Platform account disconnected before publication.',
-           updated_at = now()
-       WHERE platform_account_id = $1
-         AND status IN ('scheduled', 'queued')`,
-      [account.id],
-    );
-    yield* client.query("DELETE FROM platform_accounts WHERE id = $1", [account.id]);
-    yield* client.query(
-      `INSERT INTO outbox_events
-         (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-       VALUES ($1, 'channel.revocation.requested', 'platform_account', $2, $3, $4)
-       ON CONFLICT (org_id, topic, dedupe_key) DO NOTHING`,
-      [
-        organizationId,
-        account.id,
-        `channel-revocation:${account.id}`,
-        {
-          access_token: account.access_token,
-          brand_profile_id: account.brand_profile_id,
-          platform: account.platform,
-          platform_account_id: account.id,
-          version: 1,
-        },
-      ],
-    );
-  });
 }
 
 export function createBrandProfileService(): BrandProfileApiService {
@@ -193,7 +125,7 @@ export function createBrandProfileService(): BrandProfileApiService {
     listDeletedBrandProfiles(env, session) {
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.gen(function* () {
-          yield* requireWorkspaceAdminEffect(client);
+          yield* requireActiveWorkspaceAdminEffect(client);
           const result = yield* client.query<BrandProfileRow>(
             `SELECT id, org_id, name, description, color, deleted_at, purge_at,
                     created_at, updated_at
@@ -243,7 +175,7 @@ export function createBrandProfileService(): BrandProfileApiService {
         201,
         (client, organizationId) =>
           Effect.gen(function* () {
-            yield* requireWorkspaceAdminEffect(client);
+            yield* requireActiveWorkspaceAdminEffect(client);
             const inserted = yield* client
               .query<BrandProfileRow>(
                 `INSERT INTO brand_profiles (org_id, name, description, color)
@@ -284,7 +216,7 @@ export function createBrandProfileService(): BrandProfileApiService {
         200,
         (client, organizationId) =>
           Effect.gen(function* () {
-            yield* requireWorkspaceAdminEffect(client);
+            yield* requireActiveWorkspaceAdminEffect(client);
             const updated = yield* client
               .query<BrandProfileRow>(
                 `UPDATE brand_profiles
@@ -338,7 +270,7 @@ export function createBrandProfileService(): BrandProfileApiService {
         200,
         (client, organizationId) =>
           Effect.gen(function* () {
-            yield* requireWorkspaceAdminEffect(client);
+            yield* requireActiveWorkspaceAdminEffect(client);
             yield* lockOrganizationEffect(client, organizationId);
             const existing = yield* client.query<Pick<BrandProfileRow, "id">>(
               `SELECT id
@@ -358,9 +290,7 @@ export function createBrandProfileService(): BrandProfileApiService {
                WHERE brand_profile_id = $1 AND org_id = $2`,
               [profileId, organizationId],
             );
-            for (const account of accounts.rows) {
-              yield* disconnectPlatformAccountEffect(client, organizationId, account);
-            }
+            yield* disconnectPlatformAccountsEffect(client, organizationId, accounts.rows);
             const deleted = yield* client.query<BrandProfileRow>(
               `DELETE FROM brand_profiles
                WHERE id = $1 AND org_id = $2
@@ -383,7 +313,7 @@ export function createBrandProfileService(): BrandProfileApiService {
         200,
         (client, organizationId) =>
           Effect.gen(function* () {
-            yield* requireWorkspaceAdminEffect(client);
+            yield* requireActiveWorkspaceAdminEffect(client);
             const existing = yield* client.query<Pick<BrandProfileRow, "deleted_at" | "purge_at">>(
               `SELECT deleted_at, purge_at
                FROM brand_profiles

@@ -2,7 +2,6 @@ import { errorMessage } from "@meltiply/domain";
 import { Data } from "effect";
 
 export class RetryableJobError extends Data.TaggedError("RetryableJobError")<{
-  readonly attempt?: number;
   readonly cause?: string;
   readonly message: string;
 }> {}

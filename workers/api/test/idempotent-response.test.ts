@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { idempotencyHeaders } from "../src/idempotent-response";
+import { idempotencyHeaders } from "../src/responses";
 
 describe("idempotency response headers", () => {
   it("marks replayed responses", () => {

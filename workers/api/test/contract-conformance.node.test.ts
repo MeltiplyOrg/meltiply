@@ -513,7 +513,6 @@ function body<T>(operationId: string): T {
 }
 
 const coreService = {
-  activeOrganization: () => Effect.succeed("20000000-0000-4000-8000-000000000001"),
   analyticsPosts: () => Effect.succeed(body("getAnalyticsPosts")),
   dashboardAnalytics: () => Effect.succeed(body("getAnalyticsDashboard")),
   calendar: () => Effect.succeed(body<{ events: unknown[] }>("listCalendarEvents").events),
@@ -598,16 +597,17 @@ const postService = {
 const publishingQueueService: PublishingQueueApiService = {
   list: () => Effect.succeed(body<components["schemas"]["QueueListResponse"]>("listQueues")),
   get: () => Effect.succeed(body<components["schemas"]["PublishingQueue"]>("getQueue")),
-  mutate: (_env, _session, action) =>
+  createQueue: () =>
     Effect.succeed({
       replayed: false,
-      value:
-        action === "delete"
-          ? null
-          : body<components["schemas"]["PublishingQueue"]>(
-              action === "create" ? "createQueue" : "updateQueue",
-            ),
+      value: body<components["schemas"]["PublishingQueue"]>("createQueue"),
     }),
+  updateQueue: () =>
+    Effect.succeed({
+      replayed: false,
+      value: body<components["schemas"]["PublishingQueue"]>("updateQueue"),
+    }),
+  deleteQueue: () => Effect.succeed({ replayed: false, value: null }),
   removePost: () =>
     Effect.succeed({
       replayed: false,
@@ -1033,7 +1033,9 @@ function errorApp(status: number) {
     publishingQueueService: {
       list: effectFailure,
       get: effectFailure,
-      mutate: effectFailure,
+      createQueue: effectFailure,
+      updateQueue: effectFailure,
+      deleteQueue: effectFailure,
       removePost: effectFailure,
     },
     resolveActor: async () => actorFixture,

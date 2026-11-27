@@ -1,5 +1,6 @@
 import { Cause, Effect, Exit } from "effect";
-import type { DatabaseError } from "@meltiply/domain";
+import { isoPeriodKey, type DatabaseError } from "@meltiply/domain";
+import { errorDiagnostic, log } from "@meltiply/observability";
 
 import { withSystemTransactionEffect } from "./database";
 import { runJobProgram } from "./effect/boundary";
@@ -53,7 +54,7 @@ function period(now: Date): { end: Date; key: string; start: Date } {
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   return {
     end: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)),
-    key: start.toISOString().slice(0, 7),
+    key: isoPeriodKey(start),
     start,
   };
 }
@@ -273,11 +274,29 @@ export function reconcileDueUsageEffect(
             failed: 0,
             reconciled: Number(result.reconciled),
           })),
-          Effect.catchCause(() =>
-            releaseAfterFailure(env, organization, now).pipe(
+          Effect.catchCause((cause) => {
+            log(
+              "warn",
+              {
+                environment: env.ENVIRONMENT,
+                job_id: organization.org_id,
+                service: "automation",
+                trace_id: organization.org_id,
+                version: env.VERSION,
+              },
+              {
+                ...errorDiagnostic(Cause.squash(cause)),
+                event: "usage_reconciliation_failed",
+                job: "usage_reconciliation",
+                org_id: organization.org_id,
+                outcome: "failed",
+                retry_class: "platform_retry",
+              },
+            );
+            return releaseAfterFailure(env, organization, now).pipe(
               Effect.as({ corrected: 0, failed: 1, reconciled: 0 }),
-            ),
-          ),
+            );
+          }),
         ),
       { concurrency: 4 },
     );

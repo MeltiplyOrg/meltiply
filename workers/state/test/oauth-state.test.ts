@@ -3,12 +3,8 @@ import { env } from "cloudflare:workers";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { validateOAuthSelectionCreateEffect, validateOAuthStateCreateEffect } from "../src/index";
-import type {
-  OAuthSelectionCandidate,
-  OAuthSelectionInit,
-  OAuthSelectionRecord,
-} from "@meltiply/contracts";
-import type { OAuthStateCoordinator } from "../src/index";
+import type { OAuthSelectionCandidate, OAuthSelectionInit } from "@meltiply/contracts";
+import type { OAuthSelectionRecord, OAuthStateCoordinator } from "../src/index";
 describe("OAuthStateCoordinator", () => {
   it("atomically consumes state once", async () => {
     const coordinator = env.OAUTH_STATE.getByName("org-alpha");

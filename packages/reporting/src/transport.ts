@@ -27,9 +27,6 @@ function captureBody(event: CaptureEvent, projectToken: string): string {
   });
 }
 
-/**
- * Creates the PostHog capture transport for one destination.
- */
 export function createPostHogTransport(options: PostHogTransportOptions): CaptureTransport {
   const request = options.fetch ?? fetch;
   const timeoutMilliseconds = options.timeoutMilliseconds ?? CAPTURE_TIMEOUT_MILLISECONDS;

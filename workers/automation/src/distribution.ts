@@ -3,8 +3,6 @@ import { claimJobLease, finishJobLease, jobLeaseOutcome } from "./job-lease";
 import {
   cachedProviderRegistryFromEnvironment,
   createProviderServiceLive,
-  validatePublishInput,
-  type ProviderAdapterError,
   type ProviderOperationResult,
   type ProviderPublishOptions,
   type ProviderRegistry,
@@ -25,9 +23,25 @@ import {
 } from "@meltiply/reporting";
 
 import { withSystemTransactionEffect } from "./database";
-import { recordDiagnostic } from "./diagnostic-reporting";
-import { classifyJobError, RetryableJobError, type AutomationJobError } from "./effect/index";
 import {
+  claimDueOutboxWork,
+  distributionProcessingGraceSeconds,
+  maximumDelayedDeliverySeconds,
+  maximumProviderPollAttempts,
+  maximumReconciliationAttempts,
+  overdueRecoveryGraceSeconds,
+  providerPollIntervalSeconds,
+} from "./due-work";
+import { recordDiagnostic } from "./diagnostic-reporting";
+import {
+  classifyJobError,
+  createQueuePublisherLive,
+  QueuePublisher,
+  RetryableJobError,
+  type AutomationJobError,
+} from "./effect/index";
+import {
+  candidateConstraint,
   executeProviderCancelEffect,
   executeProviderLookupEffect,
   executeProviderPublishEffect,
@@ -36,10 +50,15 @@ import {
   type DistributionPublishExecution,
   type PublicationMediaEntry,
 } from "./distribution-provider";
-import type { AutomationEnv } from "./env";
+import { recurringCommentsEnabled, type AutomationEnv } from "./env";
 import { createProviderMediaResolver, providerMediaRetrievalLeaseSeconds } from "./provider-media";
 import { armDistributionReconcile, armOutboxCommand, outboxDedupeKey } from "./outbox-commands";
-import { decryptStoredToken, tokenCipherFor } from "./provider-credentials";
+import {
+  decryptStoredToken,
+  encryptRotatedTokens,
+  nextTokenRefreshAt,
+  persistRotatedPlatformTokens,
+} from "./provider-credentials";
 import { isOutboxMessage, providerSyncMessage, type OutboxMessage } from "./messages";
 import { nextDelaySeconds } from "./retry-policy";
 
@@ -115,15 +134,6 @@ export interface DistributionProcessingDependencies {
 }
 
 export { distributionProcessingGraceSeconds } from "./due-work";
-import {
-  claimDueOutboxWork,
-  distributionProcessingGraceSeconds,
-  maximumDelayedDeliverySeconds,
-  maximumProviderPollAttempts,
-  maximumReconciliationAttempts,
-  overdueRecoveryGraceSeconds,
-  providerPollIntervalSeconds,
-} from "./due-work";
 const leaseSeconds = distributionProcessingGraceSeconds;
 
 function eventKey(message: DistributionMessage): string {
@@ -223,24 +233,15 @@ function candidateDeliversTo(
   capability: PlatformCapability,
   candidate: DistributionMediaCandidate,
 ): boolean {
-  return !validatePublishInput(capability, {
-    caption: "",
-    hashtags: [],
-    idempotencyKey: "distribution-claim-selection",
-    media: [
-      {
-        contentType: candidate.content_type ?? "",
-        fileSize: candidate.file_size ?? 0,
-        metadata: {
-          ...(candidate.duration_sec === null ? {} : { durationSeconds: candidate.duration_sec }),
-          ...(candidate.height === null ? {} : { height: candidate.height }),
-          ...(candidate.width === null ? {} : { width: candidate.width }),
-        },
-        mode: "remote_ingest",
-        url: "https://validation.invalid/media",
-      },
-    ],
-  }).some((issue) => issue.field.startsWith("media[0]."));
+  return (
+    candidateConstraint(capability, {
+      contentType: candidate.content_type,
+      fileSize: candidate.file_size ?? 0,
+      ...(candidate.duration_sec === null ? {} : { durationSeconds: candidate.duration_sec }),
+      ...(candidate.height === null ? {} : { height: candidate.height }),
+      ...(candidate.width === null ? {} : { width: candidate.width }),
+    }) === undefined
+  );
 }
 
 function frozenCandidate(
@@ -768,50 +769,117 @@ function providerRetryDelaySeconds(
   );
 }
 
-async function dispatchInitialEngagementTriggers(
+function engagementTriggerEffect(
+  env: AutomationEnv,
+  queue: Queue<unknown> | undefined,
+  workload: "analytics" | "comments",
+  distributionId: string,
+  eventId: string | null | undefined,
+): Effect.Effect<void, never, QueuePublisher> {
+  if (!eventId || !queue) return Effect.void;
+  return Effect.flatMap(QueuePublisher, (publisher) =>
+    publisher.sendBatch(queue, [{ body: providerSyncMessage(workload, distributionId, eventId) }]),
+  ).pipe(
+    Effect.catch((cause) =>
+      Effect.sync(() =>
+        log(
+          "warn",
+          {
+            environment: env.ENVIRONMENT,
+            job_id: eventId,
+            service: "automation",
+            trace_id: eventId,
+            version: env.VERSION,
+          },
+          {
+            ...errorDiagnostic(cause),
+            distribution_id: distributionId,
+            event: "engagement_trigger_send_failed",
+            outcome: "deferred_to_sweep",
+            retry_class: "none",
+            workload,
+          },
+        ),
+      ),
+    ),
+  );
+}
+
+function dispatchInitialEngagementTriggers(
   env: AutomationEnv,
   distributionId: string,
   analyticsEventId: string | null | undefined,
   commentsEventId: string | null | undefined,
-): Promise<void> {
-  const sendTrigger = async (
-    queue: Queue<unknown> | undefined,
-    workload: "analytics" | "comments",
-    eventId: string | null | undefined,
-  ): Promise<void> => {
-    if (!eventId || !queue) return;
-    try {
-      await queue.sendBatch([
-        {
-          body: providerSyncMessage(workload, distributionId, eventId),
-          contentType: "json",
-        },
-      ]);
-    } catch (cause) {
-      log(
-        "warn",
-        {
-          environment: env.ENVIRONMENT,
-          job_id: eventId,
-          service: "automation",
-          trace_id: eventId,
-          version: env.VERSION,
-        },
-        {
-          ...errorDiagnostic(cause),
-          distribution_id: distributionId,
-          event: "engagement_trigger_send_failed",
-          outcome: "deferred_to_sweep",
-          retry_class: "none",
-          workload,
-        },
+): Effect.Effect<void> {
+  return Effect.gen(function* () {
+    yield* engagementTriggerEffect(
+      env,
+      env.ANALYTICS_QUEUE,
+      "analytics",
+      distributionId,
+      analyticsEventId,
+    );
+    if (recurringCommentsEnabled(env)) {
+      yield* engagementTriggerEffect(
+        env,
+        env.COMMENTS_QUEUE,
+        "comments",
+        distributionId,
+        commentsEventId,
       );
     }
-  };
-  await sendTrigger(env.ANALYTICS_QUEUE, "analytics", analyticsEventId);
-  if (env.RECURRING_COMMENTS_ENABLED === "true") {
-    await sendTrigger(env.COMMENTS_QUEUE, "comments", commentsEventId);
-  }
+  }).pipe(Effect.provide(createQueuePublisherLive()));
+}
+
+interface UpdatedDistributionOutcomeRow extends Record<string, unknown> {
+  analytics_event_id: string | null;
+  comments_event_id: string | null;
+  reconciliation_attempt_count: number;
+  status: string;
+}
+
+function settleUpdatedDistributionEffects(
+  client: EffectTransactionClient,
+  env: AutomationEnv,
+  row: DistributionRow,
+  updatedRow: UpdatedDistributionOutcomeRow | undefined,
+  options: {
+    budget:
+      | { percentUsed: number | null; remaining: number | null; resetsInSeconds: number | null }
+      | null
+      | undefined;
+    eventKey: string;
+    nextAttemptDelay: number | null;
+  },
+): Effect.Effect<void, DatabaseError> {
+  return Effect.gen(function* () {
+    if (updatedRow?.status === "published") {
+      yield* recordPublicationUsage(
+        client,
+        {
+          distributionId: row.id,
+          platform: row.platform,
+          postId: row.post_id,
+        },
+        reportingConfiguration(env),
+      );
+    }
+    if (row.platform_user_id !== null && options.budget) {
+      yield* recordRateLimitBudget(client, row.platform, row.platform_user_id, options.budget);
+    }
+    if (
+      options.nextAttemptDelay !== null &&
+      updatedRow !== undefined &&
+      (updatedRow.status === "awaiting_provider" || updatedRow.status === "needs_reconciliation")
+    ) {
+      yield* armDistributionReconcile(client, {
+        completedAttempts: updatedRow.reconciliation_attempt_count,
+        distributionId: row.id,
+        orgId: row.org_id,
+      });
+    }
+    yield* finishJobLease(client, options.eventKey, "succeeded");
+  });
 }
 
 function reportCommittedProviderFailure(
@@ -970,60 +1038,33 @@ function recordPublishOutcome(
             state.retryable,
             state.message,
             nextAttemptDelay,
-            env.RECURRING_COMMENTS_ENABLED === "true",
+            recurringCommentsEnabled(env),
             result.outcome === "confirmed_success" && result.warnings
               ? JSON.stringify(result.warnings)
               : null,
           ],
         );
-        analyticsEventId = updated.rows[0]?.analytics_event_id;
-        commentsEventId = updated.rows[0]?.comments_event_id;
         const updatedRow = updated.rows[0];
-        if (updatedRow?.status === "published") {
-          yield* recordPublicationUsage(
-            client,
-            {
-              distributionId: row.id,
-              platform: row.platform,
-              postId: row.post_id,
-            },
-            reportingConfiguration(env),
-          );
-        }
-        if (row.platform_user_id !== null) {
-          const budget =
-            result.metadata?.rateLimitBudget ??
-            (result.outcome === "confirmed_failure" &&
-            result.failure.classification === "rate_limit"
-              ? {
-                  percentUsed: 100,
-                  remaining: 0,
-                  resetsInSeconds: result.failure.retryAfterSeconds ?? null,
-                }
-              : null);
-          if (budget) {
-            yield* recordRateLimitBudget(client, row.platform, row.platform_user_id, budget);
-          }
-        }
-        if (
-          nextAttemptDelay !== null &&
-          updatedRow !== undefined &&
-          (updatedRow.status === "awaiting_provider" ||
-            updatedRow.status === "needs_reconciliation")
-        ) {
-          yield* armDistributionReconcile(client, {
-            completedAttempts: updatedRow.reconciliation_attempt_count,
-            distributionId: row.id,
-            orgId: row.org_id,
-          });
-        }
-        yield* finishJobLease(client, eventKey(message), "succeeded");
+        analyticsEventId = updatedRow?.analytics_event_id;
+        commentsEventId = updatedRow?.comments_event_id;
+        const budget =
+          result.metadata?.rateLimitBudget ??
+          (result.outcome === "confirmed_failure" && result.failure.classification === "rate_limit"
+            ? {
+                percentUsed: 100,
+                remaining: 0,
+                resetsInSeconds: result.failure.retryAfterSeconds ?? null,
+              }
+            : null);
+        yield* settleUpdatedDistributionEffects(client, env, row, updatedRow, {
+          budget,
+          eventKey: eventKey(message),
+          nextAttemptDelay,
+        });
       }),
     );
     if (state.status === "published") {
-      yield* Effect.promise(() =>
-        dispatchInitialEngagementTriggers(env, row.id, analyticsEventId, commentsEventId),
-      );
+      yield* dispatchInitialEngagementTriggers(env, row.id, analyticsEventId, commentsEventId);
     }
   });
 }
@@ -1381,7 +1422,7 @@ function recordReconciliationOutcome(
             outcome.message,
             nextAttemptDelay,
             providerStillProcessing,
-            env.RECURRING_COMMENTS_ENABLED === "true",
+            recurringCommentsEnabled(env),
             execution.result.kind === "publication" &&
             (execution.result.status.state === "published" ||
               execution.result.status.state === "delivered") &&
@@ -1390,47 +1431,18 @@ function recordReconciliationOutcome(
               : null,
           ],
         );
-        analyticsEventId = updated.rows[0]?.analytics_event_id;
-        commentsEventId = updated.rows[0]?.comments_event_id;
         const updatedRow = updated.rows[0];
-        if (updatedRow?.status === "published") {
-          yield* recordPublicationUsage(
-            client,
-            {
-              distributionId: row.id,
-              platform: row.platform,
-              postId: row.post_id,
-            },
-            reportingConfiguration(env),
-          );
-        }
-        if (row.platform_user_id !== null && execution.metadata?.rateLimitBudget) {
-          yield* recordRateLimitBudget(
-            client,
-            row.platform,
-            row.platform_user_id,
-            execution.metadata.rateLimitBudget,
-          );
-        }
-        if (
-          nextAttemptDelay !== null &&
-          updatedRow !== undefined &&
-          (updatedRow.status === "awaiting_provider" ||
-            updatedRow.status === "needs_reconciliation")
-        ) {
-          yield* armDistributionReconcile(client, {
-            completedAttempts: updatedRow.reconciliation_attempt_count,
-            distributionId: row.id,
-            orgId: row.org_id,
-          });
-        }
-        yield* finishJobLease(client, eventKey(message), "succeeded");
+        analyticsEventId = updatedRow?.analytics_event_id;
+        commentsEventId = updatedRow?.comments_event_id;
+        yield* settleUpdatedDistributionEffects(client, env, row, updatedRow, {
+          budget: execution.metadata?.rateLimitBudget,
+          eventKey: eventKey(message),
+          nextAttemptDelay,
+        });
       }),
     );
     if (outcome.status === "published") {
-      yield* Effect.promise(() =>
-        dispatchInitialEngagementTriggers(env, row.id, analyticsEventId, commentsEventId),
-      );
+      yield* dispatchInitialEngagementTriggers(env, row.id, analyticsEventId, commentsEventId);
     }
   });
 }
@@ -1448,44 +1460,20 @@ function persistRotatedTokens(
   },
 ): Effect.Effect<boolean, DatabaseError> {
   return Effect.gen(function* () {
-    const cipher = tokenCipherFor(env);
-    const accessToken = yield* Effect.promise(() => cipher.encrypt(rotation.accessToken));
-    const refreshToken = rotation.refreshToken
-      ? yield* Effect.promise(() => cipher.encrypt(rotation.refreshToken!))
-      : null;
+    const encrypted = yield* Effect.promise(() => encryptRotatedTokens(env, rotation));
     const expiresAt = rotation.expiresAt !== undefined ? new Date(rotation.expiresAt) : null;
-    const nextAttemptAt =
-      expiresAt !== null
-        ? new Date(Math.max(now.getTime() + 3_600_000, expiresAt.getTime() - 7 * 86_400_000))
-        : null;
-    const updated = yield* transaction(env, (client) =>
-      client.query(
-        `UPDATE platform_accounts
-           SET access_token = $2, refresh_token = COALESCE($3, refresh_token),
-               token_expires_at = $4,
-               scopes = COALESCE($5::text[], scopes),
-               connection_status = 'connected', last_synced_at = now(),
-               token_refresh_event_id = NULL,
-               token_refresh_lease_expires_at = NULL,
-               token_refresh_next_attempt_at = $6::timestamptz,
-               token_refresh_attempt_count = 0,
-               token_refresh_last_error = NULL,
-               reconnect_notified_at = NULL, updated_at = now()
-           WHERE id = $1
-             AND connection_status <> 'revoked'
-             AND token_expires_at IS NOT DISTINCT FROM $7::timestamptz`,
-        [
-          rotation.platformAccountId,
-          accessToken,
-          refreshToken,
-          expiresAt,
-          rotation.scopes.length > 0 ? rotation.scopes : null,
-          nextAttemptAt,
-          expectedTokenExpiresAt,
-        ],
-      ),
+    const nextAttemptAt = nextTokenRefreshAt(expiresAt, now);
+    return yield* transaction(env, (client) =>
+      persistRotatedPlatformTokens(client, {
+        accessToken: encrypted.accessToken,
+        expectedTokenExpiresAt,
+        expiresAt,
+        nextAttemptAt,
+        platformAccountId: rotation.platformAccountId,
+        refreshToken: encrypted.refreshToken,
+        scopes: rotation.scopes.length > 0 ? rotation.scopes : null,
+      }),
     );
-    return updated.rowCount === 1;
   });
 }
 
@@ -1493,7 +1481,7 @@ export function processDistributionMessage(
   env: AutomationEnv,
   message: DistributionMessage,
   dependencies: DistributionProcessingDependencies = {},
-): Effect.Effect<"processed" | "skipped", AutomationJobError | ProviderAdapterError> {
+): Effect.Effect<"processed" | "skipped", AutomationJobError> {
   return Effect.gen(function* () {
     if (!isOutboxMessage(message)) return "skipped" as const;
     const operationType = operation(message);

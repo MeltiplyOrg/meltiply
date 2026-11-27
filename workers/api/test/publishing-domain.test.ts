@@ -711,11 +711,9 @@ describe("Queue configuration", () => {
       sql.includes("INSERT INTO publishing_queues") ? [queueRow()] : [],
     );
     const result = await Effect.runPromise(
-      service.mutate(
+      service.createQueue(
         env,
         claims("admin"),
-        "create",
-        undefined,
         {
           brand_profile_id: brandProfileId,
           name: "Weekly",
@@ -740,10 +738,9 @@ describe("Queue configuration", () => {
       return [];
     });
     const result = await Effect.runPromise(
-      service.mutate(
+      service.updateQueue(
         env,
         claims("admin"),
-        "update",
         queueId,
         { brand_profile_id: brandProfileId, name: "Renamed" },
         "update-queue",
@@ -762,10 +759,9 @@ describe("Queue configuration", () => {
       return [];
     });
     const error = await failure(
-      service.mutate(
+      service.deleteQueue(
         env,
         claims("admin"),
-        "delete",
         queueId,
         { brand_profile_id: brandProfileId },
         "retire-pending",
@@ -783,10 +779,9 @@ describe("Queue configuration", () => {
       return [];
     });
     const result = await Effect.runPromise(
-      service.mutate(
+      service.deleteQueue(
         env,
         claims("admin"),
-        "delete",
         queueId,
         { brand_profile_id: brandProfileId },
         "retire-settled",

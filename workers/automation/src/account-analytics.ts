@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { PLATFORM_IDS, type Platform } from "@meltiply/domain";
+import { errorDiagnostic, log } from "@meltiply/observability";
 import {
   cachedProviderRegistryFromEnvironment,
   createProviderServiceLive,
@@ -128,7 +129,30 @@ export function sweepAccountAnalytics(
             ),
           );
           return "recorded" as const;
-        }).pipe(Effect.catch(() => Effect.succeed("failed" as const))),
+        }).pipe(
+          Effect.catch((cause) => {
+            log(
+              "warn",
+              {
+                environment: env.ENVIRONMENT,
+                job_id: row.id,
+                service: "automation",
+                trace_id: row.id,
+                version: env.VERSION,
+              },
+              {
+                ...errorDiagnostic(cause),
+                event: "account_analytics_failed",
+                job: "account_analytics_sweep",
+                outcome: "failed",
+                platform: row.platform,
+                platform_account_id: row.id,
+                retry_class: "none",
+              },
+            );
+            return Effect.succeed("failed" as const);
+          }),
+        ),
       { concurrency: 4 },
     );
 

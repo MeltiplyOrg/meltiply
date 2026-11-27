@@ -111,7 +111,6 @@ function unavailableCapabilities(): ReturnType<ProviderRegistry["capabilities"]>
 function service(overrides: Partial<CoreApiService> = {}): CoreApiService {
   const notImplemented = () => Effect.die(new Error("unexpected service call"));
   return {
-    activeOrganization: notImplemented,
     analyticsPosts: notImplemented,
     calendar: notImplemented,
     cancelDistribution: notImplemented,
@@ -2170,8 +2169,11 @@ describe("core API routes", () => {
   });
 
   it.each([
-    { ENVIRONMENT: "staging", origin: "http://localhost:3000", status: 503 },
-    { ENVIRONMENT: "production", origin: "http://localhost:3000", status: 503 },
+    { ENVIRONMENT: "staging", origin: "http://localhost:3000", status: 307 },
+    { ENVIRONMENT: "production", origin: "http://localhost:3000", status: 307 },
+    { ENVIRONMENT: "production", origin: "http://127.0.0.1:3000", status: 307 },
+    { ENVIRONMENT: "production", origin: "http://app.example.test", status: 503 },
+    { ENVIRONMENT: "local", origin: "http://app.example.test", status: 503 },
     { ENVIRONMENT: "staging", origin: "https://app.example.test", status: 307 },
     { ENVIRONMENT: "production", origin: "https://app.example.test", status: 307 },
     { ENVIRONMENT: "local", origin: "http://localhost:3000", status: 307 },

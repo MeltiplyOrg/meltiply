@@ -1,4 +1,5 @@
-import { malformed } from "../failures";
+import { malformed, requiredIdentifier, validateSnapshotPage } from "../failures";
+import { engagementSnapshot } from "../results";
 import type {
   ProviderAccountAnalytics,
   ProviderAnalyticsRecord,
@@ -12,9 +13,8 @@ import {
   bearer,
   boundedString,
   metricValue,
+  nonNegativeIntegerStringOrNumber,
   record,
-  requiredIdentifier,
-  validateSnapshotPage,
 } from "../values";
 import {
   YOUTUBE_ANALYTICS_ORIGIN,
@@ -41,12 +41,12 @@ export function createYouTubeAnalytics(googleRequest: GoogleRequest, now: () => 
       if (!Array.isArray(items) || items.length !== 1) throw malformed();
       const statistics = record(record(items[0])?.statistics);
       if (statistics?.hiddenSubscriberCount === true) throw malformed();
-      const followers = Number(statistics?.subscriberCount);
-      const posts = Number(statistics?.videoCount);
-      if (!Number.isSafeInteger(followers) || followers < 0) throw malformed();
+      const followers = nonNegativeIntegerStringOrNumber(statistics?.subscriberCount);
+      const posts = nonNegativeIntegerStringOrNumber(statistics?.videoCount);
+      if (followers === undefined) throw malformed();
       return {
         followers,
-        ...(Number.isSafeInteger(posts) && posts >= 0 ? { posts } : {}),
+        ...(posts !== undefined ? { posts } : {}),
         recordedAt: now().toISOString(),
       };
     },
@@ -101,21 +101,7 @@ export function createYouTubeAnalytics(googleRequest: GoogleRequest, now: () => 
       ) {
         throw malformed();
       }
-      return {
-        items: [
-          {
-            comments,
-            impressions: 0,
-            likes,
-            providerPostId,
-            recordedAt: now().toISOString(),
-            reach: 0,
-            shares,
-            views,
-            watchTimeSeconds: 0,
-          },
-        ],
-      };
+      return engagementSnapshot({ comments, likes, providerPostId, shares, views }, now());
     },
   };
 }

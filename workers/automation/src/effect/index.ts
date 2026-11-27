@@ -11,7 +11,6 @@ export type { JobScope } from "./scope";
 export {
   configureJobLogging,
   exitToJobOutcome,
-  logJobOutcome,
   queueBackoffDelaySeconds,
   recoverJobErrorCause,
   runJobProgram,

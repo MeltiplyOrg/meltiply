@@ -4,20 +4,23 @@ import {
   isUncertainFailure,
   malformed,
   ProviderAdapterError,
+  rejected,
   rejection,
 } from "../failures";
 import type { ProviderHttpResponse } from "../http";
+import { PROVIDER_LIMITS } from "../limits";
 import { confirmedFailure, unknownResult } from "../results";
-import type {
-  ProviderCredentials,
-  ProviderFailure,
-  ProviderMedia,
-  ProviderOperationResult,
-  ProviderPublicationStatus,
-  ProviderRequestContext,
-  ProviderStreamMedia,
-  PublishInput,
-  YouTubePrivacyStatus,
+import {
+  YOUTUBE_PRIVACY_STATUSES,
+  type ProviderCredentials,
+  type ProviderFailure,
+  type ProviderMedia,
+  type ProviderOperationResult,
+  type ProviderPublicationStatus,
+  type ProviderRequestContext,
+  type ProviderStreamMedia,
+  type PublishInput,
+  type YouTubePrivacyStatus,
 } from "../types";
 import {
   bearer,
@@ -28,10 +31,11 @@ import {
   providerIdentifier,
   record,
   requireIdempotencyKey,
+  STANDARD_VIDEO_MIME_TYPES,
+  validFileSize,
 } from "../values";
 import {
   YOUTUBE_API_ORIGIN,
-  YOUTUBE_LIMITS,
   validateSessionUri,
   youtubeAccountId,
   youtubeOperationId,
@@ -79,16 +83,16 @@ function parseYouTubeUploadInput(input: PublishInput): UploadInput {
     !media ||
     media.mode !== "resumable_upload" ||
     !title ||
-    codePointLength(title) > YOUTUBE_LIMITS.maxTitleCodePoints ||
-    utf8Encoder.encode(description).byteLength > YOUTUBE_LIMITS.maxCaptionCodePoints ||
+    codePointLength(title) > PROVIDER_LIMITS.youtube.maxTitleCodePoints ||
+    utf8Encoder.encode(description).byteLength > PROVIDER_LIMITS.youtube.maxCaptionCodePoints ||
     angleBracketsPattern.test(title) ||
     angleBracketsPattern.test(description) ||
-    input.hashtags.length > YOUTUBE_LIMITS.maxHashtags ||
-    input.hashtags.join(",").length > YOUTUBE_LIMITS.maxHashtagsJoinedChars ||
+    input.hashtags.length > PROVIDER_LIMITS.youtube.maxHashtags ||
+    input.hashtags.join(",").length > PROVIDER_LIMITS.youtube.maxHashtagsJoinedChars ||
     duration === undefined ||
     !Number.isFinite(duration) ||
     duration <= 0 ||
-    duration > YOUTUBE_LIMITS.maxVideoDurationSeconds ||
+    duration > PROVIDER_LIMITS.youtube.maxVideoDurationSeconds ||
     width === undefined ||
     !Number.isSafeInteger(width) ||
     width < 1 ||
@@ -96,40 +100,23 @@ function parseYouTubeUploadInput(input: PublishInput): UploadInput {
     !Number.isSafeInteger(height) ||
     height < 1
   ) {
-    throw new ProviderAdapterError(
-      classifyProviderFailure({
-        code: "youtube_video_invalid",
-        status: 400,
-      }),
-    );
+    throw rejected("youtube_video_invalid");
   }
   const contentType = normalizeContentType(media.contentType);
   if (
-    !["video/mp4", "video/quicktime"].includes(contentType) ||
-    !Number.isSafeInteger(media.fileSize) ||
-    media.fileSize < 1 ||
-    media.fileSize > YOUTUBE_LIMITS.maxVideoBytes
+    !STANDARD_VIDEO_MIME_TYPES.includes(contentType) ||
+    !validFileSize(media.fileSize, PROVIDER_LIMITS.youtube.maxVideoBytes)
   ) {
-    throw new ProviderAdapterError(
-      classifyProviderFailure({
-        code: "youtube_media_invalid",
-        status: 400,
-      }),
-    );
+    throw rejected("youtube_media_invalid");
   }
   const providerOptions = input.providerOptions?.youtube;
   const privacyStatus = providerOptions?.privacyStatus ?? "public";
   if (
     providerOptions !== undefined &&
     (typeof providerOptions.madeForKids !== "boolean" ||
-      !["private", "public", "unlisted"].includes(privacyStatus))
+      !YOUTUBE_PRIVACY_STATUSES.has(privacyStatus))
   ) {
-    throw new ProviderAdapterError(
-      classifyProviderFailure({
-        code: "youtube_publish_options_invalid",
-        status: 400,
-      }),
-    );
+    throw rejected("youtube_publish_options_invalid");
   }
   return {
     contentType,
@@ -245,10 +232,6 @@ export interface YouTubeResumableConfig {
   uploadChunkBytes: number;
 }
 
-/**
- * Builds YouTube's resumable upload initiation, chunk streaming, session probe,
- * continuation, and video processing lookup handlers.
- */
 export function createYouTubeResumable(config: YouTubeResumableConfig) {
   const { categoryId, googleRequest, uploadChunkBytes } = config;
 
@@ -499,7 +482,7 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
       };
     }
     if (uploadStatus === "processed" && ["succeeded", "terminated"].includes(processingStatus)) {
-      if (!["private", "public", "unlisted"].includes(privacyStatus)) {
+      if (!YOUTUBE_PRIVACY_STATUSES.has(privacyStatus as YouTubePrivacyStatus)) {
         throw malformed();
       }
       return {
@@ -525,7 +508,7 @@ export function createYouTubeResumable(config: YouTubeResumableConfig) {
     if (
       media.mode === "remote_ingest" ||
       media.fileSize !== operation.fileSize ||
-      !["video/mp4", "video/quicktime"].includes(contentType)
+      !STANDARD_VIDEO_MIME_TYPES.includes(contentType)
     ) {
       return {
         result: confirmedFailure(

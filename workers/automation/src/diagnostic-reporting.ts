@@ -1,19 +1,16 @@
 import { Cause, Effect, Exit } from "effect";
-import type { EffectTransactionClient } from "@meltiply/database";
 import {
-  createReportingServiceLive,
   diagnosticReportInput,
   extractProviderFailureClass,
   ReportingService,
-  reportingConfiguration,
   type DiagnosticReportInput,
   type OperationCategory,
-  type ReportingTransactionRunner,
 } from "@meltiply/reporting";
 import { errorDiagnostic, log, type LogContext } from "@meltiply/observability";
 
 import { runJobProgram } from "./effect/boundary";
 import type { AutomationEnv } from "./env";
+import { automationReportingLayer } from "./reporting";
 
 const topicOperations: readonly (readonly [string, OperationCategory])[] = [
   ["distribution.", "publish"],
@@ -77,48 +74,22 @@ export function scheduledDiagnosticReport(cause: unknown, unit: string): Diagnos
   });
 }
 
-export function workflowDiagnosticReport(
-  cause: unknown,
-  context: { readonly outcome: "ambiguous" | "rejected" | "retry"; readonly provider?: string },
-): DiagnosticReportInput {
-  const failureClass =
-    context.outcome === "ambiguous" ? "ambiguous" : extractProviderFailureClass(cause);
-  return diagnosticReportInput(cause, {
-    ...(failureClass ? { category: "provider_failure" as const, failureClass } : {}),
-    handled: true,
-    operation: "inbox",
-    ...(context.provider === undefined
-      ? {}
-      : { platform: context.provider as DiagnosticReportInput["platform"] }),
-  });
+function enqueueDiagnosticEffect(
+  env: AutomationEnv,
+  input: DiagnosticReportInput,
+): Effect.Effect<boolean, unknown> {
+  if (input.operation === "reporting") return Effect.succeed(false);
+  const { layer } = automationReportingLayer(env);
+  return Effect.flatMap(ReportingService, (service) =>
+    Effect.map(service.enqueueDiagnostic(input), (decision) => decision !== "skipped"),
+  ).pipe(Effect.provide(layer));
 }
 
 export function recordDiagnostic(
   env: AutomationEnv,
   input: DiagnosticReportInput,
 ): Effect.Effect<boolean> {
-  if (input.operation === "reporting") return Effect.succeed(false);
-  const configuration = reportingConfiguration(env);
-  const transaction: ReportingTransactionRunner = (operation) =>
-    Effect.flatMap(
-      Effect.promise(() => import("./database")),
-      (module) =>
-        module.withSystemTransactionEffect(env, (client: EffectTransactionClient) =>
-          operation(client),
-        ),
-    );
-  const layer = createReportingServiceLive({
-    appVersion: env.VERSION,
-    configuration,
-    transaction,
-    transport: null,
-  });
-  return Effect.flatMap(ReportingService, (service) =>
-    Effect.map(service.enqueueDiagnostic(input), (decision) => decision !== "skipped"),
-  ).pipe(
-    Effect.provide(layer),
-    Effect.catchCause(() => Effect.succeed(false)),
-  );
+  return enqueueDiagnosticEffect(env, input).pipe(Effect.catchCause(() => Effect.succeed(false)));
 }
 
 async function recordDiagnosticSafely(
@@ -126,26 +97,20 @@ async function recordDiagnosticSafely(
   input: DiagnosticReportInput,
   context: LogContext,
 ): Promise<void> {
-  let recorded = false;
-  try {
-    const exit = await runJobProgram(recordDiagnostic(env, input));
-    if (Exit.isFailure(exit)) {
-      throw Cause.squash(exit.cause);
-    }
-    recorded = exit.value;
-  } catch (cause) {
+  const exit = await runJobProgram(enqueueDiagnosticEffect(env, input));
+  if (Exit.isFailure(exit)) {
     log("warn", context, {
       error_code: "diagnostic_report_failed",
       event: "diagnostic_report",
       outcome: "failed",
-      ...errorDiagnostic(cause),
+      ...errorDiagnostic(Cause.squash(exit.cause)),
       retry_class: "none",
     });
     return;
   }
   log("debug", context, {
     event: "diagnostic_report",
-    outcome: recorded ? "recorded" : "skipped",
+    outcome: exit.value ? "recorded" : "skipped",
     retry_class: "none",
   });
 }

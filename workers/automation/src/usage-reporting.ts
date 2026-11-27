@@ -3,27 +3,25 @@ import { isPlatform, PLATFORM_IDS, type Platform } from "@meltiply/domain";
 import { cachedProviderRegistryFromEnvironment, type ProviderRegistry } from "@meltiply/providers";
 import {
   categoryEffective,
-  createReportingServiceLive,
   loadPreferences,
   lockReportingMeasurement,
   policySnapshot,
-  reportingConfiguration,
   ReportingService,
   USAGE_ENGAGEMENT_METRICS,
-  type ReportingTransactionRunner,
   type UsageEngagement,
   type UsageEngagementCoverage,
   type UsageEngagementMetric,
   type UsageReportInput,
 } from "@meltiply/reporting";
 
-import { withSystemTransactionEffect, type EffectTransactionClient } from "./database";
+import { withSystemTransactionEffect } from "./database";
 import { classifyJobError, type AutomationJobError } from "./effect/index";
 import type { AutomationEnv } from "./env";
+import { automationReportingLayer } from "./reporting";
 
-export const usageReportLookbackDays = 7;
+const usageReportLookbackDays = 7;
 
-export const usageEngagementCohortLimit = 2_000;
+const usageEngagementCohortLimit = 2_000;
 
 export interface UsageReportResult {
   readonly considered: number;
@@ -114,15 +112,7 @@ export function enqueueDailyUsageReport(
   } = {},
 ): Effect.Effect<UsageReportResult, AutomationJobError> {
   const now = dependencies.now?.() ?? new Date();
-  const configuration = reportingConfiguration(env);
-  const transaction: ReportingTransactionRunner = (operation) =>
-    withSystemTransactionEffect(env, (client: EffectTransactionClient) => operation(client));
-  const service = createReportingServiceLive({
-    appVersion: env.VERSION,
-    configuration,
-    transaction,
-    transport: null,
-  });
+  const { configuration, layer: service } = automationReportingLayer(env);
   const registry = dependencies.providerRegistry ?? cachedProviderRegistryFromEnvironment(env);
   const analyticsSupported = new Set<Platform>(
     registry
